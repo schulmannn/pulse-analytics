@@ -1035,6 +1035,64 @@ export function useYmLandings(period: MsPeriod, goalId: number | null, limit = 1
   });
 }
 
+// Слайс ритма/выходов: распределение визитов по часу суток (ym:s:hour — суточный профиль, всегда
+// 24 плотные строки 0..23 + пик) и страницы выхода (ym:s:endURLPath — зеркало входов, БЕЗ атрибуции
+// цели). Оба — живые отчёты, тот же оконный контракт 7/30/90/диапазон/«Всё».
+const YmHourlySchema = z
+  .object({
+    visits_total: z.number(),
+    users_total: z.number(),
+    // Час пика суток (0..23) — null, когда за окно не было визитов (ложный «пик в 0:00» не рисуем).
+    peak_hour: z.number().nullable(),
+    rows: z.array(z.object({ hour: z.number(), visits: z.number(), users: z.number() }).passthrough()),
+    meta: z
+      .object({ sampled: z.boolean().optional(), sample_share: z.number().optional(), data_lag: z.number().optional() })
+      .passthrough()
+      .optional(),
+  })
+  .passthrough();
+export type YmHourly = z.infer<typeof YmHourlySchema>;
+
+export function useYmHourly(period: MsPeriod) {
+  const { channelId } = useSelectedChannel();
+  return useQuery({
+    enabled: channelId != null,
+    queryKey: ['ym-hourly', channelId, ...msPeriodKey(period)],
+    staleTime: STALE_LIVE,
+    retry: false,
+    queryFn: ({ signal }) => apiGet(`/api/ym/hourly?${msPeriodQuery(period)}`, YmHourlySchema, { signal, channelId }),
+  });
+}
+
+// Страницы выхода — зеркало лендингов (путь + визиты/посетители + отказы), но без полей цели.
+const YmExitsSchema = z
+  .object({
+    visits_total: z.number(),
+    rows: z.array(
+      z
+        .object({ path: z.string(), visits: z.number(), users: z.number(), bounce_rate: z.number().nullable() })
+        .passthrough(),
+    ),
+    meta: z
+      .object({ sampled: z.boolean().optional(), sample_share: z.number().optional(), data_lag: z.number().optional() })
+      .passthrough()
+      .optional(),
+  })
+  .passthrough();
+export type YmExits = z.infer<typeof YmExitsSchema>;
+
+export function useYmExits(period: MsPeriod, limit = 10) {
+  const { channelId } = useSelectedChannel();
+  return useQuery({
+    enabled: channelId != null,
+    queryKey: ['ym-exits', channelId, ...msPeriodKey(period), limit],
+    staleTime: STALE_LIVE,
+    retry: false,
+    queryFn: ({ signal }) =>
+      apiGet(`/api/ym/exits?${msPeriodQuery(period)}&limit=${limit}`, YmExitsSchema, { signal, channelId }),
+  });
+}
+
 const MsBackfillStatusSchema = z
   .object({
     status: z.string(),

@@ -2,7 +2,9 @@ import { useContext, useState } from 'react';
 import { ChartExpandedContext } from '@/components/ExpandableChart';
 import {
   useYmDevices,
+  useYmExits,
   useYmGoals,
+  useYmHourly,
   useYmLandings,
   useYmMessengers,
   useYmPages,
@@ -107,6 +109,8 @@ export function YmOverview() {
   const utm = useYmUtm(period, selectedGoalId);
   const pages = useYmPages(period);
   const landings = useYmLandings(period, selectedGoalId);
+  const hourly = useYmHourly(period);
+  const exits = useYmExits(period);
   // Общие опции + рендер синхронного селектора цели (одинаковое value/handler на всех карточках,
   // card-specific aria-label). Показываем ТОЛЬКО при наличии целей — иначе UI как прежде.
   const goalOptions = [
@@ -215,6 +219,10 @@ export function YmOverview() {
 
       {/* Качество трафика: отказы/длительность/глубина/новые/роботы — nullable, «—» когда недоступно. */}
       <YmQualityStrip quality={quality} qualitySeries={qualitySeries} meta={meta} windowLabel={windowLabel} />
+
+      {/* Трафик по часам: суточный heatmap-профиль визитов (ym:s:hour) — когда приходят посетители.
+          Полные 24 клетки, подпись отмечает час пика. Визиты — своя единица, не TG/IG-метрики. */}
+      <YmHourlyCard hourly={hourly} windowLabel={windowLabel} />
 
       <ChartWidget
         id="ym-sources"
@@ -548,7 +556,109 @@ export function YmOverview() {
           />
         )}
       </ChartWidget>
+
+      {/* Страницы выхода (endURLPath): зеркало входов — где визиты заканчиваются, + отказы по строке. */}
+      <ChartWidget id="ym-exits" title="Страницы выхода" fixedSize="half">
+        {exits.isPending ? (
+          <TableSkeleton rows={4} columns={2} className="py-2" />
+        ) : exits.isError ? (
+          <ErrorState
+            compact
+            size="table"
+            className="py-4"
+            title="Не удалось получить страницы выхода"
+            reason={exits.error instanceof Error ? exits.error.message : 'ошибка'}
+            onRetry={() => exits.refetch()}
+            retrying={exits.isFetching}
+          />
+        ) : exits.data.rows.length === 0 ? (
+          <EmptyState compact size="table" title="Нет визитов по страницам выхода за период." />
+        ) : (
+          <YmBreakdownRows
+            rows={exits.data.rows.map((r) => ({
+              key: r.path,
+              label: r.path,
+              value: r.visits,
+              note: breakdownNote(r.users, r.bounce_rate),
+            }))}
+            tailWord="визитов"
+            unitTotal={exits.data.visits_total}
+          />
+        )}
+      </ChartWidget>
     </div>
+  );
+}
+
+/** Трафик по часам суток: доступная heatmap-сетка из 24 клеток (визиты по часу 0..23) + пик.
+    Насыщенность каждой клетки нормирована на максимум текущего окна; title/aria-label сохраняют
+    точные визиты и посетителей. Пустое окно — EmptyState, а не декоративная сетка нулей. */
+function YmHourlyCard({
+  hourly,
+  windowLabel,
+}: {
+  hourly: ReturnType<typeof useYmHourly>;
+  windowLabel: string;
+}) {
+  const padHour = (h: number): string => String(h).padStart(2, '0');
+  const maxVisits = Math.max(0, ...(hourly.data?.rows ?? []).map((row) => row.visits));
+  return (
+    <ChartWidget id="ym-hourly" title="Трафик по часам" fixedSize="half">
+      {hourly.isPending ? (
+        <ChartSkeleton />
+      ) : hourly.isError ? (
+        <ErrorState
+          compact
+          size="chart"
+          className="py-4"
+          title="Не удалось получить ритм по часам"
+          reason={hourly.error instanceof Error ? hourly.error.message : 'ошибка'}
+          onRetry={() => hourly.refetch()}
+          retrying={hourly.isFetching}
+        />
+      ) : hourly.data.visits_total === 0 ? (
+        <EmptyState compact size="chart" title="Нет визитов за период." />
+      ) : (
+        <ChartCardBody
+          label="Визиты"
+          value={fmt.short(hourly.data.visits_total)}
+          caption={
+            <span className="space-y-0.5">
+              <span className="block">
+                {hourly.data.peak_hour != null
+                  ? `Пик в ${padHour(hourly.data.peak_hour)}:00 · ${windowLabel}`
+                  : windowLabel}
+              </span>
+              <span className="block">Часы — в часовом поясе счётчика</span>
+            </span>
+          }
+        >
+          <div className="grid h-full grid-cols-12 content-center gap-x-1 gap-y-2">
+            {hourly.data.rows.map((row) => {
+              const opacity = maxVisits > 0 ? Math.max(0.1, row.visits / maxVisits) : 0.08;
+              const title = `${padHour(row.hour)}:00 — ${fmt.num(row.visits)} визитов, ${fmt.num(row.users)} посетителей`;
+              return (
+                <div
+                  key={row.hour}
+                  role="img"
+                  aria-label={title}
+                  title={title}
+                  className="min-w-0 text-center"
+                >
+                  <div
+                    className="h-8 rounded-sm"
+                    style={{ backgroundColor: 'hsl(var(--brand-iris))', opacity }}
+                  />
+                  <span className="mt-1 block text-2xs tabular-nums text-muted-foreground">
+                    {row.hour % 3 === 0 ? row.hour : '\u00a0'}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </ChartCardBody>
+      )}
+    </ChartWidget>
   );
 }
 

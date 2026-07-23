@@ -425,7 +425,7 @@ test('utm: null-строка уходит в untagged_visits, tagged = total −
   });
 });
 
-test('goals/pages/utm «Всё»: date1 — counter_created_day учётки (общий allRangeWindow)', async () => {
+test('goals/pages/utm/hourly/exits «Всё»: общий allRangeWindow + часовой кэш новых разрезов', async () => {
   const paths = [];
   const { routes } = buildYm({
     ymFetch: async (_t, path) => {
@@ -437,8 +437,13 @@ test('goals/pages/utm «Всё»: date1 — counter_created_day учётки (о
   await invoke(routes, 'GET /api/ym/pages', { query: { days: '0' } });
   await invoke(routes, 'GET /api/ym/utm', { query: { days: '0' } });
   await invoke(routes, 'GET /api/ym/goals', { query: { days: '0' } });
+  await invoke(routes, 'GET /api/ym/hourly', { query: { days: '0' } });
+  await invoke(routes, 'GET /api/ym/exits', { query: { days: '0' } });
+  // Повторы новых all-time разрезов обслуживаются кэшем, новых stat-вызовов не добавляют.
+  await invoke(routes, 'GET /api/ym/hourly', { query: { days: '0' } });
+  await invoke(routes, 'GET /api/ym/exits', { query: { days: '0' } });
   const statPaths = paths.filter((p) => p.startsWith('/stat/'));
-  assert.equal(statPaths.length, 3);
+  assert.equal(statPaths.length, 5);
   for (const p of statPaths) assert.ok(p.includes('date1=2024-03-01'), `якорь «Всё» в ${p.slice(0, 40)}…`);
 });
 
@@ -1071,5 +1076,117 @@ test('goal_id на не-devices разрезах игнорируется: ни 
     assert.ok(!paths[0].includes('goal'), `${route}: цель не приклеена к metrics`);
     assert.equal(res.body.goal_id, undefined, `${route}: goal_id в ответе нет`);
     assert.equal(res.body.rows[0].goal_reaches, undefined, `${route}: строка без полей цели`);
+  }
+});
+
+test('exits: endURLPath-разрез — путь/визиты/отказы, totals авторитет, null-путь отброшен, кэш-хит', async () => {
+  let calls = 0;
+  const paths = [];
+  const { routes } = buildYm({
+    ymFetch: async (_t, path) => {
+      calls += 1;
+      paths.push(path);
+      return {
+        data: [
+          { dimensions: [{ name: '/checkout/success' }], metrics: [70, 55, 12.5] },
+          { dimensions: [{ name: '/' }], metrics: [35, 30, 60.0] },
+          // Отказы отсутствуют → bounce_rate null (не 0); путь пустой → строка отброшена.
+          { dimensions: [{ name: '/catalog' }], metrics: [20, 15] },
+          { dimensions: [{ name: '' }], metrics: [5, 4, 80] },
+        ],
+        totals: [140, 108, 33.4],
+      };
+    },
+  });
+  const res = await invoke(routes, 'GET /api/ym/exits', { query: { days: '30' } });
+  assert.equal(res.statusCode, 200);
+  assert.ok(paths[0].includes('dimensions=ym:s:endURLPath'), 'разрез по странице выхода');
+  assert.ok(!paths[0].includes('endURLPathFull'), 'query/fragment не запрашиваются');
+  assert.ok(paths[0].includes('sort=-ym:s:visits'), 'сортировка по визитам');
+  assert.ok(paths[0].includes('limit=10'), 'дефолтный limit');
+  // totals[0] авторитетнее суммы строк (140 ≠ 70+35+20).
+  assert.equal(res.body.visits_total, 140);
+  assert.deepEqual(res.body.rows, [
+    { path: '/checkout/success', visits: 70, users: 55, bounce_rate: 12.5 },
+    { path: '/', visits: 35, users: 30, bounce_rate: 60 },
+    { path: '/catalog', visits: 20, users: 15, bounce_rate: null },
+  ]);
+  // Второй запрос того же окна — из кэша (upstream не дёргается повторно).
+  await invoke(routes, 'GET /api/ym/exits', { query: { days: '30' } });
+  assert.equal(calls, 1, 'кэш-хит: один upstream-запрос');
+});
+
+test('exits: limit клампится к максимуму (50), goal не поддерживается', async () => {
+  const paths = [];
+  const { routes } = buildYm({
+    ymFetch: async (_t, path) => { paths.push(path); return { data: [], totals: [0, 0, 0] }; },
+  });
+  const res = await invoke(routes, 'GET /api/ym/exits', { query: { days: '30', limit: '999', goal_id: '11' } });
+  assert.equal(res.statusCode, 200);
+  assert.ok(paths[0].includes('limit=50'), 'limit клампится к 50');
+  assert.ok(!paths[0].includes('goal'), 'цель к странице выхода не приклеивается');
+  assert.equal(res.body.goal_id, undefined, 'exits не отдаёт goal_id');
+});
+
+test('hourly: суточный профиль — 24 плотные строки 0..23, пропуски = 0, пик = час максимума', async () => {
+  const paths = [];
+  const { routes } = buildYm({
+    ymFetch: async (_t, path) => {
+      paths.push(path);
+      return {
+        data: [
+          { dimensions: [{ id: '09:00', name: '09:00' }], metrics: [20, 14] },
+          { dimensions: [{ id: '14:00', name: '14:00' }], metrics: [20, 14] },
+          // Неожиданный дубль суммируется, а не затирает предыдущую строку часа.
+          { dimensions: [{ id: '14', name: '14:00' }], metrics: [10, 8] },
+          { dimensions: [{ id: '0', name: '0' }], metrics: [3, 2] },
+          // Мусорный/внедиапазонный час игнорируется, окно не роняет.
+          { dimensions: [{ id: '99', name: '99' }], metrics: [1000, 1000] },
+          { dimensions: [{ name: 'x' }], metrics: [1000, 1000] },
+          { dimensions: [{ name: '9garbage' }], metrics: [1000, 1000] },
+        ],
+        totals: [53, 38],
+        sampled: true,
+        sample_share: 0.5,
+      };
+    },
+  });
+  const res = await invoke(routes, 'GET /api/ym/hourly', { query: { days: '30' } });
+  assert.equal(res.statusCode, 200);
+  assert.ok(paths[0].includes('dimensions=ym:s:hour'), 'разрез по часу суток');
+  assert.ok(paths[0].includes('sort=ym:s:hour'), 'сортировка по часу, не по визитам');
+  assert.equal(res.body.rows.length, 24, 'ровно 24 плотные строки');
+  assert.deepEqual(res.body.rows[0], { hour: 0, visits: 3, users: 2 });
+  assert.deepEqual(res.body.rows[9], { hour: 9, visits: 20, users: 14 });
+  assert.deepEqual(res.body.rows[14], { hour: 14, visits: 30, users: 22 });
+  // Час без данных (например 5) — честный 0, а не пропуск.
+  assert.deepEqual(res.body.rows[5], { hour: 5, visits: 0, users: 0 });
+  // totals авторитет, пик — час максимума визитов (14).
+  assert.equal(res.body.visits_total, 53);
+  assert.equal(res.body.users_total, 38);
+  assert.equal(res.body.peak_hour, 14);
+  assert.deepEqual(res.body.meta, { sampled: true, sample_share: 0.5 });
+});
+
+test('hourly: пустое окно — 24 нулевые строки, пик = null (без ложного «пика в 0:00»)', async () => {
+  const { routes } = buildYm({
+    ymFetch: async () => ({ data: [], totals: [0, 0] }),
+  });
+  const res = await invoke(routes, 'GET /api/ym/hourly', { query: { days: '7' } });
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.rows.length, 24);
+  assert.equal(res.body.visits_total, 0);
+  assert.equal(res.body.peak_hour, null);
+  assert.ok(res.body.rows.every((r) => r.visits === 0 && r.users === 0));
+});
+
+test('hourly/exits: 401 после connect → ym_token_revoked (reconnect-CTA)', async () => {
+  for (const route of ['hourly', 'exits']) {
+    const { routes } = buildYm({
+      ymFetch: async () => { const e = new Error('unauth'); e.status = 401; throw e; },
+    });
+    const res = await invoke(routes, `GET /api/ym/${route}`, { query: { days: '30' } });
+    assert.equal(res.statusCode, 401, `${route}: 401`);
+    assert.equal(res.body.code, 'ym_token_revoked', `${route}: reconnect-код`);
   }
 });
