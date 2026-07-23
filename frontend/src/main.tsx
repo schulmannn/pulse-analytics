@@ -37,9 +37,10 @@ const queryClient = new QueryClient({
       staleTime: 60_000,
       refetchOnWindowFocus: false,
       // Never retry client-side failures (4xx, schema drift) — a 401/404 won't heal on
-      // retry. Keep one retry for 5xx/network flake.
+      // retry. Keep one retry for 5xx/network flake; network failures are ApiError with
+      // .network (human message), so the flag — not the status — keeps their retry.
       retry: (failureCount, error) =>
-        !(error instanceof ApiError && error.status < 500) && failureCount < 1,
+        !(error instanceof ApiError && !error.network && error.status < 500) && failureCount < 1,
     },
   },
 });

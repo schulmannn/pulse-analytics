@@ -8,6 +8,8 @@ import { demoFixture } from '@/lib/demoFixtures';
 export class ApiError extends Error {
   status: number;
   retryAfter?: number;
+  /** Запрос не дошёл до сервера (обрыв сети/DNS/офлайн) — ретраится как 5xx, см. main.tsx. */
+  network?: boolean;
   constructor(status: number, message: string, retryAfter?: number) {
     super(message);
     this.name = 'ApiError';
@@ -16,8 +18,21 @@ export class ApiError extends Error {
   }
 }
 
+// Фолбэк, когда сервер не прислал собственное поле `error` (non-JSON тело: обрыв на прокси,
+// 502/504 от gateway, HTML-страница ошибки). Эти сообщения через error.message попадают в
+// ErrorState.reason по всему приложению — пользователь должен видеть русский текст, а не
+// «502 Bad Gateway»; числовой код остаётся для баг-репортов.
+function humanHttpMessage(status: number): string {
+  if (status === 401) return 'Сессия истекла — войдите заново';
+  if (status === 403) return 'Нет доступа к этому разделу';
+  if (status === 404) return 'Данные не найдены';
+  if (status === 429) return 'Слишком много запросов — попробуйте чуть позже';
+  if (status >= 500) return 'Сервер временно недоступен — попробуйте позже';
+  return `Не удалось выполнить запрос (код ${status})`;
+}
+
 async function readApiError(res: Response): Promise<ApiError> {
-  let message = `${res.status} ${res.statusText}`;
+  let message = humanHttpMessage(res.status);
   let retryAfter: number | undefined;
   try {
     const body = await res.json();
@@ -26,7 +41,7 @@ async function readApiError(res: Response): Promise<ApiError> {
     const parsedRetry = rawRetry === '' || rawRetry == null ? NaN : Number(rawRetry);
     if (Number.isFinite(parsedRetry) && parsedRetry >= 0) retryAfter = parsedRetry;
   } catch {
-    /* error body was not JSON — keep the status line */
+    /* error body was not JSON — keep the human fallback */
   }
   if (retryAfter == null) {
     const rawHeader = res.headers.get('Retry-After');
@@ -65,6 +80,22 @@ function parseResponse<S extends z.ZodTypeAny>(
     throw new ApiError(0, 'Формат данных не совпадает с ожидаемым');
   }
   return result.data;
+}
+
+// Обрыв сети / DNS / офлайн: fetch кидает TypeError с английским «Failed to fetch», и этот текст
+// раньше доходил до ErrorState. Оборачиваем ТОЛЬКО TypeError: отмена запроса (AbortError от
+// cancelQueries) обязана пробрасываться как есть, иначе TanStack Query перестанет её узнавать.
+async function fetchApi(path: string, init: RequestInit): Promise<Response> {
+  try {
+    return await fetch(path, init);
+  } catch (err) {
+    if (err instanceof TypeError) {
+      const error = new ApiError(0, 'Нет соединения с сервером — проверьте интернет и попробуйте ещё раз');
+      error.network = true;
+      throw error;
+    }
+    throw err;
+  }
 }
 
 function buildHeaders(channelId: number | null): Record<string, string> {
@@ -107,7 +138,7 @@ export async function apiGet<S extends z.ZodTypeAny>(
     if (fixture !== undefined) return parseResponse('GET', path, schema, fixture);
   }
   const channelId = opts.channelId !== undefined ? opts.channelId : getSelectedChannel();
-  const res = await fetch(path, {
+  const res = await fetchApi(path, {
     credentials: 'same-origin',
     headers: buildHeaders(channelId),
     signal: opts.signal,
@@ -152,7 +183,7 @@ export async function apiSend(
     headers['Content-Type'] = 'application/json';
     init.body = JSON.stringify(body);
   }
-  const res = await fetch(path, init);
+  const res = await fetchApi(path, init);
   if (!res.ok) {
     throw await readApiError(res);
   }
