@@ -1,10 +1,12 @@
 import { useContext, useState } from 'react';
 import { ChartExpandedContext } from '@/components/ExpandableChart';
 import {
+  useYmAge,
   useYmCities,
   useYmCountries,
   useYmDevices,
   useYmExits,
+  useYmGender,
   useYmGoals,
   useYmHourly,
   useYmLandings,
@@ -47,6 +49,40 @@ const YM_DEVICE_LABELS: Record<string, string> = {
   mobile: 'Смартфоны',
   tablet: 'Планшеты',
   tv: 'ТВ',
+};
+
+/** Локализация возрастных групп по стабильному id ym:s:ageInterval (нижняя граница интервала).
+    lang=ru обычно уже отдаёт русскую подпись, но по id мы даём единый продуктовый формат и не
+    зависим от языка ответа API; неизвестный id падает на имя из ответа. */
+const YM_AGE_LABELS: Record<string, string> = {
+  '17': 'До 18 лет',
+  '18': '18–24 года',
+  '25': '25–34 года',
+  '35': '35–44 года',
+  '45': '45–54 года',
+  '55': '55 лет и старше',
+};
+
+/** Локализация пола по стабильному значению ym:s:gender (male/female), имя API — фолбэк. */
+const YM_GENDER_LABELS: Record<string, string> = {
+  male: 'Мужчины',
+  female: 'Женщины',
+};
+
+/** Методологическая подпись соцдема: оценочная природа, фактическое покрытие и privacy-redaction
+    перечисляются отдельно. При нулевом total процент не выдумывается. */
+const demographicsFootnote = (data: {
+  coverage_percent: number | null;
+  contains_sensitive_data: boolean;
+}): string => {
+  const coverage =
+    data.coverage_percent == null
+      ? null
+      : `определено для ${data.coverage_percent.toLocaleString('ru-RU', { maximumFractionDigits: 1 })}% визитов`;
+  const base = ['Оценка Метрики (Crypta)', coverage].filter(Boolean).join(' · ');
+  return data.contains_sensitive_data
+    ? `${base}. Часть данных скрыта при малой выборке.`
+    : `${base}.`;
 };
 
 /** Вторичный контекст строки разреза: посетители + отказы (когда доступны). Отказы nullable —
@@ -109,6 +145,8 @@ export function YmOverview() {
   const messengers = useYmMessengers(period);
   const countries = useYmCountries(period);
   const cities = useYmCities(period);
+  const age = useYmAge(period);
+  const gender = useYmGender(period);
   const devices = useYmDevices(period, selectedGoalId);
   const utm = useYmUtm(period, selectedGoalId);
   const pages = useYmPages(period);
@@ -465,6 +503,74 @@ export function YmOverview() {
             }))}
             tailWord="визитов"
             unitTotal={cities.data.visits_total}
+          />
+        )}
+      </ChartWidget>
+
+      {/* Возраст: демография посетителей (ageInterval) — локализация по стабильному id, имя — фолбэк. */}
+      <ChartWidget id="ym-age" title="Возраст" fixedSize="half">
+        {age.isPending ? (
+          <TableSkeleton rows={4} columns={2} className="py-2" />
+        ) : age.isError ? (
+          <ErrorState
+            compact
+            size="table"
+            className="py-4"
+            title="Не удалось получить возраст"
+            reason={age.error instanceof Error ? age.error.message : 'ошибка'}
+            onRetry={() => age.refetch()}
+            retrying={age.isFetching}
+          />
+        ) : age.data.rows.length === 0 ? (
+          <div>
+            <EmptyState compact size="table" title="Демографические данные недоступны за период." />
+            <p className="text-2xs text-muted-foreground">{demographicsFootnote(age.data)}</p>
+          </div>
+        ) : (
+          <YmBreakdownRows
+            rows={age.data.rows.map((r) => ({
+              key: r.id ?? r.name ?? 'unknown',
+              label: (r.id != null ? YM_AGE_LABELS[r.id] : undefined) ?? r.name ?? 'возраст неизвестен',
+              value: r.visits,
+              note: breakdownNote(r.users, r.bounce_rate),
+            }))}
+            tailWord="визитов"
+            unitTotal={age.data.visits_total}
+            footnote={demographicsFootnote(age.data)}
+          />
+        )}
+      </ChartWidget>
+
+      {/* Пол: демография посетителей (gender) — локализация по стабильному id male/female. */}
+      <ChartWidget id="ym-gender" title="Пол" fixedSize="half">
+        {gender.isPending ? (
+          <TableSkeleton rows={4} columns={2} className="py-2" />
+        ) : gender.isError ? (
+          <ErrorState
+            compact
+            size="table"
+            className="py-4"
+            title="Не удалось получить пол"
+            reason={gender.error instanceof Error ? gender.error.message : 'ошибка'}
+            onRetry={() => gender.refetch()}
+            retrying={gender.isFetching}
+          />
+        ) : gender.data.rows.length === 0 ? (
+          <div>
+            <EmptyState compact size="table" title="Демографические данные недоступны за период." />
+            <p className="text-2xs text-muted-foreground">{demographicsFootnote(gender.data)}</p>
+          </div>
+        ) : (
+          <YmBreakdownRows
+            rows={gender.data.rows.map((r) => ({
+              key: r.id ?? r.name ?? 'unknown',
+              label: (r.id != null ? YM_GENDER_LABELS[r.id] : undefined) ?? r.name ?? 'не определён',
+              value: r.visits,
+              note: breakdownNote(r.users, r.bounce_rate),
+            }))}
+            tailWord="визитов"
+            unitTotal={gender.data.visits_total}
+            footnote={demographicsFootnote(gender.data)}
           />
         )}
       </ChartWidget>

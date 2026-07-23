@@ -884,6 +884,78 @@ test('cities: regionCity-разрез, дефолтный limit, кэш «Всё
   assert.equal(paths.length, 2, '«Всё» закэшировано на час — второй ответ из кэша');
 });
 
+test('age: ageInterval-разрез + lang=ru, стабильный id + русское имя, totals авторитет', async () => {
+  const paths = [];
+  const { routes } = buildYm({
+    ymFetch: async (_t, path) => {
+      paths.push(path);
+      return {
+        data: [
+          { dimensions: [{ id: '25', name: '25—34 года' }], metrics: [120, 90, 22.5] },
+          { dimensions: [{ id: '18', name: '18—24 года' }], metrics: [80, 60, 31.0] },
+          // Undefined запрошен явно: строка не показывается как категория, но остаётся в totals.
+          { dimensions: [{ id: null, name: null }], metrics: [50, 35, null] },
+        ],
+        totals: [250, 185, 26.0],
+        contains_sensitive_data: true,
+      };
+    },
+  });
+  const res = await invoke(routes, 'GET /api/ym/age', { query: { days: '30' } });
+  assert.equal(res.statusCode, 200);
+  assert.ok(paths[0].includes('ym:s:ageInterval'), 'официальная размерность возраста');
+  assert.ok(paths[0].includes('ym:s:visits,ym:s:users,ym:s:bounceRate'), 'контрактные метрики разреза');
+  assert.ok(paths[0].includes('sort=-ym:s:visits'), 'сортировка по визитам');
+  assert.ok(paths[0].includes('lang=ru'), 'русские подписи групп');
+  assert.ok(paths[0].includes('limit=10'), 'потолок разреза возраста');
+  assert.ok(paths[0].includes('include_undefined=true'), 'неопределённая аудитория входит в coverage');
+  assert.ok(!paths[0].includes('goal'), 'демография без атрибуции цели');
+  // Демография — разрез без атрибуции: goal_id в ответе нет (байт-в-байт как география).
+  assert.deepEqual(res.body, {
+    visits_total: 250,
+    users_total: 185,
+    known_visits: 200,
+    unknown_visits: 50,
+    coverage_percent: 80,
+    contains_sensitive_data: true,
+    meta: {},
+    rows: [
+      { id: '25', name: '25—34 года', visits: 120, users: 90, bounce_rate: 22.5 },
+      { id: '18', name: '18—24 года', visits: 80, users: 60, bounce_rate: 31 },
+    ],
+  });
+});
+
+test('gender: gender-разрез, дефолтный limit, кэш «Всё» по counter_created_day', async () => {
+  const paths = [];
+  const { routes } = buildYm({
+    ymFetch: async (_t, path) => { paths.push(path); return { data: [], totals: [0, 0, 0] }; },
+  });
+  const win = await invoke(routes, 'GET /api/ym/gender', { query: { days: '30' } });
+  assert.equal(win.statusCode, 200);
+  assert.ok(paths[0].includes('ym:s:gender'), 'официальная размерность пола');
+  assert.ok(paths[0].includes('lang=ru'), 'русские имена пола');
+  assert.ok(paths[0].includes('limit=5'), 'потолок разреза пола');
+  assert.ok(paths[0].includes('include_undefined=true'), 'неопределённая аудитория входит в coverage');
+  assert.deepEqual(win.body, {
+    visits_total: 0,
+    users_total: 0,
+    known_visits: 0,
+    unknown_visits: 0,
+    coverage_percent: null,
+    contains_sensitive_data: false,
+    rows: [],
+    meta: {},
+  });
+  // «Всё»: якорь диапазона — counter_created_day учётки; повтор обслуживается часовым кэшем.
+  const a1 = await invoke(routes, 'GET /api/ym/gender', { query: { days: '0' } });
+  assert.equal(a1.statusCode, 200);
+  assert.ok(paths[1].includes('date1=2024-03-01'), 'якорь «Всё» — counter_created_day');
+  const a2 = await invoke(routes, 'GET /api/ym/gender', { query: { days: '0' } });
+  assert.equal(a2.statusCode, 200);
+  assert.equal(paths.length, 2, '«Всё» закэшировано на час — второй ответ из кэша');
+});
+
 test('breakdown: пустые/undefined-строки размерности отбрасываются, отказы null-safe (не 0)', async () => {
   const { routes } = buildYm({
     ymFetch: async () => ({
@@ -1115,7 +1187,7 @@ test('devices: goal_id → метрики цели ПОСЛЕ bounceRate (idx 3)
 });
 
 test('goal_id на не-devices разрезах игнорируется: ни метрик цели, ни goal_id, ни полей строки', async () => {
-  for (const route of ['referrers', 'social', 'messengers', 'countries', 'cities']) {
+  for (const route of ['referrers', 'social', 'messengers', 'countries', 'cities', 'age', 'gender']) {
     const paths = [];
     const { routes } = buildYm({
       ymFetch: async (_t, path) => {

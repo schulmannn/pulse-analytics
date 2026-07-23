@@ -933,6 +933,41 @@ export function useYmCities(period: MsPeriod) {
   });
 }
 
+// Демография посетителей: возраст (ym:s:ageInterval) и пол (ym:s:gender). Тот же breakdown-контракт
+// (визиты/посетители + отказы по строке, стабильный id + русское имя при lang=ru), без атрибуции
+// цели. Значения — оценка Метрики по поведению аудитории, не анкета; карточка это оговаривает.
+const YmDemographicsSchema = YmBreakdownSchema.extend({
+  known_visits: z.number(),
+  unknown_visits: z.number(),
+  coverage_percent: z.number().nullable(),
+  contains_sensitive_data: z.boolean(),
+});
+export type YmDemographics = z.infer<typeof YmDemographicsSchema>;
+
+export function useYmAge(period: MsPeriod) {
+  const { channelId } = useSelectedChannel();
+  return useQuery({
+    enabled: channelId != null,
+    queryKey: ['ym-age', channelId, ...msPeriodKey(period)],
+    staleTime: STALE_LIVE,
+    retry: false,
+    queryFn: ({ signal }) =>
+      apiGet(`/api/ym/age?${msPeriodQuery(period)}`, YmDemographicsSchema, { signal, channelId }),
+  });
+}
+
+export function useYmGender(period: MsPeriod) {
+  const { channelId } = useSelectedChannel();
+  return useQuery({
+    enabled: channelId != null,
+    queryKey: ['ym-gender', channelId, ...msPeriodKey(period)],
+    staleTime: STALE_LIVE,
+    retry: false,
+    queryFn: ({ signal }) =>
+      apiGet(`/api/ym/gender?${msPeriodQuery(period)}`, YmDemographicsSchema, { signal, channelId }),
+  });
+}
+
 // Слайс 2: цели (reaches + conversionRate — отдельная метрика, из reaches не выводится),
 // топ-страницы (hits-неймспейс, просмотры ≠ визиты) и utm_source-разрез с честным хвостом
 // неразмеченных визитов.
