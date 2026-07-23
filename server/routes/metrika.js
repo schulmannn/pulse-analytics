@@ -4,7 +4,7 @@ const { hasWorkspaceRole } = require('../middleware/tenant');
 
 /**
  * Роуты Яндекс.Метрики
- * (/api/ym/{connect,status,account,summary,sources,devices,referrers,social,messengers,goals,pages,landings,exits,hourly,utm}) —
+ * (/api/ym/{connect,status,account,summary,sources,devices,referrers,social,messengers,countries,cities,goals,pages,landings,exits,hourly,utm}) —
  * серверная половина
  * источника «метрика», зеркально МойСклад-вертикали: connect валидирует OAuth-токен живым
  * identity-вызовом (management/v1/counters) и сохраняет его ТОЛЬКО шифрованным (lib/ym_crypto),
@@ -1279,6 +1279,10 @@ function registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cach
   const YM_SOCIAL_LIMIT = 50;
   // Telegram и другие мессенджеры у Метрики — отдельная размерность, не SocialNetwork.
   const YM_MESSENGERS_LIMIT = 50;
+  // География — высокая кардинальность (стран у Метрики ~250, городов — тысячи): компактный топ по
+  // визитам, а хвост «Ещё N визитов из M» честно закрывает срез. Оба разреза — тот же потолок.
+  const YM_COUNTRIES_LIMIT = 100;
+  const YM_CITIES_LIMIT = 100;
 
   // goalOpt !== null включает АДДИТИВНЫЕ поля цели у строки (только там, где разрез их поддерживает —
   // устройства): reaches/conversionRate идут после базовых visits,users,bounceRate → индекс 3.
@@ -1398,6 +1402,12 @@ function registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cach
     lang: true,
     filter: "ym:s:lastsignTrafficSource=='messenger'",
   });
+  // GET /api/ym/countries?days=30 — страны посетителей (ym:s:regionCountry: стабильный region-id +
+  // русское имя при lang=ru). Как и устройства, фронт может опереться на стабильный id, имя — фолбэк.
+  registerYmBreakdown('countries', 'ym:s:regionCountry', YM_COUNTRIES_LIMIT, { lang: true });
+  // GET /api/ym/cities?days=30 — города посетителей (ym:s:regionCity — отдельная от страны
+  // размерность, чтобы город не терялся внутри страны). Тот же id+lang-контракт, что у стран.
+  registerYmBreakdown('cities', 'ym:s:regionCity', YM_CITIES_LIMIT, { lang: true });
 }
 
 module.exports = { registerYmRoutes };
