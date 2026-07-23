@@ -10,11 +10,11 @@ import { CATEGORY_LABEL, CATEGORY_ORDER, metricsForSource, type MetricDef, type 
  * existing picker; this is the metric-first path alongside it.
  */
 
-const SOURCE_LABEL: Record<'tg' | 'ig' | 'ms', string> = { tg: 'Telegram', ig: 'Instagram', ms: 'МойСклад' };
+const SOURCE_LABEL: Record<'tg' | 'ig' | 'ms' | 'ym', string> = { tg: 'Telegram', ig: 'Instagram', ms: 'МойСклад', ym: 'Метрика' };
 // All sources resolve now (TG: S3; IG: S11; МС: слайс 4). A metric with no data for the active
 // channel still renders an honest «Нет данных» card, but the catalogue only offers metrics the
 // resolver handles — вкладки не гейтятся по подключённости (канон TG/IG сохранён и для МС).
-const AVAILABLE_SOURCES: Array<'tg' | 'ig' | 'ms'> = ['tg', 'ig', 'ms'];
+const AVAILABLE_SOURCES: Array<'tg' | 'ig' | 'ms' | 'ym'> = ['tg', 'ig', 'ms', 'ym'];
 
 export function WidgetCatalogModal({
   onPick,
@@ -23,7 +23,7 @@ export function WidgetCatalogModal({
   onPick: (metricId: string) => void;
   onClose: () => void;
 }) {
-  const [source, setSource] = useState<'tg' | 'ig' | 'ms'>(AVAILABLE_SOURCES[0]);
+  const [source, setSource] = useState<'tg' | 'ig' | 'ms' | 'ym'>(AVAILABLE_SOURCES[0]);
   const [query, setQuery] = useState('');
   const searchRef = useRef<HTMLInputElement>(null);
 

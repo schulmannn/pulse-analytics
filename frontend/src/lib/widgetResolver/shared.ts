@@ -166,7 +166,7 @@ function localDay(ms: number): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
-export function commonMeta(config: WidgetConfig, ctx: DataContext, network: 'tg' | 'ig' | 'ms'): WidgetMeta {
+export function commonMeta(config: WidgetConfig, ctx: DataContext, network: 'tg' | 'ig' | 'ms' | 'ym'): WidgetMeta {
   const meta: WidgetMeta = {
     network,
     periodLabel: ctx.range ? 'выбранный период' : ctx.days > 0 ? `за ${ctx.days} дн.` : 'за всё время',
@@ -178,6 +178,9 @@ export function commonMeta(config: WidgetConfig, ctx: DataContext, network: 'tg'
     } else if (network === 'ms') {
       // Имя организации в ctx недоступно (summary его не несёт) — честная подпись источника-сети.
       meta.sourceLabel = 'МойСклад';
+    } else if (network === 'ym') {
+      // Имя счётчика в ctx недоступно (summary его не несёт) — та же честная сетевая подпись.
+      meta.sourceLabel = 'Метрика';
     } else {
       const username = ctx.ig?.profile?.username;
       if (username) meta.sourceLabel = `@${username}`;

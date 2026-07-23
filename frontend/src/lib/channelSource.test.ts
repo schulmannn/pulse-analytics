@@ -86,4 +86,10 @@ describe('resolveHomeSourceChannel (авто-пин виджета Главно�
     expect(resolveHomeSourceChannel([msStandalone], 'tg', null)).toBeNull();
     expect(resolveHomeSourceChannel([tg, msStandalone], 'ig', null)).toBeNull();
   });
+
+  it('ym-виджет пинится к каналу Метрики; чужой запомненный канал игнорируется', () => {
+    expect(resolveHomeSourceChannel(all, 'ym', null)).toBe(5);
+    expect(resolveHomeSourceChannel(all, 'ym', 1)).toBe(5); // remembered = TG
+    expect(resolveHomeSourceChannel([tg, msStandalone], 'ym', null)).toBeNull();
+  });
 });

@@ -391,9 +391,9 @@ function TargetField({ config, onChange }: { config: WidgetConfig; onChange: (pa
   const type: 'none' | TargetType = config.target?.type ?? 'none';
   // Dynamic target candidates: same-source scalar metrics (value/series carry a valueRaw), not self.
   const candidates = metric
-    ? metricsForSource(metric.source === 'ig' ? 'ig' : metric.source === 'ms' ? 'ms' : 'tg').filter(
-        (m) => (m.kind === 'value' || m.kind === 'series') && m.id !== metric.id,
-      )
+    ? metricsForSource(
+        metric.source === 'ig' ? 'ig' : metric.source === 'ms' ? 'ms' : metric.source === 'ym' ? 'ym' : 'tg',
+      ).filter((m) => (m.kind === 'value' || m.kind === 'series') && m.id !== metric.id)
     : [];
   return (
     <Field label="Цель">
@@ -520,7 +520,8 @@ function SourceField({ config, onChange }: { config: WidgetConfig; onChange: (pa
   // MetricDef and are Telegram, so anything that isn't an IG metric is treated as 'tg' (mirrors the
   // metric-picker narrowing above).
   const metricSource = getMetric(config.metricId)?.source;
-  const source = metricSource === 'ig' ? 'ig' : metricSource === 'ms' ? 'ms' : 'tg';
+  const source =
+    metricSource === 'ig' ? 'ig' : metricSource === 'ms' ? 'ms' : metricSource === 'ym' ? 'ym' : 'tg';
   const list = channelsForSource(channels.data?.channels ?? [], source);
   // Пустой список каналов сети метрики — честная подсказка вместо пустого селекта (per-source копия).
   const emptyNote =
@@ -529,7 +530,9 @@ function SourceField({ config, onChange }: { config: WidgetConfig; onChange: (pa
         ? 'Нет подключённых аккаунтов Instagram — источник берётся из свитчера. Подключите в разделе «Источники».'
         : source === 'ms'
           ? 'МойСклад не подключён — источник берётся из свитчера. Подключите в разделе «Источники».'
-          : null
+          : source === 'ym'
+            ? 'Яндекс.Метрика не подключена — источник берётся из свитчера. Подключите в разделе «Источники».'
+            : null
       : null;
   // A pin left from before source-aware filtering (e.g. a Telegram channel on an IG widget) is no
   // longer eligible; surface it as a disabled option so the value still round-trips and the mismatch
