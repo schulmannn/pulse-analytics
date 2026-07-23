@@ -46,9 +46,45 @@ test.before(async () => {
   });
 
   await db.upsertYmDaily(ch.id, [
-    { day: '2026-07-01', visits: 10, users: 7, pageviews: 25 },
-    { day: '2026-07-02', visits: 0, users: 0, pageviews: 0 },
-    { day: '2026-07-03', visits: 4, users: 3, pageviews: 9 },
+    {
+      day: '2026-07-01',
+      visits: 10,
+      users: 7,
+      pageviews: 25,
+      bounce_rate: 31.25,
+      avg_visit_duration_seconds: 84.5,
+      page_depth: 2.5,
+      new_users: 5,
+      percent_new_visitors: 71.43,
+      robot_visits: 2,
+      robot_percentage: 20,
+    },
+    {
+      day: '2026-07-02',
+      visits: 0,
+      users: 0,
+      pageviews: 0,
+      bounce_rate: null,
+      avg_visit_duration_seconds: null,
+      page_depth: null,
+      new_users: 0,
+      percent_new_visitors: null,
+      robot_visits: 0,
+      robot_percentage: null,
+    },
+    {
+      day: '2026-07-03',
+      visits: 4,
+      users: 3,
+      pageviews: 9,
+      bounce_rate: 12.5,
+      avg_visit_duration_seconds: 63.2,
+      page_depth: 2.25,
+      new_users: 1,
+      percent_new_visitors: 33.33,
+      robot_visits: 0,
+      robot_percentage: 0,
+    },
   ]);
   // Сосед-канал того же владельца: его строки НЕ должны просачиваться в чтения ch.
   await db.upsertYmDaily(other.id, [{ day: '2026-07-01', visits: 999, users: 999, pageviews: 999 }]);
@@ -104,10 +140,69 @@ test('listYmAccounts: живые каналы в списке, disabled — ис
   }
 });
 
+test('quality backfill marker: guarded по channel+counter и идемпотентен', { skip }, async () => {
+  const wrong = await db.markYmQualityBackfilled(ch.id, `wrong-${COUNTER_ID}`);
+  assert.equal(wrong, false, 'чужой counter_id не может пометить учётку');
+  const before = (await db.listYmAccounts()).find((a) => a.channel_id === ch.id);
+  assert.equal(before.quality_backfilled_at, null);
+
+  assert.equal(await db.markYmQualityBackfilled(ch.id, COUNTER_ID), true);
+  const marked = (await db.listYmAccounts()).find((a) => a.channel_id === ch.id);
+  assert.match(marked.quality_backfilled_at, /^\d{4}-\d{2}-\d{2}T/);
+  assert.equal(await db.markYmQualityBackfilled(ch.id, COUNTER_ID), false, 'повтор не передёргивает timestamp');
+});
+
+test('saveYmAccount: тот же counter сохраняет marker, другой counter сбрасывает его', { skip }, async () => {
+  const rotated = await db.createYmChannel({ owner_uid: owner.id, name: `Rotate ${nonce}` });
+  const firstCounter = `rotate-a-${nonce}`;
+  const secondCounter = `rotate-b-${nonce}`;
+  const save = (counter_id, access_token_enc) => db.saveYmAccount(rotated.id, {
+    counter_id,
+    counter_name: counter_id,
+    site: 'rotate.test',
+    counter_created_day: '2025-01-01',
+    access_token_enc,
+  });
+
+  await save(firstCounter, 'enc-a');
+  assert.equal(await db.markYmQualityBackfilled(rotated.id, firstCounter), true);
+  await save(firstCounter, 'enc-a2');
+  let account = (await db.listYmAccounts()).find((a) => a.channel_id === rotated.id);
+  assert.ok(account.quality_backfilled_at, 'ротация токена того же счётчика сохраняет завершённый backfill');
+
+  await save(secondCounter, 'enc-b');
+  account = (await db.listYmAccounts()).find((a) => a.channel_id === rotated.id);
+  assert.equal(account.quality_backfilled_at, null, 'новый счётчик требует собственный полный backfill');
+});
+
 test('upsertYmDaily: повторный проход ЗАМЕНЯЕТ точку (допересчёт Метрики вниз доносится честно)', { skip }, async () => {
-  await db.upsertYmDaily(ch.id, [{ day: '2026-07-01', visits: 8, users: 6, pageviews: 20 }]);
+  await db.upsertYmDaily(ch.id, [{
+    day: '2026-07-01',
+    visits: 8,
+    users: 6,
+    pageviews: 20,
+    bounce_rate: 22.2,
+    avg_visit_duration_seconds: 70.1,
+    page_depth: 2.1,
+    new_users: 4,
+    percent_new_visitors: 66.67,
+    robot_visits: 1,
+    robot_percentage: 12.5,
+  }]);
   const rows = await db.getYmDailyAllForActor(ch.id, { uid: owner.id });
-  assert.deepEqual(rows[0], { day: '2026-07-01', visits: 8, users: 6, pageviews: 20 });
+  assert.deepEqual(rows[0], {
+    day: '2026-07-01',
+    visits: 8,
+    users: 6,
+    pageviews: 20,
+    bounce_rate: 22.2,
+    avg_visit_duration_seconds: 70.1,
+    page_depth: 2.1,
+    new_users: 4,
+    percent_new_visitors: 66.67,
+    robot_visits: 1,
+    robot_percentage: 12.5,
+  });
 });
 
 test('hasYmDaily: дешёвый EXISTS для решения «бэкфилл или окно»', { skip }, async () => {
@@ -119,10 +214,34 @@ test('hasYmDaily: дешёвый EXISTS для решения «бэкфилл �
 test('getYmDailyAllForActor: day ASC, числа числами, только свой канал; чужому — []', { skip }, async () => {
   const rows = await db.getYmDailyAllForActor(ch.id, { uid: owner.id });
   assert.deepEqual(rows.map((r) => r.day), ['2026-07-01', '2026-07-02', '2026-07-03']);
-  assert.deepEqual(rows[2], { day: '2026-07-03', visits: 4, users: 3, pageviews: 9 });
+  assert.deepEqual(rows[2], {
+    day: '2026-07-03',
+    visits: 4,
+    users: 3,
+    pageviews: 9,
+    bounce_rate: 12.5,
+    avg_visit_duration_seconds: 63.2,
+    page_depth: 2.25,
+    new_users: 1,
+    percent_new_visitors: 33.33,
+    robot_visits: 0,
+    robot_percentage: 0,
+  });
   assert.equal(typeof rows[2].visits, 'number', 'bigint пришёл числом, не строкой pg');
   // Нулевой день архива — честный 0 (плотное окно), а не дыра.
-  assert.deepEqual(rows[1], { day: '2026-07-02', visits: 0, users: 0, pageviews: 0 });
+  assert.deepEqual(rows[1], {
+    day: '2026-07-02',
+    visits: 0,
+    users: 0,
+    pageviews: 0,
+    bounce_rate: null,
+    avg_visit_duration_seconds: null,
+    page_depth: null,
+    new_users: 0,
+    percent_new_visitors: null,
+    robot_visits: 0,
+    robot_percentage: null,
+  });
   assert.deepEqual(await db.getYmDailyAllForActor(ch.id, { uid: stranger.id }), []);
 });
 

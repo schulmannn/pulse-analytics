@@ -41,6 +41,45 @@ const SUMMARY = {
     page_depth: 2.77,
     new_users: 61,
     percent_new_visitors: 42,
+    robot_visits: 10,
+    robot_percentage: 6.9,
+  },
+  quality_series: {
+    bounce_rate: [
+      { day: '2026-07-20', value: 31.2 },
+      { day: '2026-07-21', value: null },
+      { day: '2026-07-22', value: 34.2 },
+    ],
+    avg_visit_duration_seconds: [
+      { day: '2026-07-20', value: 84 },
+      { day: '2026-07-21', value: null },
+      { day: '2026-07-22', value: 96 },
+    ],
+    page_depth: [
+      { day: '2026-07-20', value: 2.4 },
+      { day: '2026-07-21', value: null },
+      { day: '2026-07-22', value: 2.77 },
+    ],
+    new_users: [
+      { day: '2026-07-20', value: 21 },
+      { day: '2026-07-21', value: 0 },
+      { day: '2026-07-22', value: 40 },
+    ],
+    percent_new_visitors: [
+      { day: '2026-07-20', value: 38 },
+      { day: '2026-07-21', value: null },
+      { day: '2026-07-22', value: 42 },
+    ],
+    robot_visits: [
+      { day: '2026-07-20', value: 4 },
+      { day: '2026-07-21', value: 0 },
+      { day: '2026-07-22', value: 6 },
+    ],
+    robot_percentage: [
+      { day: '2026-07-20', value: 5.1 },
+      { day: '2026-07-21', value: null },
+      { day: '2026-07-22', value: 6.9 },
+    ],
   },
   meta: {
     exact_period_totals: true,
@@ -290,6 +329,11 @@ test('Обзор Метрики: карточки метрик, источник
   await expect(page.getByText('34,2%')).toBeVisible();
   await expect(page.getByText('Глубина', { exact: true })).toBeVisible();
   await expect(page.getByText('2,77')).toBeVisible();
+  const qualityStrip = page.getByTestId('ym-quality-strip');
+  await expect(qualityStrip.getByText('Роботы', { exact: true })).toBeVisible();
+  await expect(qualityStrip.getByText('6,9% · 10', { exact: true })).toBeVisible();
+  await expect(qualityStrip.getByText(/не исключены автоматически/)).toBeVisible();
+  await expect(qualityStrip.locator('svg[aria-hidden="true"]')).toHaveCount(6);
   await expect(page.getByText(/выборка 50%/)).toBeVisible();
   await expect(page.getByText(/задержка данных ~2 ч/)).toBeVisible();
 
