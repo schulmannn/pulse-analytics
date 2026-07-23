@@ -12,6 +12,7 @@ import { resolveHomeSourceChannel } from '@/lib/channelSource';
 import { useWidgetData } from '@/lib/useWidgetData';
 import { useIgWidgetData } from '@/lib/useIgWidgetData';
 import { useMsWidgetData } from '@/lib/useMsWidgetData';
+import { useYmWidgetData } from '@/lib/useYmWidgetData';
 import { getMetric } from '@/lib/widgetMetrics';
 import { coerceSizeForViz, effectiveTinted } from '@/lib/widgetSurface';
 import { updateWidgetConfig } from '@/lib/widgetStore';
@@ -43,7 +44,8 @@ export const ConfigWidget = memo(function ConfigWidget({ config, homeKey }: { co
   const navigate = useNavigate();
   const metric = getMetric(config.metricId);
   const legacyKey = legacyKeyForMetricId(config.metricId);
-  const sourceNetwork = metric?.source === 'ig' ? 'ig' : metric?.source === 'ms' ? 'ms' : 'tg';
+  const sourceNetwork =
+    metric?.source === 'ig' ? 'ig' : metric?.source === 'ms' ? 'ms' : metric?.source === 'ym' ? 'ym' : 'tg';
   // Metric widgets and legacy composites both drive the universal editor / explorer.
   const configurable = !!metric || !!legacyKey;
   const label = config.title || metric?.label || (legacyKey ? LEGACY_LABEL[legacyKey] : undefined) || 'Метрика';
@@ -148,6 +150,7 @@ export function WidgetBody({ config, onDrill, drillLabel }: { config: WidgetConf
   const metric = getMetric(config.metricId);
   if (metric?.source === 'ig') return <IgWidgetBody config={config} />;
   if (metric?.source === 'ms') return <MsWidgetBody config={config} onDrill={onDrill} drillLabel={drillLabel} />;
+  if (metric?.source === 'ym') return <YmWidgetBody config={config} onDrill={onDrill} drillLabel={drillLabel} />;
   return <TgWidgetBody config={config} onDrill={onDrill} drillLabel={drillLabel} />;
 }
 
@@ -189,6 +192,12 @@ function IgWidgetBody({ config }: { config: WidgetConfig }) {
 
 function MsWidgetBody({ config, onDrill, drillLabel }: { config: WidgetConfig; onDrill?: () => void; drillLabel?: string }) {
   const { result, isLoading } = useMsWidgetData(config);
+  if (isLoading) return <WidgetSkeleton viz={config.viz} />;
+  return <WidgetRenderer result={result} viz={config.viz} onDrill={onDrill} drillLabel={drillLabel} />;
+}
+
+function YmWidgetBody({ config, onDrill, drillLabel }: { config: WidgetConfig; onDrill?: () => void; drillLabel?: string }) {
+  const { result, isLoading } = useYmWidgetData(config);
   if (isLoading) return <WidgetSkeleton viz={config.viz} />;
   return <WidgetRenderer result={result} viz={config.viz} onDrill={onDrill} drillLabel={drillLabel} />;
 }

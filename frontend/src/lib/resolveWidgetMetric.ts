@@ -7,6 +7,7 @@ import type { MetricResolver, SeriesAggregation } from '@/lib/widgetMetrics';
 import type { WidgetConfig } from '@/lib/widgetConfig';
 import { resolveIgMetric } from '@/lib/widgetResolver/ig';
 import { resolveMsMetric } from '@/lib/widgetResolver/ms';
+import { resolveYmMetric } from '@/lib/widgetResolver/ym';
 import { COMPARISON_LABEL, capResultSeries, commonMeta, wantsGhostLine } from '@/lib/widgetResolver/shared';
 import { TG_WIDGET_RESOLVERS } from '@/lib/widgetResolver/tg';
 import type {
@@ -51,6 +52,7 @@ const WIDGET_RESOLVERS: Record<MetricResolver, WidgetMetricResolver> = {
   ...TG_WIDGET_RESOLVERS,
   ig: resolveIgMetric,
   ms: resolveMsMetric,
+  ym: resolveYmMetric,
   unavailable,
 };
 
@@ -88,8 +90,8 @@ function resolveTargetValue(config: WidgetConfig, ctx: DataContext): number | nu
 export function resolveWidgetMetric(config: WidgetConfig, ctx: DataContext): WidgetResult {
   const result = resolveMetricCore(config, ctx);
   const source = getMetric(config.metricId)?.source;
-  const network: 'tg' | 'ig' | 'ms' =
-    source === 'ig' ? 'ig' : source === 'ms' ? 'ms' : source === 'tg' ? 'tg' : ctx.ig && !ctx.tg ? 'ig' : 'tg';
+  const network: 'tg' | 'ig' | 'ms' | 'ym' =
+    source === 'ig' ? 'ig' : source === 'ms' ? 'ms' : source === 'ym' ? 'ym' : source === 'tg' ? 'tg' : ctx.ig && !ctx.tg ? 'ig' : 'tg';
   result.meta = { ...commonMeta(config, ctx, network), ...result.meta };
 
   const comparison = config.comparison;

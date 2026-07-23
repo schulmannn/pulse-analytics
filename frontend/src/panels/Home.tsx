@@ -202,6 +202,24 @@ export function Home() {
       setHomeBlocks(seeded);
       return;
     }
+    // YM-only workspace — тот же стандартный add-флоу, что у МС-ветки выше (МС при наличии обоих
+    // побеждает сознательно: порядок веток). Ритм: Визиты на всю ширину, Посетители + Просмотры парой.
+    if (keys.length === 0 && channels.some((c) => c.source === 'ym')) {
+      const seeded: string[] = [];
+      for (const [metricId, size] of [
+        ['ym.visits', 'full'],
+        ['ym.users', 'half'],
+        ['ym.pageviews', 'half'],
+      ] as const) {
+        const w = addWidgetForMetric(metricId);
+        if (!w) continue;
+        updateWidgetConfig(w.id, { size });
+        seeded.push(customKey(w.id));
+      }
+      setGroupOrder('home', seeded.map((key) => `custom-${configIdFromKey(key) ?? ''}`));
+      setHomeBlocks(seeded);
+      return;
+    }
     // The desktop composition is a deliberate 100 / 50+50 / 100 / 100 rhythm. Preserve any old
     // per-widget choice, but give a genuinely new board enough room for its narrative and line chart.
     if (keys.includes('growth') && !getWidgetConfig(legacyConfigId('growth'))) {

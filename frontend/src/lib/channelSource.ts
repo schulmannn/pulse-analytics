@@ -31,7 +31,7 @@ export function isEligibleSource(channels: Channel[], source: 'tg' | 'ig' | 'ms'
  */
 export function resolveHomeSourceChannel(
   channels: Channel[],
-  source: 'tg' | 'ig' | 'ms',
+  source: 'tg' | 'ig' | 'ms' | 'ym',
   remembered: number | null,
 ): number | null {
   const eligible = channelsForSource(channels, source);

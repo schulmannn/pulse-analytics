@@ -721,10 +721,11 @@ export function useYmStatus() {
 
 // Период Метрики сериализуется тем же feed-топбаром, что у МС (msPeriodQuery/msPeriodKey —
 // сете-агностичные хелперы окна): одна система координат окон на все не-социальные источники.
-export function useYmSummary(period: MsPeriod) {
+export function useYmSummary(period: MsPeriod, opts?: { enabled?: boolean }) {
   const { channelId } = useSelectedChannel();
   return useQuery({
-    enabled: channelId != null,
+    // opts.enabled — внешний гейт поверх канального (офскрин-виджеты Главной), queryKey прежний.
+    enabled: channelId != null && opts?.enabled !== false,
     queryKey: ['ym-summary', channelId, ...msPeriodKey(period)],
     staleTime: STALE_LIVE,
     retry: false,

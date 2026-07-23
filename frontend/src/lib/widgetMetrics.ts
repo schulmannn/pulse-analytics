@@ -19,7 +19,7 @@ import type { DrillKey } from '@/lib/kpiDerive';
 import type { WidgetSize } from '@/lib/widgetPrefsStore';
 
 /** Where the metric's data comes from. `all` = source-agnostic (rare; reserved). */
-export type MetricSource = 'tg' | 'ig' | 'ms' | 'all';
+export type MetricSource = 'tg' | 'ig' | 'ms' | 'ym' | 'all';
 
 /** The metric's natural data shape — drives which visualisations make sense.
  *   - value      → a scalar (+ optional delta): a KPI headline (ER now, ERV, virality);
@@ -55,6 +55,7 @@ export type MetricResolver =
   | 'tg.breakdown'
   | 'ig'
   | 'ms'
+  | 'ym'
   | 'unavailable';
 
 export interface MetricDef {
@@ -125,6 +126,7 @@ type MetricSpec = Omit<MetricDef, 'defaultViz' | 'supportedViz' | 'resolver'> &
 function resolverFor(spec: MetricSpec): MetricResolver {
   if (spec.source === 'ig') return 'ig';
   if (spec.source === 'ms') return 'ms';
+  if (spec.source === 'ym') return 'ym';
   if (spec.drillKey) return 'tg.core';
   if (spec.id === 'tg.erv' || spec.id === 'tg.virality') return 'tg.ratio';
   if (spec.id === 'tg.netGrowth') return 'tg.netGrowth';
@@ -344,8 +346,32 @@ const MS_METRICS: MetricDef[] = [
   }),
 ];
 
-/** The full catalogue — TG first, then IG, then МС, in a sensible reading order per source. */
-export const WIDGET_METRICS: MetricDef[] = [...TG_METRICS, ...IG_METRICS, ...MS_METRICS];
+// ── Яндекс.Метрика ──────────────────────────────────────────────────────────────────────────
+// Величины сайта (визиты/посетители/просмотры страниц) — СВОИ, четвёртая независимая семья
+// (канон TG-views ≠ IG-reach ≠ MS-revenue ≠ YM-visits). Данные — серверные агрегаты
+// /api/ym/summary (окно виджета), серии приходят уже нарезанными по дням.
+const YM_METRICS: MetricDef[] = [
+  define({
+    id: 'ym.visits', label: 'Визиты', source: 'ym', kind: 'series', unit: 'number',
+    category: 'growth', drillTo: '/metrika',
+    formula: 'Число визитов сайта по дням за окно.', sourceNote: 'Яндекс.Метрика (accuracy=full; «Всё» — дневной архив).',
+  }),
+  define({
+    id: 'ym.users', label: 'Посетители', source: 'ym', kind: 'series', unit: 'number',
+    category: 'growth', drillTo: '/metrika',
+    formula: 'Уникальные посетители по дням; хедлайн — сумма дневных уникальных за окно.',
+    included: 'Сумма дневных уникальных ≠ уникальные за период — это честная оговорка подписи.',
+    sourceNote: 'Яндекс.Метрика.',
+  }),
+  define({
+    id: 'ym.pageviews', label: 'Просмотры страниц', source: 'ym', kind: 'series', unit: 'number',
+    category: 'growth', drillTo: '/metrika',
+    formula: 'Просмотры страниц сайта по дням за окно.', sourceNote: 'Яндекс.Метрика.',
+  }),
+];
+
+/** The full catalogue — TG first, then IG, then МС и Метрика, in a sensible reading order per source. */
+export const WIDGET_METRICS: MetricDef[] = [...TG_METRICS, ...IG_METRICS, ...MS_METRICS, ...YM_METRICS];
 
 /** id → MetricDef for O(1) lookup (the WidgetConfig resolves its metric through this). */
 export const METRIC_BY_ID: Record<string, MetricDef> = Object.fromEntries(
@@ -372,8 +398,8 @@ export function isMetricId(raw: string | undefined | null): raw is string {
   return typeof raw === 'string' && raw in METRIC_BY_ID;
 }
 
-/** Metrics available for a source: `tg` / `ig` / `ms` themselves plus any `all` (source-agnostic) ones. */
-export function metricsForSource(source: 'tg' | 'ig' | 'ms'): MetricDef[] {
+/** Metrics available for a source: `tg` / `ig` / `ms` / `ym` themselves plus any `all` (source-agnostic) ones. */
+export function metricsForSource(source: 'tg' | 'ig' | 'ms' | 'ym'): MetricDef[] {
   return WIDGET_METRICS.filter((m) => m.source === source || m.source === 'all');
 }
 

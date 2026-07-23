@@ -33,7 +33,7 @@ export interface WidgetLedgerRow {
 }
 
 export interface WidgetMeta {
-  network?: 'tg' | 'ig' | 'ms';
+  network?: 'tg' | 'ig' | 'ms' | 'ym';
   sourceLabel?: string;
   periodLabel?: string;
   samplePosts?: number;
@@ -92,6 +92,16 @@ export interface MsDataContext {
   } | null;
 }
 
+/** Данные Яндекс.Метрики для резолвера. Структурная копия ответа /api/ym/summary (queries.ts):
+ *  серии УЖЕ нарезаны сервером под окно виджета (зеркало MsDataContext). */
+export interface YmDataContext {
+  summary?: {
+    visits: { total: number; series: Array<{ day: string; value: number }> };
+    users: { total: number; series: Array<{ day: string; value: number }> };
+    pageviews: { total: number; series: Array<{ day: string; value: number }> };
+  } | null;
+}
+
 export interface DataContext {
   now: number;
   days: PeriodDays;
@@ -100,6 +110,7 @@ export interface DataContext {
   tg?: TgDataContext;
   ig?: IgDataContext;
   ms?: MsDataContext;
+  ym?: YmDataContext;
 }
 
 export type WidgetMetricResolver = (
