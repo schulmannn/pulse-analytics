@@ -240,6 +240,41 @@ const CITIES = {
   meta: {},
 };
 
+// Демография: возраст/пол посетителей (ageInterval/gender). Имена намеренно нерусские/сырые —
+// карточка обязана локализовать по СТАБИЛЬНОМУ id ('25' → «25–34 года», 'female' → «Женщины»),
+// а не показывать сырое имя API. У возраста пятая строка уходит в хвост (карточка показывает топ-4);
+// visits_total уникален у каждого разреза, чтобы хвост «Ещё N из M» не схлопывался локатором.
+const AGE = {
+  visits_total: 500,
+  users_total: 360,
+  known_visits: 410,
+  unknown_visits: 90,
+  coverage_percent: 82,
+  contains_sensitive_data: true,
+  rows: [
+    { id: '25', name: 'age_25_34', visits: 180, users: 130, bounce_rate: 21.0 },
+    { id: '35', name: 'age_35_44', visits: 120, users: 90, bounce_rate: 27.0 },
+    { id: '18', name: 'age_18_24', visits: 70, users: 55, bounce_rate: 33.0 },
+    { id: '45', name: 'age_45_54', visits: 25, users: 18, bounce_rate: 40.0 },
+    { id: '17', name: 'age_under_18', visits: 15, users: 12, bounce_rate: 48.0 },
+  ],
+  meta: {},
+};
+
+const GENDER = {
+  visits_total: 400,
+  users_total: 290,
+  known_visits: 360,
+  unknown_visits: 40,
+  coverage_percent: 90,
+  contains_sensitive_data: false,
+  rows: [
+    { id: 'female', name: 'f', visits: 200, users: 145, bounce_rate: 24.0 },
+    { id: 'male', name: 'm', visits: 160, users: 115, bounce_rate: 29.0 },
+  ],
+  meta: {},
+};
+
 // Устройства: имена намеренно английские — карточка обязана локализовать по СТАБИЛЬНОМУ id
 // (id '2' → «Смартфоны»), а не показывать сырое имя API. Четыре строки → без хвоста.
 const DEVICES = {
@@ -303,6 +338,8 @@ async function bootMetrika(page: Page, path: string, { connected = true } = {}) 
     if (urlPath === '/api/ym/messengers') return json(200, MESSENGERS);
     if (urlPath === '/api/ym/countries') return json(200, COUNTRIES);
     if (urlPath === '/api/ym/cities') return json(200, CITIES);
+    if (urlPath === '/api/ym/age') return json(200, AGE);
+    if (urlPath === '/api/ym/gender') return json(200, GENDER);
     if (urlPath === '/api/ym/devices') return json(200, attributed ? withGoalCtx(DEVICES, 7, 4.2) : DEVICES);
     if (urlPath === '/api/ym/landings') return json(200, attributed ? withGoalCtx(LANDINGS, 9, 6.4) : LANDINGS);
     if (urlPath === '/api/ym/hourly') return json(200, HOURLY);
@@ -461,6 +498,27 @@ test('Обзор Метрики: карточки метрик, источник
   await expect(citiesHeading).toBeVisible();
   await expect(page.getByText('Москва', { exact: true })).toBeVisible();
   await expect(page.getByText(/Ещё 10 визитов из 275/)).toBeVisible();
+
+  // Слайс демографии — возраст (ageInterval): локализация по СТАБИЛЬНОМУ id ('25' → «25–34 года»),
+  // сырое имя API не показывается; пятая строка — в хвосте своего total (410); оговорка об оценке.
+  const ageHeading = page.getByRole('heading', { name: 'Возраст', exact: true });
+  await ageHeading.scrollIntoViewIfNeeded();
+  await expect(ageHeading).toBeVisible();
+  await expect(page.getByText('25–34 года', { exact: true })).toBeVisible();
+  await expect(page.getByText('age_25_34')).toHaveCount(0); // локализуем по id, не сырое имя
+  await expect(page.getByText('age_under_18')).toHaveCount(0); // пятая строка — в хвосте
+  await expect(page.getByText(/Ещё 15 визитов из 500/)).toBeVisible();
+  await expect(
+    page.getByText('Оценка Метрики (Crypta) · определено для 82% визитов. Часть данных скрыта при малой выборке.'),
+  ).toBeVisible();
+
+  // Слайс демографии — пол (gender): локализация по id ('female' → «Женщины»), свой total (360).
+  const genderHeading = page.getByRole('heading', { name: 'Пол', exact: true });
+  await genderHeading.scrollIntoViewIfNeeded();
+  await expect(genderHeading).toBeVisible();
+  await expect(page.getByText('Женщины', { exact: true })).toBeVisible();
+  await expect(page.getByText('Мужчины', { exact: true })).toBeVisible();
+  await expect(page.getByText('Оценка Метрики (Crypta) · определено для 90% визитов.')).toBeVisible();
 
   // Период-чипсы (общий page-period контракт) на месте.
   await expect(page.getByRole('group', { name: 'Период', exact: true })).toHaveCount(1);

@@ -4,7 +4,7 @@ const { hasWorkspaceRole } = require('../middleware/tenant');
 
 /**
  * Роуты Яндекс.Метрики
- * (/api/ym/{connect,status,account,summary,sources,devices,referrers,social,messengers,countries,cities,goals,pages,landings,exits,hourly,utm}) —
+ * (/api/ym/{connect,status,account,summary,sources,devices,referrers,social,messengers,countries,cities,age,gender,goals,pages,landings,exits,hourly,utm}) —
  * серверная половина
  * источника «метрика», зеркально МойСклад-вертикали: connect валидирует OAuth-токен живым
  * identity-вызовом (management/v1/counters) и сохраняет его ТОЛЬКО шифрованным (lib/ym_crypto),
@@ -1283,6 +1283,10 @@ function registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cach
   // визитам, а хвост «Ещё N визитов из M» честно закрывает срез. Оба разреза — тот же потолок.
   const YM_COUNTRIES_LIMIT = 100;
   const YM_CITIES_LIMIT = 100;
+  // Демография — низкая кардинальность (возрастных групп у Метрики ~6, пол — 2..3): небольшой
+  // потолок с запасом; хвост «Ещё N визитов из M» честно закрывает срез, если групп окажется больше.
+  const YM_AGE_LIMIT = 10;
+  const YM_GENDER_LIMIT = 5;
 
   // goalOpt !== null включает АДДИТИВНЫЕ поля цели у строки (только там, где разрез их поддерживает —
   // устройства): reaches/conversionRate идут после базовых visits,users,bounceRate → индекс 3.
@@ -1328,7 +1332,12 @@ function registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cach
   // добавляет goal_id в кэш-ключ/ответ и достижения/конверсию цели по строке. Для разрезов без
   // goals контракт байт-в-байт прежний (ни goal_id, ни поля цели, ключ без g-слота) — рефереры/
   // соцсети/мессенджеры не меняются молча.
-  function registerYmBreakdown(route, dimension, limit, { lang = false, filter = null, goals = false } = {}) {
+  function registerYmBreakdown(
+    route,
+    dimension,
+    limit,
+    { lang = false, filter = null, goals = false, demographics = false } = {},
+  ) {
     app.get(`/api/ym/${route}`, requireAuth, async (req, res, next) => {
       try {
         const period = parseYmPeriod(req);
@@ -1361,7 +1370,10 @@ function registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cach
               `&date1=${date1}&date2=${date2}` +
               `&limit=${limit}&accuracy=full` +
               `${filter ? `&filters=${encodeURIComponent(filter)}` : ''}` +
-              `${lang ? '&lang=ru' : ''}`,
+              `${lang ? '&lang=ru' : ''}` +
+              // Соцдем раскрывается не для каждого визита. Явно просим undefined-строку, затем
+              // наружу её не показываем, а считаем покрытие относительно полного totals.
+              `${demographics ? '&include_undefined=true' : ''}`,
           );
         } catch (e) {
           return sendYmError(res, e, { route, channelId: ym.channel.id });
@@ -1369,9 +1381,28 @@ function registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cach
 
         const rows = breakdownRowsFromBody(body, goals ? { goalId } : null);
         const { visits_total, users_total } = breakdownTotals(body, rows);
-        const data = goals
-          ? { goal_id: goalId, visits_total, users_total, rows, meta: samplingMeta(body) }
-          : { visits_total, users_total, rows, meta: samplingMeta(body) };
+        let data;
+        if (goals) {
+          data = { goal_id: goalId, visits_total, users_total, rows, meta: samplingMeta(body) };
+        } else if (demographics) {
+          // Видимые строки = распознанная часть. Неизвестные и скрытые privacy-порогом сегменты
+          // остаются в авторитетном totals, поэтому coverage не завышает полноту отчёта.
+          const visibleVisits = rows.reduce((acc, row) => acc + row.visits, 0);
+          const knownVisits = Math.max(0, Math.min(visits_total, visibleVisits));
+          const unknownVisits = Math.max(0, visits_total - knownVisits);
+          data = {
+            visits_total,
+            users_total,
+            known_visits: knownVisits,
+            unknown_visits: unknownVisits,
+            coverage_percent: visits_total > 0 ? round2((knownVisits / visits_total) * 100) : null,
+            contains_sensitive_data: !!(body && body.contains_sensitive_data === true),
+            rows,
+            meta: samplingMeta(body),
+          };
+        } else {
+          data = { visits_total, users_total, rows, meta: samplingMeta(body) };
+        }
         cacheSet(cacheKey, data, isAll ? YM_ALL_RANGE_CACHE_TTL_MS : undefined);
         res.json(data);
       } catch (e) {
@@ -1408,6 +1439,13 @@ function registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cach
   // GET /api/ym/cities?days=30 — города посетителей (ym:s:regionCity — отдельная от страны
   // размерность, чтобы город не терялся внутри страны). Тот же id+lang-контракт, что у стран.
   registerYmBreakdown('cities', 'ym:s:regionCity', YM_CITIES_LIMIT, { lang: true });
+  // GET /api/ym/age?days=30 — возрастные группы посетителей (ym:s:ageInterval: стабильный
+  // числовой id группы + русская подпись при lang=ru). Метрика оценивает возраст по поведению
+  // (Крипта), а не по анкете — фронт подписывает это оговоркой. Атрибуции цели у демографии нет.
+  registerYmBreakdown('age', 'ym:s:ageInterval', YM_AGE_LIMIT, { lang: true, demographics: true });
+  // GET /api/ym/gender?days=30 — пол посетителей (ym:s:gender: стабильный id male/female +
+  // русское имя при lang=ru). Та же оценочная (не анкетная) природа, что у возраста.
+  registerYmBreakdown('gender', 'ym:s:gender', YM_GENDER_LIMIT, { lang: true, demographics: true });
 }
 
 module.exports = { registerYmRoutes };
