@@ -1,0 +1,43 @@
+# Автоматические PR на обновление зависимостей. Система хранит зашифрованные Telegram-сессии и
+# Instagram-токены — supply-chain-уязвимости в npm/PyPI должны всплывать сами, а не при ручном
+# аудите. Каждый PR проходит обычный CI (unit/integration/e2e) и мержится человеком; main
+# авто-деплоится, поэтому auto-merge намеренно не включён.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      npm-minor-patch:
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: npm
+    directory: "/frontend"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      npm-minor-patch:
+        update-types: ["minor", "patch"]
+
+  # Telethon пиннится сознательно (< 1.43.2 не парсит TL-layer — см. CLAUDE.md): его апдейты
+  # приходят как обычные PR и требуют осмысленного ревью, не автослияния.
+  - package-ecosystem: pip
+    directory: "/mtproto"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+
+  - package-ecosystem: pip
+    directory: "/collector"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3

@@ -70,6 +70,43 @@ jobs:
           while ((match = re.exec(html))) new vm.Script(match[1]);
           NODE
 
+  # Аудит известных CVE в зависимостях. Гейтим только production-поверхность (--omit=dev) на
+  # high+: dev-тулинг (vite/biome/playwright) обновляет Dependabot, а падение CI на каждом
+  # low-advisory в сборочной цепочке давало бы постоянный шум вместо сигнала. Python: pip-audit
+  # резолвит requirements целиком, так что транзитивные CVE тоже видны.
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+      - name: Audit npm dependencies (server)
+        run: npm audit --omit=dev --audit-level=high
+      - name: Audit npm dependencies (frontend)
+        run: npm audit --omit=dev --audit-level=high
+        working-directory: frontend
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      # Игноры ниже — ИЗВЕСТНЫЕ advisories transitive starlette 0.37.2 (тянется пином
+      # fastapi==0.111.0). Лечатся только бампом fastapi, а это отдельная работа: unit-тесты
+      # стабят fastapi через sys.modules, так что апгрейд требует ручной проверки живого
+      # сервиса. Снять весь блок --ignore-vuln при бампе fastapi; НОВЫЕ CVE в любом пакете
+      # джоб ловит сразу.
+      - name: Audit Python dependencies (mtproto + collector)
+        run: |
+          pip install pip-audit
+          pip-audit -r mtproto/requirements.txt \
+            --ignore-vuln PYSEC-2026-161 \
+            --ignore-vuln PYSEC-2026-248 \
+            --ignore-vuln PYSEC-2026-249 \
+            --ignore-vuln PYSEC-2026-1941 \
+            --ignore-vuln PYSEC-2026-1943 \
+            --ignore-vuln PYSEC-2026-2280 \
+            --ignore-vuln PYSEC-2026-2281
+          pip-audit -r collector/requirements.txt
+
   frontend:
     runs-on: ubuntu-latest
     defaults:
