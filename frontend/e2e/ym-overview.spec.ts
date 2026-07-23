@@ -211,6 +211,35 @@ const MESSENGERS = {
   meta: {},
 };
 
+// География: страны/города посетителей (regionCountry/regionCity) — id стабилен, имя lang=ru.
+// visits_total у каждого разреза уникален, чтобы хвост «Ещё N визитов из M» не совпал одним
+// локатором между карточками. Пятая строка уходит в хвост (карточка показывает топ-4).
+const COUNTRIES = {
+  visits_total: 320,
+  users_total: 240,
+  rows: [
+    { id: '225', name: 'Россия', visits: 200, users: 150, bounce_rate: 25.0 },
+    { id: '159', name: 'Казахстан', visits: 60, users: 45, bounce_rate: 40.0 },
+    { id: '149', name: 'Беларусь', visits: 30, users: 22, bounce_rate: 33.3 },
+    { id: '187', name: 'Украина', visits: 20, users: 15, bounce_rate: 44.0 },
+    { id: '96', name: 'Германия', visits: 10, users: 8, bounce_rate: 55.0 },
+  ],
+  meta: {},
+};
+
+const CITIES = {
+  visits_total: 275,
+  users_total: 199,
+  rows: [
+    { id: '213', name: 'Москва', visits: 150, users: 110, bounce_rate: 22.0 },
+    { id: '2', name: 'Санкт-Петербург', visits: 70, users: 50, bounce_rate: 30.0 },
+    { id: '162', name: 'Алматы', visits: 25, users: 18, bounce_rate: 41.0 },
+    { id: '157', name: 'Минск', visits: 20, users: 14, bounce_rate: 38.0 },
+    { id: '43', name: 'Казань', visits: 10, users: 7, bounce_rate: 50.0 },
+  ],
+  meta: {},
+};
+
 // Устройства: имена намеренно английские — карточка обязана локализовать по СТАБИЛЬНОМУ id
 // (id '2' → «Смартфоны»), а не показывать сырое имя API. Четыре строки → без хвоста.
 const DEVICES = {
@@ -272,6 +301,8 @@ async function bootMetrika(page: Page, path: string, { connected = true } = {}) 
     if (urlPath === '/api/ym/referrers') return json(200, REFERRERS);
     if (urlPath === '/api/ym/social') return json(200, SOCIAL);
     if (urlPath === '/api/ym/messengers') return json(200, MESSENGERS);
+    if (urlPath === '/api/ym/countries') return json(200, COUNTRIES);
+    if (urlPath === '/api/ym/cities') return json(200, CITIES);
     if (urlPath === '/api/ym/devices') return json(200, attributed ? withGoalCtx(DEVICES, 7, 4.2) : DEVICES);
     if (urlPath === '/api/ym/landings') return json(200, attributed ? withGoalCtx(LANDINGS, 9, 6.4) : LANDINGS);
     if (urlPath === '/api/ym/hourly') return json(200, HOURLY);
@@ -414,6 +445,22 @@ test('Обзор Метрики: карточки метрик, источник
   await expect(page.getByText(/12,5% отказов/)).toBeVisible();
   await expect(page.getByText('/faq')).toHaveCount(0);
   await expect(page.getByText(/Ещё 5 визитов из 140/)).toBeVisible();
+
+  // Слайс географии — страны (regionCountry): русское имя, отказы по строке, хвост своего total (320).
+  const countriesHeading = page.getByRole('heading', { name: 'Страны', exact: true });
+  await countriesHeading.scrollIntoViewIfNeeded();
+  await expect(countriesHeading).toBeVisible();
+  await expect(page.getByText('Россия', { exact: true })).toBeVisible();
+  await expect(page.getByText('Германия', { exact: true })).toHaveCount(0); // пятая строка — в хвосте
+  await expect(page.getByText(/Ещё 10 визитов из 320/)).toBeVisible();
+  await expect(page.getByText('География определяется Метрикой по данным визита, а не по GPS.')).toBeVisible();
+
+  // Слайс географии — города (regionCity): отдельная от страны карточка, свой total (275).
+  const citiesHeading = page.getByRole('heading', { name: 'Города', exact: true });
+  await citiesHeading.scrollIntoViewIfNeeded();
+  await expect(citiesHeading).toBeVisible();
+  await expect(page.getByText('Москва', { exact: true })).toBeVisible();
+  await expect(page.getByText(/Ещё 10 визитов из 275/)).toBeVisible();
 
   // Период-чипсы (общий page-period контракт) на месте.
   await expect(page.getByRole('group', { name: 'Период', exact: true })).toHaveCount(1);

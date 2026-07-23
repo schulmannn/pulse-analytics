@@ -906,6 +906,33 @@ export function useYmMessengers(period: MsPeriod) {
   });
 }
 
+// География посетителей: страны (ym:s:regionCountry) и города (ym:s:regionCity). Тот же breakdown-
+// контракт (визиты/посетители + отказы по строке, стабильный id + русское имя при lang=ru), без
+// атрибуции цели. Живые отчёты, общий оконный контракт 7/30/90/диапазон/«Всё».
+export function useYmCountries(period: MsPeriod) {
+  const { channelId } = useSelectedChannel();
+  return useQuery({
+    enabled: channelId != null,
+    queryKey: ['ym-countries', channelId, ...msPeriodKey(period)],
+    staleTime: STALE_LIVE,
+    retry: false,
+    queryFn: ({ signal }) =>
+      apiGet(`/api/ym/countries?${msPeriodQuery(period)}`, YmBreakdownSchema, { signal, channelId }),
+  });
+}
+
+export function useYmCities(period: MsPeriod) {
+  const { channelId } = useSelectedChannel();
+  return useQuery({
+    enabled: channelId != null,
+    queryKey: ['ym-cities', channelId, ...msPeriodKey(period)],
+    staleTime: STALE_LIVE,
+    retry: false,
+    queryFn: ({ signal }) =>
+      apiGet(`/api/ym/cities?${msPeriodQuery(period)}`, YmBreakdownSchema, { signal, channelId }),
+  });
+}
+
 // Слайс 2: цели (reaches + conversionRate — отдельная метрика, из reaches не выводится),
 // топ-страницы (hits-неймспейс, просмотры ≠ визиты) и utm_source-разрез с честным хвостом
 // неразмеченных визитов.

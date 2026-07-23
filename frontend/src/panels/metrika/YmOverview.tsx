@@ -1,6 +1,8 @@
 import { useContext, useState } from 'react';
 import { ChartExpandedContext } from '@/components/ExpandableChart';
 import {
+  useYmCities,
+  useYmCountries,
   useYmDevices,
   useYmExits,
   useYmGoals,
@@ -105,6 +107,8 @@ export function YmOverview() {
   const referrers = useYmReferrers(period);
   const social = useYmSocial(period);
   const messengers = useYmMessengers(period);
+  const countries = useYmCountries(period);
+  const cities = useYmCities(period);
   const devices = useYmDevices(period, selectedGoalId);
   const utm = useYmUtm(period, selectedGoalId);
   const pages = useYmPages(period);
@@ -400,6 +404,67 @@ export function YmOverview() {
             }))}
             tailWord="визитов"
             unitTotal={devices.data.visits_total}
+          />
+        )}
+      </ChartWidget>
+
+      {/* Страны: география посетителей (regionCountry) — визиты + отказы по строке, имя lang=ru. */}
+      <ChartWidget id="ym-countries" title="Страны" fixedSize="half">
+        {countries.isPending ? (
+          <TableSkeleton rows={4} columns={2} className="py-2" />
+        ) : countries.isError ? (
+          <ErrorState
+            compact
+            size="table"
+            className="py-4"
+            title="Не удалось получить страны"
+            reason={countries.error instanceof Error ? countries.error.message : 'ошибка'}
+            onRetry={() => countries.refetch()}
+            retrying={countries.isFetching}
+          />
+        ) : countries.data.rows.length === 0 ? (
+          <EmptyState compact size="table" title="Нет визитов за период." />
+        ) : (
+          <YmBreakdownRows
+            rows={countries.data.rows.map((r) => ({
+              key: r.id ?? r.name ?? 'unknown',
+              label: r.name ?? r.id ?? 'страна',
+              value: r.visits,
+              note: breakdownNote(r.users, r.bounce_rate),
+            }))}
+            tailWord="визитов"
+            unitTotal={countries.data.visits_total}
+            footnote="География определяется Метрикой по данным визита, а не по GPS."
+          />
+        )}
+      </ChartWidget>
+
+      {/* Города: география посетителей (regionCity) — отдельная от страны размерность. */}
+      <ChartWidget id="ym-cities" title="Города" fixedSize="half">
+        {cities.isPending ? (
+          <TableSkeleton rows={4} columns={2} className="py-2" />
+        ) : cities.isError ? (
+          <ErrorState
+            compact
+            size="table"
+            className="py-4"
+            title="Не удалось получить города"
+            reason={cities.error instanceof Error ? cities.error.message : 'ошибка'}
+            onRetry={() => cities.refetch()}
+            retrying={cities.isFetching}
+          />
+        ) : cities.data.rows.length === 0 ? (
+          <EmptyState compact size="table" title="Нет визитов за период." />
+        ) : (
+          <YmBreakdownRows
+            rows={cities.data.rows.map((r) => ({
+              key: r.id ?? r.name ?? 'unknown',
+              label: r.name ?? r.id ?? 'город',
+              value: r.visits,
+              note: breakdownNote(r.users, r.bounce_rate),
+            }))}
+            tailWord="визитов"
+            unitTotal={cities.data.visits_total}
           />
         )}
       </ChartWidget>

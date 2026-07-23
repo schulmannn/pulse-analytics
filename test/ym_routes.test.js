@@ -832,6 +832,58 @@ test('messengers: Telegram — отдельная lastsignMessenger-размер
   ]);
 });
 
+test('countries: regionCountry-разрез + lang=ru, стабильный id + русское имя, totals авторитет', async () => {
+  const paths = [];
+  const { routes } = buildYm({
+    ymFetch: async (_t, path) => {
+      paths.push(path);
+      return {
+        data: [
+          { dimensions: [{ id: '225', name: 'Россия' }], metrics: [180, 130, 28.4] },
+          { dimensions: [{ id: '187', name: 'Украина' }], metrics: [40, 30, 35.0] },
+        ],
+        totals: [240, 175, 30.1],
+      };
+    },
+  });
+  const res = await invoke(routes, 'GET /api/ym/countries', { query: { days: '30' } });
+  assert.equal(res.statusCode, 200);
+  assert.ok(paths[0].includes('ym:s:regionCountry'), 'официальная размерность страны');
+  assert.ok(paths[0].includes('ym:s:visits,ym:s:users,ym:s:bounceRate'), 'контрактные метрики разреза');
+  assert.ok(paths[0].includes('sort=-ym:s:visits'), 'сортировка по визитам');
+  assert.ok(paths[0].includes('lang=ru'), 'русские имена стран');
+  assert.ok(!paths[0].includes('goal'), 'география без атрибуции цели');
+  // География — разрез без атрибуции: goal_id в ответе нет (байт-в-байт как рефереры/соцсети).
+  assert.deepEqual(res.body, {
+    visits_total: 240,
+    users_total: 175,
+    meta: {},
+    rows: [
+      { id: '225', name: 'Россия', visits: 180, users: 130, bounce_rate: 28.4 },
+      { id: '187', name: 'Украина', visits: 40, users: 30, bounce_rate: 35 },
+    ],
+  });
+});
+
+test('cities: regionCity-разрез, дефолтный limit, кэш «Всё» по counter_created_day', async () => {
+  const paths = [];
+  const { routes } = buildYm({
+    ymFetch: async (_t, path) => { paths.push(path); return { data: [], totals: [0, 0, 0] }; },
+  });
+  const win = await invoke(routes, 'GET /api/ym/cities', { query: { days: '30' } });
+  assert.equal(win.statusCode, 200);
+  assert.ok(paths[0].includes('ym:s:regionCity'), 'официальная размерность города');
+  assert.ok(paths[0].includes('lang=ru'), 'русские имена городов');
+  assert.ok(paths[0].includes('limit=100'), 'потолок разреза городов');
+  // «Всё»: якорь диапазона — counter_created_day учётки; повтор обслуживается часовым кэшем.
+  const a1 = await invoke(routes, 'GET /api/ym/cities', { query: { days: '0' } });
+  assert.equal(a1.statusCode, 200);
+  assert.ok(paths[1].includes('date1=2024-03-01'), 'якорь «Всё» — counter_created_day');
+  const a2 = await invoke(routes, 'GET /api/ym/cities', { query: { days: '0' } });
+  assert.equal(a2.statusCode, 200);
+  assert.equal(paths.length, 2, '«Всё» закэшировано на час — второй ответ из кэша');
+});
+
 test('breakdown: пустые/undefined-строки размерности отбрасываются, отказы null-safe (не 0)', async () => {
   const { routes } = buildYm({
     ymFetch: async () => ({
@@ -1063,7 +1115,7 @@ test('devices: goal_id → метрики цели ПОСЛЕ bounceRate (idx 3)
 });
 
 test('goal_id на не-devices разрезах игнорируется: ни метрик цели, ни goal_id, ни полей строки', async () => {
-  for (const route of ['referrers', 'social', 'messengers']) {
+  for (const route of ['referrers', 'social', 'messengers', 'countries', 'cities']) {
     const paths = [];
     const { routes } = buildYm({
       ymFetch: async (_t, path) => {
