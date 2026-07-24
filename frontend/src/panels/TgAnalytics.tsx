@@ -60,7 +60,7 @@ const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct
 
 export type TgAnalyticsGroup = 'dynamics' | 'audience' | 'content';
 
-const WD_LABELS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
+export const WD_LABELS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
 
 const formatMsDate = (ts: number) => {
   const d = new Date(ts);
@@ -164,6 +164,61 @@ function capLineSeries<T extends { values: number[]; labels: string[]; titles: s
   };
 }
 
+type SourceItemArr = Array<{ label?: string | null; value?: number | null }> | null | undefined;
+
+/** Map a graphs breakdown array to Breakdown-like items (localised label, positive values only).
+    Hoisted to module scope + exported wrappers below so the audience `/metrics/tg-*` routes derive
+    the exact same rows the cards do (no copy). These are period-AGNOSTIC — the graphs payload is a
+    fixed server window, so their routes carry no window control (it would change nothing). */
+function mapSourceItems(
+  arr: SourceItemArr,
+  mapper?: Record<string, string>,
+  colorMapper?: Record<string, string>,
+) {
+  if (!arr) return [];
+  return arr
+    .map((item) => {
+      const rawLabel = item.label ?? '';
+      return {
+        label: mapper ? mapper[rawLabel] || rawLabel : rawLabel,
+        value: Number(item.value ?? 0),
+        color: colorMapper ? colorMapper[rawLabel] : undefined,
+        display: fmt.num(Number(item.value ?? 0)),
+      };
+    })
+    .filter((item) => item.value > 0);
+}
+
+export function tgViewsBySourceItems(graphs: TgGraphs | undefined) {
+  return mapSourceItems(graphs?.views_by_source, SRC_NAMES);
+}
+export function tgNewFollowersBySourceItems(graphs: TgGraphs | undefined) {
+  return mapSourceItems(graphs?.new_followers_by_source, SRC_NAMES);
+}
+export function tgLanguageItems(graphs: TgGraphs | undefined) {
+  // Длинный хвост языков — топ-8, как у эмодзи/стран/городов.
+  return mapSourceItems(graphs?.languages)
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 8);
+}
+export function tgSentimentItems(graphs: TgGraphs | undefined) {
+  return mapSourceItems(graphs?.reactions_sentiment, SENT_NAME, SENT_COLOR);
+}
+
+export interface TgTopHours {
+  values: number[];
+  hours: number[];
+  peakHour: number;
+}
+/** Активность по часам from graphs.top_hours — genuine category (hour-of-day) series, so its route
+    keeps the card's honest Bar/Line choice. Period-agnostic (server window). */
+export function tgTopHours(graphs: TgGraphs | undefined): TgTopHours | null {
+  const th = graphs?.top_hours;
+  if (!th || th.values.length === 0) return null;
+  const argmax = th.values.indexOf(Math.max(...th.values));
+  return { values: th.values, hours: th.hours, peakHour: th.hours[argmax] ?? argmax };
+}
+
 /**
  * All normalisation/aggregation for the TG analytics sections, extracted so the component
  * can memoize it — previously these ~180 lines re-ran on every render for all four tab
@@ -196,42 +251,17 @@ function deriveTgAnalytics(
   const viewSeries = interSeries.find((s) => /view|просмотр/i.test(s.name ?? ''));
   const shareSeries = interSeries.find((s) => /share|forward|репост|пересыл/i.test(s.name ?? ''));
 
-  // 8) Sources / languages / sentiment
-  const mapSourceItems = (
-    arr: Array<{ label?: string | null; value?: number | null }> | null | undefined,
-    mapper?: Record<string, string>,
-    colorMapper?: Record<string, string>,
-  ) => {
-    if (!arr) return [];
-    return arr
-      .map((item) => {
-        const rawLabel = item.label ?? '';
-        return {
-          label: mapper ? mapper[rawLabel] || rawLabel : rawLabel,
-          value: Number(item.value ?? 0),
-          color: colorMapper ? colorMapper[rawLabel] : undefined,
-          display: fmt.num(Number(item.value ?? 0)),
-        };
-      })
-      .filter((item) => item.value > 0);
-  };
-  const vbsItems = mapSourceItems(graphs?.views_by_source, SRC_NAMES);
-  const nfsItems = mapSourceItems(graphs?.new_followers_by_source, SRC_NAMES);
-  // Языки: длинный хвост из десятков языков делал плитку сильно выше коротких соседей —
-  // топ-8, тот же кэп, что у эмодзи/стран/городов (и у леджера «Столбцы + значения»).
-  const langItems = mapSourceItems(graphs?.languages)
-    .sort((a, b) => b.value - a.value)
-    .slice(0, 8);
-  const sentItems = mapSourceItems(graphs?.reactions_sentiment, SENT_NAME, SENT_COLOR);
+  // 8) Sources / languages / sentiment — the same exported derivations the audience routes reuse.
+  const vbsItems = tgViewsBySourceItems(graphs);
+  const nfsItems = tgNewFollowersBySourceItems(graphs);
+  const langItems = tgLanguageItems(graphs);
+  const sentItems = tgSentimentItems(graphs);
 
   // 9) Hours
-  const thData = graphs?.top_hours;
-  const hasHours = thData && thData.values.length > 0;
-  let peakHourStr = '';
-  if (hasHours && thData) {
-    const argmax = thData.values.indexOf(Math.max(...thData.values));
-    peakHourStr = `пик активности ~ ${thData.hours[argmax] ?? argmax}:00`;
-  }
+  const topHours = tgTopHours(graphs);
+  const thData = topHours ? { values: topHours.values, hours: topHours.hours } : undefined;
+  const hasHours = topHours != null;
+  const peakHourStr = topHours ? `пик активности ~ ${topHours.peakHour}:00` : '';
 
   // 10) Net subscribers
   const fGroup = graphs?.followers;
@@ -301,7 +331,7 @@ function contentPosts(full: TgFull | undefined, inRange: InRange, keep: Keep) {
 }
 
 /** «Реакции по эмодзи» — top-8 emoji reactions over the in-window posts. */
-function deriveEmojis(full: TgFull | undefined, inRange: InRange, keep: Keep = keepAll) {
+export function deriveEmojis(full: TgFull | undefined, inRange: InRange, keep: Keep = keepAll) {
   const posts = contentPosts(full, inRange, keep);
   const emojiMap: Record<string, number> = {};
   posts.forEach((p) => {
@@ -316,7 +346,7 @@ function deriveEmojis(full: TgFull | undefined, inRange: InRange, keep: Keep = k
 }
 
 /** «Вовлечённость по формату» — avg ERV per media type over the in-window posts. */
-function deriveFormatPerf(full: TgFull | undefined, inRange: InRange, keep: Keep = keepAll) {
+export function deriveFormatPerf(full: TgFull | undefined, inRange: InRange, keep: Keep = keepAll) {
   const posts = contentPosts(full, inRange, keep);
   const g: Record<string, { n: number; ervSum: number; ervN: number }> = {};
   posts.forEach((p) => {
@@ -336,7 +366,7 @@ function deriveFormatPerf(full: TgFull | undefined, inRange: InRange, keep: Keep
 /** «Состав вовлечённости» from raw posts (reactions/forwards/replies sums) — used when a campaign is
     selected, so the split reflects the campaign's own posts for the source, NOT the channel-wide
     views_summary totals (which can't be scoped to a campaign). */
-function deriveCompositionFromPosts(full: TgFull | undefined, inRange: InRange, keep: Keep) {
+export function deriveCompositionFromPosts(full: TgFull | undefined, inRange: InRange, keep: Keep) {
   const posts = contentPosts(full, inRange, keep);
   const reactions = posts.reduce((s, p) => s + p.likes, 0);
   const forwards = posts.reduce((s, p) => s + p.shares, 0);
@@ -350,7 +380,7 @@ function deriveCompositionFromPosts(full: TgFull | undefined, inRange: InRange, 
 
 /** «Ср. охват по типу» from raw posts (avg views per media type) — the campaign-scoped counterpart
     to views_summary.avg_views_by_type, computed only over the campaign's posts for the source. */
-function deriveViewsByTypeFromPosts(full: TgFull | undefined, inRange: InRange, keep: Keep) {
+export function deriveViewsByTypeFromPosts(full: TgFull | undefined, inRange: InRange, keep: Keep) {
   const posts = contentPosts(full, inRange, keep);
   const g: Record<string, { sum: number; n: number }> = {};
   posts.forEach((p) => {
@@ -365,8 +395,9 @@ function deriveViewsByTypeFromPosts(full: TgFull | undefined, inRange: InRange, 
     .sort((a, b) => b.value - a.value);
 }
 
-/** Weekday avg-views + post-count over the in-window posts (fixes the old all-posts bug). */
-function deriveWeekday(full: TgFull | undefined, inRange: InRange) {
+/** Weekday avg-views + post-count over the in-window posts (fixes the old all-posts bug). Exported so
+    the `/metrics/tg-weekday-views` and `/metrics/tg-post-count` routes re-derive from the same posts. */
+export function deriveWeekday(full: TgFull | undefined, inRange: InRange) {
   const wdViews: number[] = Array(7).fill(0);
   const wdCount: number[] = Array(7).fill(0);
   full?.posts?.forEach((p) => {
@@ -522,6 +553,9 @@ function TgAnalyticsSummary({ full }: { full: TgFull | undefined }) {
 export interface TgAnalyticsCampaign {
   active: boolean;
   inCampaign: (postId: number | null | undefined) => boolean;
+  /** Selected campaign id — carried on the content cards' `drillTo` (`?campaign=`) so the full-screen
+      route keeps the same campaign scope after navigation. Null when no campaign is selected. */
+  campaignId: number | null;
 }
 
 /** `group` renders only that section family (the Analytics tabs); undefined = all sections. The KPI
@@ -555,6 +589,9 @@ export function TgAnalytics({
   // channel-wide views_summary to the campaign's own posts (the summary can't be campaign-scoped).
   // `keep` is a pass-through when no campaign is active, so the non-campaign path is byte-identical.
   const keep: Keep = campaign?.active ? campaign.inCampaign : keepAll;
+  // Campaign handoff for the content cards: `?campaign=` is the canonical filter state, so carrying it
+  // on drillTo preserves the user's selected campaign across the route navigation (empty otherwise).
+  const campaignQ = campaign?.active && campaign.campaignId != null ? `?campaign=${campaign.campaignId}` : '';
   // Whole-payload (alwaysInRange) versions gate section EXISTENCE — same policy as elsewhere, so a
   // narrow card window that happens to be empty doesn't make the section vanish (its own empty
   // shows). useMemo (перф): раньше четыре пост-derive (normalizeTgPosts ×4 по ≤100 постам)
@@ -856,22 +893,22 @@ export function TgAnalytics({
         {/* Пост-производный: топ эмодзи считаются по постам выбранного окна (variants-fn form).
             Под фильтром кампании — только по её публикациям из текущего источника. */}
         {inGroup('content') && emojiItems.length > 0 && (
-          <ChartSection title="Реакции по эмодзи" periodControl variants={emojiVariants} />
+          <ChartSection title="Реакции по эмодзи" drillTo={`/metrics/tg-emoji${campaignQ}`} periodControl variants={emojiVariants} />
         )}
 
         {/* Всегда из публикаций выбранного окна; keep дополнительно ограничивает кампанией. */}
         {inGroup('content') && compositionItems.length > 0 && (
-          <ChartSection title="Состав вовлечённости" periodControl variants={compositionVariants} />
+          <ChartSection title="Состав вовлечённости" drillTo={`/metrics/tg-engagement-mix${campaignQ}`} periodControl variants={compositionVariants} />
         )}
 
         {/* Средний охват формата — по публикациям выбранного окна и выбранной кампании. */}
         {inGroup('content') && viewsByTypeItems.length > 0 && (
-          <ChartSection title="Ср. охват по типу" periodControl variants={viewsByTypeVariants} />
+          <ChartSection title="Ср. охват по типу" drillTo={`/metrics/tg-reach-by-type${campaignQ}`} periodControl variants={viewsByTypeVariants} />
         )}
 
         {/* Пост-производный: средний ERV по формату — по постам выбранного окна и кампании. */}
         {inGroup('content') && formatPerfItems.length > 0 && (
-          <ChartSection title="Вовлечённость по формату" periodControl variants={formatPerfVariants} />
+          <ChartSection title="Вовлечённость по формату" drillTo={`/metrics/tg-erv-by-format${campaignQ}`} periodControl variants={formatPerfVariants} />
         )}
 
         {/* Раньше «Просмотры и репосты» были ОДНИМ двойным виджетом (два графика в столбик) —
@@ -930,21 +967,22 @@ export function TgAnalytics({
         )}
 
         {inGroup('audience') && vbsItems.length > 0 && (
-          <ChartSection title="Просмотры по источникам" variants={breakdownVariants(vbsItems)} />
+          <ChartSection title="Просмотры по источникам" drillTo="/metrics/tg-views-by-source" variants={breakdownVariants(vbsItems)} />
         )}
         {inGroup('audience') && nfsItems.length > 0 && (
-          <ChartSection title="Новые подписчики по источникам" variants={breakdownVariants(nfsItems)} />
+          <ChartSection title="Новые подписчики по источникам" drillTo="/metrics/tg-followers-by-source" variants={breakdownVariants(nfsItems)} />
         )}
         {inGroup('audience') && langItems.length > 0 && (
-          <ChartSection title="Языки аудитории" variants={breakdownVariants(langItems)} />
+          <ChartSection title="Языки аудитории" drillTo="/metrics/tg-languages" variants={breakdownVariants(langItems)} />
         )}
         {inGroup('audience') && sentItems.length > 0 && (
-          <ChartSection title="Тональность реакций" variants={breakdownVariants(sentItems)} />
+          <ChartSection title="Тональность реакций" drillTo="/metrics/tg-sentiment" variants={breakdownVariants(sentItems)} />
         )}
 
         {inGroup('audience') && hasHours && thData && (
           <ChartSection
             title="Активность по часам"
+            drillTo="/metrics/tg-hours"
             variants={[
               {
                 key: 'bar',
@@ -983,7 +1021,7 @@ export function TgAnalytics({
         )}
 
         {inGroup('dynamics') && netGrowthPresent && (
-          <ChartSection title="Динамика оттока" periodControl variants={churnVariants}>
+          <ChartSection title="Динамика оттока" drillTo="/metrics/tg-churn" periodControl variants={churnVariants}>
             <FollowerFlowTotal graphs={graphs} />
           </ChartSection>
         )}
@@ -993,7 +1031,7 @@ export function TgAnalytics({
             пост-производные: считаются по постам выбранного окна. Раньше они игнорировали период
             вовсе и шли по всем постам. */}
         {inGroup('audience') && maxWdAvg > 0 && (
-          <ChartSection title="По дням недели" periodControl variants={weekdayVariants}>
+          <ChartSection title="По дням недели" drillTo="/metrics/tg-weekday-views" periodControl variants={weekdayVariants}>
             <WeekdayBestDay full={full} />
           </ChartSection>
         )}
@@ -1002,7 +1040,7 @@ export function TgAnalytics({
           /* D6.3: секция — последняя в «Аудитории» и при нечётном числе плиток растягивается
              на обе колонки; 7 столбиков с кэпом 48px по центру full-width ряда = «острова в
              пустоте». max-w держит чарт компактным слева (в 1×-плитке кэп не срабатывает). */
-          <ChartSection title="Количество постов" periodControl variants={postCountVariants} />
+          <ChartSection title="Количество постов" drillTo="/metrics/tg-post-count" periodControl variants={postCountVariants} />
         )}
       </WidgetGroup>
     </div>
