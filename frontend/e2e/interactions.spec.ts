@@ -362,7 +362,7 @@ test('chart drill guard: a scrub across the chart does not navigate', async ({ p
     localStorage.setItem('pulse_widget_configs', JSON.stringify([{ id: 'probe1', metricId: 'tg.views', viz: 'line' }]));
   });
   await bootDemo(page, '/home');
-  const chart = page.locator('svg[aria-label^="График:"]').first();
+  const chart = page.locator('svg[data-chart-kind="sparkline"]').first();
   await chart.waitFor({ state: 'visible', timeout: 15_000 });
   await chart.scrollIntoViewIfNeeded();
   await page.waitForTimeout(300);

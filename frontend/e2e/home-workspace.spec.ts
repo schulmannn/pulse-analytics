@@ -38,6 +38,32 @@ test.describe('desktop /home workspace (dark, 1440)', () => {
     await expect(identities.filter({ hasText: 'Instagram · @demo_channel' })).toHaveCount(1);
     await expect(page.getByRole('heading', { name: 'Показатели', exact: true })).toHaveCount(0);
 
+    // Config-driven Home cards use the same story anatomy as Overview: the half-width views card
+    // has its KPI on the left and an axis-free area sparkline on the right. The old generic renderer
+    // stacked a full report chart (with x/y axes) below the number, which made Home look unrelated.
+    const viewsCard = page.locator('section').filter({
+      has: page.getByRole('heading', { name: 'Просмотры', exact: true }),
+    });
+    await expect(viewsCard).toHaveCount(1);
+    await expect(viewsCard.locator('[data-widget-story-card]')).toBeVisible();
+    await expect(viewsCard.locator('svg[data-chart-kind="sparkline"]')).toBeVisible();
+    await expect(viewsCard.locator('svg[data-chart-kind="line"]')).toHaveCount(0);
+    const storyGeometry = await viewsCard.locator('[data-chart-card-body]').evaluate((body) => {
+      const headline = body.querySelector('[data-chart-card-headline]');
+      const plot = body.querySelector('[data-chart-card-plot]');
+      if (!headline || !plot) return null;
+      const headlineRect = headline.getBoundingClientRect();
+      const plotRect = plot.getBoundingClientRect();
+      return {
+        plotAfterHeadline: plotRect.left >= headlineRect.right,
+        plotWidth: plotRect.width,
+        headlineWidth: headlineRect.width,
+      };
+    });
+    expect(storyGeometry).not.toBeNull();
+    expect(storyGeometry!.plotAfterHeadline).toBe(true);
+    expect(storyGeometry!.plotWidth).toBeGreaterThan(storyGeometry!.headlineWidth);
+
     const hScroll = await page.evaluate(
       () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
     );

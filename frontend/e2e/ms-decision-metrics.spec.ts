@@ -35,9 +35,9 @@ test('customer cards expose repeat revenue and the shared independent-window exp
   const repeatCard = page.getByRole('heading', { name: 'Повторные покупки' }).locator('xpath=ancestor::section[1]');
   await expect(repeatCard.getByText('Доля повторной выручки')).toBeVisible();
 
-  // «Развернуть» ведёт на полностраничную метрику /metrics/ms-customers (общий independent-window
-  // explorer), а не в модальный оверлей.
-  await page.getByRole('button', { name: 'Развернуть виджет «Покупатели»' }).click();
+  // Вся карточка ведёт на полностраничную метрику /metrics/ms-customers (общий independent-window
+  // explorer), а не в модальный оверлей. Отдельная стрелка «Развернуть» намеренно удалена.
+  await page.locator('[data-drill-to="/metrics/ms-customers"]').click({ position: { x: 24, y: 24 } });
   await expect(page).toHaveURL(/\/metrics\/ms-customers$/);
   // The MS metric page is a lazy chunk. Allow the cold Vite transform to finish when this suite
   // runs in parallel with the all-routes parity pass; the production bundle is already built.
@@ -55,9 +55,9 @@ test('customer cards expose repeat revenue and the shared independent-window exp
   await window.getByRole('button', { name: '90д' }).click();
   await request90;
   await metric.getByRole('button', { name: 'Выручка' }).click();
-  await expect(page.getByText('новые и повторные покупки', { exact: true })).toBeVisible();
+  await expect(metric.getByRole('button', { name: 'Выручка' })).toHaveAttribute('aria-pressed', 'true');
   await metric.getByRole('button', { name: 'Доля повторных' }).click();
-  await expect(page.getByText('доля повторной выручки', { exact: true })).toBeVisible();
+  await expect(metric.getByRole('button', { name: 'Доля повторных' })).toHaveAttribute('aria-pressed', 'true');
 
   await page.getByRole('group', { name: 'Грануляция' }).getByRole('button', { name: 'Месяц' }).click();
   await page.getByRole('group', { name: 'Тип графика' }).getByRole('button', { name: 'Столбцы' }).click();
