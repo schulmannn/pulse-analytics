@@ -96,6 +96,7 @@ test('keyboard: Tab stays inside the open detail dialog (focus trap)', async ({ 
 
 test('keyboard: widget ⋯-menu opens with Enter and closes with Escape', async ({ page }) => {
   await bootDemo(page, '/');
+  await expect(page.locator('button[aria-label^="Развернуть виджет"] svg')).toHaveCount(0);
   const menuButton = page.locator('button[aria-label^="Меню виджета"]').first();
   await menuButton.focus();
   await page.keyboard.press('Enter');
@@ -112,7 +113,8 @@ test('keyboard: widget ⋯-menu opens with Enter and closes with Escape', async 
 
 test('keyboard: ⌘K palette is a live combobox and restores focus on close', async ({ page }) => {
   await bootDemo(page, '/');
-  // Park focus somewhere identifiable first — the palette's focus trap must restore it on close.
+  // Park focus on the screen-reader expansion action — the visible arrow is intentionally absent,
+  // while the full card remains the pointer target.
   const opener = page.getByRole('button', { name: /^Развернуть виджет/ }).first();
   await opener.focus();
   await page.keyboard.press('ControlOrMeta+k');

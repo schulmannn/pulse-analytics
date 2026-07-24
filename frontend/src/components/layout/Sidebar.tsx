@@ -1,14 +1,10 @@
 import { useEffect, useId, useState } from 'react';
 import type { ReactNode } from 'react';
 import { NavLink } from 'react-router-dom';
-import { useChannels, useHistory, useTgQrStatus } from '@/api/queries';
-import { useSelectedChannel } from '@/lib/channel-context';
 import { openCommandPalette } from '@/lib/command-palette';
-import { sidebarHealth } from '@/lib/connectionHealth';
 import { PLAN_LABEL, usePlan } from '@/lib/plan';
 import { useMediaQuery } from '@/lib/useMediaQuery';
 import { useSidebarMode } from '@/lib/sidebar';
-import { freshness, latestHistoryDay } from '@/lib/freshness';
 import { cn } from '@/lib/utils';
 import { Icon, PanelToggleGlyph } from '@/components/nav-icons';
 import {
@@ -68,9 +64,6 @@ export function Sidebar({ email, role, avatar }: { email?: string; role?: string
 
       <div className="mt-2">
         <SourceSwitcher rail={rail} />
-        <div className="px-3">
-          <SidebarStatus rail={rail} />
-        </div>
       </div>
 
       <SidebarNav rail={rail} />
@@ -211,59 +204,6 @@ function SidebarNavGroup({ label, items, rail }: { label?: string; items: NavLin
         <div aria-hidden={rail} className="sidebar-section-label px-2 pb-1 text-2xs font-medium text-ink3">{label}</div>
       )}
       {items.map((item) => <NavItem key={item.to} {...item} rail={rail} />)}
-    </div>
-  );
-}
-
-/**
- * One-click network crossing for the current workspace — a quiet strip of brand glyphs, one per
- * CONNECTED network (registry-gated: all while the channel list loads / in demo; unconnected nets
- * live behind «Подключить источник» in the switcher). Scales flat: 10 sources are one wrapping row
- * of 28px chips, not ten nav groups. Hidden with a single network — nothing to cross to. Brand
-
-
-/** Data-freshness line — a status dot + "обновлено <time>" (mono), sitting directly under the
-    channel card. Rail: dot only, the full text moves into the title tooltip. */
-function SidebarStatus({ rail }: { rail?: boolean }) {
-  const { channelId } = useSelectedChannel();
-  const { data: channelsData } = useChannels();
-  const current = channelsData?.channels.find((channel) => channel.id === channelId) ?? channelsData?.channels[0];
-  const isQr = current?.source === 'qr';
-  const isCentral = current?.source === 'central';
-  const { data: qrStatus } = useTgQrStatus(isQr || isCentral);
-  const centralOwner = isCentral ? !!qrStatus?.central_owner : false;
-  const managed = isQr || (isCentral && centralOwner);
-  const { data: history } = useHistory(730);
-  const fresh = freshness(latestHistoryDay(history), Date.now());
-  const health = sidebarHealth({
-    source: current?.source,
-    connectionState: managed ? qrStatus?.connection_state ?? null : null,
-    fresh,
-    centralOwner,
-  });
-  // Reserve this row's height even before freshness resolves — the same flex row with a muted dot and
-  // an invisible (but same-metrics) label — so the nav below doesn't jump down when it appears. That
-  // pop-in was the shell-wide layout shift measured on every route (see e2e/layout-shift.spec.ts).
-  // The dot stays anchored at the left gutter in both modes; the label is always mounted and rides the
-  // shared `.sidebar-copy` mask (faded + collapsed) in the rail rather than unmounting.
-  const rowClass = 'grid grid-cols-[40px_minmax(0,1fr)] items-center pt-1 text-2xs text-muted-foreground';
-  if (!health) {
-    return (
-      <div aria-hidden="true" className={rowClass}>
-        <span className="flex justify-center">
-          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-muted" />
-        </span>
-        <span className="sidebar-copy sidebar-copy-placeholder block truncate pl-2 font-mono">обновлено —</span>
-      </div>
-    );
-  }
-  const dotClass = health.tone === 'error' ? 'bg-ember' : health.tone === 'warn' ? 'bg-status-warn' : 'bg-verdant';
-  return (
-    <div title={rail ? health.label : undefined} className={rowClass}>
-      <span aria-hidden="true" className="flex justify-center">
-        <span className={cn('h-1.5 w-1.5 shrink-0 rounded-full', dotClass)} />
-      </span>
-      <span aria-hidden={rail} className="sidebar-copy block truncate pl-2 font-mono">{health.label}</span>
     </div>
   );
 }

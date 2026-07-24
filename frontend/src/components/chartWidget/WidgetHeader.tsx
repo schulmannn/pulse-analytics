@@ -74,15 +74,10 @@ export function WidgetHeader({
         <button
           type="button"
           aria-label={`Развернуть виджет «${label}»`}
-          title="Развернуть"
           onClick={onExpand}
-          className={`${ICON_BUTTON_CLASS} hover:text-foreground print:hidden ${
-            removePresence.mounted ? 'hidden' : ''
-          } ${reorder ? 'pointer-events-none invisible' : ''}`}
+          className={`sr-only ${removePresence.mounted || reorder ? 'hidden' : ''}`}
         >
-          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-            <path d="M7 17 17 7M9 7h8v8" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
+          Развернуть
         </button>
       )}
       <WidgetMenu {...menu} homeKey={homeKey} />

@@ -2078,9 +2078,6 @@
     transform: translateX(-0.5rem);
     pointer-events: none;
   }
-  .sidebar-shell .sidebar-copy-placeholder {
-    opacity: 0;
-  }
 
   /* Section headings and the separator rhythm change continuously too. Keeping both states mounted
    avoids the old one-frame jump from `mt-4` straight to `border + mt-3 + pt-3`. */
