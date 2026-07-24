@@ -14,6 +14,7 @@ import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { Skeleton } from '@/components/ui/skeleton';
 import { HeatmapWidgetBody, VelocityWidgetBody } from '@/panels/Charts';
+import { ContentOpportunity } from '@/panels/ContentOpportunity';
 import { usePeriod, calendarWindowForPeriod } from '@/lib/period';
 import { WidgetPeriodProvider, widgetPeriodValue } from '@/lib/period';
 import type { PeriodDays, DateRange, WidgetPeriodValue } from '@/lib/period';
@@ -61,6 +62,8 @@ export function TgMetricPage({ metricKey }: { metricKey: string }) {
       return <TgHeatmapPage />;
     case 'tg-velocity':
       return <TgVelocityPage />;
+    case 'tg-content-opportunity':
+      return <TgContentOpportunityPage />;
     case 'tg-churn':
       return <TgChurnPage />;
     case 'tg-weekday-reach':
@@ -236,6 +239,70 @@ function TgVelocityPage() {
       >
         <VelocityWidgetBody viz={kind === 'bar' ? 'bar' : 'line'} />
       </TgReportCard>
+    </TgMetricShell>
+  );
+}
+
+// ── Content-opportunity map ───────────────────────────────────────────────────────────────────
+
+/** A genuine two-dimensional analytical map: publication share on X and relative reach on Y.
+    Its shape is the meaning, so Line/Bar would be misleading. The selected campaign and explorer
+    period follow the same URL-backed contracts as the source card. */
+function TgContentOpportunityPage() {
+  const window = useTgMetricWindow();
+  const full = useTgFull(0);
+  const campaign = useTgCampaignScope();
+  const campaignPending = campaign.active && campaign.isPending;
+  const campaignError = campaign.active && campaign.isError;
+  const campaignEmpty =
+    campaign.active && !campaignPending && !campaignError && campaign.sourceMemberCount === 0;
+  const backTo =
+    campaign.campaignId != null
+      ? `/analytics?tab=content&campaign=${campaign.campaignId}`
+      : '/analytics?tab=content';
+
+  return (
+    <TgMetricShell
+      back={{ to: backTo, label: 'Аналитика · Форматы' }}
+      term="Карта возможностей контента"
+      descriptor="Какие форматы публикуются реже других, но дают охват выше среднего"
+      about={{
+        formula:
+          'Ось X — доля публикаций формата в выбранном окне. Ось Y — средний охват формата относительно среднего охвата всех публикаций окна. Верхняя левая зона отмечает форматы с охватом выше среднего и редким использованием.',
+        included:
+          'Точка строится только для формата с публикациями в текущем источнике, окне и выбранной кампании. Малая выборка отмечается отдельно; карта — наблюдение, не прогноз результата.',
+        source: 'Публикации канала из архива Telegram за выбранное окно.',
+      }}
+      aside={
+        <TgNoComparison text="Это двухмерная карта состава текущего окна, а не временной ряд — Line/Bar и baseline прошлого периода здесь были бы ложными." />
+      }
+    >
+      <TgReportCard id="tg-page-content-opportunity" title="Частота публикаций × относительный охват">
+        {full.isPending || campaignPending ? (
+          <ReportSkeleton />
+        ) : full.isError || campaignError ? (
+          <ErrorState
+            title={
+              campaignError
+                ? 'Не удалось загрузить публикации кампании'
+                : 'Не удалось загрузить публикации канала'
+            }
+            onRetry={campaignError ? campaign.retry : () => void full.refetch()}
+          />
+        ) : campaignEmpty ? (
+          <EmptyState
+            compact
+            size="chart"
+            title="В этой кампании нет публикаций Telegram из текущего источника"
+            reason="Выберите другую кампанию или снимите фильтр."
+          />
+        ) : (
+          <WidgetPeriodProvider value={window.period}>
+            <ContentOpportunity inCampaign={campaign.inCampaign} />
+          </WidgetPeriodProvider>
+        )}
+      </TgReportCard>
+      <TgWindowBar window={window} />
     </TgMetricShell>
   );
 }
