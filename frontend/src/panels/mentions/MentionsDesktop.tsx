@@ -49,6 +49,7 @@ export function MentionsDesktop() {
 
   const filters = useMemo(() => parseMentionsFilters(params), [params]);
   const pageDays = pp?.days ?? filters.period;
+  const metricQuery = filters.source ? `?source=${encodeURIComponent(filters.source)}` : '';
 
   // ── Two-way period sync (mirrors Posts): URL wins on mount/navigation, the page provider wins
   //    otherwise, so Обзор → Упоминания keeps the chosen window; direct ?period= + Back/Forward work.
@@ -389,6 +390,7 @@ export function MentionsDesktop() {
             id="mentions-timeline"
             title={!hasRange && pageDays === 0 ? 'Упоминания по дням · последние 365 дней' : 'Упоминания по дням'}
             fixedSize="full"
+            drillTo={`/metrics/mentions-timeline${metricQuery}`}
             expand={{
               renderExpandedBar: () => (
                 <BarChart values={timeline.values} labels={timeline.labels} titles={timeline.titles} ghost={timeline.ghost} ghostLabel="Предыдущий период" />
@@ -413,7 +415,12 @@ export function MentionsDesktop() {
       {/* 4. Who mentions (leaderboard) + period context, 50/50. */}
       <section className="space-y-3">
         <WidgetGroup id="mentions-drivers-desktop" className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-6">
-          <ChartSection id="mentions-sources" title="Кто упоминает · за период" fixedSize="half" noExpand>
+          <ChartSection
+            id="mentions-sources"
+            title="Кто упоминает · за период"
+            fixedSize="half"
+            drillTo={`/metrics/mentions-sources${metricQuery}`}
+          >
             <SourceLeaderboard
               options={sourceOptions}
               selected={filters.source}
