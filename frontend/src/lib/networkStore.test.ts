@@ -45,13 +45,21 @@ describe('routeNetworkOwner — exact route ownership', () => {
     expect(routeNetworkOwner('/mentions')).toBe('tg');
   });
 
-  it('splits /metrics by the ig-/ms- prefixes', () => {
+  it('splits /metrics by the ig-/ms-/ym- prefixes', () => {
     expect(routeNetworkOwner('/metrics/ig-reach')).toBe('ig');
     expect(routeNetworkOwner('/metrics/ig-follows')).toBe('ig');
     expect(routeNetworkOwner('/metrics/ms-revenue')).toBe('ms');
     expect(routeNetworkOwner('/metrics/ms-channels')).toBe('ms');
+    expect(routeNetworkOwner('/metrics/ym-visits')).toBe('ym');
+    expect(routeNetworkOwner('/metrics/ym-sources')).toBe('ym');
+    expect(routeNetworkOwner('/metrics/ym-hourly')).toBe('ym');
     expect(routeNetworkOwner('/metrics/views')).toBe('tg');
     expect(routeNetworkOwner('/metrics/er')).toBe('tg');
+  });
+
+  it('keeps the /metrika feed and its metric family under ym', () => {
+    expect(routeNetworkOwner('/metrika')).toBe('ym');
+    expect(routeNetworkOwner('/metrics/ym-visits')).toBe('ym');
   });
 
   it('reports null for network-agnostic surfaces (the store decides there)', () => {

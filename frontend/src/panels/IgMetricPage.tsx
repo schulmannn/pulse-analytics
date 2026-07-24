@@ -2,6 +2,7 @@ import { Suspense, lazy, useEffect, useState } from 'react';
 import { InspectorHandle } from '@/components/InspectorHandle';
 import { Link, useParams } from 'react-router-dom';
 import { isMsMetricKey } from '@/panels/sklad/msMetricKeys';
+import { isYmMetricKey } from '@/panels/metrika/ymMetricKeys';
 import { useIgData } from '@/lib/useIgData';
 import { usePeriod, type PeriodDays } from '@/lib/period';
 import { pairDelta } from '@/lib/igMetrics';
@@ -157,10 +158,23 @@ export function isIgMetricKey(raw: string | undefined): boolean {
     page must never download the MS panel bundle (it's only pulled when an `ms-*` key opens here). */
 const MsMetricPageLazy = lazy(lazyWithReload(() => import('@/panels/sklad/MsMetricPage').then((m) => ({ default: m.MsMetricPage }))));
 
+/** «Яндекс.Метрика» metric/report pages share МойСклад's lazy-chunk discipline: a TG/IG viewer who
+    opens a TG/IG metric page must never download the YM panel bundle (it is only pulled when a
+    `ym-*` key opens here). */
+const YmMetricPageLazy = lazy(lazyWithReload(() => import('@/panels/metrika/YmMetricPage').then((m) => ({ default: m.YmMetricPage }))));
+
 /** /metrics/:key dispatcher: TG keys → the TG explorer, ig-* keys → the IG page, ms-* keys → the
-    МойСклад page. MetricPage itself redirects unknown keys home, so the fallthrough stays safe. */
+    МойСклад page, ym-* keys → the Метрика page. MetricPage itself redirects unknown keys home, so
+    the fallthrough stays safe. YM is matched before IG/TG so its lazy branch always wins. */
 export function MetricRoute() {
   const { key } = useParams<{ key: string }>();
+  if (isYmMetricKey(key)) {
+    return (
+      <Suspense fallback={<MetricRouteFallback />}>
+        <YmMetricPageLazy metricKey={key} />
+      </Suspense>
+    );
+  }
   if (isMsMetricKey(key)) {
     return (
       <Suspense fallback={<MetricRouteFallback />}>
