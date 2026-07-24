@@ -3,9 +3,11 @@ import type { ReactNode } from 'react';
 import { DeltaPill } from '@/components/DeltaPill';
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
+import { Sparkline } from '@/components/Sparkline';
 import { PieChart } from '@/components/PieChart';
 import { Breakdown } from '@/components/Breakdown';
 import { ChartExpandedContext, ExpandedChartHeightContext, WidgetTargetContext } from '@/components/ExpandableChart';
+import { ChartCardBody } from '@/components/chartWidget/ChartCardBody';
 import { observeSize } from '@/lib/observeSize';
 import { MetricExplainPanel, MetricExplainTooltip } from '@/components/MetricExplain';
 import { EmptyState } from '@/components/EmptyState';
@@ -95,12 +97,48 @@ export function WidgetRenderer({
   // Lead with a hero headline whenever the resolver provides one — value/series metrics, and now
   // ADDITIVE breakdowns (a total, steep #4.9). A non-additive breakdown carries no value, so it
   // still leads with its chart (the distribution IS the story, and the card title names it).
-  const showHero = hasValue;
+  const showHero = hasValue && !expanded;
 
   // «N% от цели» (steep) — when a target is set and the metric has a scalar to measure against it.
   const targetPct = result.targetPct;
   const progress =
     targetPct != null && Number.isFinite(targetPct) ? `${Math.round(targetPct)}% от цели` : null;
+
+  // A collapsed single-series line is a dashboard story, not a miniature report. Reuse the same
+  // horizontal anatomy as the curated Overview cards (headline left, axis-free sparkline right).
+  // The full-page explorer still renders the complete LineChart below: axes, comparison ghost,
+  // targets and detail annotations belong to that proof surface.
+  if (!expanded && showHero && eff === 'line' && result.series && result.series.length > 1 && result.target == null) {
+    const c = seriesToChart(result);
+    return (
+      <div className="h-full min-h-0" data-widget-story-card>
+        <ChartCardBody
+          hero
+          value={result.value ?? '—'}
+          delta={result.delta}
+          caption={
+            <WidgetStoryMeta
+              caption={result.caption}
+              progress={progress}
+              meta={result.meta}
+              metricId={result.metricId}
+            />
+          }
+          onValueClick={onDrill}
+          drillLabel={drillLabel}
+        >
+          <Sparkline
+            values={c.values}
+            labels={c.labels}
+            area
+            strokeWidth={2}
+            interactive
+            className="h-full min-h-14 w-full"
+          />
+        </ChartCardBody>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -158,6 +196,36 @@ export function WidgetRenderer({
           it duplicated the hero and the chart (владелец: «слишком много текста», steep cards
           carry title + number + delta + chart, nothing else). */}
       {expanded && <SeriesStatsFooter result={result} eff={eff} />}
+    </div>
+  );
+}
+
+/** Quiet metadata under the story headline. It deliberately omits a second chart caption/axis row:
+ *  the card header already carries source identity, while period/sample/honesty stay reachable here
+ *  with the same explanation tooltip as every other config-driven widget. */
+function WidgetStoryMeta({
+  caption,
+  progress,
+  meta,
+  metricId,
+}: {
+  caption?: string | null;
+  progress: string | null;
+  meta?: WidgetMeta;
+  metricId: string;
+}) {
+  return (
+    <div className="max-w-44 space-y-1">
+      {(caption || progress) && (
+        <div className="flex flex-wrap items-baseline gap-x-2">
+          {caption ? <span>{caption}</span> : null}
+          {progress ? <span className="font-medium">{progress}</span> : null}
+        </div>
+      )}
+      <WidgetMetaLine
+        meta={meta}
+        info={<MetricExplainTooltip metricId={metricId} meta={meta} />}
+      />
     </div>
   );
 }
@@ -271,9 +339,22 @@ function WidgetChart({ result, eff, onDrill, expanded = false }: { result: Widge
   if (eff === 'list') {
     return <Breakdown items={result.breakdown ?? []} />;
   }
-  // kpi — the hero already carries the number; a series (if any) becomes a compact sparkline beneath.
+  // KPI cards keep the same quiet, axis-free story language as the curated Overview. The expanded
+  // explorer still needs the full report chart (axes + point interaction), so only the card face
+  // swaps the generic LineChart for the lightweight Sparkline.
   if (result.series?.length) {
     const c = seriesToChart(result);
+    if (!expanded) {
+      return (
+        <Sparkline
+          values={c.values}
+          labels={c.labels}
+          area
+          interactive
+          className="h-full min-h-14 w-full"
+        />
+      );
+    }
     return <LineChart values={c.values} labels={c.labels} titles={c.titles} height={64} onPointClick={onPointClick} />;
   }
   return null;

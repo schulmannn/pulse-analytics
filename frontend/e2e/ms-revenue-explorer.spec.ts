@@ -9,7 +9,7 @@ test.beforeEach(async ({ page }, testInfo) => {
 test('MoySklad revenue drills into the full /metrics/ms-revenue page with working controls', async ({ page }, testInfo) => {
   // «Развернуть» на карточке «Выручка» больше не открывает модалку `?detail=`, а ведёт на
   // полностраничную метрику `/metrics/ms-revenue` — та же архитектура, что у эталона IG /metrics/ig-reach.
-  await page.getByRole('button', { name: 'Развернуть виджет «Выручка»' }).click();
+  await page.locator('[data-drill-to="/metrics/ms-revenue"]').click({ position: { x: 24, y: 24 } });
   await expect(page).toHaveURL(/\/metrics\/ms-revenue$/);
 
   // Тихая шапка + назад-ссылка на раздел (никакой role="dialog").
@@ -29,8 +29,28 @@ test('MoySklad revenue drills into the full /metrics/ms-revenue page with workin
   await expect(kindGroup).toBeVisible();
 
   await expect(windowGroup.getByRole('button', { name: '30д' })).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.getByText('за 30 дн.')).toBeVisible();
+  await expect(page.getByText('за 30 дн.', { exact: true })).toHaveCount(0);
   await expect(page.locator('svg[data-chart-kind="line"]')).toBeVisible();
+  // Full-screen means plot-only: the compact card's KPI column must not be copied into the chart
+  // body. It used to consume ~15% of the available width on every MoySklad series explorer.
+  await expect(page.locator('[data-chart-card-headline]')).toHaveCount(0);
+  const plotGeometry = await page.locator('[data-chart-card-plot]').evaluate((plot) => {
+    const tile = plot.closest('.widget-tile');
+    const chart = plot.querySelector('svg[data-chart-kind]');
+    if (!tile || !chart) return null;
+    const plotRect = plot.getBoundingClientRect();
+    const tileRect = tile.getBoundingClientRect();
+    const chartRect = chart.getBoundingClientRect();
+    return {
+      plotRatio: plotRect.width / tileRect.width,
+      chartRatio: chartRect.width / tileRect.width,
+      leftGap: plotRect.left - tileRect.left,
+    };
+  });
+  expect(plotGeometry).not.toBeNull();
+  expect(plotGeometry!.plotRatio).toBeGreaterThan(0.98);
+  expect(plotGeometry!.chartRatio).toBeGreaterThan(0.98);
+  expect(Math.abs(plotGeometry!.leftGap)).toBeLessThanOrEqual(1);
 
   // Окно тянет ВЫБРАННЫЙ период (архитектурная проверка через точный запрос), а не топбар-payload.
   const request90 = page.waitForRequest((request) => {
@@ -58,7 +78,7 @@ test('MoySklad revenue drills into the full /metrics/ms-revenue page with workin
   });
   expect(to).toBe(localToday);
   await expect(windowGroup.getByRole('button', { name: '90д' })).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.getByText('за 90 дн.')).toBeVisible();
+  await expect(page.getByText('за 90 дн.', { exact: true })).toHaveCount(0);
 
   // Грануляция (день → месяц).
   await grainGroup.getByRole('button', { name: 'Месяц' }).click();
