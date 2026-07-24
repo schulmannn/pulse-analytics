@@ -7,6 +7,7 @@ describe('Telegram extra-chart metric route registry', () => {
     expect(TG_EXTRA_METRIC_KEYS).toEqual([
       'tg-heatmap',
       'tg-velocity',
+      'tg-content-opportunity',
       'tg-weekday-reach',
       'tg-weekday-views',
       'tg-post-count',
@@ -23,7 +24,7 @@ describe('Telegram extra-chart metric route registry', () => {
       'tg-sentiment',
       'tg-churn',
     ]);
-    expect(TG_EXTRA_METRIC_KEYS).toHaveLength(17);
+    expect(TG_EXTRA_METRIC_KEYS).toHaveLength(18);
     // Every key is unique (no accidental duplicate route).
     expect(new Set(TG_EXTRA_METRIC_KEYS).size).toBe(TG_EXTRA_METRIC_KEYS.length);
   });

@@ -24,6 +24,8 @@ export const TG_EXTRA_METRIC_KEYS = [
   'tg-heatmap',
   // Views-velocity profile — cumulative accrual curve, genuine Line/Bar (no comparison baseline).
   'tg-velocity',
+  // Scatter/map of content formats — its own 2D shape, no fabricated Line/Bar.
+  'tg-content-opportunity',
   // Category Bar/Line cards (weekday / hour axis — Line is truthful for a category series).
   'tg-weekday-reach', // Compare: avg reach per post by weekday
   'tg-weekday-views', // Audience: avg views per post by weekday

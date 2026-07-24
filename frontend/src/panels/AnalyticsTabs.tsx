@@ -251,7 +251,9 @@ function FormatsBody({ scope }: { scope: TgCampaignScope }) {
           title="Карта возможностей контента"
           defaultSize="full"
           periodControl
-          noExpand
+          drillTo={`/metrics/tg-content-opportunity${
+            scope.campaignId != null ? `?campaign=${scope.campaignId}` : ''
+          }`}
         >
           <ContentOpportunity inCampaign={inCampaign} />
         </ChartSection>

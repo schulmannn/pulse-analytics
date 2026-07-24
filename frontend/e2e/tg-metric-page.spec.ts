@@ -92,6 +92,7 @@ test.describe('Telegram extra-chart metric pages', () => {
 
 /** Каждый новый route: term (h1) — точное название карточки-источника. */
 const TG_ROUTES: { key: string; heading: string }[] = [
+  { key: 'tg-content-opportunity', heading: 'Карта возможностей контента' },
   { key: 'tg-weekday-reach', heading: 'Охват по дням недели' },
   { key: 'tg-format-views', heading: 'По форматам (просмотры)' },
   { key: 'tg-hashtag-erv', heading: 'Влияние хэштегов на ERV' },
@@ -146,6 +147,21 @@ test.describe('Telegram chart cards — вторая волна /metrics/tg-*', 
     await expect(page.getByRole('heading', { name: 'Состав вовлечённости', level: 1 })).toBeVisible();
     // Разрез — без выдуманного селектора типа графика.
     await expect(page.getByRole('group', { name: 'Тип графика' })).toHaveCount(0);
+  });
+
+  test('клик по «Карте возможностей контента» ведёт на свою 2D-страницу без ложного Line/Bar', async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== 'desktop-1440', 'Аналитика — desktop-first поверхность');
+    await bootDemo(page, '/analytics?tab=content');
+
+    await page.getByRole('heading', { name: 'Карта возможностей контента', exact: true }).click();
+
+    await expect(page).toHaveURL(/\/metrics\/tg-content-opportunity/);
+    await expect(page.locator('[role="dialog"]')).toHaveCount(0);
+    await expect(
+      page.getByRole('heading', { name: 'Карта возможностей контента', level: 1 }),
+    ).toBeVisible();
+    await expect(page.getByRole('group', { name: 'Тип графика' })).toHaveCount(0);
+    await expect(page.getByRole('group', { name: 'Окно' })).toBeVisible();
   });
 
   test('клик по «По дням недели» ведёт на категориальный route с честными Line/Bar', async ({ page }, testInfo) => {
