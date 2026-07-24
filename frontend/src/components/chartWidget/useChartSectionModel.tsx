@@ -182,7 +182,21 @@ export function useChartSectionModel(props: ChartSectionProps) {
   const activeTarget = configEditor ? (configEditor.target ?? null) : (prefs.target ?? null);
   const chosenSize: WidgetSize =
     fixedSize ?? (configEditor ? configEditor.size : prefs.size) ?? defaultSize ?? 'third';
-  const effectiveSize = strip ? 'full' : maxSize(chosenSize, activeVariant?.minSize ?? 'third');
+  const resizeMinSize = maxSize(configEditor?.minSize ?? 'third', activeVariant?.minSize ?? 'third');
+  const effectiveSize = strip ? 'full' : maxSize(chosenSize, resizeMinSize);
+  const resizeEnabled = homeEditing && !!homeKey && !!group && !fixedSize && !strip;
+  const resizeWidget = useCallback(
+    (nextSize: WidgetSize) => {
+      const bounded = maxSize(nextSize, resizeMinSize);
+      if (configEditor?.onSizeChange) {
+        configEditor.onSizeChange(bounded);
+        return;
+      }
+      const fallback = defaultSize ?? 'third';
+      updatePrefs({ ...prefs, size: bounded === fallback ? undefined : bounded });
+    },
+    [configEditor, defaultSize, prefs, resizeMinSize, updatePrefs],
+  );
   const fillHeight = effectiveSize === 'full' ? null : bodyHeight;
   const label = prefs.title || title;
   const bodyResetKeys = [bodyResetKey, activeVariant?.key ?? null, widgetDays];
@@ -252,6 +266,9 @@ export function useChartSectionModel(props: ChartSectionProps) {
       reorder,
       dragging,
       effectiveSize,
+      resizeEnabled,
+      resizeMinSize,
+      userSized: configEditor?.size != null || prefs.size != null,
       fillHeight,
       outerStyle,
       innerStyle,
@@ -268,6 +285,7 @@ export function useChartSectionModel(props: ChartSectionProps) {
       removePresence,
       removeFromHome,
       openEdit,
+      resizeWidget,
     },
     expansion: {
       open: expandOpen,

@@ -87,7 +87,9 @@ export function WidgetGroup({ id, className, children }: WidgetGroupProps) {
   useEffect(() => {
     let handle = 0;
     const layoutSig = (root: HTMLElement, els: HTMLElement[]) =>
-      `${root.clientWidth}|${els.map((el) => `${el.offsetLeft}:${el.offsetWidth}`).join(',')}`;
+      `${root.clientWidth}|${els
+        .map((el) => `${el.offsetLeft}:${el.offsetWidth}:${el.hasAttribute('data-widget-user-sized') ? 1 : 0}`)
+        .join(',')}`;
     const apply = () => {
       const root = groupRootRef.current;
       if (!root) return;
@@ -105,7 +107,14 @@ export function WidgetGroup({ id, className, children }: WidgetGroupProps) {
       if (els.length >= 2) {
         const maxTop = Math.max(...els.map((el) => el.offsetTop));
         const lastRow = els.filter((el) => el.offsetTop === maxTop);
-        if (lastRow.length === 1 && lastRow[0].offsetWidth < root.clientWidth * 0.8) {
+        // An untouched default card may still close an accidental tail gap. Once the owner has
+        // explicitly chosen S/M/L (dialog or corner drag), that footprint is authoritative: silently
+        // stretching it back to a full row would make resize look broken after pointer-up.
+        if (
+          lastRow.length === 1 &&
+          !lastRow[0].hasAttribute('data-widget-user-sized') &&
+          lastRow[0].offsetWidth < root.clientWidth * 0.8
+        ) {
           lastRow[0].style.gridColumn = '1 / -1';
           stretchedRef.current = lastRow[0];
         }
@@ -419,7 +428,7 @@ export function WidgetGroup({ id, className, children }: WidgetGroupProps) {
 
   return (
     <GroupCtx.Provider value={ctxValue}>
-      <div ref={groupRootRef} className={className}>{children}</div>
+      <div ref={groupRootRef} className={className} data-widget-group-root>{children}</div>
       {reorderMode &&
         createPortal(
           <button

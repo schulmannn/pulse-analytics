@@ -165,6 +165,113 @@ test.describe('desktop /home workspace (dark, 1440)', () => {
     expect(restWidth - editWidth).toBeLessThanOrEqual(120);
   });
 
+  test('edit mode resizes a card from its corner, snaps to S/M/L and keeps line at M+', async ({ page }, testInfo) => {
+    await page.addInitScript(() => {
+      localStorage.setItem(
+        'pulse_home_blocks',
+        JSON.stringify({ keys: ['custom:resize-bar', 'custom:resize-line', 'week'] }),
+      );
+      localStorage.setItem(
+        'pulse_widget_configs',
+        JSON.stringify([
+          { id: 'resize-bar', metricId: 'tg.avgReach', viz: 'bar', size: 'third' },
+          { id: 'resize-line', metricId: 'tg.views', viz: 'line', size: 'half' },
+        ]),
+      );
+    });
+    await bootDemo(page, '/home', { theme: 'dark' });
+    await page.locator('button.edit-toggle').click();
+
+    const barCard = page.locator('section').filter({
+      has: page.getByRole('heading', { name: 'Средний охват поста', exact: true }),
+    });
+    const lineCard = page.locator('section').filter({
+      has: page.getByRole('heading', { name: 'Просмотры', exact: true }),
+    });
+    const barHandle = barCard.getByRole('slider', {
+      name: 'Изменить размер виджета «Средний охват поста»',
+    });
+    const lineHandle = lineCard.getByRole('slider', {
+      name: 'Изменить размер виджета «Просмотры»',
+    });
+    await expect(barHandle).toBeVisible();
+    await expect(lineHandle).toBeVisible();
+    await expect(barCard).toHaveAttribute('data-widget-size', 'third');
+
+    // Pointer path: a rightward corner drag grows S → M without opening the card.
+    const cardBefore = await barCard.boundingBox();
+    const handleBox = await barHandle.boundingBox();
+    expect(cardBefore && handleBox).toBeTruthy();
+    await page.mouse.move(handleBox!.x + handleBox!.width / 2, handleBox!.y + handleBox!.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(handleBox!.x + handleBox!.width / 2 + 220, handleBox!.y + handleBox!.height / 2, {
+      steps: 6,
+    });
+    const cardDuring = await barCard.boundingBox();
+    expect(cardDuring!.width).toBeGreaterThan(cardBefore!.width + 150);
+    await expect(barCard).toHaveAttribute('data-widget-resizing', '');
+    await page.mouse.up();
+    await expect(barCard).not.toHaveAttribute('data-widget-resizing', '');
+    await expect(page).toHaveURL(/\/home$/);
+    await expect(barCard).toHaveAttribute('data-widget-size', 'half');
+    await expect(barHandle).toHaveAttribute('aria-valuetext', 'M');
+
+    // Keyboard parity keeps the retained S/M/L control model reachable from the new handle.
+    await barHandle.focus();
+    await page.keyboard.press('ArrowRight');
+    await expect(barCard).toHaveAttribute('data-widget-size', 'full');
+    await expect(barHandle).toHaveAttribute('aria-valuetext', 'L');
+
+    // A temporal line has an M floor: dragging hard left must never force the chart into S.
+    const lineBox = await lineHandle.boundingBox();
+    expect(lineBox).not.toBeNull();
+    await page.mouse.move(lineBox!.x + lineBox!.width / 2, lineBox!.y + lineBox!.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(lineBox!.x - 800, lineBox!.y + lineBox!.height / 2, { steps: 6 });
+    await page.mouse.up();
+    await expect(lineCard).toHaveAttribute('data-widget-size', 'half');
+
+    // Curated/prefs-backed cards share the same handle but persist into widget prefs, not configs.
+    const weekCard = page.locator('section').filter({
+      has: page.getByRole('heading', { name: 'Неделя канала', exact: true }),
+    });
+    const weekHandle = weekCard.getByRole('slider', {
+      name: 'Изменить размер виджета «Неделя канала»',
+    });
+    await weekHandle.focus();
+    await page.keyboard.press('ArrowRight');
+    await expect(weekCard).toHaveAttribute('data-widget-size', 'full');
+
+    const saved = await page.evaluate(() => {
+      const configs = JSON.parse(localStorage.getItem('pulse_widget_configs') ?? '[]') as Array<{
+        id: string;
+        size?: string;
+      }>;
+      const prefs = JSON.parse(localStorage.getItem('pulse_widget_prefs') ?? '{}') as Record<
+        string,
+        { size?: string }
+      >;
+      return {
+        configs: Object.fromEntries(configs.map((config) => [config.id, config.size])),
+        weekSize: prefs['home-week']?.size,
+      };
+    });
+    expect(saved.configs).toMatchObject({ 'resize-bar': 'full', 'resize-line': 'half' });
+    expect(saved.weekSize).toBe('full');
+
+    await page.getByRole('heading', { name: 'Главная', exact: true }).click();
+    const shot = testInfo.outputPath('home-widget-corner-resize-dark.png');
+    await page.screenshot({ path: shot, fullPage: true });
+    await testInfo.attach('home-widget-corner-resize-dark', { path: shot, contentType: 'image/png' });
+
+    // Reorder owns the whole-card pointer gesture, so resize handles step out while jiggle mode runs.
+    await barCard.getByRole('button', { name: 'Меню виджета «Средний охват поста»' }).click();
+    await page.getByRole('menuitem', { name: 'Переставить' }).click();
+    await expect(page.locator('[data-widget-resize-handle]')).toHaveCount(0);
+    await page.locator('[data-reorder-done]').click();
+    await expect(barHandle).toBeVisible();
+  });
+
   test('empty state: unframed surface, catalog CTA, availability-aware defaults', async ({ page }, testInfo) => {
     await seedEmpty(page);
     await bootDemo(page, '/home', { theme: 'dark' });
