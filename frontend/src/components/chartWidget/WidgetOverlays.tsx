@@ -47,7 +47,6 @@ export function WidgetEditOverlay({ open, configDriven, ...props }: WidgetEditOv
 interface WidgetExpandOverlayProps {
   open: boolean;
   noExpand: boolean;
-  customExplorer?: (close: () => void, originRect?: DOMRect | null) => ReactNode;
   onClose: () => void;
   originRect: DOMRect | null;
   widgetId: string;
@@ -64,7 +63,6 @@ interface WidgetExpandOverlayProps {
 export function WidgetExpandOverlay({
   open,
   noExpand,
-  customExplorer,
   onClose,
   originRect,
   widgetId,
@@ -78,7 +76,6 @@ export function WidgetExpandOverlay({
   body,
 }: WidgetExpandOverlayProps) {
   if (!open) return null;
-  if (customExplorer) return <>{customExplorer(onClose, originRect)}</>;
   if (noExpand) return null;
 
   return (

@@ -216,7 +216,6 @@ export function ChartSection(props: ChartSectionProps) {
       <WidgetExpandOverlay
         open={model.expansion.open}
         noExpand={!!props.noExpand}
-        customExplorer={props.explorer}
         onClose={model.expansion.closeExpand}
         originRect={model.refs.originRectRef.current}
         widgetId={widgetId}

@@ -46,6 +46,10 @@ const CampaignMetricPage = lazyFrom(
   () => import('@/panels/campaign/CampaignMetricPage'),
   'CampaignMetricPage',
 );
+const WidgetMetricPage = lazyFrom(
+  () => import('@/panels/WidgetMetricPage'),
+  'WidgetMetricPage',
+);
 // AI-чат — lazy: стриминговая механика (lib/aiStream) не едет в entry-чанк; на Главной живёт
 // только лёгкий hero (panels/ai/HomeAiHero), который сюда лишь навигирует.
 const AiChatPage = lazyFrom(() => import('@/panels/ai/AiChatPage'), 'AiChatPage');
@@ -80,6 +84,7 @@ export default function App() {
         <Route path="home" element={<Home />} />
         {/* One dispatcher for both worlds: TG keys → MetricPage, ig-* keys → IgMetricPage. */}
         <Route path="metrics/:key" element={<PanelSuspense><MetricRoute /></PanelSuspense>} />
+        <Route path="widgets/:widgetId" element={<PanelSuspense><WidgetMetricPage /></PanelSuspense>} />
         <Route path="reports" element={<PanelSuspense><ReportsList /></PanelSuspense>} />
         <Route path="reports/:id" element={<PanelSuspense><ReportPage /></PanelSuspense>} />
         {/* Страница кампании — standalone, как reports/:id. Списка-маршрута нет намеренно:

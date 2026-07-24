@@ -46,8 +46,6 @@ export interface ChartSectionProps {
   seriesOptions?: boolean;
   /** Overrides prefs-backed editing for config-driven widgets. */
   configEditor?: ConfigWidgetEditor;
-  /** Custom fullscreen explorer that replaces ChartExpandOverlay. */
-  explorer?: (close: () => void, originRect?: DOMRect | null) => ReactNode;
   /** Clears the body error boundary when the widget's data/config identity changes. */
   bodyResetKey?: unknown;
   children?: ReactNode;

@@ -4,7 +4,6 @@ import { useChannels } from '@/api/queries';
 import { ChartSection, PERIOD_WORD } from '@/components/ChartWidget';
 import { WidgetRenderer, WidgetSkeleton } from '@/components/WidgetRenderer';
 import { ConfigEditDialog } from '@/components/ConfigEditDialog';
-import { WidgetExplorer } from '@/components/WidgetExplorer';
 import { LEGACY_RENDER } from '@/components/legacyAdapters';
 import { ChannelScope, useSelectedChannel } from '@/lib/channel-context';
 import { getRememberedChannel } from '@/lib/channel';
@@ -98,23 +97,12 @@ export const ConfigWidget = memo(function ConfigWidget({ config, homeKey }: { co
         // The goal line is now resolver-computed (result.target) and provided by WidgetRenderer, so
         // the card-level target override is no longer needed (it also covers dynamic targets, S9).
       }}
-      // «Развернуть» opens the universal explorer sandbox (mutable draft; «Применить» commits it).
-      explorer={
-        configurable
-          ? (close, originRect) => (
-              <WidgetExplorer
-                config={config}
-                onApply={(next) => updateWidgetConfig(config.id, next)}
-                onClose={close}
-                originRect={originRect}
-              />
-            )
-          : undefined
-      }
+      // Config-driven cards follow the same contract as every other graph: a card click and the
+      // expand affordance navigate to a stable, shareable full-page explorer instead of an overlay.
+      drillTo={configurable ? `/widgets/${encodeURIComponent(config.id)}` : undefined}
     >
-      {/* The pin scopes ONLY the card body — not the whole ChartSection: the explorer render-prop
-          must stay OUTSIDE the pin so its draft fully controls its own scope («Как в свитчере» in
-          the sandbox previews switcher data, not the still-pinned original channel). */}
+      {/* The pin scopes only the card body. The dedicated explorer route reads the stored config
+          independently, so its local draft remains free to switch the source. */}
       {effectiveSource != null ? (
         <ChannelScope channelId={effectiveSource}>
           <WidgetBody config={config} onDrill={onDrill} drillLabel={label} />
