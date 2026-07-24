@@ -28,7 +28,6 @@ import {
   resolveTimelineMode,
   scopeNote,
   sourceLeaderboard,
-  type SourceLeaderRow,
   timelineModes,
 } from '@/lib/campaignPageModel';
 import { campaignSourceKey } from '@/lib/campaignSources';
@@ -37,6 +36,8 @@ import { fmt } from '@/lib/format';
 import { markdownToPlainText } from '@/lib/markdown';
 import { cn } from '@/lib/utils';
 import { CampaignPostsTable } from '@/panels/campaign/CampaignPostsTable';
+import { CampaignSourceLeaderboard } from '@/panels/campaign/CampaignSourceLeaderboard';
+import { campaignMetricPath } from '@/panels/campaign/campaignMetricKeys';
 import type { CampaignViewProps } from '@/panels/campaign/campaignView';
 
 /**
@@ -58,6 +59,7 @@ export function CampaignPageDesktop(props: CampaignViewProps) {
   const leaders = useMemo(() => sourceLeaderboard(summary.by_source), [summary.by_source]);
   const cmpText = comparisonText(summary);
   const cmpMissing = comparisonUnavailableText(summary);
+  const [searchParams] = useSearchParams();
 
   return (
     <div className="space-y-8">
@@ -113,17 +115,27 @@ export function CampaignPageDesktop(props: CampaignViewProps) {
           {/* ── методологий никогда не рисуются вместе. ── */}
           <section className="space-y-3">
             <SectionLabel>Как развивалось</SectionLabel>
-            <TimelineExplorer series={series} />
+            <TimelineExplorer series={series} campaignId={summary.campaign?.id ?? props.campaign.id} />
           </section>
 
           {/* ── Q3. Что дало результат: источники и форматы — 50/50, затем крайние посты строкой ── */}
           <section className="space-y-3">
             <SectionLabel>Что дало результат</SectionLabel>
             <WidgetGroup id="campaign-drivers-desktop" className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-6">
-              <ChartSection id="campaign-sources" title="Источники · вклад внутри своей платформы" fixedSize="half" noExpand>
-                <SourceLeaderboard leaders={leaders} />
+              <ChartSection
+                id="campaign-sources"
+                title="Источники · вклад внутри своей платформы"
+                fixedSize="half"
+                drillTo={campaignMetricPath(props.campaign.id, 'sources', searchParams)}
+              >
+                <CampaignSourceLeaderboard leaders={leaders} />
               </ChartSection>
-              <ChartSection id="campaign-formats" title="Форматы · по числу публикаций" fixedSize="half" noExpand>
+              <ChartSection
+                id="campaign-formats"
+                title="Форматы · по числу публикаций"
+                fixedSize="half"
+                drillTo={campaignMetricPath(props.campaign.id, 'formats', searchParams)}
+              >
                 {slices.values.length > 0 ? (
                   <PieChart values={slices.values} labels={slices.labels} titles={slices.titles} />
                 ) : (
@@ -159,7 +171,13 @@ function SectionLabel({ children }: { children: ReactNode }) {
  * режимы, у которых есть данные (TG-просмотры / IG-охват), плюс «Публикации» всегда. Переключение
  * подменяет серию — TG и IG никогда не совмещаются в одной серии.
  */
-function TimelineExplorer({ series }: { series: ReturnType<typeof timelineSeries> }) {
+function TimelineExplorer({
+  series,
+  campaignId,
+}: {
+  series: ReturnType<typeof timelineSeries>;
+  campaignId: number;
+}) {
   const modes = useMemo(() => timelineModes(series), [series]);
   const [searchParams, setSearchParams] = useSearchParams();
   const rawMode = searchParams.get('metric');
@@ -211,7 +229,13 @@ function TimelineExplorer({ series }: { series: ReturnType<typeof timelineSeries
 
   return (
     <WidgetGroup id="campaign-timeline-desktop" className="grid grid-cols-1 gap-6">
-      <ChartSection id="campaign-timeline" title={active.title} action={segmented} fixedSize="full" noExpand>
+      <ChartSection
+        id="campaign-timeline"
+        title={active.title}
+        action={segmented}
+        fixedSize="full"
+        drillTo={campaignMetricPath(campaignId, 'timeline', searchParams, active.key)}
+      >
         {active.kind === 'line' ? (
           <LineChart values={active.values} labels={active.labels} titles={active.titles} showPoints fullAxes />
         ) : (
@@ -319,38 +343,6 @@ function CampaignHeader({
           {fmt.num(summary.inaccessible_posts)} публ. из источников, недоступных вам, — они не входят в метрики ниже.
         </p>
       )}
-    </div>
-  );
-}
-
-/** Ранжированный список источников: порядок по публикациям, полоска — доля внутри своей платформы. */
-function SourceLeaderboard({ leaders }: { leaders: SourceLeaderRow[] }) {
-  if (leaders.length === 0) return <EmptyState compact title="Нет источников." />;
-  return (
-    <div className="flex h-full flex-col gap-2 overflow-y-auto">
-      {leaders.map((s) => (
-        <div key={s.key} className="border-t border-border pt-2 first:border-t-0 first:pt-0">
-          <div className="flex items-center gap-2">
-            <NetworkBadge network={s.network} />
-            <span className="min-w-0 flex-1 truncate text-sm text-foreground">{s.label}</span>
-            <span className="text-xs tabular-nums text-muted-foreground">{fmt.num(s.posts)} публ.</span>
-            <span className="w-16 text-right text-xs font-medium tabular-nums text-foreground">{s.metricText}</span>
-          </div>
-          {s.share != null && (
-            <div className="mt-1 flex items-center gap-2">
-              <div className="h-1 flex-1 overflow-hidden rounded-full bg-muted">
-                <div
-                  className="h-full rounded-full bg-primary/60"
-                  style={{ width: `${Math.max(2, Math.round(s.share * 100))}%` }}
-                />
-              </div>
-              <span className="w-9 text-right text-2xs tabular-nums text-muted-foreground">
-                {Math.round(s.share * 100)}%
-              </span>
-            </div>
-          )}
-        </div>
-      ))}
     </div>
   );
 }

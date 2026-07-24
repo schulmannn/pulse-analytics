@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { BarChart } from '@/components/BarChart';
 import { ChartSection } from '@/components/ChartWidget';
 import { EmptyState } from '@/components/EmptyState';
@@ -27,6 +28,7 @@ import { fmt } from '@/lib/format';
 import { markdownToPlainText } from '@/lib/markdown';
 import { cn } from '@/lib/utils';
 import { CampaignPostsTable } from '@/panels/campaign/CampaignPostsTable';
+import { campaignMetricPath } from '@/panels/campaign/campaignMetricKeys';
 import type { CampaignViewProps } from '@/panels/campaign/campaignView';
 
 /**
@@ -60,6 +62,7 @@ export function CampaignPageMobile(props: CampaignViewProps) {
   const cmpText = comparisonText(summary);
   const cmpMissing = comparisonUnavailableText(summary);
   const extremes = useMemo(() => campaignExtremes(summary), [summary]);
+  const [searchParams] = useSearchParams();
 
   return (
     <div className="space-y-8">
@@ -189,26 +192,46 @@ export function CampaignPageMobile(props: CampaignViewProps) {
           {/* ── Динамика и разбивки. Line-чарты времени — только full-ширина. ── */}
           <WidgetGroup id="campaign-charts" className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-6">
             {series.hasTg && (
-              <ChartSection title="Просмотры TG · по дате публикации" fixedSize="full" noExpand>
+              <ChartSection
+                title="Просмотры TG · по дате публикации"
+                fixedSize="full"
+                drillTo={campaignMetricPath(campaign.id, 'timeline', searchParams, 'tg_views')}
+              >
                 <LineChart values={series.tgViews} labels={series.labels} titles={series.titles} showPoints fullAxes />
               </ChartSection>
             )}
             {series.hasIg && (
-              <ChartSection title="Сумма охватов IG · по дате публикации" fixedSize="full" noExpand>
+              <ChartSection
+                title="Сумма охватов IG · по дате публикации"
+                fixedSize="full"
+                drillTo={campaignMetricPath(campaign.id, 'timeline', searchParams, 'ig_reach')}
+              >
                 <LineChart values={series.igReach} labels={series.labels} titles={series.titles} showPoints fullAxes />
               </ChartSection>
             )}
-            <ChartSection title="Публикации по дням" fixedSize="half" noExpand>
+            <ChartSection
+              title="Публикации по дням"
+              fixedSize="half"
+              drillTo={campaignMetricPath(campaign.id, 'timeline', searchParams, 'posts')}
+            >
               <BarChart values={series.posts} labels={series.labels} titles={series.titles} />
             </ChartSection>
-            <ChartSection title="Форматы" fixedSize="half" noExpand>
+            <ChartSection
+              title="Форматы"
+              fixedSize="half"
+              drillTo={campaignMetricPath(campaign.id, 'formats', searchParams)}
+            >
               {slices.values.length > 0 ? (
                 <PieChart values={slices.values} labels={slices.labels} titles={slices.titles} />
               ) : (
                 <EmptyState compact title="Нет данных о форматах." />
               )}
             </ChartSection>
-            <ChartSection title="Источники" fixedSize="half" noExpand>
+            <ChartSection
+              title="Источники"
+              fixedSize="half"
+              drillTo={campaignMetricPath(campaign.id, 'sources', searchParams)}
+            >
               <div className="flex h-full flex-col justify-start gap-2 overflow-y-auto">
                 {summary.by_source.map((s) => (
                   <div key={`${s.network}:${s.channel_id}`} className="flex items-center gap-2 border-t border-border pt-2 first:border-t-0 first:pt-0">
