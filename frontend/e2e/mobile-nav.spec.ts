@@ -4,7 +4,7 @@ import { bootDemo, detailOverlayOpener } from './helpers';
 /**
  * Mobile navigation & reachability (card «Mobile dashboard navigation»). Two things get gated here at
  * phone widths (360/390/430):
- *  1. Touch targets — each widget's expand/menu icon buttons and the period pills are ≥32px, and the
+ *  1. Touch targets — each widget's menu button and the period pills are ≥32px, and the
  *     page never scrolls horizontally. (Inline text links / ⓘ keep their text size by design — their
  *     tap area is the text, and the same action has a full-size path in the detail overlay.)
  *  2. Sheets — the card detail opens as a full-height edge-to-edge sheet, the source switcher opens as
@@ -29,7 +29,7 @@ for (const w of WIDTHS) {
           if (r.height < min - 0.5 || r.width < min - 0.5) tooSmall.push(`${name(el)} ${Math.round(r.width)}x${Math.round(r.height)}`);
         }
       };
-      check('button[aria-label^="Развернуть виджет"], button[aria-label^="Меню виджета"]', (e) => (e.getAttribute('aria-label') || '').slice(0, 24));
+      check('button[aria-label^="Меню виджета"]', (e) => (e.getAttribute('aria-label') || '').slice(0, 24));
       check('[role="group"][aria-label^="Период"] button', (e) => `период ${(e.textContent || '').trim()}`);
       return { hScroll, tooSmall };
     }, MIN);

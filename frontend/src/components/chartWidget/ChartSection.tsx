@@ -57,7 +57,7 @@ export function ChartSection(props: ChartSectionProps) {
     };
   }, [inView, sectionRef]);
   const { widgetId, label } = model.identity;
-  const { group, sequenceIndex, reorder, dragging, effectiveSize } = model.layout;
+  const { group, reorder, dragging, effectiveSize } = model.layout;
   const { prefs, updatePrefs, pinned } = model.preferences;
   const allowExpand = !props.noExpand;
 
@@ -153,13 +153,10 @@ export function ChartSection(props: ChartSectionProps) {
             label,
             widgetId,
             group,
-            sequenceIndex,
             pinned,
             prefs,
             onPrefsChange: updatePrefs,
-            onExpand: model.expansion.openExpand,
             onEdit: model.controls.openEdit,
-            allowExpand,
             allowEdit: !props.strip,
             reorder,
           }}
