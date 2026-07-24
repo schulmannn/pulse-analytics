@@ -49,7 +49,7 @@ const median = (nums: number[]): number | null => {
   return s.length % 2 ? s[mid]! : (s[mid - 1]! + s[mid]!) / 2;
 };
 
-async function boot(page: Page) {
+async function boot(page: Page, path = '/campaigns/1') {
   let rows = [...ROWS];
   const campaign = {
     id: 1,
@@ -193,8 +193,11 @@ async function boot(page: Page) {
     localStorage.setItem('pulse_theme', 'dark');
   });
 
-  await page.goto('/campaigns/1');
-  await page.getByTestId('campaign-name').waitFor({ state: 'visible', timeout: 25_000 });
+  await page.goto(path);
+  await page.locator('main h1, [data-testid="campaign-name"]').first().waitFor({
+    state: 'visible',
+    timeout: 25_000,
+  });
 }
 
 test.describe('Смешанная кампания TG+IG', () => {
@@ -359,5 +362,58 @@ test.describe('Смешанная кампания TG+IG', () => {
     }
     await expect(page.getByTestId('campaign-posts-search')).toHaveCount(0);
     await expect(page.getByTestId('campaign-post-select')).toHaveCount(0);
+  });
+
+  test('desktop campaign charts open as dedicated metric pages with preserved context', async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name === 'mobile-430', 'desktop contract');
+    await boot(page, '/campaigns/1?source=ig%3A2&q=reels&sort=result&metric=ig_reach');
+
+    await page.locator('[data-drill-to*="/campaigns/1/metrics/timeline"]').click();
+    await expect.poll(() => new URL(page.url()).pathname).toBe('/campaigns/1/metrics/timeline');
+    await expect.poll(() => new URL(page.url()).searchParams.get('source')).toBe('ig:2');
+    await expect.poll(() => new URL(page.url()).searchParams.get('q')).toBe('reels');
+    await expect.poll(() => new URL(page.url()).searchParams.get('sort')).toBe('result');
+    await expect(page.getByRole('heading', { level: 1, name: 'Сумма охватов IG · по дате публикации' })).toBeVisible();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+
+    const chartType = page.getByRole('group', { name: 'Тип графика' });
+    await expect(chartType).toBeVisible();
+    await chartType.getByRole('button', { name: 'Тип графика: Столбцы' }).click();
+    await expect.poll(() => new URL(page.url()).searchParams.get('chart')).toBe('bar');
+    await expect(page.getByRole('group', { name: 'Показатель' })).toBeVisible();
+
+    const backLink = page.locator('a[href^="/campaigns/1?"]').first();
+    await expect(backLink).toHaveAttribute('href', /source=ig%3A2/);
+    await expect(backLink).toHaveAttribute('href', /q=reels/);
+    await expect(backLink).toHaveAttribute('href', /sort=result/);
+    await expect(backLink).not.toHaveAttribute('href', /chart=/);
+
+    await page.goto('/campaigns/1?source=ig%3A2&q=reels&sort=result');
+    await page.locator('[data-drill-to*="/campaigns/1/metrics/sources"]').click();
+    await expect.poll(() => new URL(page.url()).pathname).toBe('/campaigns/1/metrics/sources');
+    await expect(page.getByRole('heading', { level: 1, name: 'Источники кампании' })).toBeVisible();
+    await expect(page.getByText('IG аккаунт')).toBeVisible();
+    await expect(page.getByText('TG канал')).toHaveCount(0);
+    await expect(page.getByRole('group', { name: 'Тип графика' })).toHaveCount(0);
+
+    await page.goto('/campaigns/1');
+    await page.locator('[data-drill-to*="/campaigns/1/metrics/formats"]').click();
+    await expect.poll(() => new URL(page.url()).pathname).toBe('/campaigns/1/metrics/formats');
+    await expect(page.getByRole('heading', { level: 1, name: 'Форматы кампании' })).toBeVisible();
+    await expect(page.getByRole('img', { name: 'Круговая диаграмма' })).toBeVisible();
+    await expect(page.getByRole('group', { name: 'Тип графика' })).toHaveCount(0);
+  });
+
+  test('mobile campaign chart uses the same dedicated timeline route', async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== 'mobile-430', 'mobile contract');
+    await boot(page);
+
+    await page.locator('[data-drill-to*="/campaigns/1/metrics/timeline?metric=ig_reach"]').click();
+    await expect.poll(() => new URL(page.url()).pathname).toBe('/campaigns/1/metrics/timeline');
+    await expect.poll(() => new URL(page.url()).searchParams.get('metric')).toBe('ig_reach');
+    await expect(page.getByRole('heading', { level: 1, name: 'Сумма охватов IG · по дате публикации' })).toBeVisible();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(page.getByRole('group', { name: 'Тип графика' })).toBeVisible();
+    await expect(page.getByRole('group', { name: 'Показатель' })).toBeVisible();
   });
 });
