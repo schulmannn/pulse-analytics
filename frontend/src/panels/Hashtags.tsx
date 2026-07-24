@@ -20,9 +20,10 @@ const keepAll: Keep = () => true;
 /**
  * Hashtag ERV-lift over the IN-WINDOW posts: for each tag carried by ≥2 posts, its average ERV and
  * the lift vs the no-tag baseline. Top-10 by lift (else avg ERV). Pure, so the widget re-derives it
- * for the resolved feed/Home window. `keep` additionally scopes to a selected campaign.
+ * for the resolved feed/Home window. `keep` additionally scopes to a selected campaign. Exported so
+ * the full-screen `/metrics/tg-hashtag-erv` route re-derives from the same predicate (no copy).
  */
-function deriveHashtags(full: TgFull | undefined, inRange: InRange, keep: Keep = keepAll) {
+export function deriveHashtags(full: TgFull | undefined, inRange: InRange, keep: Keep = keepAll) {
   const posts = normalizeTgPosts(full?.posts ?? [], full?.channel ?? {}).filter(
     (post) => post.erv !== null && inRange(post.date) && keep(post.id),
   );
@@ -91,16 +92,22 @@ function HashtagsBase({ full, keep }: { full: TgFull | undefined; keep: Keep }) 
 const alwaysInRange = () => true;
 
 /** `inCampaign` (default pass-through) scopes the lift to the selected campaign's members for the
-    active source on the Analytics «Форматы» surface — derived from raw posts, never all-channel. */
+    active source on the Analytics «Форматы» surface — derived from raw posts, never all-channel.
+    `campaignId` (when a campaign is selected) is carried on `drillTo` so the full-screen route keeps
+    the same campaign scope after navigation (`?campaign=` is the canonical filter state). */
 export function Hashtags({
   inCampaign = keepAll,
-}: { inCampaign?: Keep } = {}) {
+  campaignId = null,
+}: { inCampaign?: Keep; campaignId?: number | null } = {}) {
   // ONE wide fetch (limit 0 = server cap 100); the resolved feed/Home period windows it client-side.
   const { data: full, isPending, isError, refetch } = useTgFull(0);
+  // Every branch drills to the dedicated route (never the generic ?detail= overlay), so the click
+  // contract is identical regardless of API timing (loading/error/empty all carry drillTo).
+  const drillTo = campaignId != null ? `/metrics/tg-hashtag-erv?campaign=${campaignId}` : '/metrics/tg-hashtag-erv';
 
   if (isPending) {
     return (
-      <ChartSection title="Влияние хэштегов на ERV" defaultSize="full">
+      <ChartSection title="Влияние хэштегов на ERV" defaultSize="full" drillTo={drillTo}>
         <Skeleton className="h-40 w-full" />
       </ChartSection>
     );
@@ -108,7 +115,7 @@ export function Hashtags({
 
   if (isError || !full) {
     return (
-      <ChartSection title="Влияние хэштегов на ERV" defaultSize="full">
+      <ChartSection title="Влияние хэштегов на ERV" defaultSize="full" drillTo={drillTo}>
         <ErrorState title="Не удалось загрузить хэштеги" onRetry={() => refetch()} />
       </ChartSection>
     );
@@ -116,7 +123,7 @@ export function Hashtags({
 
   if (!deriveHashtags(full, alwaysInRange, inCampaign).hasItems) {
     return (
-      <ChartSection title="Влияние хэштегов на ERV" defaultSize="full">
+      <ChartSection title="Влияние хэштегов на ERV" defaultSize="full" drillTo={drillTo}>
         <EmptyState compact title="Мало данных для хэштегов" reason="Нужно ≥2 поста с одним хэштегом" />
       </ChartSection>
     );
@@ -126,6 +133,7 @@ export function Hashtags({
     <ChartSection
       title="Влияние хэштегов на ERV"
       defaultSize="full"
+      drillTo={drillTo}
       periodControl
       variants={(period) => breakdownVariants(deriveHashtags(full, period.inRange, inCampaign).breakdownItems)}
     >

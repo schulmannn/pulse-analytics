@@ -257,9 +257,9 @@ function FormatsBody({ scope }: { scope: TgCampaignScope }) {
         </ChartSection>
       </WidgetGroup>
       <WidgetErrorBoundary variant="inline" widgetId="analytics-tg-content" label="Аналитика">
-        <TgAnalytics group="content" campaign={{ active: scope.active, inCampaign }} />
+        <TgAnalytics group="content" campaign={{ active: scope.active, inCampaign, campaignId: scope.campaignId }} />
       </WidgetErrorBoundary>
-      <Hashtags inCampaign={inCampaign} />
+      <Hashtags inCampaign={inCampaign} campaignId={scope.campaignId} />
     </div>
   );
 }

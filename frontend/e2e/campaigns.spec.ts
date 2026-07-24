@@ -327,6 +327,23 @@ test.describe('Кампании (desktop)', () => {
     await expect(composition).toContainText('Комментарии');
     await expect(composition).toContainText('12');
 
+    // Drill в полноэкранный график сохраняет канонический ?campaign= и пересчитывает тот же scope.
+    const selectedCampaignId = new URL(page.url()).searchParams.get('campaign');
+    expect(selectedCampaignId).not.toBeNull();
+    await page.getByRole('heading', { name: 'Состав вовлечённости', exact: true }).click();
+    await expect(page).toHaveURL(/\/metrics\/tg-engagement-mix/);
+    await expect(page).toHaveURL(new RegExp(`[?&]campaign=${selectedCampaignId}`));
+    await expect(page.locator('[role="dialog"]')).toHaveCount(0);
+    const fullscreenComposition = page
+      .getByRole('heading', { name: 'Состав вовлечённости', level: 1 })
+      .locator('xpath=ancestor::main[1]');
+    await expect(fullscreenComposition).toContainText('80');
+    await expect(fullscreenComposition).toContainText('28');
+    await expect(fullscreenComposition).toContainText('12');
+    // Back-link также не сбрасывает выбранную кампанию.
+    await page.getByRole('link', { name: 'Аналитика · Форматы' }).click();
+    await expect(page).toHaveURL(new RegExp(`[?&]campaign=${selectedCampaignId}`));
+
     // ── Удаление membership со страницы кампании (публикации не удаляются) ──
     await page.getByRole('link', { name: 'Контент' }).first().click();
     await page.getByRole('tab', { name: 'Кампании' }).click();
