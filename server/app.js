@@ -30,6 +30,7 @@ const { registerBugsRoutes } = require('./routes/bugs');
 const { registerChannelsRoutes } = require('./routes/channels');
 const { registerTgRoutes } = require('./routes/tg');
 const { registerMentionsRoutes } = require('./routes/mentions');
+const { registerTgNotifyRoutes } = require('./routes/tgNotify');
 const { registerIgOauthRoutes } = require('./routes/ig-oauth');
 const { registerIgRoutes } = require('./routes/ig');
 const { registerMsRoutes } = require('./routes/moysklad');
@@ -56,6 +57,7 @@ function createApp(deps) {
     ymCrypto, ymFetch, nearestOf,
     cacheGet, cacheSet, cache, IG_ACCOUNT, IG_TOKEN, IG_GRAPH, AUTH_SECRET,
     tgCrypto, collectQrChannelsNow, collectManagedPostStatsNow, TG_TOKEN, TG_CHANNEL,
+    tgBot, tgBotWebhookSecret,
     timingSafeEqualStr, dailyIngestJob, jobTracker, mtprotoClient, notionCrash,
     aiChatService,
   } = deps;
@@ -229,6 +231,13 @@ function createApp(deps) {
   registerMentionsRoutes({
     app, requireAuth, resolveChannel, db, audit, log,
     cacheGet, cacheSet, tgCrypto, mtprotoClient,
+  });
+
+  // Доставка упоминаний в личку: вебхук бота (deep-link /start привязка) + личная подписка
+  // выбранного канала. Секрет вебхука дериватен от TG_BOT_TOKEN (composition), не отдельный env.
+  registerTgNotifyRoutes({
+    app, requireAuth, resolveChannel, db, audit, log,
+    tgBot, webhookSecret: tgBotWebhookSecret, newToken, sha256, appBase,
   });
 
   // ════════════════════════════════════════════════════════════════

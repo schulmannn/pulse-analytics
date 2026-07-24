@@ -30,6 +30,7 @@ import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { Icon } from '@/components/nav-icons';
 import { Skeleton } from '@/components/ui/skeleton';
+import { MentionNotifyDialog } from '@/components/mentions/MentionNotifyDialog';
 import { MentionRulesDialog } from '@/components/mentions/MentionRulesDialog';
 
 /**
@@ -44,6 +45,7 @@ export function MentionsDesktop() {
   const [params, setParams] = useSearchParams();
   const pp = usePagePeriod();
   const [rulesOpen, setRulesOpen] = useState(false);
+  const [notifyOpen, setNotifyOpen] = useState(false);
 
   const filters = useMemo(() => parseMentionsFilters(params), [params]);
   const pageDays = pp?.days ?? filters.period;
@@ -127,6 +129,7 @@ export function MentionsDesktop() {
   const rulesDialog = rulesOpen && settings ? (
     <MentionRulesDialog settings={settings} onClose={() => setRulesOpen(false)} />
   ) : null;
+  const notifyDialog = notifyOpen ? <MentionNotifyDialog onClose={() => setNotifyOpen(false)} /> : null;
 
   const data = archive.data;
   const sourceOptions: MentionSourceOption[] = data?.source_options ?? [];
@@ -265,6 +268,7 @@ export function MentionsDesktop() {
           )}
         </div>
         {rulesDialog}
+        {notifyDialog}
       </>
     );
   }
@@ -295,6 +299,16 @@ export function MentionsDesktop() {
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1.5">
           <div className="flex items-center gap-2">
+            {settings && (
+              <button
+                type="button"
+                onClick={() => setNotifyOpen(true)}
+                className="btn-pill inline-flex items-center gap-2 border border-border bg-background px-3.5 py-2 text-sm font-medium text-foreground transition-colors hover:bg-hover-row"
+              >
+                <Icon name="bell" className="size-4 text-muted-foreground" />
+                Уведомления
+              </button>
+            )}
             {settings && (
               <button
                 type="button"
@@ -424,6 +438,7 @@ export function MentionsDesktop() {
         hasPeriodRows={total > 0}
       />
       {rulesDialog}
+      {notifyDialog}
     </div>
   );
 }

@@ -23,6 +23,7 @@ function safeManagedFallbackCode(error) {
 function createDailyIngestJob({
   db, log, mtprotoFetch, MTPROTO_TIMEOUT_STATS_MS, MTPROTO_TIMEOUT_HEAVY_MS, tgPostToRow,
   collectManagedChannelNow, processReportSchedules, processPersistence, processTgQrCollection,
+  processMentionNotify,
 }) {
   async function run({ requestId, base }) {
     if (!db.enabled) return { status: 200, body: { ok: false, reason: 'DATABASE_URL не задан — БД выключена' } };
@@ -59,6 +60,12 @@ function createDailyIngestJob({
         log('error', 'persistence_failed', { request_id: requestId, error: e.message })),
       processTgQrCollection().catch(e =>
         log('error', 'tg_qr_collection_failed', { request_id: requestId, error: e.message })),
+      // Доставка новых упоминаний в личку (бот). Внутренняя идемпотентность — runJobOnce per
+      // (channel, uid, day); сбой хвоста никогда не касается ответа крону.
+      Promise.resolve()
+        .then(() => (processMentionNotify ? processMentionNotify() : null))
+        .catch(e =>
+          log('error', 'mention_notify_tail_failed', { request_id: requestId, error: e.message })),
     ]);
 
     try {

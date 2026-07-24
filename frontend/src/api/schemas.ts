@@ -268,6 +268,50 @@ export const MentionSettingsSchema = z
   .passthrough();
 export type MentionSettings = z.infer<typeof MentionSettingsSchema>;
 
+/** Статус личных уведомлений об упоминаниях (привязка бота + подписка выбранного канала). */
+export const MentionNotifyStatusSchema = z
+  .object({
+    available: z.boolean(),
+    bot_configured: z.boolean(),
+    binding: z
+      .object({
+        bound: z.boolean(),
+        username: z.string().optional().nullable(),
+        bound_at: z.string().optional().nullable(),
+      })
+      .passthrough(),
+    subscription: z
+      .object({
+        enabled: z.boolean(),
+        last_run_at: z.string().optional().nullable(),
+        last_notified_at: z.string().optional().nullable(),
+        last_error: z.string().optional().nullable(),
+      })
+      .passthrough(),
+    requirements: z
+      .object({
+        rules_configured: z.boolean(),
+        session_state: z.enum(['ok', 'missing', 'reauth_required']),
+      })
+      .passthrough()
+      .optional(),
+  })
+  .passthrough();
+export type MentionNotifyStatus = z.infer<typeof MentionNotifyStatusSchema>;
+
+export const MentionNotifyLinkSchema = z
+  .object({ url: z.string(), expires_in_minutes: z.coerce.number().optional() })
+  .passthrough();
+
+export const MentionNotifySubscriptionSchema = z
+  .object({
+    enabled: z.boolean(),
+    last_run_at: z.string().optional().nullable(),
+    last_notified_at: z.string().optional().nullable(),
+    last_error: z.string().optional().nullable(),
+  })
+  .passthrough();
+
 export const HistoryRowSchema = z
   .object({
     day: z.string(),

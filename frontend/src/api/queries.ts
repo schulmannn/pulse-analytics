@@ -43,6 +43,9 @@ import {
   IgTagsSchema,
   KeySchema,
   LoginResponseSchema,
+  MentionNotifyLinkSchema,
+  MentionNotifyStatusSchema,
+  MentionNotifySubscriptionSchema,
   MentionSettingsSchema,
   MentionsSchema,
   MeSchema,
@@ -273,6 +276,56 @@ export function useSaveMentionSettings() {
       qc.setQueryData(['mention-settings', channelId], data);
       return qc.invalidateQueries({ queryKey: ['mentions', channelId] });
     },
+  });
+}
+
+/**
+ * Личные уведомления об упоминаниях: статус привязки бота + подписки выбранного канала.
+ * `poll` включает refetchInterval — диалог ждёт нажатия Start в Telegram после deep-link'а.
+ */
+export function useMentionNotifyStatus(poll = false) {
+  const { channelId } = useSelectedChannel();
+  return useQuery({
+    enabled: channelId != null,
+    queryKey: ['mention-notify', channelId],
+    staleTime: STALE_STATUS,
+    retry: false,
+    refetchInterval: poll ? 3000 : false,
+    // Диалог монтируется только по клику: всегда тянем свежий статус, иначе закрытие до
+    // подтверждения привязки показывает при повторном открытии устаревшее «не привязан».
+    refetchOnMount: 'always',
+    queryFn: ({ signal }) =>
+      apiGet('/api/tg/mention-notify', MentionNotifyStatusSchema, { signal, channelId }),
+  });
+}
+
+/** Выдать deep-link t.me/<bot>?start=… для привязки личного чата с ботом. */
+export function useMentionNotifyLink() {
+  return useMutation({
+    mutationFn: () => apiSend('POST', '/api/tg/mention-notify/link', {}, MentionNotifyLinkSchema),
+  });
+}
+
+/** Тумблер личной подписки на упоминания выбранного канала. */
+export function useSetMentionNotify() {
+  const { channelId } = useSelectedChannel();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (enabled: boolean) => {
+      if (channelId == null) return Promise.reject(new Error('Сначала выберите канал'));
+      return apiSend('PUT', '/api/tg/mention-notify', { enabled }, MentionNotifySubscriptionSchema, { channelId });
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['mention-notify', channelId] }),
+  });
+}
+
+/** Отвязать личный чат с ботом (подписки замолкают до новой привязки). */
+export function useUnbindMentionNotify() {
+  const { channelId } = useSelectedChannel();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiSend('DELETE', '/api/tg/mention-notify/binding', undefined, AuthOkSchema),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['mention-notify', channelId] }),
   });
 }
 
