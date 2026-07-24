@@ -23,10 +23,10 @@ export function IgAudience({ ig }: { ig: IgData }) {
         <AudienceBlock breakdowns={ig.breakdowns} followers={ig.followers} />
       </Section>
 
-      {/* A real widget card (not a flat h2 section): the heatmap joins the drill contract —
-          whole-card click / ↗ open the Tier-1 overlay, same as the TG activity heatmap. */}
+      {/* A real widget card (not a flat h2 section): whole-card click opens the dedicated
+          /metrics/ig-best-time page, the same route contract as the TG activity heatmap. */}
       <WidgetGroup id="ig-audience-actions" className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-6">
-        <ChartSection title="Лучшее время для публикации" defaultSize="full">
+        <ChartSection title="Лучшее время для публикации" defaultSize="full" drillTo="/metrics/ig-best-time">
           <BestTimeHeatmap online={ig.online} />
         </ChartSection>
         <ChartSection id="ig-profile-actions" title="Действия в профиле" defaultSize="full" noExpand>

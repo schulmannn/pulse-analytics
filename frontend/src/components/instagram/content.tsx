@@ -12,33 +12,38 @@ import {
   hashtagStats,
   postEr,
   fmtDay,
-  MEDIA_PRODUCT_LABEL,
-  MEDIA_PRODUCT_CHART,
+  igFormatEngagementItems,
+  igReelsWatchTime,
+  igStoryNavItems,
   MEDIA_TYPE_LABEL,
-  NAV_LABEL,
 } from '@/lib/igMetrics';
 
 // ── Forms / formats breakdown ──
-/** Own ChartSection widget — the full presentation set (list/bars/pie/bar+ledger) + expand. */
-export function FormatsBlock({ items }: { items: { label: string; value: number }[] }) {
-  const list = [...items]
-    .sort((a, b) => b.value - a.value)
-    .map((it) => ({
-      label: MEDIA_PRODUCT_LABEL[it.label] ?? it.label,
-      value: it.value,
-      display: fmt.short(it.value),
-      color: MEDIA_PRODUCT_CHART[it.label],
-    }));
+/** Own ChartSection widget — the full presentation set (list/bars/pie/bar+ledger). Whole-card click
+    drills to /metrics/ig-format-engagement (shared math), replacing the generic ?detail= overlay. */
+function contentMetricRoute(key: string, campaignId?: number | null): string {
+  return campaignId == null ? `/metrics/${key}` : `/metrics/${key}?campaign=${campaignId}`;
+}
+
+export function FormatsBlock({
+  items,
+  campaignId,
+}: {
+  items: { label: string; value: number }[];
+  campaignId?: number | null;
+}) {
+  const list = igFormatEngagementItems(items);
+  const drillTo = contentMetricRoute('ig-format-engagement', campaignId);
   if (list.length === 0) {
     return (
-      <ChartSection title="Вовлечённость по форматам">
+      <ChartSection title="Вовлечённость по форматам" drillTo={drillTo}>
         <EmptyState compact title="Нет данных о форматах" />
       </ChartSection>
     );
   }
   return (
     <WidgetGroup id="ig-formats" className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-6">
-      <ChartSection title="Вовлечённость по форматам" defaultSize="full" variants={breakdownVariants(list)} />
+      <ChartSection title="Вовлечённость по форматам" defaultSize="full" drillTo={drillTo} variants={breakdownVariants(list)} />
     </WidgetGroup>
   );
 }
@@ -180,33 +185,32 @@ export function IgPostCard({
 }
 
 // ── Reels ──
-export function ReelsBlock({ posts }: { posts: IgPost[] }) {
-  const reels = posts.filter((p) => p.media_product_type === 'REELS');
-  if (reels.length === 0) {
+export function ReelsBlock({ posts, campaignId }: { posts: IgPost[]; campaignId?: number | null }) {
+  // Shared derivation (igMetrics): the card and /metrics/ig-reels-watch-time show identical bars +
+  // summary. Reels is per-post categorical — no fabricated period comparison.
+  const r = igReelsWatchTime(posts);
+  if (r.count === 0) {
     return (
       <EmptyState title="За выбранный период Reels нет." />
     );
   }
-  const avgSec = (r: IgPost) => Math.round(Number(r.ig_reels_avg_watch_time ?? 0) / 1000);
-  const totalWatchHours = reels.reduce((acc, r) => acc + Number(r.ig_reels_video_view_total_time ?? 0) / 1000 / 3600, 0);
-  const avgWatchAll = reels.length ? Math.round(reels.reduce((acc, r) => acc + avgSec(r), 0) / reels.length) : 0;
 
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-1 gap-x-6 gap-y-4 border-t border-border pt-4 sm:grid-cols-3">
-        <KpiCard label="Reels" value={fmt.num(reels.length)} />
-        <KpiCard label="Ср. время просмотра" value={`${avgWatchAll} сек`} />
-        <KpiCard label="Суммарно просмотрено" value={`${fmt.short(Math.round(totalWatchHours))} ч`} />
+        <KpiCard label="Reels" value={fmt.num(r.count)} />
+        <KpiCard label="Ср. время просмотра" value={`${r.avgWatchAll} сек`} />
+        <KpiCard label="Суммарно просмотрено" value={`${fmt.short(Math.round(r.totalWatchHours))} ч`} />
       </div>
-      {/* A real WidgetGroup even for the lone card: inside a group the ⋯ dialog grows «Размер»
-          and the menu grows «Скрыть» — the same customization contract as the TG feeds. */}
+      {/* A WidgetGroup keeps the card on the shared dashboard grid. Whole-card click drills to
+          /metrics/ig-reels-watch-time instead of the generic ?detail= overlay. */}
       <WidgetGroup id="ig-reels" className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-6">
-        <ChartSection title="Ср. время просмотра по Reels" defaultSize="full">
-          <BarChart
-            values={reels.map(avgSec)}
-            labels={reels.map((_, i) => `R${i + 1}`)}
-            titles={reels.map((r, i) => `R${i + 1}: ${avgSec(r)} сек · ${fmt.short(Number(r.views ?? 0))} просм`)}
-          />
+        <ChartSection
+          title="Ср. время просмотра по Reels"
+          defaultSize="full"
+          drillTo={contentMetricRoute('ig-reels-watch-time', campaignId)}
+        >
+          <BarChart values={r.values} labels={r.labels} titles={r.titles} />
         </ChartSection>
       </WidgetGroup>
     </div>
@@ -401,10 +405,8 @@ export function StoriesBlock({ stories }: { stories: IgStory[] | undefined }) {
     return Math.max(0, Math.min(1, 1 - drop / v));
   };
   const avgCompletion = list.length ? list.reduce((acc, s) => acc + completion(s), 0) / list.length : 0;
-  const nav = ['tap_forward', 'tap_back', 'tap_exit', 'swipe_forward'];
-  const navItems = nav
-    .map((k) => ({ label: NAV_LABEL[k] ?? k, value: list.reduce((acc, s) => acc + Number(s.navigation?.[k] ?? 0), 0) }))
-    .filter((x) => x.value > 0);
+  // Shared derivation (igMetrics): the card and /metrics/ig-story-navigation share the same math.
+  const navItems = igStoryNavItems(list);
 
   const soonest = list
     .map((s) => Date.parse(s.expires_at ?? ''))
@@ -423,16 +425,16 @@ export function StoriesBlock({ stories }: { stories: IgStory[] | undefined }) {
         <KpiCard label="Ответы" value={fmt.num(sum('replies'))} />
         <KpiCard label="Досматриваемость" value={`${Math.round(avgCompletion * 100)}%`} />
       </div>
-      {/* WidgetGroup (TG parity): both story cards gain Размер / Выше / Ниже / Переставить /
-          Скрыть; halves sit two-up on the 6-col grid exactly as the old 2-col grid did. */}
+      {/* Both story cards share the standard 6-column dashboard grid. */}
       <WidgetGroup id="ig-stories" className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-6">
         {navItems.length > 0 ? (
           <ChartSection
             title="Навигация по историям"
-            variants={breakdownVariants(navItems.map((n) => ({ label: n.label, value: n.value, display: fmt.short(n.value) })))}
+            drillTo="/metrics/ig-story-navigation"
+            variants={breakdownVariants(navItems)}
           />
         ) : (
-          <ChartSection title="Навигация по историям">
+          <ChartSection title="Навигация по историям" drillTo="/metrics/ig-story-navigation">
             <EmptyState compact title="Нет данных о навигации" />
           </ChartSection>
         )}

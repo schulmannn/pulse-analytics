@@ -1,7 +1,7 @@
 // Pure Instagram metric math + label/geo helpers. No React, no UI — the views and the
 // useIgData hook gather raw API payloads and lean on this to shape them. Kept separate so the
 // "what the numbers mean" logic is testable and the panels stay presentational.
-import type { IgBreakdowns, IgHistoryRow, IgInsights, IgOnline, IgPost } from '@/api/schemas';
+import type { IgBreakdowns, IgHistoryRow, IgInsights, IgOnline, IgPost, IgStory } from '@/api/schemas';
 import { pctDelta, type MetricDelta } from '@/lib/delta';
 import { fmt } from '@/lib/format';
 
@@ -358,4 +358,104 @@ export function hashtagStats(posts: IgPost[]): HashtagStat[] {
       lift: globalEr > 0 ? ((e.er / e.count - globalEr) / globalEr) * 100 : 0,
     }))
     .sort((a, b) => b.count - a.count || b.avgEr - a.avgEr);
+}
+
+// ── Shared chart-card derivations (Breakdown-like items) ──
+// ONE derivation per demographic/format/story-navigation card so the source card and its dedicated
+// /metrics/ig-* full page can never diverge in numbers or labels. Age is returned in the fixed
+// bucket order; gender/country/city are ranked high→low as full lists — the card slices a top-N
+// preview, the full page shows all. Kept here (pure) so both consumers import the same math.
+export interface IgBreakdownItem {
+  label: string;
+  value: number;
+  display: string;
+  /** Optional HSL fill (gender/format keep a stable hue across sorts). */
+  color?: string;
+}
+
+/** Возраст — buckets in AGE_ORDER (histogram order), dropping segments Instagram didn't return. */
+export function igAgeItems(breakdowns: IgBreakdowns | undefined): IgBreakdownItem[] {
+  const raw = tvBreakdown(breakdowns?.data, 'follower_demographics', 'age');
+  return AGE_ORDER.map((bucket) => raw.find((a) => a.label === bucket))
+    .filter((a): a is { label: string; value: number } => !!a)
+    .map((a) => ({ label: a.label, value: a.value, display: fmt.short(a.value) }));
+}
+
+/** Пол — ranked high→low, each slice keeping its categorical hue. */
+export function igGenderItems(breakdowns: IgBreakdowns | undefined): IgBreakdownItem[] {
+  return tvBreakdown(breakdowns?.data, 'follower_demographics', 'gender')
+    .sort((a, b) => b.value - a.value)
+    .map((g, i) => ({
+      label: GENDER_LABEL[g.label] ?? g.label,
+      value: g.value,
+      display: fmt.short(g.value),
+      color: CHART_CYCLE[i % CHART_CYCLE.length],
+    }));
+}
+
+/** Страны — full ranked list, localized country name (card slices a top-N preview). */
+export function igCountryItems(breakdowns: IgBreakdowns | undefined): IgBreakdownItem[] {
+  return tvBreakdown(breakdowns?.data, 'follower_demographics', 'country')
+    .sort((a, b) => b.value - a.value)
+    .map((c) => ({ label: countryName(c.label), value: c.value, display: fmt.short(c.value) }));
+}
+
+/** Города — full ranked list, localized city name (card slices a top-N preview). */
+export function igCityItems(breakdowns: IgBreakdowns | undefined): IgBreakdownItem[] {
+  return tvBreakdown(breakdowns?.data, 'follower_demographics', 'city')
+    .sort((a, b) => b.value - a.value)
+    .map((c) => ({ label: cityName(c.label), value: c.value, display: fmt.short(c.value) }));
+}
+
+/** Вовлечённость по форматам — account total_interactions by media_product_type, ranked high→low. */
+export function igFormatEngagementItems(formatItems: { label: string; value: number }[]): IgBreakdownItem[] {
+  return [...formatItems]
+    .sort((a, b) => b.value - a.value)
+    .map((it) => ({
+      label: MEDIA_PRODUCT_LABEL[it.label] ?? it.label,
+      value: it.value,
+      display: fmt.short(it.value),
+      color: MEDIA_PRODUCT_CHART[it.label],
+    }));
+}
+
+/** Навигация по историям — summed tap/swipe actions across the window's stories (>0 only). */
+export function igStoryNavItems(stories: IgStory[] | undefined): IgBreakdownItem[] {
+  const list = stories ?? [];
+  return ['tap_forward', 'tap_back', 'tap_exit', 'swipe_forward']
+    .map((k) => ({
+      label: NAV_LABEL[k] ?? k,
+      value: list.reduce((acc, s) => acc + Number(s.navigation?.[k] ?? 0), 0),
+    }))
+    .filter((x) => x.value > 0)
+    .map((x) => ({ label: x.label, value: x.value, display: fmt.short(x.value) }));
+}
+
+export interface IgReelsWatch {
+  count: number;
+  /** Mean of per-reel average watch times (seconds). */
+  avgWatchAll: number;
+  /** Total time watched across all reels (hours). */
+  totalWatchHours: number;
+  /** Per-reel average watch time (seconds) — the bar chart series. */
+  values: number[];
+  labels: string[];
+  titles: string[];
+}
+
+/** Ср. время просмотра по Reels — per-post (categorical), not a time series. Same math the card
+    used, so the card and the /metrics/ig-reels-watch-time page show identical bars and summary. */
+export function igReelsWatchTime(posts: IgPost[]): IgReelsWatch {
+  const reels = posts.filter((p) => p.media_product_type === 'REELS');
+  const avgSec = (r: IgPost) => Math.round(Number(r.ig_reels_avg_watch_time ?? 0) / 1000);
+  const totalWatchHours = reels.reduce((acc, r) => acc + Number(r.ig_reels_video_view_total_time ?? 0) / 1000 / 3600, 0);
+  const avgWatchAll = reels.length ? Math.round(reels.reduce((acc, r) => acc + avgSec(r), 0) / reels.length) : 0;
+  return {
+    count: reels.length,
+    avgWatchAll,
+    totalWatchHours,
+    values: reels.map(avgSec),
+    labels: reels.map((_, i) => `R${i + 1}`),
+    titles: reels.map((r, i) => `R${i + 1}: ${avgSec(r)} сек · ${fmt.short(Number(r.views ?? 0))} просм`),
+  };
 }

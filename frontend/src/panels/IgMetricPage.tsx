@@ -5,24 +5,40 @@ import { isMsMetricKey } from '@/panels/sklad/msMetricKeys';
 import { isYmMetricKey } from '@/panels/metrika/ymMetricKeys';
 import { isTgExtraMetricKey } from '@/panels/tgMetricKeys';
 import { useIgData } from '@/lib/useIgData';
+import type { IgData } from '@/lib/useIgData';
 import { usePeriod, type PeriodDays } from '@/lib/period';
-import { pairDelta } from '@/lib/igMetrics';
-import type { WindowPair } from '@/lib/igMetrics';
+import {
+  pairDelta,
+  igAgeItems,
+  igGenderItems,
+  igCountryItems,
+  igCityItems,
+  igFormatEngagementItems,
+  igReelsWatchTime,
+  igStoryNavItems,
+} from '@/lib/igMetrics';
+import type { WindowPair, IgBreakdownItem } from '@/lib/igMetrics';
 import { pctDelta } from '@/lib/delta';
 import { fmt } from '@/lib/format';
-import { windowIgSeries, ChartSection as RailSection } from '@/components/instagram/shared';
+import { windowIgSeries, ChartSection as RailSection, KpiCard } from '@/components/instagram/shared';
+import { BestTimeHeatmap } from '@/components/instagram/audience';
 import { ChartSection } from '@/components/ChartWidget';
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
-import { ChartExpandedContext } from '@/components/ExpandableChart';
+import { Breakdown } from '@/components/Breakdown';
+import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
 import { DeltaPill } from '@/components/DeltaPill';
 import { SegmentedControl } from '@/components/SegmentedControl';
+import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { Skeleton } from '@/components/ui/skeleton';
 import { PinnedDayPanel } from '@/components/PinnedDayPanel';
 import { MetricPage, SegSelect } from '@/panels/MetricPage';
+import { isIgChartMetricKey } from '@/panels/igMetricKeys';
+import { useIgScopedPosts } from '@/panels/instagram/igContentScope';
 import { useExplorerChartHeight } from '@/lib/useExplorerChartHeight';
 import { lazyWithReload } from '@/lib/lazyWithReload';
+import type { ReactNode } from 'react';
 
 /**
  * Instagram metric pages — the drill target the unified chart contract points IG cards at
@@ -152,7 +168,7 @@ const ER_DEF = {
 };
 
 export function isIgMetricKey(raw: string | undefined): boolean {
-  return raw != null && (raw in DAILY_DEFS || raw in AGG_DEFS || raw === 'ig-er');
+  return raw != null && (raw in DAILY_DEFS || raw in AGG_DEFS || raw === 'ig-er' || isIgChartMetricKey(raw));
 }
 
 /** МойСклад metric/report pages live in their own lazy chunk: a TG/IG user opening a TG/IG metric
@@ -301,6 +317,12 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
   }
 
   const handle = ig.profile?.username ? `@${ig.profile.username}` : null;
+  // Chart cards (demographics / heatmap / format engagement / Reels / story navigation) migrated off
+  // the generic ?detail= overlay. They reuse the already-fetched `ig` bundle (loading/error above are
+  // shared) and each renders a truthful full page — never a fabricated daily series or comparison.
+  if (isIgChartMetricKey(metricKey)) {
+    return <IgChartMetricPage metricKey={metricKey} ig={ig} handle={handle} />;
+  }
   if (metricKey === 'ig-er') {
     return (
       <IgErPage
@@ -870,5 +892,429 @@ function AboutRow({ label, text }: { label: string; text: string }) {
       <dt className="text-2xs tracking-wide text-muted-foreground">{label}</dt>
       <dd className="mt-0.5 text-sm leading-relaxed text-foreground">{text}</dd>
     </div>
+  );
+}
+
+// ── IG chart-card pages (/metrics/ig-{age,gender,countries,cities,best-time,format-engagement,
+//    reels-watch-time,story-navigation}) ─────────────────────────────────────────────────────────
+// The demographic/format/story-navigation cards were generic ?detail= overlays; they now each drill
+// to a dedicated full page of the SAME shell/grammar as /metrics/ig-reach (back link, quiet header
+// with source identity + descriptor, full-height main card, right rail «Сравнение»/«О метрике»).
+// ЧЕСТНОСТЬ over parity: demographics are a follower-base snapshot (no window/comparison); best-time
+// is its own 7×24 heatmap; Reels is per-post categorical (bars, no fabricated period comparison);
+// format-engagement + Reels follow the GLOBAL period through useIgData (window bar), the rest don't.
+
+interface IgAboutDef {
+  formula: string;
+  included?: string;
+  source: string;
+}
+
+/** Тихая шапка + две колонки (главный блок + rail «Сравнение»/«О метрике»), как у `/metrics/ig-reach`. */
+function IgChartShell({
+  back,
+  term,
+  handle,
+  descriptor,
+  comparison,
+  about,
+  children,
+}: {
+  back: { to: string; label: string };
+  term: string;
+  handle: string | null;
+  descriptor?: string;
+  comparison: ReactNode;
+  about: IgAboutDef;
+  children: ReactNode;
+}) {
+  return (
+    <div className="space-y-5">
+      <Link to={back.to} className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground">
+        <span aria-hidden="true">←</span> {back.label}
+      </Link>
+
+      <div>
+        <h1 className="text-2xl font-medium tracking-tight text-foreground">{term}</h1>
+        <div className="mt-1 text-xs tracking-wide text-muted-foreground">{handle ? `Instagram ${handle}` : 'Instagram'}</div>
+        {descriptor && <div className="mt-1.5 text-xs text-muted-foreground">{descriptor}</div>}
+      </div>
+
+      <div className="relative grid grid-cols-1 gap-6 xl:gap-8 lg:grid-cols-[minmax(0,1fr)_var(--inspector-w,300px)]">
+        <InspectorHandle />
+        <div className="min-w-0 space-y-6">{children}</div>
+        <aside className="space-y-6">
+          <RailSection title="Сравнение">{comparison}</RailSection>
+          <RailSection title="О метрике">
+            <dl className="space-y-3 text-sm">
+              <AboutRow label="Как считается" text={about.formula} />
+              {about.included && <AboutRow label="Что учитывается" text={about.included} />}
+              <AboutRow label="Источник" text={about.source} />
+            </dl>
+          </RailSection>
+          <Link to={back.to} className="inline-flex items-center gap-1 text-xs font-medium text-primary transition-colors hover:text-primary/80">
+            Открыть раздел <span aria-hidden="true">→</span>
+          </Link>
+        </aside>
+      </div>
+    </div>
+  );
+}
+
+/** Full-height (non-expandable) card whose body renders expanded — the IG mirror of YmReportCard.
+    ChartExpandedContext keeps Breakdown at its full list; ExpandedChartHeightContext feeds charts. */
+function IgReportCard({ id, title, children }: { id: string; title: string; children: ReactNode }) {
+  const chartH = useExplorerChartHeight();
+  return (
+    <ChartSection id={id} title={title} defaultSize="full" noExpand>
+      <ChartExpandedContext.Provider value={true}>
+        <ExpandedChartHeightContext.Provider value={chartH}>{children}</ExpandedChartHeightContext.Provider>
+      </ChartExpandedContext.Provider>
+    </ChartSection>
+  );
+}
+
+/** Honest «Сравнение» text — a snapshot/breakdown, not a period metric. */
+function IgNoComparison({ text }: { text: string }) {
+  return <p className="text-xs leading-relaxed text-muted-foreground">{text}</p>;
+}
+
+const IG_BACK = {
+  audience: { to: '/instagram/audience', label: 'Instagram · Аудитория' },
+  content: { to: '/instagram/content', label: 'Instagram · Контент' },
+} as const;
+
+/** The relevant React Query result gating one chart page (loading / error / retry). */
+interface IgQueryLike {
+  isPending: boolean;
+  isError: boolean;
+  isFetching: boolean;
+  refetch: () => unknown;
+}
+
+interface IgBreakdownPageDef {
+  cardId: string;
+  back: { to: string; label: string };
+  term: string;
+  descriptor: string;
+  cardTitle: string;
+  about: IgAboutDef;
+  comparison: string;
+  /** Post/timeframe-derived pages carry the GLOBAL period window bar; snapshots don't. */
+  periodControl: boolean;
+  query: (ig: IgData) => IgQueryLike;
+  derive: (ig: IgData) => IgBreakdownItem[];
+  errorTitle: string;
+  empty: string;
+  footer?: (ig: IgData, items: IgBreakdownItem[]) => ReactNode;
+  /** Content views may be campaign-scoped through the canonical `?campaign=` URL parameter. */
+  contentView?: 'formats';
+}
+
+const DEMOGRAPHIC_COMPARISON =
+  'Разрез аудитории по подписчикам — снимок базы, а не метрика периода; сравнение периодов здесь не рассчитывается.';
+
+const IG_BREAKDOWN_DEFS: Record<string, IgBreakdownPageDef> = {
+  'ig-age': {
+    cardId: 'ig-page-age',
+    back: IG_BACK.audience,
+    term: 'Возраст',
+    descriptor: 'Возрастные группы подписчиков — оценка Instagram по демографии базы',
+    cardTitle: 'Возрастные группы',
+    about: {
+      formula: 'Подписчики группируются по возрастной корзине (follower_demographics · age) в фиксированном порядке 13–17 … 65+.',
+      included: 'Это снимок текущей базы подписчиков, а не срез за период. Instagram отдаёт демографию только для аккаунтов от 100 подписчиков и показывает лишь топ-сегменты.',
+      source: 'Instagram insights (follower_demographics, age).',
+    },
+    comparison: DEMOGRAPHIC_COMPARISON,
+    periodControl: false,
+    query: (ig) => ig.queries.breakdowns,
+    derive: (ig) => igAgeItems(ig.breakdowns),
+    errorTitle: 'Не удалось загрузить демографию',
+    empty: 'Возрастной демографии для этого аккаунта нет (нужно 100+ подписчиков).',
+    footer: (ig, items) => {
+      const covered = items.reduce((acc, a) => acc + a.value, 0);
+      const coverage = ig.followers > 0 && covered > 0 ? covered / ig.followers : 1;
+      if (coverage >= 0.98) return null;
+      return (
+        <p className="mt-3 text-2xs text-muted-foreground/70">
+          Охвачено ≈{Math.round(coverage * 100)}% аудитории — Instagram показывает только топ-сегменты.
+        </p>
+      );
+    },
+  },
+  'ig-gender': {
+    cardId: 'ig-page-gender',
+    back: IG_BACK.audience,
+    term: 'Пол',
+    descriptor: 'Пол подписчиков — оценка Instagram по демографии базы',
+    cardTitle: 'По полу',
+    about: {
+      formula: 'Подписчики группируются по полу (follower_demographics · gender), ранжируются по величине.',
+      included: 'Снимок текущей базы, а не срез за период. Доступно только для аккаунтов от 100 подписчиков.',
+      source: 'Instagram insights (follower_demographics, gender).',
+    },
+    comparison: DEMOGRAPHIC_COMPARISON,
+    periodControl: false,
+    query: (ig) => ig.queries.breakdowns,
+    derive: (ig) => igGenderItems(ig.breakdowns),
+    errorTitle: 'Не удалось загрузить демографию',
+    empty: 'Демографии по полу для этого аккаунта нет (нужно 100+ подписчиков).',
+  },
+  'ig-countries': {
+    cardId: 'ig-page-countries',
+    back: IG_BACK.audience,
+    term: 'Топ стран',
+    descriptor: 'География подписчиков по странам — полный список',
+    cardTitle: 'Все страны',
+    about: {
+      formula: 'Подписчики группируются по стране (follower_demographics · country); коды стран локализуются. Полный ранжированный список (карточка показывает топ-8).',
+      included: 'Снимок текущей базы, а не срез за период. Доступно только для аккаунтов от 100 подписчиков.',
+      source: 'Instagram insights (follower_demographics, country).',
+    },
+    comparison: DEMOGRAPHIC_COMPARISON,
+    periodControl: false,
+    query: (ig) => ig.queries.breakdowns,
+    derive: (ig) => igCountryItems(ig.breakdowns),
+    errorTitle: 'Не удалось загрузить географию',
+    empty: 'Данных по странам для этого аккаунта нет (нужно 100+ подписчиков).',
+  },
+  'ig-cities': {
+    cardId: 'ig-page-cities',
+    back: IG_BACK.audience,
+    term: 'Топ городов',
+    descriptor: 'География подписчиков по городам — полный список',
+    cardTitle: 'Все города',
+    about: {
+      formula: 'Подписчики группируются по городу (follower_demographics · city); названия локализуются, регион отбрасывается. Полный ранжированный список (карточка показывает топ-8).',
+      included: 'Снимок текущей базы, а не срез за период. Доступно только для аккаунтов от 100 подписчиков.',
+      source: 'Instagram insights (follower_demographics, city).',
+    },
+    comparison: DEMOGRAPHIC_COMPARISON,
+    periodControl: false,
+    query: (ig) => ig.queries.breakdowns,
+    derive: (ig) => igCityItems(ig.breakdowns),
+    errorTitle: 'Не удалось загрузить географию',
+    empty: 'Данных по городам для этого аккаунта нет (нужно 100+ подписчиков).',
+  },
+  'ig-format-engagement': {
+    cardId: 'ig-page-format-engagement',
+    back: IG_BACK.content,
+    term: 'Вовлечённость по форматам',
+    descriptor: 'Как распределяются взаимодействия аккаунта по формату за выбранное окно',
+    cardTitle: 'Вовлечённость по форматам',
+    about: {
+      formula: 'Взаимодействия аккаунта (total_interactions) группируются по формату (Лента/Reels/Stories/Карусель), ранжируются по величине.',
+      included: 'Это разрез аккаунта за окно инсайтов Instagram, а не сумма по загруженным постам. Меняйте окно, чтобы пересобрать карточку.',
+      source: 'Instagram insights (total_interactions · media_product_type).',
+    },
+    comparison:
+      'Это разрез вовлечённости по форматам за окно, а не одна метрика периода — сравнение периодов не рассчитывается. Меняйте окно, чтобы пересобрать карточку.',
+    periodControl: true,
+    query: (ig) => ig.queries.breakdowns,
+    derive: (ig) => igFormatEngagementItems(ig.formatItems),
+    errorTitle: 'Не удалось загрузить разрез по форматам',
+    empty: 'Нет данных о форматах за период.',
+    contentView: 'formats',
+  },
+  'ig-story-navigation': {
+    cardId: 'ig-page-story-navigation',
+    back: { to: '/instagram/content?more=stories', label: 'Instagram · Контент' },
+    term: 'Навигация по историям',
+    descriptor: 'Как зрители переходят между активными историями за 24-часовое окно',
+    cardTitle: 'Навигация по историям',
+    about: {
+      formula: 'Суммарные действия навигации активных историй: «Вперёд» (tap_forward), «Назад» (tap_back), «Выход» (tap_exit), «Свайп к следующему» (swipe_forward).',
+      included: 'Истории живут 24 часа — это разрез активных историй, а не срез за выбранный период. Пустые действия скрыты.',
+      source: 'Instagram Stories insights (navigation).',
+    },
+    comparison:
+      'Навигация по активным историям за 24-часовое окно Instagram — не метрика периода; сравнение периодов не рассчитывается.',
+    periodControl: false,
+    query: (ig) => ig.queries.stories,
+    derive: (ig) => igStoryNavItems(ig.stories),
+    errorTitle: 'Не удалось загрузить истории',
+    empty: 'Нет данных о навигации по историям.',
+  },
+};
+
+/** /metrics/ig-* chart-card dispatcher: heatmap and Reels get bespoke bodies; every categorical
+    breakdown shares one truthful rank-list page (Breakdown, no fabricated chart/comparison). */
+function IgChartMetricPage({ metricKey, ig, handle }: { metricKey: string; ig: IgData; handle: string | null }) {
+  const contentScope = useIgScopedPosts(ig);
+  if (metricKey === 'ig-best-time') return <IgBestTimePage ig={ig} handle={handle} />;
+  if (metricKey === 'ig-reels-watch-time') {
+    return <IgReelsWatchTimePage ig={ig} handle={handle} contentScope={contentScope} />;
+  }
+  const def = IG_BREAKDOWN_DEFS[metricKey];
+  if (!def) return null;
+  return <IgBreakdownPage def={def} ig={ig} handle={handle} contentScope={contentScope} />;
+}
+
+type IgContentScope = ReturnType<typeof useIgScopedPosts>;
+
+function contentBack(view: 'formats' | 'reels', campaignId: number | null): { to: string; label: string } {
+  const params = new URLSearchParams({ more: view });
+  if (campaignId != null) params.set('campaign', String(campaignId));
+  return { to: `/instagram/content?${params.toString()}`, label: 'Instagram · Контент' };
+}
+
+function IgBreakdownPage({
+  def,
+  ig,
+  handle,
+  contentScope,
+}: {
+  def: IgBreakdownPageDef;
+  ig: IgData;
+  handle: string | null;
+  contentScope: IgContentScope;
+}) {
+  const { days, setDays } = usePeriod();
+  const campaignScoped = def.contentView != null && contentScope.campaignId != null;
+  const queries: IgQueryLike[] = campaignScoped
+    ? [ig.queries.posts, contentScope.campaignPostsQ]
+    : [def.query(ig)];
+  const pending = queries.some((q) => q.isPending);
+  const error = queries.some((q) => q.isError);
+  const fetching = queries.some((q) => q.isFetching);
+  const items =
+    !pending && !error
+      ? def.contentView === 'formats'
+        ? igFormatEngagementItems(contentScope.formatItems)
+        : def.derive(ig)
+      : [];
+  const back =
+    def.contentView != null
+      ? contentBack(def.contentView, contentScope.campaignId)
+      : def.back;
+  return (
+    <IgChartShell
+      back={back}
+      term={def.term}
+      handle={handle}
+      descriptor={def.descriptor}
+      comparison={<IgNoComparison text={def.comparison} />}
+      about={def.about}
+    >
+      <IgReportCard id={def.cardId} title={def.cardTitle}>
+        {pending ? (
+          <Skeleton className="h-[360px] w-full" />
+        ) : error ? (
+          <ErrorState
+            title={def.errorTitle}
+            onRetry={() => queries.forEach((q) => void q.refetch())}
+            retrying={fetching}
+          />
+        ) : items.length === 0 ? (
+          <EmptyState compact size="chart" title={def.empty} />
+        ) : (
+          <>
+            <Breakdown items={items} />
+            {def.footer?.(ig, items)}
+          </>
+        )}
+      </IgReportCard>
+      {def.periodControl && <WindowBar value={days} onChange={setDays} allowAll={false} />}
+    </IgChartShell>
+  );
+}
+
+/** Reels watch time — per-post categorical bars + a Reels/avg/total summary. No Line/Bar toggle and
+    no fabricated period comparison; the GLOBAL period still narrows the post set through useIgData. */
+function IgReelsWatchTimePage({
+  ig,
+  handle,
+  contentScope,
+}: {
+  ig: IgData;
+  handle: string | null;
+  contentScope: IgContentScope;
+}) {
+  const { days, setDays } = usePeriod();
+  const chartH = useExplorerChartHeight();
+  const queries: IgQueryLike[] =
+    contentScope.campaignId != null
+      ? [ig.queries.posts, contentScope.campaignPostsQ]
+      : [ig.queries.posts];
+  const pending = queries.some((q) => q.isPending);
+  const error = queries.some((q) => q.isError);
+  const fetching = queries.some((q) => q.isFetching);
+  const r = igReelsWatchTime(contentScope.posts);
+  return (
+    <IgChartShell
+      back={contentBack('reels', contentScope.campaignId)}
+      term="Ср. время просмотра по Reels"
+      handle={handle}
+      descriptor="Удержание Reels за выбранное окно — среднее время просмотра по каждому ролику"
+      comparison={
+        <IgNoComparison text="Показатели по каждому Reels за окно — это разрез по публикациям, а не метрика периода; сравнение с прошлым периодом не рассчитывается." />
+      }
+      about={{
+        formula:
+          'Для каждого Reels окна — среднее время просмотра (ig_reels_avg_watch_time) в секундах, столбец на ролик. Сводка: число Reels, среднее по роликам и суммарно просмотренные часы.',
+        included:
+          'Только медиа-продукт REELS из загруженных публикаций окна; Reels без метрики удержания дают 0. Глубина ограничена ~24 последними публикациями (как в Контенте).',
+        source: 'Instagram insights по публикациям (ig_reels_avg_watch_time, ig_reels_video_view_total_time).',
+      }}
+    >
+      <IgReportCard id="ig-page-reels-watch-time" title="Ср. время просмотра по Reels">
+        {pending ? (
+          <Skeleton className="h-[360px] w-full" />
+        ) : error ? (
+          <ErrorState
+            title="Не удалось загрузить публикации"
+            onRetry={() => queries.forEach((q) => void q.refetch())}
+            retrying={fetching}
+          />
+        ) : r.count === 0 ? (
+          <EmptyState compact size="chart" title="За выбранный период Reels нет." />
+        ) : (
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 gap-x-6 gap-y-4 border-t border-border pt-4 sm:grid-cols-3">
+              <KpiCard label="Reels" value={fmt.num(r.count)} />
+              <KpiCard label="Ср. время просмотра" value={`${r.avgWatchAll} сек`} />
+              <KpiCard label="Суммарно просмотрено" value={`${fmt.short(Math.round(r.totalWatchHours))} ч`} />
+            </div>
+            <BarChart values={r.values} labels={r.labels} titles={r.titles} height={chartH} />
+          </div>
+        )}
+      </IgReportCard>
+      <WindowBar value={days} onChange={setDays} allowAll={false} />
+    </IgChartShell>
+  );
+}
+
+/** Best time — the online_followers 7×24 heatmap in its own shape (no Line/Bar/comparison). The
+    body owns the honest empty state (online_followers is frequently empty on the new IG-Login API). */
+function IgBestTimePage({ ig, handle }: { ig: IgData; handle: string | null }) {
+  const q = ig.queries.online;
+  return (
+    <IgChartShell
+      back={IG_BACK.audience}
+      term="Лучшее время для публикации"
+      handle={handle}
+      descriptor="Когда подписчики онлайн — сетка 7×24 по средней активности аудитории"
+      comparison={
+        <IgNoComparison text="Тепловая карта онлайна аудитории — форма распределения, а не одна метрика периода; сравнение периодов не рассчитывается." />
+      }
+      about={{
+        formula:
+          'Для каждого слота (день недели × час) — среднее число подписчиков онлайн из метрики online_followers; насыщенность нормирована на максимум, лучший слот отмечен рамкой.',
+        included:
+          'Часы — в UTC, как отдаёт Instagram. Метрика доступна не всегда и требует 100+ подписчиков — при пустом ответе показываем честное пустое состояние, а не выдуманный слот.',
+        source: 'Instagram insights (online_followers).',
+      }}
+    >
+      <IgReportCard id="ig-page-best-time" title="По дням недели и часам">
+        {q.isPending ? (
+          <Skeleton className="h-[360px] w-full" />
+        ) : q.isError ? (
+          <ErrorState title="Не удалось загрузить активность аудитории" onRetry={() => void q.refetch()} retrying={q.isFetching} />
+        ) : (
+          <BestTimeHeatmap online={ig.online} />
+        )}
+      </IgReportCard>
+    </IgChartShell>
   );
 }

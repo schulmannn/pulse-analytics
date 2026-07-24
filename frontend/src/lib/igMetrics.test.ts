@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { cityName, countryName, followerLevelSeries, netFollowerDaily, postInteractionsByFormat } from '@/lib/igMetrics';
-import type { IgHistoryRow, IgPost } from '@/api/schemas';
+import {
+  cityName,
+  countryName,
+  followerLevelSeries,
+  igCountryItems,
+  igFormatEngagementItems,
+  igReelsWatchTime,
+  igStoryNavItems,
+  netFollowerDaily,
+  postInteractionsByFormat,
+} from '@/lib/igMetrics';
+import type { IgBreakdowns, IgHistoryRow, IgPost, IgStory } from '@/api/schemas';
 
 describe('postInteractionsByFormat — campaign-scoped форматы', () => {
   it('агрегирует только переданные посты и использует сумму действий как fallback', () => {
@@ -104,6 +114,70 @@ describe('followerLevelSeries — абсолютный уровень базы (
       { day: '2026-07-01', value: 800 },
       { day: '2026-07-02', value: 812 },
     ]);
+  });
+});
+
+describe('shared chart-card derivations (card ↔ /metrics/ig-* parity)', () => {
+  it('igCountryItems ranks high→low, localizes, and returns the FULL list (card slices its preview)', () => {
+    const breakdowns = {
+      data: [
+        {
+          name: 'follower_demographics',
+          total_value: {
+            breakdowns: [
+              {
+                dimension_keys: ['country'],
+                results: [
+                  { dimension_values: ['US'], value: 30 },
+                  { dimension_values: ['RU'], value: 120 },
+                  { dimension_values: ['DE'], value: 45 },
+                ],
+              },
+            ],
+          },
+        },
+      ],
+    } as unknown as IgBreakdowns;
+    const items = igCountryItems(breakdowns);
+    expect(items.map((i) => i.value)).toEqual([120, 45, 30]); // ranked high→low, nothing dropped
+    expect(items[0].label).toBe(countryName('RU'));
+    expect(items[0].display).toBe('120');
+  });
+
+  it('igFormatEngagementItems ranks formats and maps labels/hues', () => {
+    const items = igFormatEngagementItems([
+      { label: 'FEED', value: 100 },
+      { label: 'REELS', value: 250 },
+    ]);
+    expect(items.map((i) => i.label)).toEqual(['Reels', 'Лента']);
+    expect(items[0].color).toBeTruthy();
+  });
+
+  it('igStoryNavItems sums navigation actions and drops empty buckets', () => {
+    const stories = [
+      { navigation: { tap_forward: 5, tap_exit: 2 } },
+      { navigation: { tap_forward: 3, swipe_forward: 4 } },
+    ] as unknown as IgStory[];
+    expect(igStoryNavItems(stories)).toEqual([
+      { label: 'Вперёд', value: 8, display: '8' },
+      { label: 'Выход', value: 2, display: '2' },
+      { label: 'Свайп к следующему', value: 4, display: '4' },
+    ]);
+    expect(igStoryNavItems(undefined)).toEqual([]);
+  });
+
+  it('igReelsWatchTime keeps only REELS, averages ms→sec, and totals watch hours', () => {
+    const posts = [
+      { media_product_type: 'REELS', ig_reels_avg_watch_time: 8000, ig_reels_video_view_total_time: 3_600_000, views: 1200 },
+      { media_product_type: 'REELS', ig_reels_avg_watch_time: 4000, ig_reels_video_view_total_time: 1_800_000, views: 600 },
+      { media_product_type: 'FEED', ig_reels_avg_watch_time: 9999 },
+    ] as unknown as IgPost[];
+    const r = igReelsWatchTime(posts);
+    expect(r.count).toBe(2);
+    expect(r.values).toEqual([8, 4]);
+    expect(r.avgWatchAll).toBe(6);
+    expect(Math.round(r.totalWatchHours)).toBe(2);
+    expect(r.labels).toEqual(['R1', 'R2']);
   });
 });
 
