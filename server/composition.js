@@ -37,6 +37,9 @@ const { createYmCollectionJob } = require('./jobs/ymCollectionJob');
 const { createMemoryCache } = require('./infrastructure/memoryCache');
 const { createPersistenceJob } = require('./jobs/persistenceJob');
 const { createTgQrCollectionJob } = require('./jobs/tgQrCollectionJob');
+const { createMentionNotifyJob } = require('./jobs/mentionNotifyJob');
+const { createTgBot } = require('./lib/tgBot');
+const { webhookSecretOf } = require('./lib/tgNotifyText');
 const { createReportScheduleJob } = require('./jobs/reportScheduleJob');
 const { createDailyIngestJob } = require('./jobs/dailyIngestJob');
 const { createJobTracker } = require('./infrastructure/jobTracker');
@@ -377,6 +380,25 @@ function createComposition(config, overrides = {}) {
   const TG_TOKEN = config.telegram.botToken || undefined; // || undefined — как IG выше
   const TG_CHANNEL = config.telegram.channel || undefined;
 
+  // Бот доставки упоминаний — ТОТ ЖЕ TG_BOT_TOKEN, что и статистика канала в routes/tg.js.
+  // Секрет вебхука дериватен от токена (lib/tgNotifyText) — отдельного env не нужно.
+  const tgBot = overrides.tgBot || createTgBot({ token: config.telegram.botToken, fetchImpl: fetchWithTimeout, log });
+  const tgBotWebhookSecret = webhookSecretOf(config.telegram.botToken);
+
+  // Доставка новых упоминаний в личку — jobs/mentionNotifyJob (хвост дневного ingest'а ниже).
+  // Поиск идёт через managed-сессию ПОДПИСЧИКА тем же приватным /mentions/search, что и живой
+  // поиск по кнопке; фоновые записи — через backgroundDb (малый пул).
+  const { processMentionNotify } = createMentionNotifyJob({
+    db: backgroundDb,
+    log,
+    tgCrypto,
+    tgBot,
+    mtprotoPost,
+    MTPROTO_TOKEN,
+    MTPROTO_TIMEOUT_HEAVY_MS,
+    appUrl: config.http.publicUrl,
+  });
+
   // Email-выгрузка отчётов (weekly/monthly + «Неделя канала» в теле) — jobs/reportScheduleJob;
   // дёргается из ingest-хвостов. weekDigest-движок job требует сам (lib).
   const { processReportSchedules } = createReportScheduleJob({
@@ -403,6 +425,7 @@ function createComposition(config, overrides = {}) {
     processReportSchedules,
     processPersistence,
     processTgQrCollection,
+    processMentionNotify,
   });
 
   // ── AI-ассистент (STEEP-паттерн) ──────────────────────────────────
@@ -505,6 +528,8 @@ function createComposition(config, overrides = {}) {
       collectManagedPostStatsNow,
       TG_TOKEN,
       TG_CHANNEL,
+      tgBot,
+      tgBotWebhookSecret,
       timingSafeEqualStr,
       dailyIngestJob,
       jobTracker,

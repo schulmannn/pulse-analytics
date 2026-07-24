@@ -16,6 +16,7 @@ const { createChannelsRepo } = require('./repos/channelsRepo');
 const { createSourcesRepo } = require('./repos/sourcesRepo');
 const { createIntegrationsRepo } = require('./repos/integrationsRepo');
 const { createMentionSettingsRepo } = require('./repos/mentionSettingsRepo');
+const { createMentionNotifyRepo } = require('./repos/mentionNotifyRepo');
 const { createAiChatsRepo } = require('./repos/aiChatsRepo');
 const { createAuditRepo } = require('./repos/auditRepo');
 const { createGdprService } = require('./services/gdprService');
@@ -231,6 +232,9 @@ function createDatabase(config, overrides = {}) {
     enabled,
     getAccessibleChannel: channelsRepo.getChannel,
   });
+  // Доставка упоминаний (035): привязка бота (uid→chat) + личные подписки. Запись подписки
+  // вшивает channelAccessSql в SQL (member-view достаточно — поиск идёт сессией подписчика).
+  const mentionNotifyRepo = createMentionNotifyRepo({ pool, enabled });
   // Личные AI-диалоги (028): все методы uid-scoped; аналитика в чат попадает только через
   // ForActor-инструменты aiChatService, не через этот repo.
   const aiChatsRepo = createAiChatsRepo({ pool, enabled });
@@ -262,6 +266,7 @@ function createDatabase(config, overrides = {}) {
     reports: reportsRepo, // REPORT_SCHEDULES, listReports, getReport, createReport, updateReport, deleteReport, listDueReports, markReportSent, reserveReportDelivery, clearReportDelivery, listPostsWindow
     campaigns: campaignsRepo, // CAMPAIGN_*, listCampaigns, getCampaign, create/update/deleteCampaign, add/remove/listCampaignPosts, getCampaignSummary
     mentionSettings: mentionSettingsRepo, // getMentionSettingsInternal/ForActor, upsertMentionSettingsForActor
+    mentionNotify: mentionNotifyRepo, // issueMentionNotifyLink, bindMentionNotifyByToken, get/deleteMentionNotifyBinding, unbindMentionNotifyChat, set/getMentionNotifySubscription*, listRunnableMentionNotifySubscriptions, markMentionNotifyRun, filterNewMentions
     aiChats: aiChatsRepo, // listAiChats, createAiChat, getAiChat, deleteAiChat, listAiChatMessages, appendAiChatMessage, getAiUsageToday, bumpAiUsage
     jobs: jobsRepo, // claimJob, completeJob, failJob, getJob, runJobOnce, pruneTerminalJobs
     audit: auditRepo, // recordAuditEvent, pruneAuditEvents
