@@ -98,10 +98,10 @@ export function IgContentMobile({ ig, tabs }: { ig: IgData; tabs: ReactNode }) {
       </WidgetGroup>
 
       <Section title="Reels: удержание и просмотры">
-        <ReelsBlock posts={posts} />
+        <ReelsBlock posts={posts} campaignId={campaignId} />
       </Section>
 
-      <FormatsBlock items={formatItems} />
+      <FormatsBlock items={formatItems} campaignId={campaignId} />
 
       <WidgetGroup id="ig-content-insights" className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-6">
         <ChartSection id="ig-hashtags" title="Эффективность хэштегов" defaultSize="full" noExpand>

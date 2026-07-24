@@ -565,7 +565,13 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
           ))}
         </div>
       </div>
-      <IgSecondaryBody view={secondary} ig={ig} posts={scope} formatItems={formatItems} />
+      <IgSecondaryBody
+        view={secondary}
+        ig={ig}
+        posts={scope}
+        formatItems={formatItems}
+        campaignId={campaignId}
+      />
     </section>
   );
   const campaignDataBlocked = campaignId != null && (campaignPostsQ.isPending || campaignPostsQ.isError);
@@ -963,19 +969,21 @@ function IgSecondaryBody({
   ig,
   posts,
   formatItems,
+  campaignId,
 }: {
   view: IgSecondaryView;
   ig: IgData;
   posts: IgPost[];
   formatItems: { label: string; value: number }[];
+  campaignId: number | null;
 }) {
   switch (view) {
     case 'formats':
-      return <FormatsBlock items={formatItems} />;
+      return <FormatsBlock items={formatItems} campaignId={campaignId} />;
     case 'reels':
       return (
         <Section title="Reels: удержание и просмотры">
-          <ReelsBlock posts={posts} />
+          <ReelsBlock posts={posts} campaignId={campaignId} />
         </Section>
       );
     case 'hashtags':

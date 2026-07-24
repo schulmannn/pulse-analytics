@@ -7,56 +7,42 @@ import { WidgetGroup } from '@/components/widgets/WidgetGroup';
 import { breakdownVariants, reorderDefault } from '@/components/widgets/variants';
 import type { IgBreakdowns, IgOnline } from '@/api/schemas';
 import {
-  tvBreakdown,
   aggregateOnline,
-  cityName,
-  countryName,
-  GENDER_LABEL,
-  AGE_ORDER,
-  CHART_CYCLE,
+  igAgeItems,
+  igGenderItems,
+  igCountryItems,
+  igCityItems,
   DAY_NAMES,
 } from '@/lib/igMetrics';
 
 export function AudienceBlock({ breakdowns, followers }: { breakdowns: IgBreakdowns | undefined; followers: number }) {
-  const ageRaw = tvBreakdown(breakdowns?.data, 'follower_demographics', 'age');
-  const age = AGE_ORDER.map((bucket) => ageRaw.find((a) => a.label === bucket)).filter(Boolean) as { label: string; value: number }[];
-  const gender = tvBreakdown(breakdowns?.data, 'follower_demographics', 'gender');
-  const countries = tvBreakdown(breakdowns?.data, 'follower_demographics', 'country').sort((a, b) => b.value - a.value).slice(0, 8);
-  const cities = tvBreakdown(breakdowns?.data, 'follower_demographics', 'city').sort((a, b) => b.value - a.value).slice(0, 8);
+  // Shared derivations (igMetrics): the card and each /metrics/ig-* full page read the SAME math, so
+  // their numbers/labels can never diverge. Country/city are full ranked lists here — the card keeps
+  // its top-N preview slice, the full page shows all.
+  const ageItems = igAgeItems(breakdowns);
+  const genderItems = igGenderItems(breakdowns);
+  const countryItems = igCountryItems(breakdowns).slice(0, 8);
+  const cityItems = igCityItems(breakdowns).slice(0, 8);
 
-  const covered = age.reduce((acc, a) => acc + a.value, 0);
+  const covered = ageItems.reduce((acc, a) => acc + a.value, 0);
   const coverage = followers > 0 && covered > 0 ? covered / followers : 1;
-
-  // Every demographic widget goes through breakdownVariants — the full presentation set
-  // (Список/Столбцы/Круговая/Столбцы+значения) + the edit-dialog carousel, like TG widgets.
-  const ageItems = age.map((a) => ({ label: a.label, value: a.value, display: fmt.short(a.value) }));
-  const genderItems = gender
-    .sort((a, b) => b.value - a.value)
-    .map((g, i) => ({
-      label: GENDER_LABEL[g.label] ?? g.label,
-      value: g.value,
-      display: fmt.short(g.value),
-      color: CHART_CYCLE[i % CHART_CYCLE.length],
-    }));
-  const countryItems = countries.map((c) => ({ label: countryName(c.label), value: c.value, display: fmt.short(c.value) }));
-  const cityItems = cities.map((c) => ({ label: cityName(c.label), value: c.value, display: fmt.short(c.value) }));
 
   return (
     <div className="space-y-6">
-      {/* ONE reorderable WidgetGroup (TG parity): the four demography cards gain
-          Выше/Ниже/Переставить/Скрыть and can be arranged like any TG feed grid. */}
+      {/* One WidgetGroup keeps the four demographic cards on the shared dashboard grid. Whole-card
+          click drills to a dedicated /metrics/ig-* page instead of the generic ?detail= overlay. */}
       <WidgetGroup id="ig-audience" className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-6">
         {ageItems.length > 0 ? (
           // Возраст default = столбцы (упорядоченные бакеты читаются гистограммой).
-          <ChartSection title="Возраст" variants={reorderDefault(breakdownVariants(ageItems), 'bar')} />
+          <ChartSection title="Возраст" drillTo="/metrics/ig-age" variants={reorderDefault(breakdownVariants(ageItems), 'bar')} />
         ) : (
-          <ChartSection title="Возраст">
+          <ChartSection title="Возраст" drillTo="/metrics/ig-age">
             <EmptyChart />
           </ChartSection>
         )}
-        <ChartSection title="Пол" variants={breakdownVariants(genderItems)} />
-        <ChartSection title="Топ стран" variants={breakdownVariants(countryItems)} />
-        <ChartSection title="Топ городов" variants={breakdownVariants(cityItems)} />
+        <ChartSection title="Пол" drillTo="/metrics/ig-gender" variants={breakdownVariants(genderItems)} />
+        <ChartSection title="Топ стран" drillTo="/metrics/ig-countries" variants={breakdownVariants(countryItems)} />
+        <ChartSection title="Топ городов" drillTo="/metrics/ig-cities" variants={breakdownVariants(cityItems)} />
       </WidgetGroup>
       {coverage < 0.98 && (
         <p className="px-1 text-2xs text-muted-foreground/70">
