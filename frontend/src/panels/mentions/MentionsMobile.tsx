@@ -133,7 +133,11 @@ export function MentionsMobile() {
       <WidgetGroup id="mentions" className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-6">
         <MentionsByDayWidget byDay={byDay} />
 
-        <ChartSection title="Кто упоминает · топ каналов" variants={breakdownVariants(breakdownItems)} />
+        <ChartSection
+          title="Кто упоминает · топ каналов"
+          variants={breakdownVariants(breakdownItems)}
+          drillTo="/metrics/mentions-sources"
+        />
       </WidgetGroup>
 
       {/* Лента последних упоминаний — full = content-height so the feed grows instead of
@@ -231,6 +235,7 @@ export function MentionsByDayWidget({ byDay, id, homeKey }: { byDay: Record<stri
       id={id}
       homeKey={homeKey}
       title="Упоминаний по дням"
+      drillTo="/metrics/mentions-timeline"
       periodControl
       variants={(period) => {
         const w = mentionsWindow(byDay, period.days);

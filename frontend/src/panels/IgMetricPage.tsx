@@ -4,6 +4,7 @@ import { Link, useParams } from 'react-router-dom';
 import { isMsMetricKey } from '@/panels/sklad/msMetricKeys';
 import { isYmMetricKey } from '@/panels/metrika/ymMetricKeys';
 import { isTgExtraMetricKey } from '@/panels/tgMetricKeys';
+import { isMentionsMetricKey } from '@/panels/mentions/mentionsMetricKeys';
 import { useIgData } from '@/lib/useIgData';
 import type { IgData } from '@/lib/useIgData';
 import { usePeriod, type PeriodDays } from '@/lib/period';
@@ -184,10 +185,14 @@ const YmMetricPageLazy = lazy(lazyWithReload(() => import('@/panels/metrika/YmMe
     they are only pulled when a `tg-*` extra key opens, never for a numeric TG drill (views/er/…). */
 const TgMetricPageLazy = lazy(lazyWithReload(() => import('@/panels/TgMetricPage').then((m) => ({ default: m.TgMetricPage }))));
 
+/** Mentions chart pages live in their own lazy chunk and reuse the same metric-route shell. */
+const MentionsMetricPageLazy = lazy(lazyWithReload(() => import('@/panels/mentions/MentionsMetricPage').then((m) => ({ default: m.MentionsMetricPage }))));
+
 /** /metrics/:key dispatcher: numeric TG keys → the steep explorer, tg-* extra keys → the TG chart
-    pages, ig-* keys → the IG page, ms-* keys → the МойСклад page, ym-* keys → the Метрика page.
+    pages, mentions-* keys → the Mentions pages, ig-* keys → the IG page, ms-* keys → the
+    МойСклад page, ym-* keys → the Метрика page.
     MetricPage itself redirects unknown keys home, so the fallthrough stays safe. YM/MS/IG/tg-extra
-    are each matched before the numeric-TG fallthrough so their lazy branch always wins. */
+    and Mentions are each matched before the numeric-TG fallthrough so their lazy branch wins. */
 export function MetricRoute() {
   const { key } = useParams<{ key: string }>();
   if (isYmMetricKey(key)) {
@@ -201,6 +206,13 @@ export function MetricRoute() {
     return (
       <Suspense fallback={<MetricRouteFallback />}>
         <TgMetricPageLazy metricKey={key} />
+      </Suspense>
+    );
+  }
+  if (isMentionsMetricKey(key)) {
+    return (
+      <Suspense fallback={<MetricRouteFallback />}>
+        <MentionsMetricPageLazy metricKey={key} />
       </Suspense>
     );
   }

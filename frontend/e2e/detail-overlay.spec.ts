@@ -6,8 +6,7 @@ import { bootDemo } from './helpers';
  *  1. Escape закрывает разворот С ПЕРВОГО раза и в диплинк-сценарии (URL открыл оверлей без клика),
  *     чистит ?detail= из URL (replace) и оверлей НЕ возвращается после settle.
  *  2. Обычное открытие кликом: Escape закрывает, фокус возвращается опенеру (шапочный ↗).
- *  3. Не-rich тело (без период/статы-эксплорера) разворачивается в контент-панель по центру вьюпорта,
- *     а rich-развороты (период/статы) держат полную высоту.
+ *  3. Не-rich тело (без период/статы-эксплорера) разворачивается в контент-панель по центру вьюпорта.
  * Мобильный полноэкранный шит НЕ здесь — его геометрию держит mobile-nav.spec.ts.
  *
  * Регресс-фикстура оверлея — «Лучшие публикации» (НЕ график: карточки постов). Прежняя фикстура
@@ -65,7 +64,7 @@ test('клик по карточке открывает детализацию, 
   await expect(page).not.toHaveURL(/[?&]detail=/);
 });
 
-test('не-rich тело — контент-панель по центру; rich держит полную высоту', async ({ page }, testInfo) => {
+test('не-rich тело — контент-панель по центру', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop-1440', 'desktop-сайзинг панели');
   await bootDemo(page, OVERLAY_URL);
   await expect(page.getByRole('dialog', { name: `График: ${OVERLAY}` })).toBeVisible();
@@ -76,12 +75,4 @@ test('не-rich тело — контент-панель по центру; rich
   // …и по центру вьюпорта.
   const mid = compact.top + compact.height / 2;
   expect(Math.abs(mid - compact.vh / 2)).toBeLessThanOrEqual(24);
-
-  // Rich-разворот (период-пилюли/статы: «Упоминания по дням») остаётся полноэкранной панелью.
-  await bootDemo(page, '/mentions?detail=mentions-timeline');
-  await expect(page.getByRole('dialog', { name: 'График: Упоминания по дням' })).toBeVisible();
-  const rich = await panelBox(page);
-  expect(rich.height).toBeGreaterThan(rich.vh * 0.9);
-  // Не-rich тело строго ниже rich full-height — распорка машинерии сайзинга, а не совпадение порога.
-  expect(compact.height).toBeLessThan(rich.height);
 });
