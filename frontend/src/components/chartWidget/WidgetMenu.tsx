@@ -12,14 +12,11 @@ export interface WidgetMenuProps {
   label: string;
   widgetId: string;
   group: GroupCtxValue | null;
-  sequenceIndex: number;
   pinned: boolean;
   homeKey?: string;
   prefs: WidgetPrefs;
   onPrefsChange: (next: WidgetPrefs) => void;
-  onExpand: () => void;
   onEdit: () => void;
-  allowExpand: boolean;
   allowEdit: boolean;
   reorder: boolean;
 }
@@ -30,14 +27,11 @@ export function WidgetMenu({
   label,
   widgetId,
   group,
-  sequenceIndex,
   pinned,
   homeKey,
   prefs,
   onPrefsChange,
-  onExpand,
   onEdit,
-  allowExpand,
   allowEdit,
   reorder,
 }: WidgetMenuProps) {
@@ -64,16 +58,12 @@ export function WidgetMenu({
     };
   }, [open, onOpenChange]);
 
+  if (!group && !homeKey && !allowEdit) return null;
+
   const focusFirstItem = () =>
     requestAnimationFrame(() =>
       rootRef.current?.querySelector<HTMLElement>('[role="menuitem"]:not(:disabled)')?.focus(),
     );
-
-  const keepFocusInMenu = () =>
-    requestAnimationFrame(() => {
-      if (document.activeElement === document.body)
-        rootRef.current?.querySelector<HTMLElement>('[role="menuitem"]:not(:disabled)')?.focus();
-    });
 
   return (
     <div className={`relative shrink-0 ${reorder ? 'pointer-events-none invisible' : ''}`} ref={rootRef}>
@@ -125,49 +115,8 @@ export function WidgetMenu({
             items[next]?.focus();
           }}
         >
-          {allowExpand && (
-            <>
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  buttonRef.current?.focus();
-                  onOpenChange(false);
-                  onExpand();
-                }}
-                className={MENU_ITEM_CLASS}
-              >
-                <MenuIcon kind="expand" /> Развернуть
-              </button>
-              <MenuSeparator />
-            </>
-          )}
           {group && (
             <>
-              <button
-                type="button"
-                role="menuitem"
-                disabled={sequenceIndex <= 0}
-                onClick={() => {
-                  group.move(widgetId, -1);
-                  keepFocusInMenu();
-                }}
-                className={MENU_ITEM_CLASS}
-              >
-                <MenuIcon kind="up" /> Выше
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                disabled={sequenceIndex < 0 || sequenceIndex >= group.sequence.length - 1}
-                onClick={() => {
-                  group.move(widgetId, 1);
-                  keepFocusInMenu();
-                }}
-                className={MENU_ITEM_CLASS}
-              >
-                <MenuIcon kind="down" /> Ниже
-              </button>
               <button
                 type="button"
                 role="menuitem"
@@ -261,7 +210,7 @@ function MenuSeparator() {
   return <div role="separator" className="mx-1 my-1 h-px bg-border" />;
 }
 
-function MenuIcon({ kind }: { kind: 'up' | 'down' | 'edit' | 'hide' | 'drag' | 'expand' | 'home' }) {
+function MenuIcon({ kind }: { kind: 'edit' | 'hide' | 'drag' | 'home' }) {
   return (
     <svg
       viewBox="0 0 16 16"
@@ -273,7 +222,6 @@ function MenuIcon({ kind }: { kind: 'up' | 'down' | 'edit' | 'hide' | 'drag' | '
       className="h-3.5 w-3.5 shrink-0"
       aria-hidden="true"
     >
-      {kind === 'expand' && <path d="M5 11 11 5M6.5 5H11v4.5" />}
       {kind === 'home' && (
         <>
           <path d="m2 7 6-5 6 5" />
@@ -281,8 +229,6 @@ function MenuIcon({ kind }: { kind: 'up' | 'down' | 'edit' | 'hide' | 'drag' | '
           <path d="M6.5 14v-4h3v4" />
         </>
       )}
-      {kind === 'up' && <path d="m4 10 4-4 4 4" />}
-      {kind === 'down' && <path d="m4 6 4 4 4-4" />}
       {kind === 'drag' && (
         <>
           <path d="M8 2v12M2 8h12" />

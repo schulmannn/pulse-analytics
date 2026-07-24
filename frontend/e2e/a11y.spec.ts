@@ -100,6 +100,10 @@ test('keyboard: widget ⋯-menu opens with Enter and closes with Escape', async 
   await menuButton.focus();
   await page.keyboard.press('Enter');
   await expect(menuButton).toHaveAttribute('aria-expanded', 'true');
+  const menu = page.getByRole('menu').first();
+  await expect(menu.getByRole('menuitem', { name: 'Развернуть', exact: true })).toHaveCount(0);
+  await expect(menu.getByRole('menuitem', { name: 'Выше', exact: true })).toHaveCount(0);
+  await expect(menu.getByRole('menuitem', { name: 'Ниже', exact: true })).toHaveCount(0);
   await page.keyboard.press('Escape');
   await expect(menuButton).toHaveAttribute('aria-expanded', 'false');
   // Escape must hand focus back to the trigger (the focused menu item unmounted).
