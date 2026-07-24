@@ -5,6 +5,7 @@ import { WidgetBody } from './WidgetBody';
 import { WidgetHeader } from './WidgetHeader';
 import { WidgetEditOverlay, WidgetExpandOverlay } from './WidgetOverlays';
 import { WidgetPeriodPills } from './WidgetPeriodPills';
+import { WidgetResizeHandle } from './WidgetResizeHandle';
 import type { ChartSectionProps } from './types';
 import { SourceIdentity } from '@/components/SourceIdentity';
 import { useHomeSource } from '@/lib/homeSourceContext';
@@ -64,10 +65,12 @@ export function ChartSection(props: ChartSectionProps) {
   return (
     <section
       ref={model.refs.sectionRef}
-      className={`min-w-0 ${reorder ? 'cursor-grab touch-none select-none active:cursor-grabbing' : ''} ${
+      className={`relative min-w-0 ${reorder ? 'cursor-grab touch-none select-none active:cursor-grabbing' : ''} ${
         SIZE_COL_SPAN[effectiveSize]
       } ${model.controls.menuOpen ? 'z-10' : ''} ${props.className ?? ''}`}
       style={model.layout.outerStyle}
+      data-widget-size={effectiveSize}
+      data-widget-user-sized={model.layout.userSized ? '' : undefined}
       onPointerDown={
         reorder
           ? (event) => {
@@ -196,6 +199,14 @@ export function ChartSection(props: ChartSectionProps) {
         />
       </div>
       </WidgetInViewContext.Provider>
+      {model.layout.resizeEnabled && !reorder && (
+        <WidgetResizeHandle
+          label={label}
+          size={effectiveSize}
+          minSize={model.layout.resizeMinSize}
+          onResize={model.controls.resizeWidget}
+        />
+      )}
 
       <WidgetEditOverlay
         open={model.controls.editOpen}

@@ -9,6 +9,8 @@ export interface ConfigWidgetEditor {
   color?: number;
   tinted?: boolean;
   size?: WidgetSize;
+  minSize?: WidgetSize;
+  onSizeChange?: (size: WidgetSize) => void;
   target?: number | null;
 }
 

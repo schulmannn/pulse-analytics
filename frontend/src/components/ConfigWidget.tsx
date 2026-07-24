@@ -13,7 +13,7 @@ import { useIgWidgetData } from '@/lib/useIgWidgetData';
 import { useMsWidgetData } from '@/lib/useMsWidgetData';
 import { useYmWidgetData } from '@/lib/useYmWidgetData';
 import { getMetric } from '@/lib/widgetMetrics';
-import { coerceSizeForViz, effectiveTinted } from '@/lib/widgetSurface';
+import { coerceSizeForViz, effectiveTinted, vizAllowsThirdWidth } from '@/lib/widgetSurface';
 import { updateWidgetConfig } from '@/lib/widgetStore';
 import { LEGACY_LABEL, legacyKeyForMetricId, type LegacyKey } from '@/lib/legacyWidgets';
 import {
@@ -94,6 +94,8 @@ export const ConfigWidget = memo(function ConfigWidget({ config, homeKey }: { co
         color: config.style?.color,
         tinted: effectiveTinted(config.viz, config.style?.tinted),
         size,
+        minSize: vizAllowsThirdWidth(config.viz) ? 'third' : 'half',
+        onSizeChange: (nextSize) => updateWidgetConfig(config.id, { size: nextSize }),
         // The goal line is now resolver-computed (result.target) and provided by WidgetRenderer, so
         // the card-level target override is no longer needed (it also covers dynamic targets, S9).
       }}
