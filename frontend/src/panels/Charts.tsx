@@ -104,18 +104,28 @@ export function HistoryChartBlock({ id, homeKey }: HomeBlockProps = {}) {
   // isPending (не isLoading): запрос выключен, пока канал не известен, — скелетон и там.
   const { data, isPending, isError, refetch } = useHistory(730);
 
-  if (isPending) return <ChartSkeleton title="История подписчиков" id={id} homeKey={homeKey} defaultSize="half" />;
+  if (isPending) {
+    return (
+      <ChartSkeleton
+        title="История подписчиков"
+        id={id}
+        homeKey={homeKey}
+        defaultSize="half"
+        drillTo="/metrics/subscribers"
+      />
+    );
+  }
   // Честная ошибка в СВОЕЙ карточке (dense-flow затянул бы дыру соседями — пропажа незаметна).
   if (isError) {
     return (
-      <ChartSection title="История подписчиков" defaultSize="half" id={id} homeKey={homeKey}>
+      <ChartSection title="История подписчиков" defaultSize="half" id={id} homeKey={homeKey} drillTo="/metrics/subscribers">
         <ErrorState title="Не удалось загрузить историю" onRetry={() => refetch()} />
       </ChartSection>
     );
   }
   if (!data || !data.enabled) {
     return (
-      <ChartSection title="История подписчиков" defaultSize="half" id={id} homeKey={homeKey}>
+      <ChartSection title="История подписчиков" defaultSize="half" id={id} homeKey={homeKey} drillTo="/metrics/subscribers">
         <EmptyState compact title="История подписчиков пока недоступна" />
       </ChartSection>
     );
@@ -127,7 +137,7 @@ export function HistoryChartBlock({ id, homeKey }: HomeBlockProps = {}) {
     .sort((a, b) => a.day.localeCompare(b.day));
   if (archiveRows.length < 2) {
     return (
-      <ChartSection title="История подписчиков" defaultSize="half" id={id} homeKey={homeKey}>
+      <ChartSection title="История подписчиков" defaultSize="half" id={id} homeKey={homeKey} drillTo="/metrics/subscribers">
         <EmptyState compact title="История подписчиков пока пуста" />
       </ChartSection>
     );
@@ -300,7 +310,7 @@ export function HeatmapChartBlock({ id, homeKey }: HomeBlockProps = {}) {
     // The 7×24 grid is genuinely wide content → a full-row tile wherever the section lands in a
     // widget grid. periodControl opts into the resolved period: the feed top bar owns it on work
     // pages, while a Home widget keeps an independent saved value.
-    <ChartSection title="Тепловая карта активности" defaultSize="full" periodControl id={id} homeKey={homeKey}>
+    <ChartSection title="Тепловая карта активности" defaultSize="full" periodControl id={id} homeKey={homeKey} drillTo="/metrics/tg-heatmap">
       <HeatmapWidgetBody />
     </ChartSection>
   );
@@ -464,14 +474,24 @@ function HeatmapSurface({
 export function VelocityChartBlock({ id, homeKey }: HomeBlockProps = {}) {
   const { data, isPending } = useVelocity();
 
-  if (isPending) return <ChartSkeleton title="Скорость набора просмотров" id={id} homeKey={homeKey} defaultSize="half" />;
+  if (isPending) {
+    return (
+      <ChartSkeleton
+        title="Скорость набора просмотров"
+        id={id}
+        homeKey={homeKey}
+        defaultSize="half"
+        drillTo="/metrics/tg-velocity"
+      />
+    );
+  }
 
   const available = data?.available ?? false;
   const byDay = data?.by_day ?? [];
 
   if (!available || byDay.length < 2) {
     return (
-      <ChartSection title="Скорость набора просмотров" id={id} homeKey={homeKey} defaultSize="half">
+      <ChartSection title="Скорость набора просмотров" id={id} homeKey={homeKey} defaultSize="half" drillTo="/metrics/tg-velocity">
         <LineChart values={[]} />
       </ChartSection>
     );
@@ -492,6 +512,7 @@ export function VelocityChartBlock({ id, homeKey }: HomeBlockProps = {}) {
       id={id}
       homeKey={homeKey}
       defaultSize="half"
+      drillTo="/metrics/tg-velocity"
       variants={[
         {
           key: 'line',
@@ -552,9 +573,21 @@ export function VelocityWidgetBody({ viz }: { viz: WidgetViz }) {
   );
 }
 
-function ChartSkeleton({ title, id, homeKey, defaultSize }: { title: string; id?: string; homeKey?: string; defaultSize?: WidgetSize }) {
+function ChartSkeleton({
+  title,
+  id,
+  homeKey,
+  defaultSize,
+  drillTo,
+}: {
+  title: string;
+  id?: string;
+  homeKey?: string;
+  defaultSize?: WidgetSize;
+  drillTo?: string;
+}) {
   return (
-    <ChartSection title={title} id={id} homeKey={homeKey} defaultSize={defaultSize}>
+    <ChartSection title={title} id={id} homeKey={homeKey} defaultSize={defaultSize} drillTo={drillTo}>
       <ChartSkeletonBody />
     </ChartSection>
   );

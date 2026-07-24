@@ -3,6 +3,7 @@ import { InspectorHandle } from '@/components/InspectorHandle';
 import { Link, useParams } from 'react-router-dom';
 import { isMsMetricKey } from '@/panels/sklad/msMetricKeys';
 import { isYmMetricKey } from '@/panels/metrika/ymMetricKeys';
+import { isTgExtraMetricKey } from '@/panels/tgMetricKeys';
 import { useIgData } from '@/lib/useIgData';
 import { usePeriod, type PeriodDays } from '@/lib/period';
 import { pairDelta } from '@/lib/igMetrics';
@@ -163,15 +164,27 @@ const MsMetricPageLazy = lazy(lazyWithReload(() => import('@/panels/sklad/MsMetr
     `ym-*` key opens here). */
 const YmMetricPageLazy = lazy(lazyWithReload(() => import('@/panels/metrika/YmMetricPage').then((m) => ({ default: m.YmMetricPage }))));
 
-/** /metrics/:key dispatcher: TG keys → the TG explorer, ig-* keys → the IG page, ms-* keys → the
-    МойСклад page, ym-* keys → the Метрика page. MetricPage itself redirects unknown keys home, so
-    the fallthrough stays safe. YM is matched before IG/TG so its lazy branch always wins. */
+/** Telegram «extra chart» pages (activity heatmap / views velocity) share the lazy-chunk discipline:
+    they are only pulled when a `tg-*` extra key opens, never for a numeric TG drill (views/er/…). */
+const TgMetricPageLazy = lazy(lazyWithReload(() => import('@/panels/TgMetricPage').then((m) => ({ default: m.TgMetricPage }))));
+
+/** /metrics/:key dispatcher: numeric TG keys → the steep explorer, tg-* extra keys → the TG chart
+    pages, ig-* keys → the IG page, ms-* keys → the МойСклад page, ym-* keys → the Метрика page.
+    MetricPage itself redirects unknown keys home, so the fallthrough stays safe. YM/MS/IG/tg-extra
+    are each matched before the numeric-TG fallthrough so their lazy branch always wins. */
 export function MetricRoute() {
   const { key } = useParams<{ key: string }>();
   if (isYmMetricKey(key)) {
     return (
       <Suspense fallback={<MetricRouteFallback />}>
         <YmMetricPageLazy metricKey={key} />
+      </Suspense>
+    );
+  }
+  if (isTgExtraMetricKey(key)) {
+    return (
+      <Suspense fallback={<MetricRouteFallback />}>
+        <TgMetricPageLazy metricKey={key} />
       </Suspense>
     );
   }
