@@ -17,7 +17,7 @@ function createRoutes(overrides = {}) {
     put(path, ...handlers) { routes.set(`PUT ${path}`, handlers); },
     delete(path, ...handlers) { routes.set(`DELETE ${path}`, handlers); },
   };
-  const calls = { audit: [], logs: [], sent: [], unbound: [], links: [], subs: [] };
+  const calls = { audit: [], logs: [], sent: [], unbound: [], links: [], subs: [], testRuns: [] };
   const db = {
     enabled: true,
     isDbUnavailable: () => false,
@@ -26,10 +26,17 @@ function createRoutes(overrides = {}) {
     getMentionNotifyBinding: async () => ({ uid: 11, chat_id: 555, username: 'user', bound_at: '2026-07-22T10:00:00+00:00' }),
     deleteMentionNotifyBinding: async () => true,
     unbindMentionNotifyChat: async (chatId) => { calls.unbound.push(chatId); return true; },
-    getMentionNotifySubscription: async () => ({ enabled: false, last_run_at: null, last_notified_at: null, last_error: null }),
-    setMentionNotifySubscriptionForActor: async (channelId, actor, enabled) => {
-      calls.subs.push({ channelId, uid: actor.uid, enabled });
-      return { channel_id: channelId, uid: actor.uid, enabled, last_run_at: null, last_notified_at: null, last_error: null };
+    getMentionNotifySubscription: async () => ({
+      enabled: false, send_days: [1, 5], send_hour: 9,
+      last_run_at: null, last_notified_at: null, last_error: null,
+    }),
+    setMentionNotifySubscriptionForActor: async (channelId, actor, enabled, schedule) => {
+      calls.subs.push({ channelId, uid: actor.uid, enabled, schedule });
+      return {
+        channel_id: channelId, uid: actor.uid, enabled,
+        send_days: (schedule && schedule.send_days) || [], send_hour: (schedule && schedule.send_hour) ?? 10,
+        last_run_at: null, last_notified_at: null, last_error: null,
+      };
     },
     getMentionSettingsForActor: async () => ({ configured: true }),
     getTgSession: async () => ({ uid: 11, session_enc: 'enc', connection_state: 'healthy' }),
@@ -54,6 +61,8 @@ function createRoutes(overrides = {}) {
     newToken: () => 'validtoken123',
     sha256,
     appBase: () => 'https://atlavue.app',
+    runMentionNotifyTest: overrides.runMentionNotifyTest
+      || (async (channelId, uid) => { calls.testRuns.push({ channelId, uid }); return { ok: true, seed: false, found: 2, fresh: 1, sent: 1 }; }),
   });
   return { routes, db, calls };
 }
@@ -178,13 +187,58 @@ test('link endpoint fails closed when webhook registration fails', async () => {
 
 // ── Статус и тумблер ───────────────────────────────────────────────────────────────────────────────
 
-test('GET status aggregates binding, subscription and requirements', async () => {
+test('GET status aggregates binding, subscription (incl. schedule) and requirements', async () => {
   const { routes } = createRoutes();
   const res = await invoke(routes.get('GET /api/tg/mention-notify'));
   assert.equal(res.statusCode, 200);
   assert.equal(res.body.binding.bound, true);
   assert.equal(res.body.subscription.enabled, false);
+  assert.deepEqual(res.body.subscription.send_days, [1, 5]);
+  assert.equal(res.body.subscription.send_hour, 9);
   assert.deepEqual(res.body.requirements, { rules_configured: true, session_state: 'ok' });
+});
+
+test('PUT persists the schedule, normalizing a full week to the canonical empty set', async () => {
+  const { routes, calls } = createRoutes();
+  const res = await invoke(routes.get('PUT /api/tg/mention-notify'), {
+    body: { enabled: true, send_days: [7, 6, 5, 4, 3, 2, 1], send_hour: 18 },
+  });
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(calls.subs[0].schedule, { send_days: [], send_hour: 18 });
+  assert.equal(res.body.send_hour, 18);
+});
+
+test('PUT rejects malformed schedules with a 400 instead of silently swallowing them', async () => {
+  const { routes } = createRoutes();
+  for (const body of [
+    { enabled: false, send_days: [0] },
+    { enabled: false, send_days: [1, 8] },
+    { enabled: false, send_days: 'mon' },
+    { enabled: false, send_days: [] },
+    { enabled: false, send_hour: 24 },
+    { enabled: false, send_hour: 9.5 },
+  ]) {
+    const res = await invoke(routes.get('PUT /api/tg/mention-notify'), { body });
+    assert.equal(res.statusCode, 400, JSON.stringify(body));
+  }
+});
+
+test('POST run maps the job outcome: 200 with counters, 409 for a not-ready subscription', async () => {
+  const ok = createRoutes();
+  const res = await invoke(ok.routes.get('POST /api/tg/mention-notify/run'));
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body, { ok: true, seed: false, found: 2, fresh: 1, sent: 1 });
+  assert.deepEqual(ok.calls.testRuns, [{ channelId: 7, uid: 11 }]);
+  assert.equal(ok.calls.audit[0].action, 'tg.mention_notify.test_run');
+
+  const notReady = createRoutes({ runMentionNotifyTest: async () => ({ ok: false, reason: 'not_runnable' }) });
+  const res409 = await invoke(notReady.routes.get('POST /api/tg/mention-notify/run'));
+  assert.equal(res409.statusCode, 409);
+  assert.match(res409.body.error, /Подписка не готова/);
+
+  const broken = createRoutes({ runMentionNotifyTest: async () => ({ ok: false, reason: 'search_failed' }) });
+  const res503 = await invoke(broken.routes.get('POST /api/tg/mention-notify/run'));
+  assert.equal(res503.statusCode, 503);
 });
 
 test('PUT enable requires binding, rules and a live session (409 with reason)', async () => {
@@ -207,7 +261,7 @@ test('PUT enable happy-path writes through the actor gate and audits', async () 
   const res = await invoke(routes.get('PUT /api/tg/mention-notify'), { body: { enabled: true } });
   assert.equal(res.statusCode, 200);
   assert.equal(res.body.enabled, true);
-  assert.deepEqual(calls.subs, [{ channelId: 7, uid: 11, enabled: true }]);
+  assert.deepEqual(calls.subs, [{ channelId: 7, uid: 11, enabled: true, schedule: {} }]);
   assert.equal(calls.audit[0].action, 'tg.mention_notify.enabled');
 });
 

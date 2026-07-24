@@ -71,10 +71,27 @@ test('подписка: владелец пишет, посторонний от
   assert.ok(saved, 'владелец канала может подписаться');
   assert.strictEqual(saved.enabled, true);
   assert.strictEqual(saved.last_notified_at, null);
+  assert.deepStrictEqual(saved.send_days, [], 'дефолт расписания — каждый день');
+  assert.strictEqual(Number(saved.send_hour), 10, 'дефолт часа — 10:00 МСК');
 
   const denied = await db.setMentionNotifySubscriptionForActor(S.ch.id, asUser(S.stranger), true);
   assert.strictEqual(denied, null, 'посторонний не создаёт подписку даже мимо route-гейта');
   assert.strictEqual(await db.getMentionNotifySubscription(S.ch.id, S.stranger.id), null);
+});
+
+test('подписка: расписание сохраняется, а PUT без него не затирает прежнее (COALESCE)', { skip }, async () => {
+  const withSchedule = await db.setMentionNotifySubscriptionForActor(
+    S.ch.id, asUser(S.owner), true, { send_days: [1, 7], send_hour: 8 });
+  assert.deepStrictEqual(withSchedule.send_days.map(Number), [1, 7]);
+  assert.strictEqual(Number(withSchedule.send_hour), 8);
+
+  const toggledOnly = await db.setMentionNotifySubscriptionForActor(S.ch.id, asUser(S.owner), false);
+  assert.strictEqual(toggledOnly.enabled, false);
+  assert.deepStrictEqual(toggledOnly.send_days.map(Number), [1, 7], 'дни не затёрлись');
+  assert.strictEqual(Number(toggledOnly.send_hour), 8, 'час не затёрся');
+
+  // Возвращаем как было для следующих тестов (enabled + каждый день).
+  await db.setMentionNotifySubscriptionForActor(S.ch.id, asUser(S.owner), true, { send_days: [], send_hour: 10 });
 });
 
 test('runnable-JOIN отдаёт подписку только при binding+rules+session и уважает reauth/unbind', { skip }, async () => {

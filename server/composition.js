@@ -385,10 +385,12 @@ function createComposition(config, overrides = {}) {
   const tgBot = overrides.tgBot || createTgBot({ token: config.telegram.botToken, fetchImpl: fetchWithTimeout, log });
   const tgBotWebhookSecret = webhookSecretOf(config.telegram.botToken);
 
-  // Доставка новых упоминаний в личку — jobs/mentionNotifyJob (хвост дневного ingest'а ниже).
-  // Поиск идёт через managed-сессию ПОДПИСЧИКА тем же приватным /mentions/search, что и живой
-  // поиск по кнопке; фоновые записи — через backgroundDb (малый пул).
-  const { processMentionNotify } = createMentionNotifyJob({
+  // Доставка новых упоминаний в личку — jobs/mentionNotifyJob. Плановые тики: хвост дневного
+  // ingest'а + почасовой operational-свип (расписание «дни/час МСК» живёт в подписке, день-ключ
+  // runJobOnce не даёт второй отправки). runMentionNotifyTest — ручной «Прислать сейчас» из
+  // диалога (routes/tgNotify). Поиск идёт через managed-сессию ПОДПИСЧИКА тем же приватным
+  // /mentions/search, что и живой поиск по кнопке; фоновые записи — через backgroundDb.
+  const { processMentionNotify, runMentionNotifyTest } = createMentionNotifyJob({
     db: backgroundDb,
     log,
     tgCrypto,
@@ -530,6 +532,7 @@ function createComposition(config, overrides = {}) {
       TG_CHANNEL,
       tgBot,
       tgBotWebhookSecret,
+      runMentionNotifyTest,
       timingSafeEqualStr,
       dailyIngestJob,
       jobTracker,
@@ -580,6 +583,9 @@ function createComposition(config, overrides = {}) {
       jobTracker,
       processReportSchedules,
       runDailyMaintenanceOnce,
+      // Третья полоса: почасовой свип доставки упоминаний — подписка с send_hour получает свой
+      // час МСК, а не время внешнего daily-крона; durable день-ключ не даёт второй отправки.
+      processMentionNotify,
       publicUrl: config.http.publicUrl,
       initialDelayMs: config.runtime.operationalRunnerInitialDelayMs,
       intervalMs: config.runtime.operationalRunnerIntervalMs,

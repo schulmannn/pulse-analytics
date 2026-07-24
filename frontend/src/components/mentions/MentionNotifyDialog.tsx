@@ -3,12 +3,17 @@ import { createPortal } from 'react-dom';
 import {
   useMentionNotifyLink,
   useMentionNotifyStatus,
+  useRunMentionNotify,
   useSetMentionNotify,
   useUnbindMentionNotify,
 } from '@/api/queries';
 import { Icon } from '@/components/nav-icons';
 import { useFocusTrap } from '@/lib/useFocusTrap';
 import { cn } from '@/lib/utils';
+
+const DAY_LABELS: Array<[number, string]> = [
+  [1, 'Пн'], [2, 'Вт'], [3, 'Ср'], [4, 'Чт'], [5, 'Пт'], [6, 'Сб'], [7, 'Вс'],
+];
 
 /**
  * «Уведомления в Telegram» — личная подписка на новые упоминания выбранного канала.
@@ -28,6 +33,7 @@ export function MentionNotifyDialog({ onClose }: { onClose: () => void }) {
   const link = useMentionNotifyLink();
   const toggle = useSetMentionNotify();
   const unbind = useUnbindMentionNotify();
+  const testRun = useRunMentionNotify();
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -77,10 +83,31 @@ export function MentionNotifyDialog({ onClose }: { onClose: () => void }) {
     setLinkOpened(true);
   };
 
+  // Расписание рендерится напрямую из статуса; каждый клик сразу сохраняется (PUT), пока мутация
+  // в полёте — контролы заблокированы. Пустой send_days = «каждый день» (канон сервера).
+  const sendDays = data?.subscription.send_days?.length ? data.subscription.send_days : [1, 2, 3, 4, 5, 6, 7];
+  const sendHour = data?.subscription.send_hour ?? 10;
+  const saveSchedule = (patch: { send_days?: number[]; send_hour?: number }) =>
+    toggle.mutate({ enabled, ...patch });
+  const toggleDay = (day: number) => {
+    const next = sendDays.includes(day) ? sendDays.filter((d) => d !== day) : [...sendDays, day];
+    if (next.length === 0) return;   // «ни одного дня» — бессмыслица, последний чип не снимается
+    saveSchedule({ send_days: next });
+  };
+
+  const testResult = (() => {
+    if (!testRun.isSuccess || !testRun.data) return null;
+    const r = testRun.data;
+    if (r.seed) return 'Отправлена стартовая сводка — проверьте личку.';
+    if ((r.fresh ?? 0) === 0) return 'Новых упоминаний нет — бот прислал проверку связи.';
+    return `Отправлено сообщений: ${r.sent ?? 0}.`;
+  })();
+
   const error =
     (link.error instanceof Error ? link.error.message : null) ??
     (toggle.error instanceof Error ? toggle.error.message : null) ??
     (unbind.error instanceof Error ? unbind.error.message : null) ??
+    (testRun.error instanceof Error ? testRun.error.message : null) ??
     (status.isError ? (status.error instanceof Error ? status.error.message : 'Ошибка запроса') : null);
 
   return createPortal(
@@ -137,6 +164,17 @@ export function MentionNotifyDialog({ onClose }: { onClose: () => void }) {
                 ))}
               </ul>
 
+              {!data.bot_configured && (
+                <div className="space-y-1 rounded border border-border bg-muted/30 px-4 py-3">
+                  <p className="text-sm font-medium text-foreground">Бот ещё не настроен на сервере</p>
+                  <p className="text-xs leading-5 text-muted-foreground">
+                    Нужен токен бота: создайте бота в @BotFather и задайте переменную окружения
+                    <span className="font-medium text-foreground"> TG_BOT_TOKEN</span> на сервере.
+                    После деплоя здесь появится кнопка привязки.
+                  </p>
+                </div>
+              )}
+
               {!bound && data.bot_configured && (
                 <div className="space-y-2 border-t border-border pt-4">
                   <button
@@ -172,7 +210,7 @@ export function MentionNotifyDialog({ onClose }: { onClose: () => void }) {
                   aria-checked={enabled}
                   aria-label="Присылать новые упоминания"
                   disabled={toggle.isPending || (!enabled && !ready)}
-                  onClick={() => toggle.mutate(!enabled)}
+                  onClick={() => toggle.mutate({ enabled: !enabled })}
                   className={cn(
                     'relative h-6 w-11 shrink-0 rounded-full transition-colors disabled:pointer-events-none disabled:opacity-50',
                     enabled ? 'bg-primary' : 'bg-muted-foreground/30',
@@ -187,6 +225,80 @@ export function MentionNotifyDialog({ onClose }: { onClose: () => void }) {
                   />
                 </button>
               </div>
+
+              {/* Расписание: рендер из статуса, каждый клик сохраняется сразу. Времена — МСК. */}
+              {enabled && (
+                <div className="space-y-3 border-t border-border pt-4">
+                  <div className="flex items-center justify-between gap-4">
+                    <span className="text-xs font-medium text-muted-foreground">Дни отправки</span>
+                    <div role="group" aria-label="Дни отправки" className="flex gap-1">
+                      {DAY_LABELS.map(([day, label]) => {
+                        const active = sendDays.includes(day);
+                        return (
+                          <button
+                            key={day}
+                            type="button"
+                            aria-pressed={active}
+                            disabled={toggle.isPending}
+                            onClick={() => toggleDay(day)}
+                            className={cn(
+                              'rounded-full border px-2 py-1 text-xs transition-colors disabled:pointer-events-none disabled:opacity-50',
+                              active
+                                ? 'border-primary/40 bg-primary/10 font-medium text-primary'
+                                : 'border-border text-muted-foreground hover:bg-muted/50',
+                            )}
+                          >
+                            {label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between gap-4">
+                    <label htmlFor={`${titleId}-hour`} className="text-xs font-medium text-muted-foreground">
+                      Время отправки (МСК)
+                    </label>
+                    <select
+                      id={`${titleId}-hour`}
+                      value={sendHour}
+                      disabled={toggle.isPending}
+                      onChange={(event) => saveSchedule({ send_hour: Number(event.target.value) })}
+                      className="rounded border border-border bg-background px-2.5 py-1.5 text-xs text-foreground outline-hidden focus:border-primary disabled:opacity-50"
+                    >
+                      {Array.from({ length: 24 }, (_, hour) => (
+                        <option key={hour} value={hour}>{String(hour).padStart(2, '0')}:00</option>
+                      ))}
+                    </select>
+                  </div>
+                  <p className="text-2xs leading-4 text-muted-foreground">
+                    Бот проверит упоминания в выбранный час (или позже, если сервер был занят) — не
+                    чаще одного раза в день. Поиск тратит вашу квоту searchPosts.
+                  </p>
+                </div>
+              )}
+
+              {/* Тест-прогон: не ждать планового часа. Явно тратит квоту — по кнопке. */}
+              {enabled && ready && (
+                <div className="space-y-2 border-t border-border pt-4">
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <p className="text-sm font-medium text-foreground">Тестовый прогон</p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        Ищет и присылает прямо сейчас, не дожидаясь расписания.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => testRun.mutate()}
+                      disabled={testRun.isPending}
+                      className="btn-pill border border-border bg-background px-3.5 py-1.5 text-xs font-medium text-foreground hover:bg-hover-row disabled:opacity-50"
+                    >
+                      {testRun.isPending ? 'Прогоняем…' : 'Прислать сейчас'}
+                    </button>
+                  </div>
+                  {testResult && <p role="status" className="text-xs text-success">{testResult}</p>}
+                </div>
+              )}
 
               {bound && (
                 <div className="flex items-center justify-between gap-4 border-t border-border pt-4 text-xs text-muted-foreground">
