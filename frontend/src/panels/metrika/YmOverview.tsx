@@ -40,7 +40,7 @@ import { useMsPagePeriod } from '@/lib/msPeriod';
  */
 /** Локализация типов устройств по стабильному значению ym:s:deviceCategory. Reporting API может
     вернуть числовой id, а документация группировки называет строковые значения — поддерживаем оба. */
-const YM_DEVICE_LABELS: Record<string, string> = {
+export const YM_DEVICE_LABELS: Record<string, string> = {
   '1': 'Десктоп',
   '2': 'Смартфоны',
   '3': 'Планшеты',
@@ -54,7 +54,7 @@ const YM_DEVICE_LABELS: Record<string, string> = {
 /** Локализация возрастных групп по стабильному id ym:s:ageInterval (нижняя граница интервала).
     lang=ru обычно уже отдаёт русскую подпись, но по id мы даём единый продуктовый формат и не
     зависим от языка ответа API; неизвестный id падает на имя из ответа. */
-const YM_AGE_LABELS: Record<string, string> = {
+export const YM_AGE_LABELS: Record<string, string> = {
   '17': 'До 18 лет',
   '18': '18–24 года',
   '25': '25–34 года',
@@ -64,14 +64,14 @@ const YM_AGE_LABELS: Record<string, string> = {
 };
 
 /** Локализация пола по стабильному значению ym:s:gender (male/female), имя API — фолбэк. */
-const YM_GENDER_LABELS: Record<string, string> = {
+export const YM_GENDER_LABELS: Record<string, string> = {
   male: 'Мужчины',
   female: 'Женщины',
 };
 
 /** Методологическая подпись соцдема: оценочная природа, фактическое покрытие и privacy-redaction
     перечисляются отдельно. При нулевом total процент не выдумывается. */
-const demographicsFootnote = (data: {
+export const demographicsFootnote = (data: {
   coverage_percent: number | null;
   contains_sensitive_data: boolean;
 }): string => {
@@ -87,7 +87,7 @@ const demographicsFootnote = (data: {
 
 /** Вторичный контекст строки разреза: посетители + отказы (когда доступны). Отказы nullable —
     «—»-семантика: при null подпункт отказов просто опускается, а не превращается в «0%». */
-const breakdownNote = (users: number, bounceRate: number | null): string =>
+export const breakdownNote = (users: number, bounceRate: number | null): string =>
   [
     `${fmt.num(users)} чел.`,
     bounceRate != null ? `${bounceRate.toLocaleString('ru-RU', { maximumFractionDigits: 1 })}% отказов` : null,
@@ -98,7 +98,7 @@ const breakdownNote = (users: number, bounceRate: number | null): string =>
 /** Контекст выбранной цели для строки разреза: конверсия (CR, %) + число достижений. Возвращает
     null, когда цель не выбрана (goalId==null) — тогда строка остаётся с базовым (визиты/отказы)
     контекстом. Конверсия/достижения nullable по отдельности: показываем то, что реально пришло. */
-const goalNote = (
+export const goalNote = (
   goalId: number | null | undefined,
   reaches: number | null | undefined,
   conversion: number | null | undefined,
@@ -115,7 +115,7 @@ const goalNote = (
 };
 
 /** Склейка базового и целевого контекста строки в одну note-строку (базовый всегда, цель — если есть). */
-const joinNote = (base: string | null, goal: string | null): string | null =>
+export const joinNote = (base: string | null, goal: string | null): string | null =>
   [base, goal].filter(Boolean).join(' · ') || null;
 
 export function YmOverview() {
@@ -228,7 +228,7 @@ export function YmOverview() {
   ) => {
     const sampled = lttbDownsample(block.series, 140, (p) => p.value);
     return (
-      <ChartWidget id={id} title={title} fixedSize="half">
+      <ChartWidget id={id} title={title} fixedSize="half" drillTo={`/metrics/${id}`}>
         <ChartCardBody value={fmt.short(block.total)} caption={caption}>
           {sampled.length > 1 ? (
             <LineChart
@@ -270,6 +270,7 @@ export function YmOverview() {
         id="ym-sources"
         title="Источники трафика"
         fixedSize="half"
+        drillTo="/metrics/ym-sources"
         action={goalSelect('Цель для источников трафика')}
       >
         {sources.isPending ? (
@@ -304,7 +305,7 @@ export function YmOverview() {
       </ChartWidget>
 
       {/* Реферальные сайты: внешние домены (externalRefererDomain) — визиты + отказы по строке. */}
-      <ChartWidget id="ym-referrers" title="Реферальные сайты" fixedSize="half">
+      <ChartWidget id="ym-referrers" title="Реферальные сайты" fixedSize="half" drillTo="/metrics/ym-referrers">
         {referrers.isPending ? (
           <TableSkeleton rows={4} columns={2} className="py-2" />
         ) : referrers.isError ? (
@@ -339,7 +340,7 @@ export function YmOverview() {
       </ChartWidget>
 
       {/* Соцсети: конкретные сети (lastsignSocialNetwork) — визиты + отказы по строке. */}
-      <ChartWidget id="ym-social" title="Соцсети" fixedSize="half">
+      <ChartWidget id="ym-social" title="Соцсети" fixedSize="half" drillTo="/metrics/ym-social">
         {social.isPending ? (
           <TableSkeleton rows={4} columns={2} className="py-2" />
         ) : social.isError ? (
@@ -374,7 +375,7 @@ export function YmOverview() {
       </ChartWidget>
 
       {/* Мессенджеры: отдельная размерность Метрики — Telegram не теряется внутри «Соцсетей». */}
-      <ChartWidget id="ym-messengers" title="Мессенджеры" fixedSize="half">
+      <ChartWidget id="ym-messengers" title="Мессенджеры" fixedSize="half" drillTo="/metrics/ym-messengers">
         {messengers.isPending ? (
           <TableSkeleton rows={4} columns={2} className="py-2" />
         ) : messengers.isError ? (
@@ -413,6 +414,7 @@ export function YmOverview() {
         id="ym-devices"
         title="Устройства"
         fixedSize="half"
+        drillTo="/metrics/ym-devices"
         action={goalSelect('Цель для устройств')}
       >
         {devices.isPending ? (
@@ -447,7 +449,7 @@ export function YmOverview() {
       </ChartWidget>
 
       {/* Страны: география посетителей (regionCountry) — визиты + отказы по строке, имя lang=ru. */}
-      <ChartWidget id="ym-countries" title="Страны" fixedSize="half">
+      <ChartWidget id="ym-countries" title="Страны" fixedSize="half" drillTo="/metrics/ym-countries">
         {countries.isPending ? (
           <TableSkeleton rows={4} columns={2} className="py-2" />
         ) : countries.isError ? (
@@ -478,7 +480,7 @@ export function YmOverview() {
       </ChartWidget>
 
       {/* Города: география посетителей (regionCity) — отдельная от страны размерность. */}
-      <ChartWidget id="ym-cities" title="Города" fixedSize="half">
+      <ChartWidget id="ym-cities" title="Города" fixedSize="half" drillTo="/metrics/ym-cities">
         {cities.isPending ? (
           <TableSkeleton rows={4} columns={2} className="py-2" />
         ) : cities.isError ? (
@@ -508,7 +510,7 @@ export function YmOverview() {
       </ChartWidget>
 
       {/* Возраст: демография посетителей (ageInterval) — локализация по стабильному id, имя — фолбэк. */}
-      <ChartWidget id="ym-age" title="Возраст" fixedSize="half">
+      <ChartWidget id="ym-age" title="Возраст" fixedSize="half" drillTo="/metrics/ym-age">
         {age.isPending ? (
           <TableSkeleton rows={4} columns={2} className="py-2" />
         ) : age.isError ? (
@@ -542,7 +544,7 @@ export function YmOverview() {
       </ChartWidget>
 
       {/* Пол: демография посетителей (gender) — локализация по стабильному id male/female. */}
-      <ChartWidget id="ym-gender" title="Пол" fixedSize="half">
+      <ChartWidget id="ym-gender" title="Пол" fixedSize="half" drillTo="/metrics/ym-gender">
         {gender.isPending ? (
           <TableSkeleton rows={4} columns={2} className="py-2" />
         ) : gender.isError ? (
@@ -576,7 +578,7 @@ export function YmOverview() {
       </ChartWidget>
 
       {/* Цели: reaches за окно + конверсия отдельной метрикой (CR не выводится из reaches). */}
-      <ChartWidget id="ym-goals" title="Цели" fixedSize="half">
+      <ChartWidget id="ym-goals" title="Цели" fixedSize="half" drillTo="/metrics/ym-goals">
         {goals.isPending ? (
           <TableSkeleton rows={4} columns={2} className="py-2" />
         ) : goals.isError ? (
@@ -617,6 +619,7 @@ export function YmOverview() {
         id="ym-utm"
         title="UTM-метки"
         fixedSize="half"
+        drillTo="/metrics/ym-utm"
         action={goalSelect('Цель для UTM-меток')}
       >
         {utm.isPending ? (
@@ -658,7 +661,7 @@ export function YmOverview() {
       </ChartWidget>
 
       {/* Топ-страницы: hits-отчёт (просмотры страниц ≠ визиты — другая единица, чем сверху). */}
-      <ChartWidget id="ym-pages" title="Топ-страницы" fixedSize="half">
+      <ChartWidget id="ym-pages" title="Топ-страницы" fixedSize="half" drillTo="/metrics/ym-pages">
         {pages.isPending ? (
           <TableSkeleton rows={4} columns={2} className="py-2" />
         ) : pages.isError ? (
@@ -692,6 +695,7 @@ export function YmOverview() {
         id="ym-landings"
         title="Страницы входа"
         fixedSize="half"
+        drillTo="/metrics/ym-landings"
         action={goalSelect('Цель для страниц входа')}
       >
         {landings.isPending ? (
@@ -729,7 +733,7 @@ export function YmOverview() {
       </ChartWidget>
 
       {/* Страницы выхода (endURLPath): зеркало входов — где визиты заканчиваются, + отказы по строке. */}
-      <ChartWidget id="ym-exits" title="Страницы выхода" fixedSize="half">
+      <ChartWidget id="ym-exits" title="Страницы выхода" fixedSize="half" drillTo="/metrics/ym-exits">
         {exits.isPending ? (
           <TableSkeleton rows={4} columns={2} className="py-2" />
         ) : exits.isError ? (
@@ -774,7 +778,7 @@ function YmHourlyCard({
   const padHour = (h: number): string => String(h).padStart(2, '0');
   const maxVisits = Math.max(0, ...(hourly.data?.rows ?? []).map((row) => row.visits));
   return (
-    <ChartWidget id="ym-hourly" title="Трафик по часам" fixedSize="half">
+    <ChartWidget id="ym-hourly" title="Трафик по часам" fixedSize="half" drillTo="/metrics/ym-hourly">
       {hourly.isPending ? (
         <ChartSkeleton />
       ) : hourly.isError ? (

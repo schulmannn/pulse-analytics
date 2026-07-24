@@ -48,7 +48,15 @@ export function WidgetHeader({
       >
         {label}
       </h3>
-      {action}
+      {action && (
+        <div
+          className="flex shrink-0 items-center gap-2"
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => event.stopPropagation()}
+        >
+          {action}
+        </div>
+      )}
       {removePresence.mounted && (
         <button
           type="button"
