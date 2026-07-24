@@ -26,6 +26,9 @@ function createOperationalRunner({
   jobTracker,
   processReportSchedules,
   runDailyMaintenanceOnce,
+  // Опциональная третья полоса: почасовой свип доставки упоминаний (mentionNotifyJob). Расписание
+  // «в какой час/дни слать» живёт в самой подписке; свип лишь даёт тик чаще раза в день.
+  processMentionNotify = null,
   // Канонический публичный origin (config.http.publicUrl) — базой для ссылок в письмах отчётов;
   // request-объекта здесь нет, поэтому appBase(req) недоступен.
   publicUrl,
@@ -53,16 +56,23 @@ function createOperationalRunner({
       // ({ accepted:false }) — тогда проход просто не выполняется. Дожидаемся, чтобы single-flight
       // держался до конца реальной работы прохода.
       const result = await jobTracker.run(async () => {
-        // Две независимые полосы под concurrency 2: отчёты (собственный durable per-report/period
-        // reservation-гейт и внутренний bounded dispatch) и maintenance (durable
-        // per-UTC-day гейт). boundedAllSettled НИКОГДА не реджектит, поэтому обе полосы пытаются
-        // выполниться, даже если одна бросает.
-        const [rep, maint] = await boundedAllSettled([
+        // Независимые полосы под concurrency 2: отчёты (собственный durable per-report/period
+        // reservation-гейт и внутренний bounded dispatch), maintenance (durable per-UTC-day гейт)
+        // и — если передана — доставка упоминаний (durable per-МСК-day гейт per-подписка).
+        // boundedAllSettled НИКОГДА не реджектит, поэтому каждая полоса пытается выполниться,
+        // даже если соседняя бросает.
+        const lanes = [
           () => processReportSchedules(publicUrl),
           () => runDailyMaintenanceOnce(),
-        ], (fn) => fn(), 2);
+          ...(processMentionNotify ? [() => processMentionNotify()] : []),
+        ];
+        const [rep, maint, mentions] = await boundedAllSettled(lanes, (fn) => fn(), 2);
         // Только безопасные статусы — ни result, ни user-данные в лог не попадают.
-        log('info', 'operational_pass_done', { rep: rep.status, maint: maint.status });
+        log('info', 'operational_pass_done', {
+          rep: rep.status,
+          maint: maint.status,
+          ...(mentions ? { mentions: mentions.status } : {}),
+        });
       }, { job: 'operational_pass' });
       if (result && result.accepted === false) return { skipped: true };
       return { skipped: false };

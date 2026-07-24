@@ -20,10 +20,39 @@
 // и уходят исключительно в тело приватного mtproto-вызова. Ошибки в БД/логах — только safe-коды.
 
 const { createTgSessionDecryptor } = require('../lib/tgSessionDecrypt');
-const { formatMentionCard, formatSeedMessage, formatOverflowMessage } = require('../lib/tgNotifyText');
+const {
+  formatMentionCard, formatSeedMessage, formatOverflowMessage, formatTestPing,
+} = require('../lib/tgNotifyText');
 
 const MAX_SUBSCRIPTIONS_PER_RUN = 30;   // страховка от бесконечного прогона (лог capped)
 const MAX_CARDS_PER_RUN = 8;            // карточек за прогон; остальное — одной сводкой
+
+// «Сейчас» в календаре проекта (Europe/Moscow): дата для runJobOnce-ключа дня, час и ISO-день
+// недели для расписания подписки. Инжектируемый now — для детерминированных тестов.
+const MSK_WEEKDAY = { Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 7 };
+function mskNow(now = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Moscow',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', hourCycle: 'h23', weekday: 'short',
+  }).formatToParts(now);
+  const get = (type) => (parts.find((p) => p.type === type) || {}).value;
+  return {
+    date: `${get('year')}-${get('month')}-${get('day')}`,
+    hour: Number(get('hour')),
+    isoDay: MSK_WEEKDAY[get('weekday')],
+  };
+}
+
+// Пора ли слать по расписанию подписки: день входит в send_days (пусто = каждый день), а час МСК
+// уже наступил (`>=`, не `===` — пропущенный час догоняется следующим тиком того же дня; вторую
+// отправку в тот же день исключает runJobOnce-ключ по МСК-дате).
+function dueBySchedule(sub, msk) {
+  const days = Array.isArray(sub.send_days) ? sub.send_days.map(Number) : [];
+  if (days.length && !days.includes(msk.isoDay)) return false;
+  const hour = Number.isInteger(Number(sub.send_hour)) ? Number(sub.send_hour) : 10;
+  return msk.hour >= hour;
+}
 
 const SAFE_ERROR_CODES = new Set([
   'reauth_required', 'session_decrypt_failed', 'search_failed', 'send_failed', 'bot_blocked',
@@ -36,8 +65,9 @@ function createMentionNotifyJob({
   const { decryptTgSession } = createTgSessionDecryptor({ tgCrypto, db, log });
 
   // Один прогон одной подписки. Бросает с e.notifyCode для last_error; успешный выход — объект
-  // счётчиков для результата runJobOnce.
-  async function runSubscription(sub) {
+  // счётчиков для результата runJobOnce. test=true — ручной прогон «Прислать сейчас»: если новых
+  // нет (и это не seed), шлёт проверочный пинг — иначе «ничего не пришло» неотличимо от поломки.
+  async function runSubscription(sub, { test = false } = {}) {
     let sessionStr;
     try {
       sessionStr = await decryptTgSession({ uid: sub.uid, session_version: sub.session_version, session_enc: sub.session_enc });
@@ -118,6 +148,9 @@ function createMentionNotifyJob({
         if (ordered.length > MAX_CARDS_PER_RUN) {
           await send(formatOverflowMessage(ordered.length - MAX_CARDS_PER_RUN, appUrl));
         }
+        if (test && ordered.length === 0) {
+          await send(formatTestPing(sub.channel_title || sub.channel_username));
+        }
       }
     } catch (e) {
       if (e && e.notifyCode) throw e;
@@ -134,14 +167,19 @@ function createMentionNotifyJob({
 
   // Обход всех выполнимых подписок. Последовательно: каждая подписка — своя сессия, но бот один,
   // и параллельный фан-аут в mtproto упирается в его семафор; объёмы малы, простота важнее.
-  async function processMentionNotify() {
+  // Дёргается ДВУМЯ путями с одинаковой семантикой: хвостом дневного ingest'а и почасовым
+  // operational-свипом — фильтр расписания решает «пора ли», runJobOnce-ключ по МСК-дате
+  // гарантирует не больше одной отправки в сутки на подписку.
+  async function processMentionNotify({ now } = {}) {
     if (!db.enabled || !tgBot.configured() || !tgCrypto.configured() || !MTPROTO_TOKEN) return;
     let subs;
     try { subs = await db.listRunnableMentionNotifySubscriptions(); }
     catch (e) { log('error', 'mention_notify_list_failed', { error: e.message }); return; }
+    const msk = mskNow(now);
+    subs = subs.filter((sub) => dueBySchedule(sub, msk));
     if (!subs.length) return;
 
-    const day = new Date().toISOString().slice(0, 10);
+    const day = msk.date;
     let done = 0, notified = 0, failed = 0, skipped = 0, capped = false;
     for (const sub of subs) {
       if (done >= MAX_SUBSCRIPTIONS_PER_RUN) { capped = true; break; }
@@ -167,7 +205,30 @@ function createMentionNotifyJob({
     log(capped ? 'warn' : 'info', 'mention_notify_done', { total: subs.length, done, notified, failed, skipped, capped });
   }
 
-  return { processMentionNotify };
+  // Ручной прогон «Прислать сейчас» (кнопка в диалоге): игнорирует расписание и день-ключ —
+  // юзер явно тратит свою квоту, чтобы проверить связку не дожидаясь планового тика. Возвращает
+  // компактный итог для UI; никаких выбросов наружу — только safe-коды.
+  async function runMentionNotifyTest(channelId, uid) {
+    if (!db.enabled || !tgBot.configured() || !tgCrypto.configured() || !MTPROTO_TOKEN) {
+      return { ok: false, reason: 'not_configured' };
+    }
+    let sub;
+    try { sub = await db.getRunnableMentionNotifySubscription(channelId, uid); }
+    catch (e) { log('error', 'mention_notify_test_lookup_failed', { error: e.message }); return { ok: false, reason: 'search_failed' }; }
+    if (!sub) return { ok: false, reason: 'not_runnable' };
+    try {
+      const result = await runSubscription(sub, { test: true });
+      await db.markMentionNotifyRun(channelId, uid, { notified: true, errorCode: null });
+      return { ok: true, seed: !!result.seed, found: result.found, fresh: result.fresh, sent: result.sent };
+    } catch (e) {
+      const code = safeCode(e && e.notifyCode);
+      db.markMentionNotifyRun(channelId, uid, { notified: false, errorCode: code }).catch(() => {});
+      log('error', 'mention_notify_test_failed', { channel_id: channelId, uid, code });
+      return { ok: false, reason: code };
+    }
+  }
+
+  return { processMentionNotify, runMentionNotifyTest };
 }
 
 module.exports = { createMentionNotifyJob };

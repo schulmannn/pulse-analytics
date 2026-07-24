@@ -44,6 +44,7 @@ import {
   KeySchema,
   LoginResponseSchema,
   MentionNotifyLinkSchema,
+  MentionNotifyRunSchema,
   MentionNotifyStatusSchema,
   MentionNotifySubscriptionSchema,
   MentionSettingsSchema,
@@ -306,14 +307,27 @@ export function useMentionNotifyLink() {
   });
 }
 
-/** Тумблер личной подписки на упоминания выбранного канала. */
+/** Тумблер + расписание личной подписки на упоминания выбранного канала. */
 export function useSetMentionNotify() {
   const { channelId } = useSelectedChannel();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (enabled: boolean) => {
+    mutationFn: (body: { enabled: boolean; send_days?: number[]; send_hour?: number }) => {
       if (channelId == null) return Promise.reject(new Error('Сначала выберите канал'));
-      return apiSend('PUT', '/api/tg/mention-notify', { enabled }, MentionNotifySubscriptionSchema, { channelId });
+      return apiSend('PUT', '/api/tg/mention-notify', body, MentionNotifySubscriptionSchema, { channelId });
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['mention-notify', channelId] }),
+  });
+}
+
+/** Ручной тест-прогон «Прислать сейчас» — тратит квоту searchPosts подписчика вне планового дня. */
+export function useRunMentionNotify() {
+  const { channelId } = useSelectedChannel();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => {
+      if (channelId == null) return Promise.reject(new Error('Сначала выберите канал'));
+      return apiSend('POST', '/api/tg/mention-notify/run', {}, MentionNotifyRunSchema, { channelId });
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['mention-notify', channelId] }),
   });

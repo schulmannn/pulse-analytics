@@ -74,31 +74,37 @@ function createMentionNotifyRepo({ pool, enabled }) {
   // Upsert с ВШИТЫМ доступом: INSERT…SELECT из channels под channelAccessSql — актор без доступа к
   // каналу не создаст строку (RETURNING пуст → null → роут отвечает 403), даже если route-гейт
   // забыт/обойдён (defense in depth, как в mentionSettingsRepo).
-  async function setMentionNotifySubscriptionForActor(channelId, actor, enabledFlag) {
+  // schedule (опц.): { send_days: smallint[] (ISO 1..7, [] = каждый день), send_hour: 0..23 МСК } —
+  // валидация в роуте; отсутствие ключа сохраняет прежнее значение (COALESCE на UPDATE-ветке).
+  async function setMentionNotifySubscriptionForActor(channelId, actor, enabledFlag, schedule = {}) {
     if (!enabled || !channelId) return null;
     const uid = actor && actor.uid;
     if (uid == null) return null;
+    const days = Array.isArray(schedule.send_days) ? schedule.send_days : null;
+    const hour = Number.isInteger(schedule.send_hour) ? schedule.send_hour : null;
     const { rows } = await pool.query(
-      `INSERT INTO mention_notify_subscriptions (channel_id, uid, enabled, created_at, updated_at)
-       SELECT c.id, $2, $3, now(), now()
+      `INSERT INTO mention_notify_subscriptions (channel_id, uid, enabled, send_days, send_hour, created_at, updated_at)
+       SELECT c.id, $2, $3, COALESCE($4::smallint[], '{}'), COALESCE($5::smallint, 10), now(), now()
          FROM channels c
         WHERE c.id = $1 AND c.status <> 'disabled'
           AND ${channelAccessSql({ channelAlias: 'c', uidParam: '$2' })}
        ON CONFLICT (channel_id, uid) DO UPDATE SET
          enabled = EXCLUDED.enabled,
+         send_days = COALESCE($4::smallint[], mention_notify_subscriptions.send_days),
+         send_hour = COALESCE($5::smallint, mention_notify_subscriptions.send_hour),
          updated_at = now()
-       RETURNING channel_id, uid, enabled,
+       RETURNING channel_id, uid, enabled, send_days, send_hour,
                  to_char(last_run_at,${ISO})      AS last_run_at,
                  to_char(last_notified_at,${ISO}) AS last_notified_at,
                  last_error`,
-      [channelId, uid, !!enabledFlag]);
+      [channelId, uid, !!enabledFlag, days, hour]);
     return rows[0] || null;
   }
 
   async function getMentionNotifySubscription(channelId, uid) {
     if (!enabled || !channelId || !uid) return null;
     const { rows } = await pool.query(
-      `SELECT channel_id, uid, enabled,
+      `SELECT channel_id, uid, enabled, send_days, send_hour,
               to_char(last_run_at,${ISO})      AS last_run_at,
               to_char(last_notified_at,${ISO}) AS last_notified_at,
               last_error
@@ -109,24 +115,34 @@ function createMentionNotifyRepo({ pool, enabled }) {
 
   // Cron-ридер: всё, что реально можно прогнать сегодня. Правила (include_terms) и канал берутся
   // здесь же, чтобы джоб не делал N дополнительных запросов; session_enc расшифровывает ТОЛЬКО джоб.
+  const RUNNABLE_SQL = `
+    SELECT s.channel_id, s.uid, s.send_days, s.send_hour,
+           to_char(s.last_notified_at,${ISO}) AS last_notified_at,
+           b.chat_id,
+           c.title AS channel_title, c.username AS channel_username, c.tg_channel_id,
+           m.include_terms, m.exclude_terms, m.exclude_sources, m.match_mode,
+           t.session_enc, t.session_version, t.connection_state
+      FROM mention_notify_subscriptions s
+      JOIN tg_notify_bindings b ON b.uid = s.uid AND b.chat_id IS NOT NULL
+      JOIN channels c           ON c.id = s.channel_id AND c.status <> 'disabled'
+      JOIN channel_mention_settings m
+           ON m.channel_id = s.channel_id AND cardinality(m.include_terms) > 0
+      JOIN tg_sessions t        ON t.uid = s.uid AND t.connection_state <> 'reauth_required'
+     WHERE s.enabled`;
+
   async function listRunnableMentionNotifySubscriptions() {
     if (!enabled) return [];
-    const { rows } = await pool.query(
-      `SELECT s.channel_id, s.uid,
-              to_char(s.last_notified_at,${ISO}) AS last_notified_at,
-              b.chat_id,
-              c.title AS channel_title, c.username AS channel_username, c.tg_channel_id,
-              m.include_terms, m.exclude_terms, m.exclude_sources, m.match_mode,
-              t.session_enc, t.session_version, t.connection_state
-         FROM mention_notify_subscriptions s
-         JOIN tg_notify_bindings b ON b.uid = s.uid AND b.chat_id IS NOT NULL
-         JOIN channels c           ON c.id = s.channel_id AND c.status <> 'disabled'
-         JOIN channel_mention_settings m
-              ON m.channel_id = s.channel_id AND cardinality(m.include_terms) > 0
-         JOIN tg_sessions t        ON t.uid = s.uid AND t.connection_state <> 'reauth_required'
-        WHERE s.enabled
-        ORDER BY s.channel_id, s.uid`);
+    const { rows } = await pool.query(`${RUNNABLE_SQL} ORDER BY s.channel_id, s.uid`);
     return rows;
+  }
+
+  // Точечный вариант для тест-прогона «Прислать сейчас»: та же строка с теми же JOIN-условиями
+  // (binding+rules+живая сессия+enabled) — null означает «прогнать нечего», роут отвечает 409.
+  async function getRunnableMentionNotifySubscription(channelId, uid) {
+    if (!enabled || !channelId || !uid) return null;
+    const { rows } = await pool.query(
+      `${RUNNABLE_SQL} AND s.channel_id = $1 AND s.uid = $2`, [channelId, uid]);
+    return rows[0] || null;
   }
 
   // Штамп прогона. notified=true двигает watermark доставки (seed или реальные карточки);
@@ -170,6 +186,7 @@ function createMentionNotifyRepo({ pool, enabled }) {
     setMentionNotifySubscriptionForActor,
     getMentionNotifySubscription,
     listRunnableMentionNotifySubscriptions,
+    getRunnableMentionNotifySubscription,
     markMentionNotifyRun,
     filterNewMentions,
   };

@@ -283,6 +283,8 @@ export const MentionNotifyStatusSchema = z
     subscription: z
       .object({
         enabled: z.boolean(),
+        send_days: z.array(z.coerce.number()).optional().nullable(),
+        send_hour: z.coerce.number().optional().nullable(),
         last_run_at: z.string().optional().nullable(),
         last_notified_at: z.string().optional().nullable(),
         last_error: z.string().optional().nullable(),
@@ -306,9 +308,22 @@ export const MentionNotifyLinkSchema = z
 export const MentionNotifySubscriptionSchema = z
   .object({
     enabled: z.boolean(),
+    send_days: z.array(z.coerce.number()).optional().nullable(),
+    send_hour: z.coerce.number().optional().nullable(),
     last_run_at: z.string().optional().nullable(),
     last_notified_at: z.string().optional().nullable(),
     last_error: z.string().optional().nullable(),
+  })
+  .passthrough();
+
+/** Итог ручного тест-прогона «Прислать сейчас». */
+export const MentionNotifyRunSchema = z
+  .object({
+    ok: z.boolean(),
+    seed: z.boolean().optional(),
+    found: z.coerce.number().optional(),
+    fresh: z.coerce.number().optional(),
+    sent: z.coerce.number().optional(),
   })
   .passthrough();
 

@@ -57,7 +57,7 @@ function createApp(deps) {
     ymCrypto, ymFetch, nearestOf,
     cacheGet, cacheSet, cache, IG_ACCOUNT, IG_TOKEN, IG_GRAPH, AUTH_SECRET,
     tgCrypto, collectQrChannelsNow, collectManagedPostStatsNow, TG_TOKEN, TG_CHANNEL,
-    tgBot, tgBotWebhookSecret,
+    tgBot, tgBotWebhookSecret, runMentionNotifyTest,
     timingSafeEqualStr, dailyIngestJob, jobTracker, mtprotoClient, notionCrash,
     aiChatService,
   } = deps;
@@ -238,6 +238,7 @@ function createApp(deps) {
   registerTgNotifyRoutes({
     app, requireAuth, resolveChannel, db, audit, log,
     tgBot, webhookSecret: tgBotWebhookSecret, newToken, sha256, appBase,
+    runMentionNotifyTest,
   });
 
   // ════════════════════════════════════════════════════════════════

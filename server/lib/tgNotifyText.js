@@ -59,6 +59,13 @@ function formatOverflowMessage(rest, appUrl) {
   return `…и ещё ${rest} новых за прогон — полный список в дашборде.${suffix}`;
 }
 
+// Ручной тест-прогон без новых упоминаний: без этого пинга «ничего не пришло» неотличимо от
+// поломки связки бот↔подписка.
+function formatTestPing(channelTitle) {
+  const title = escapeHtml(channelTitle || 'канал');
+  return `✅ Проверка связи для «${title}»: бот работает, новых упоминаний нет.`;
+}
+
 module.exports = {
   escapeHtml,
   webhookSecretOf,
@@ -66,4 +73,5 @@ module.exports = {
   formatMentionCard,
   formatSeedMessage,
   formatOverflowMessage,
+  formatTestPing,
 };

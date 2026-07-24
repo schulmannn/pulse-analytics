@@ -24,6 +24,7 @@ const { parseStartPayload } = require('../lib/tgNotifyText');
  */
 function registerTgNotifyRoutes({
   app, requireAuth, resolveChannel, db, audit, log, tgBot, webhookSecret, newToken, sha256, appBase,
+  runMentionNotifyTest,
 }) {
   const DB_OFF = { error: 'База данных выключена — уведомления недоступны' };
   const BOT_OFF = { error: 'Бот уведомлений не настроен' };
@@ -133,6 +134,10 @@ function registerTgNotifyRoutes({
         },
         subscription: {
           enabled: !!(subscription && subscription.enabled),
+          send_days: (subscription && Array.isArray(subscription.send_days))
+            ? subscription.send_days.map(Number) : [],
+          send_hour: subscription && Number.isInteger(Number(subscription.send_hour))
+            ? Number(subscription.send_hour) : 10,
           last_run_at: (subscription && subscription.last_run_at) || null,
           last_notified_at: (subscription && subscription.last_notified_at) || null,
           last_error: (subscription && subscription.last_error) || null,
@@ -145,11 +150,43 @@ function registerTgNotifyRoutes({
     } catch (e) { next(e); }
   });
 
-  // ── Тумблер подписки ────────────────────────────────────────────────────────────────────────────
+  // Валидация расписания из body: невалидный тип поля = 400 (а не тихое проглатывание),
+  // отсутствие поля = «не менять» (repo COALESCE). Дни — ISO 1..7 без дублей; полный набор из
+  // семи нормализуется в [] («каждый день» — каноническая форма, UI показывает все чипы).
+  function parseSchedule(body) {
+    const out = {};
+    if (body && body.send_days !== undefined) {
+      if (!Array.isArray(body.send_days)) throw badSchedule();
+      const days = [...new Set(body.send_days.map(Number))];
+      if (days.length > 7 || days.some((d) => !Number.isInteger(d) || d < 1 || d > 7)) throw badSchedule();
+      if (days.length === 0) throw badSchedule();   // «ни одного дня» = бессмыслица, UI не даёт
+      out.send_days = days.length === 7 ? [] : days.sort((a, b) => a - b);
+    }
+    if (body && body.send_hour !== undefined) {
+      const hour = Number(body.send_hour);
+      if (!Number.isInteger(hour) || hour < 0 || hour > 23) throw badSchedule();
+      out.send_hour = hour;
+    }
+    return out;
+  }
+  function badSchedule() {
+    const e = new Error('Некорректное расписание: дни — 1..7, час — 0..23');
+    e.code = 'bad_schedule';
+    return e;
+  }
+
+  // ── Тумблер подписки + расписание ───────────────────────────────────────────────────────────────
   app.put('/api/tg/mention-notify', requireAuth, resolveChannel, async (req, res, next) => {
     try {
       if (!db.enabled || !req.channel || req.channel.id == null) return res.status(400).json(DB_OFF);
       const enable = !!(req.body && req.body.enabled);
+      let schedule;
+      try {
+        schedule = parseSchedule(req.body);
+      } catch (e) {
+        if (e && e.code === 'bad_schedule') return res.status(400).json({ error: e.message });
+        throw e;
+      }
 
       if (enable) {
         // Требования проверяются здесь (а не только в UI): включение без бота/привязки/правил/сессии
@@ -174,17 +211,45 @@ function registerTgNotifyRoutes({
         }
       }
 
-      const saved = await db.setMentionNotifySubscriptionForActor(req.channel.id, req.user, enable);
+      const saved = await db.setMentionNotifySubscriptionForActor(req.channel.id, req.user, enable, schedule);
       if (!saved) return res.status(403).json({ error: 'Нет доступа к этому каналу' });
       audit(req, enable ? 'tg.mention_notify.enabled' : 'tg.mention_notify.disabled', {
         channel_id: req.channel.id,
       }).catch(() => {});
       res.json({
         enabled: saved.enabled,
+        send_days: Array.isArray(saved.send_days) ? saved.send_days.map(Number) : [],
+        send_hour: Number(saved.send_hour),
         last_run_at: saved.last_run_at || null,
         last_notified_at: saved.last_notified_at || null,
         last_error: saved.last_error || null,
       });
+    } catch (e) { next(e); }
+  });
+
+  // ── Ручной тест-прогон «Прислать сейчас» ────────────────────────────────────────────────────────
+  // Явное действие пользователя: тратит ЕГО квоту searchPosts вне планового дня-ключа. Джоб сам
+  // проверяет полную выполнимость (binding+rules+сессия+enabled) — здесь только маппинг ответа.
+  app.post('/api/tg/mention-notify/run', requireAuth, resolveChannel, async (req, res, next) => {
+    try {
+      if (!db.enabled || !req.channel || req.channel.id == null) return res.status(400).json(DB_OFF);
+      if (!runMentionNotifyTest) return res.status(503).json(BOT_OFF);
+      const out = await runMentionNotifyTest(req.channel.id, req.user.uid);
+      audit(req, 'tg.mention_notify.test_run', { channel_id: req.channel.id, ok: out.ok }).catch(() => {});
+      if (!out.ok) {
+        const status = out.reason === 'not_runnable' ? 409 : 503;
+        const RU = {
+          not_configured: 'Бот уведомлений не настроен',
+          not_runnable: 'Подписка не готова: включите её и закройте требования из чек-листа',
+          reauth_required: 'Сессия Telegram недействительна — переподключите аккаунт',
+          bot_blocked: 'Бот заблокирован в Telegram — привяжите чат заново',
+          send_failed: 'Не удалось отправить сообщение, попробуйте позже',
+          search_failed: 'Поиск не удался (квота или сбой Telegram), попробуйте позже',
+          session_decrypt_failed: 'Сессия Telegram недоступна — переподключите аккаунт',
+        };
+        return res.status(status).json({ ok: false, reason: out.reason, error: RU[out.reason] || RU.search_failed });
+      }
+      res.json(out);
     } catch (e) { next(e); }
   });
 
