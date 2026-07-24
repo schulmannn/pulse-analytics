@@ -377,6 +377,48 @@ test('chart drill guard: a scrub across the chart does not navigate', async ({ p
   await expect(page).not.toHaveURL(/\/metrics\//);
 });
 
+test('config widget opens a dedicated full-page explorer and applies its draft', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('pulse_home_blocks', JSON.stringify({ keys: ['custom:probe1'] }));
+    localStorage.setItem(
+      'pulse_widget_configs',
+      JSON.stringify([{ id: 'probe1', metricId: 'tg.views', viz: 'line' }]),
+    );
+  });
+  await bootDemo(page, '/home');
+
+  const card = page.locator('[data-drill-to="/widgets/probe1"]');
+  await expect(card).toBeVisible();
+  await card.click({ position: { x: 24, y: 24 } });
+
+  await expect(page).toHaveURL(/\/widgets\/probe1$/);
+  await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  const viz = page.getByRole('group', { name: 'Визуализация' });
+  await expect(viz).toBeVisible();
+  await viz.getByRole('button', { name: 'Столбцы' }).click();
+
+  const apply = page.getByRole('button', { name: 'Применить к виджету' });
+  await expect(apply).toBeEnabled();
+  await apply.click();
+  await expect(apply).toBeDisabled();
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const configs = JSON.parse(localStorage.getItem('pulse_widget_configs') ?? '[]') as Array<{
+          id: string;
+          viz: string;
+        }>;
+        return configs.find((config) => config.id === 'probe1')?.viz;
+      }),
+    )
+    .toBe('bar');
+  await expect(page.locator('main').getByRole('link', { name: 'Главная' })).toHaveAttribute(
+    'href',
+    '/home',
+  );
+});
+
 test('edit-mode entry + exit (Home)', async ({ page }) => {
   await bootDemo(page, '/home');
   // The «Изменить»↔«Готово» toggle reflects edit state via aria-pressed — robust whether Home is

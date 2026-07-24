@@ -8,13 +8,10 @@ interface DetailShellProps {
   /** Accessible dialog name (e.g. «График: Просмотры»). */
   ariaLabel: string;
   onClose: () => void;
-  /** 'panel' — a centered Card over a dimmed backdrop (the read explorer). 'fullscreen' — an opaque
-   *  edge-to-edge surface (the config sandbox). */
-  variant: 'panel' | 'fullscreen';
-  /** 'panel' only. 'viewport' (default) stretches the Card to the full inset height — the explorer
+  /** 'viewport' (default) stretches the Card to the full inset height — the explorer
    *  reading posture. 'content' lets a small body (a 3-row breakdown) size the panel itself:
    *  height auto + a sane min, same max as today — the Card floats centered in the viewport instead
-   *  of towing ~80% dead space. Mobile (<sm) keeps the full-height edge-to-edge sheet in BOTH modes. */
+   *  of towing ~80% dead space. Mobile (<sm) keeps the full-height edge-to-edge sheet. */
   fit?: 'viewport' | 'content';
   /** The clicked card's viewport rect at open time (captured by ChartWidget before the URL changes).
    *  When present (and motion is allowed) the panel grows out of that footprint — a shared-element
@@ -25,14 +22,11 @@ interface DetailShellProps {
 }
 
 /**
- * The ONE dialog CHROME behind every widget detail surface — the read explorer (ChartExpandOverlay)
- * and the config sandbox (WidgetExplorer) plug their own body into it, so there is no per-widget
- * bespoke modal. It owns everything those two duplicated: the portal, role="dialog" + aria-modal, a
- * focus trap (restores opener focus on close), body-scroll lock, capture-phase Escape (so a nested
- * control / card menu can't double-handle it), and the × close. Everything visual — header, controls,
- * body, rail — is the caller's `children`, so each surface renders exactly as before.
+ * The dialog chrome behind the legacy in-place read explorer. It owns the portal, role="dialog" +
+ * aria-modal, a focus trap (restores opener focus on close), body-scroll lock, capture-phase Escape
+ * and the × close. Dedicated metric routes bypass this shell entirely.
  */
-export function DetailShell({ ariaLabel, onClose, variant, fit = 'viewport', originRect, children }: DetailShellProps) {
+export function DetailShell({ ariaLabel, onClose, fit = 'viewport', originRect, children }: DetailShellProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   useFocusTrap(panelRef);
   // NO useLayerBack here (unlike PostDetailModal/SourceSheet): this shell is already URL-driven —
@@ -109,24 +103,7 @@ export function DetailShell({ ariaLabel, onClose, variant, fit = 'viewport', ori
     </button>
   );
 
-  if (variant === 'fullscreen') {
-    return createPortal(
-      <div
-        ref={panelRef}
-        tabIndex={-1}
-        className="fixed inset-0 z-modal flex flex-col bg-background focus:outline-hidden"
-        role="dialog"
-        aria-modal="true"
-        aria-label={ariaLabel}
-      >
-        {closeButton}
-        {children}
-      </div>,
-      document.body,
-    );
-  }
-
-  // 'panel' — centered Card over a dimmed, click-to-close backdrop. On mobile (<sm) it drops the
+  // Centered Card over a dimmed, click-to-close backdrop. On mobile (<sm) it drops the
   // outer inset so the Card is a full-height, edge-to-edge sheet (Mobile-nav card): no 16px paper
   // gutter to waste on a phone, square top/bottom corners, and a bottom safe-area pad so the stats
   // strip clears the home indicator. ≥sm restores the floating inset + panel radius.

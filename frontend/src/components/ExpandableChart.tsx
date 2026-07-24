@@ -217,7 +217,7 @@ export function ChartExpandOverlay({ title, children, renderExpanded, renderExpa
       : null;
 
   return (
-    <DetailShell variant="panel" fit={rich ? 'viewport' : 'content'} ariaLabel={`График: ${title}`} onClose={onClose} originRect={originRect}>
+    <DetailShell fit={rich ? 'viewport' : 'content'} ariaLabel={`График: ${title}`} onClose={onClose} originRect={originRect}>
       {/* display:contents — no box of its own (the shell's flex layout is untouched), but the
           custom properties still compute here, carrying the widget accent into the portal. */}
       <div className="contents" style={accentStyle}>
