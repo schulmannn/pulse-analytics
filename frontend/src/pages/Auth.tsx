@@ -4,14 +4,14 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useForgot, useLogin, useRegister, useReset, useVerify } from '@/api/queries';
 import { AtlavueMark } from '@/components/AtlavueMark';
 import { GoogleSignInButton } from '@/components/GoogleSignInButton';
+import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
 // "Atlavue Refined Technical" auth — a calm dark card on the near-black canvas: one card-scale
-// surface, hairline field shells with a compact leading icon, a full-width pill submit and one calm
-// blue accent. Semantic/brand tokens only; borders-only depth (no shadow/glow).
+// surface, hairline field shells with a compact leading icon, a full-width pill submit (canonical
+// Button, size="lg" + mt-5 w-full px-4) and one calm blue accent. Semantic/brand tokens only;
+// borders-only depth (no shadow/glow).
 
-const BUTTON_CLASS =
-  'btn-pill mt-5 w-full bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50';
 const LABEL_CLASS = 'mb-1.5 block text-sm font-medium text-ink2';
 const LINK_CLASS = 'cursor-pointer font-medium text-primary hover:underline';
 
@@ -158,9 +158,9 @@ export function LoginPage() {
             required
             disabled={forgotMutation.isPending}
           />
-          <button type="submit" disabled={forgotMutation.isPending} className={BUTTON_CLASS}>
+          <Button type="submit" disabled={forgotMutation.isPending} size="lg" className="mt-5 w-full px-4">
             {forgotMutation.isPending ? 'Отправка…' : 'Отправить ссылку'}
-          </button>
+          </Button>
           {forgotMutation.isError && (
             <p role="alert" className="mt-3 text-sm text-destructive">{errorMessage(forgotMutation.error)}</p>
           )}
@@ -216,9 +216,9 @@ export function LoginPage() {
             disabled={loginMutation.isPending}
           />
         </div>
-        <button type="submit" disabled={loginMutation.isPending} className={BUTTON_CLASS}>
+        <Button type="submit" disabled={loginMutation.isPending} size="lg" className="mt-5 w-full px-4">
           {loginMutation.isPending ? 'Вход…' : 'Войти'}
-        </button>
+        </Button>
         {loginMutation.isError && (
           <p role="alert" className="mt-3 text-sm text-destructive">{errorMessage(loginMutation.error)}</p>
         )}
@@ -289,9 +289,9 @@ export function RegisterPage() {
             disabled={registerMutation.isPending}
           />
         </div>
-        <button type="submit" disabled={registerMutation.isPending} className={BUTTON_CLASS}>
+        <Button type="submit" disabled={registerMutation.isPending} size="lg" className="mt-5 w-full px-4">
           {registerMutation.isPending ? 'Регистрация…' : 'Создать аккаунт'}
-        </button>
+        </Button>
         {registerMutation.isError && (
           <p role="alert" className="mt-3 text-sm text-destructive">{errorMessage(registerMutation.error)}</p>
         )}
@@ -332,9 +332,9 @@ export function VerifyPage() {
           {token ? 'Подтвердите аккаунт — нажмите кнопку ниже.' : 'Ссылка неполная — откройте её из письма целиком или запросите новое письмо при входе.'}
         </p>
         {token && !verifyMutation.isSuccess && (
-          <button type="submit" disabled={verifyMutation.isPending} className={BUTTON_CLASS}>
+          <Button type="submit" disabled={verifyMutation.isPending} size="lg" className="mt-5 w-full px-4">
             {verifyMutation.isPending ? 'Подтверждение…' : 'Подтвердить email'}
-          </button>
+          </Button>
         )}
         {verifyMutation.isError && (
           <p role="alert" className="mt-3 text-sm text-destructive">{errorMessage(verifyMutation.error)}</p>
@@ -384,9 +384,9 @@ export function ResetPage() {
           required
           disabled={!token || resetMutation.isPending}
         />
-        <button type="submit" disabled={!token || resetMutation.isPending} className={BUTTON_CLASS}>
+        <Button type="submit" disabled={!token || resetMutation.isPending} size="lg" className="mt-5 w-full px-4">
           {resetMutation.isPending ? 'Сохранение…' : 'Сохранить пароль'}
-        </button>
+        </Button>
         {resetMutation.isError && (
           <p role="alert" className="mt-3 text-sm text-destructive">{errorMessage(resetMutation.error)}</p>
         )}

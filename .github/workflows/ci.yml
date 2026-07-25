@@ -64,6 +64,12 @@ jobs:
         run: |
           pip install ruff==0.16.0
           ruff check mtproto collector test
+      # Пин по той же причине, что и ruff. Настройки — в mypy.ini в корне (py312, минимальный
+      # не-strict набор: сервис осознанно динамический, Telethon/FastAPI duck-typing).
+      - name: Type-check Python (mypy)
+        run: |
+          pip install mypy==2.3.0
+          mypy mtproto collector --ignore-missing-imports
       - run: python -m unittest discover -s test -p "test_*.py"
       - name: Parse inline browser scripts
         run: |

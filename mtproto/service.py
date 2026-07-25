@@ -5,6 +5,7 @@ Python + Telethon + FastAPI
 
 import asyncio
 import base64
+import contextvars
 import os
 import json
 import logging
@@ -13,6 +14,7 @@ import functools
 import secrets
 import time
 from collections import OrderedDict
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -37,7 +39,7 @@ try:
         source_is_excluded,
     )
 except ModuleNotFoundError:  # `python mtproto/service.py` puts mtproto/ itself on sys.path
-    from mention_rules import (
+    from mention_rules import (  # type: ignore[no-redef]
         MAX_EXCLUDE_TERMS,
         MAX_INCLUDE_TERMS,
         clean_sources,
@@ -54,7 +56,45 @@ load_dotenv()
 # которых нет в Bot API. Это не файл-сессия — base64 больше не нужен.
 
 # ── Logging ──────────────────────────────────────────────
-logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
+# Структурный JSON: одна строка = один объект {ts, level, msg, logger[, request_id]} — как у
+# Node-стороны (server/lib/observability.js), чтобы общий лог-пайплайн читал оба сервиса
+# одинаково. Только stdlib. request_id приходит из contextvar, который наполняет
+# _RequestIdMiddleware из заголовка x-request-id входящего запроса.
+_REQUEST_ID: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar('request_id', default=None)
+_REQUEST_ID_RE = re.compile(r'[A-Za-z0-9._:-]{8,100}')   # та же форма, что принимает Node (observability.js)
+
+
+class _JsonLogFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        payload: dict = {
+            'ts': datetime.fromtimestamp(record.created, tz=timezone.utc)
+                          .isoformat(timespec='milliseconds').replace('+00:00', 'Z'),
+            'level': record.levelname.lower(),
+            'msg': record.getMessage(),
+            'logger': record.name,
+        }
+        request_id = _REQUEST_ID.get()
+        if request_id:
+            payload['request_id'] = request_id
+        if record.exc_info:
+            payload['exc'] = self.formatException(record.exc_info)
+        return json.dumps(payload, ensure_ascii=False)
+
+
+def _configure_logging() -> None:
+    # Как прежний basicConfig: настраиваем root ТОЛЬКО когда он ещё не настроен. Collector
+    # импортирует этот модуль внутрь своего процесса с уже сконфигурированным логированием —
+    # его формат не подменяем.
+    root = logging.getLogger()
+    if root.handlers:
+        return
+    handler = logging.StreamHandler()
+    handler.setFormatter(_JsonLogFormatter())
+    root.addHandler(handler)
+    root.setLevel(logging.INFO)
+
+
+_configure_logging()
 log = logging.getLogger(__name__)
 
 # ── Config ───────────────────────────────────────────────
@@ -76,9 +116,49 @@ MENTION_EXCLUDE = set(u.strip().lstrip('@').lower()
                       for u in (os.getenv('MENTION_EXCLUDE') or _own).split(',') if u.strip())
 
 # ── FastAPI ──────────────────────────────────────────────
+@asynccontextmanager
+async def _lifespan(_app):
+    """Замена депрекейтнутых @app.on_event('startup'/'shutdown') с тем же поведением: до yield —
+    прежний startup() (включая запуск QR-GC task), после остановки — прежний shutdown(). Сами
+    функции живут в конце файла под старыми именами (резолвятся при старте приложения):
+    collector зовёт service.shutdown() напрямую, поэтому имя обязано сохраниться."""
+    await startup()
+    try:
+        yield
+    finally:
+        await shutdown()
+
+
+class _RequestIdMiddleware:
+    """ASGI-мидлварь сквозной трассировки: валидный x-request-id входящего запроса (его
+    генерирует/пробрасывает Node-сторона, см. server/lib/observability.js) кладётся в
+    contextvar, откуда _JsonLogFormatter добавляет request_id в каждую лог-строку обработки."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope['type'] != 'http':
+            await self.app(scope, receive, send)
+            return
+        rid = None
+        for name, value in scope.get('headers') or []:
+            if name == b'x-request-id':
+                candidate = value.decode('latin-1', 'replace').strip()
+                if _REQUEST_ID_RE.fullmatch(candidate):
+                    rid = candidate
+                break
+        token = _REQUEST_ID.set(rid)
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            _REQUEST_ID.reset(token)
+
+
 # Server-to-server only (the web service calls it over the private network with an
 # internal token) — no browser ever talks to it, so no CORS middleware.
-app = FastAPI(title='Atlavue MTProto Service', version='1.0.0')
+app = FastAPI(title='Atlavue MTProto Service', version='1.0.0', lifespan=_lifespan)
+app.add_middleware(_RequestIdMiddleware)
 
 
 # FloodWait — Telegram throttled the session. An expected condition, not an outage:
@@ -566,8 +646,8 @@ async def get_views_summary(
         posts = [_build_post(g) for g in _logical_posts(msgs)]   # album-collapsed
 
         total_views = total_forwards = total_reactions = total_replies = 0
-        views_by_day = {}
-        views_by_type = {}
+        views_by_day: dict[str, int] = {}
+        views_by_type: dict[str, list[int]] = {}
 
         for p in posts:
             v = p['views']
@@ -979,7 +1059,7 @@ async def search_mentions_managed(
         _MENTION_SEARCH_SEM.release()
 
 
-_THUMB_CACHE = OrderedDict()   # LRU: move_to_end on hit, popitem(last=False) drops the least-recently-used
+_THUMB_CACHE: OrderedDict[str, bytes] = OrderedDict()   # LRU: move_to_end on hit, popitem(last=False) drops the least-recently-used
 _THUMB_CACHE_MAX = 500
 
 # Bounds for the best-effort cover fanout the managed collect (POST /qr/collect, include_media) runs so
@@ -1176,7 +1256,7 @@ async def get_channel_photo(x_internal_token: str = Header(default='')):
 # service polls /qr/poll and, on success, receives the session string (which IT encrypts
 # and stores) plus the user's admin channels. Pending logins live in memory (single
 # uvicorn worker) with a short TTL. This never reads or mutates the central session.
-_QR = {}                # id -> {client, qr, status, url, session, channels, tg_user_id, username, error, created, task}
+_QR: dict[str, dict] = {}   # id -> {client, qr, status, url, session, channels, tg_user_id, username, error, created, task}
 _QR_TTL = 180           # seconds a pending/abandoned login stays in memory before GC
 _QR_TOKEN_WAIT = 25     # wait per QR token (< Telegram's ~30s TTL) before recreating it
 _QR_TOTAL = 150         # overall seconds to keep offering fresh QR tokens for one login
@@ -1994,7 +2074,9 @@ async def qr_media(session: str = Body(...), channel: str = Body(...),
         _QR_COLLECT_SEM.release()
 
 
-@app.on_event('startup')
+# Хуки жизненного цикла. Вызываются из _lifespan (см. создание FastAPI выше) вместо
+# депрекейтнутых @app.on_event; тела и имена не менялись — collector (doctor) зовёт
+# service.shutdown() напрямую.
 async def startup():
     # Reap abandoned QR logins on a timer (independent of the central session below).
     global _QR_GC_TASK
@@ -2014,7 +2096,6 @@ async def startup():
         log.error(f'MTProto startup error: {e}')
 
 
-@app.on_event('shutdown')
 async def shutdown():
     global client, _QR_GC_TASK
     if _QR_GC_TASK:
@@ -2024,4 +2105,6 @@ async def shutdown():
 
 
 if __name__ == '__main__':
-    uvicorn.run(app, host='0.0.0.0', port=MTPROTO_PORT)
+    # log_config=None: uvicorn не ставит свои plain-text хендлеры, его логгеры (error/access)
+    # проваливаются в root с нашим JSON-форматтером — весь stdout сервиса остаётся JSON.
+    uvicorn.run(app, host='0.0.0.0', port=MTPROTO_PORT, log_config=None)

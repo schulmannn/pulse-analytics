@@ -67,7 +67,7 @@ def clean_channel_ids(values: Iterable[object] | None) -> set[int]:
     result: set[int] = set()
     for raw in values:
         try:
-            value = int(raw)
+            value = int(raw)  # type: ignore[call-overload]  # defensive: non-numeric lands in except
         except (TypeError, ValueError):
             continue
         if value:
@@ -117,7 +117,7 @@ def source_is_excluded(
     ids = clean_channel_ids(excluded_channel_ids)
     uname = str(username or "").strip().lstrip("@").casefold()
     try:
-        cid = abs(int(channel_id))
+        cid = abs(int(channel_id))  # type: ignore[call-overload]  # defensive: non-numeric lands in except
     except (TypeError, ValueError):
         cid = 0
     return bool((uname and uname in sources) or (cid and cid in ids) or (cid and str(cid) in sources))
