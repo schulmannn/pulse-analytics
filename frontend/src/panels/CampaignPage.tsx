@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { toast } from 'sonner';
 import { ApiError } from '@/api/client';
 import {
   useCampaignPosts,
@@ -126,7 +127,12 @@ export function CampaignPage() {
       reason: 'Публикации останутся в источниках — удаляется только группировка.',
     });
     if (!ok) return;
-    del.mutate(campaign.id, { onSuccess: () => navigate(CAMPAIGNS_LIST) });
+    del.mutate(campaign.id, {
+      onSuccess: () => {
+        toast('Кампания удалена');
+        navigate(CAMPAIGNS_LIST);
+      },
+    });
   };
   const onToggleArchive = () => {
     update.mutate({ status: isArchived ? 'active' : 'archived' });

@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react';
+import { toast } from 'sonner';
 import { ErrorState } from '@/components/ErrorState';
 import { Link } from 'react-router-dom';
 import {
@@ -86,7 +87,7 @@ export function ChannelsSection() {
     });
     if (ok) {
       if (activeChannelKeysId === id) setActiveChannelKeysId(null);
-      deleteChannelMutation.mutate(id);
+      deleteChannelMutation.mutate(id, { onSuccess: () => toast('Канал удалён') });
     }
   };
 
