@@ -21,7 +21,7 @@ test('MoySklad returns compact card shows a real series and drills to a full cou
   await expect(page.getByRole('heading', { name: 'Возвраты', level: 1 })).toBeVisible({ timeout: 20_000 });
 
   // Segmented count/sum control: «Число» по умолчанию, сравнение подписано соответствующе.
-  const metric = page.getByRole('group', { name: 'Метрика возвратов' });
+  const metric = page.getByRole('toolbar', { name: 'Метрика возвратов' });
   await expect(metric.getByRole('button', { name: 'Число' })).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByText('Число возвратов', { exact: true })).toBeVisible();
 

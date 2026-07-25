@@ -46,7 +46,7 @@ test.describe('Telegram extra-chart metric pages', () => {
     await expect(page.getByRole('heading', { name: 'Тепловая карта активности', level: 1 })).toBeVisible();
     await expect(page.locator('[data-source-identity]')).toContainText('Telegram');
     // Heatmap — своя форма: никакого выдуманного селектора типа графика и никакого сравнения.
-    await expect(page.getByRole('group', { name: 'Тип графика' })).toHaveCount(0);
+    await expect(page.getByRole('toolbar', { name: 'Тип графика' })).toHaveCount(0);
     // Окно окна есть (heatmap пересобирается по окну).
     await expect(page.getByRole('group', { name: 'Окно' })).toBeVisible();
 
@@ -63,9 +63,9 @@ test.describe('Telegram extra-chart metric pages', () => {
     await expect(page.getByRole('heading', { name: 'Скорость набора просмотров', level: 1 })).toBeVisible();
     await expect(page.locator('[data-source-identity]')).toContainText('Telegram');
     // Накопительная кривая честна и линией, и столбцами → селектор типа графика есть.
-    await expect(page.getByRole('group', { name: 'Тип графика' })).toBeVisible();
+    await expect(page.getByRole('toolbar', { name: 'Тип графика' })).toBeVisible();
     // Bar-режим переключается без падения.
-    await page.getByRole('group', { name: 'Тип графика' }).getByText('Столбцы').click();
+    await page.getByRole('toolbar', { name: 'Тип графика' }).getByText('Столбцы').click();
 
     await page.reload();
     await page.locator('main').waitFor({ state: 'visible', timeout: 25_000 });
@@ -124,14 +124,14 @@ test.describe('Telegram chart cards — вторая волна /metrics/tg-*', 
       // Никогда не generic-оверлей — это выделенный route.
       await expect(page.locator('[role="dialog"]')).toHaveCount(0);
       // Ни на одной странице нет фабрикованного сравнения периодов (нет контрола «База сравнения»).
-      await expect(page.getByRole('group', { name: 'База сравнения' })).toHaveCount(0);
+      await expect(page.getByRole('toolbar', { name: 'База сравнения' })).toHaveCount(0);
 
       if (CATEGORY_KEYS.has(route.key)) {
         // Категориальная серия — Line честна, «Тип графика» присутствует.
-        await expect(page.getByRole('group', { name: 'Тип графика' })).toBeVisible();
+        await expect(page.getByRole('toolbar', { name: 'Тип графика' })).toBeVisible();
       } else {
         // Разрез — truthful rank-список, никакого выдуманного выбора Line/Bar.
-        await expect(page.getByRole('group', { name: 'Тип графика' })).toHaveCount(0);
+        await expect(page.getByRole('toolbar', { name: 'Тип графика' })).toHaveCount(0);
       }
     });
   }
@@ -146,7 +146,7 @@ test.describe('Telegram chart cards — вторая волна /metrics/tg-*', 
     await expect(page.locator('[role="dialog"]')).toHaveCount(0);
     await expect(page.getByRole('heading', { name: 'Состав вовлечённости', level: 1 })).toBeVisible();
     // Разрез — без выдуманного селектора типа графика.
-    await expect(page.getByRole('group', { name: 'Тип графика' })).toHaveCount(0);
+    await expect(page.getByRole('toolbar', { name: 'Тип графика' })).toHaveCount(0);
   });
 
   test('клик по «Карте возможностей контента» ведёт на свою 2D-страницу без ложного Line/Bar', async ({ page }, testInfo) => {
@@ -160,7 +160,7 @@ test.describe('Telegram chart cards — вторая волна /metrics/tg-*', 
     await expect(
       page.getByRole('heading', { name: 'Карта возможностей контента', level: 1 }),
     ).toBeVisible();
-    await expect(page.getByRole('group', { name: 'Тип графика' })).toHaveCount(0);
+    await expect(page.getByRole('toolbar', { name: 'Тип графика' })).toHaveCount(0);
     await expect(page.getByRole('group', { name: 'Окно' })).toBeVisible();
   });
 
@@ -172,11 +172,11 @@ test.describe('Telegram chart cards — вторая волна /metrics/tg-*', 
 
     await expect(page).toHaveURL(/\/metrics\/tg-weekday-views/);
     await expect(page.locator('[role="dialog"]')).toHaveCount(0);
-    await expect(page.getByRole('group', { name: 'Тип графика' })).toBeVisible();
+    await expect(page.getByRole('toolbar', { name: 'Тип графика' })).toBeVisible();
     // Категориальная ось — но сравнения периодов нет (не времянка).
-    await expect(page.getByRole('group', { name: 'База сравнения' })).toHaveCount(0);
+    await expect(page.getByRole('toolbar', { name: 'База сравнения' })).toHaveCount(0);
     // Bar-режим переключается без падения.
-    await page.getByRole('group', { name: 'Тип графика' }).getByText('Столбцы').click();
+    await page.getByRole('toolbar', { name: 'Тип графика' }).getByText('Столбцы').click();
     await expect(page.getByRole('heading', { name: 'По дням недели', level: 1 })).toBeVisible();
   });
 

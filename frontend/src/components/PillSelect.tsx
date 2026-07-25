@@ -74,6 +74,10 @@ export function PillSelect<T extends string = string>({
             value={encodeValue(option.value)}
             disabled={option.disabled}
             data-value={option.value}
+            // Без textValue Radix собирает цель typeahead из ВСЕХ текстовых узлов опции, включая
+            // описание — набор букв из пояснения матчился бы наравне с названием, а озвучка
+            // склеивала бы «Название Описание» в одно имя. Печатаем по названию.
+            textValue={option.label}
           >
             <span className="block min-w-0">
               <span className="block truncate">{option.label}</span>

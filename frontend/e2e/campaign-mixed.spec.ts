@@ -376,11 +376,11 @@ test.describe('Смешанная кампания TG+IG', () => {
     await expect(page.getByRole('heading', { level: 1, name: 'Сумма охватов IG · по дате публикации' })).toBeVisible();
     await expect(page.getByRole('dialog')).toHaveCount(0);
 
-    const chartType = page.getByRole('group', { name: 'Тип графика' });
+    const chartType = page.getByRole('toolbar', { name: 'Тип графика' });
     await expect(chartType).toBeVisible();
     await chartType.getByRole('button', { name: 'Тип графика: Столбцы' }).click();
     await expect.poll(() => new URL(page.url()).searchParams.get('chart')).toBe('bar');
-    await expect(page.getByRole('group', { name: 'Показатель' })).toBeVisible();
+    await expect(page.getByRole('toolbar', { name: 'Показатель' })).toBeVisible();
 
     const backLink = page.locator('a[href^="/campaigns/1?"]').first();
     await expect(backLink).toHaveAttribute('href', /source=ig%3A2/);
@@ -394,14 +394,14 @@ test.describe('Смешанная кампания TG+IG', () => {
     await expect(page.getByRole('heading', { level: 1, name: 'Источники кампании' })).toBeVisible();
     await expect(page.getByText('IG аккаунт')).toBeVisible();
     await expect(page.getByText('TG канал')).toHaveCount(0);
-    await expect(page.getByRole('group', { name: 'Тип графика' })).toHaveCount(0);
+    await expect(page.getByRole('toolbar', { name: 'Тип графика' })).toHaveCount(0);
 
     await page.goto('/campaigns/1');
     await page.locator('[data-drill-to*="/campaigns/1/metrics/formats"]').click();
     await expect.poll(() => new URL(page.url()).pathname).toBe('/campaigns/1/metrics/formats');
     await expect(page.getByRole('heading', { level: 1, name: 'Форматы кампании' })).toBeVisible();
     await expect(page.getByRole('img', { name: 'Круговая диаграмма' })).toBeVisible();
-    await expect(page.getByRole('group', { name: 'Тип графика' })).toHaveCount(0);
+    await expect(page.getByRole('toolbar', { name: 'Тип графика' })).toHaveCount(0);
   });
 
   test('mobile campaign chart uses the same dedicated timeline route', async ({ page }, testInfo) => {
@@ -413,7 +413,7 @@ test.describe('Смешанная кампания TG+IG', () => {
     await expect.poll(() => new URL(page.url()).searchParams.get('metric')).toBe('ig_reach');
     await expect(page.getByRole('heading', { level: 1, name: 'Сумма охватов IG · по дате публикации' })).toBeVisible();
     await expect(page.getByRole('dialog')).toHaveCount(0);
-    await expect(page.getByRole('group', { name: 'Тип графика' })).toBeVisible();
-    await expect(page.getByRole('group', { name: 'Показатель' })).toBeVisible();
+    await expect(page.getByRole('toolbar', { name: 'Тип графика' })).toBeVisible();
+    await expect(page.getByRole('toolbar', { name: 'Показатель' })).toBeVisible();
   });
 });

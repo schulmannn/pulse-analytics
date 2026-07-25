@@ -8,7 +8,7 @@ test.beforeEach(async ({ page }, testInfo) => {
 
 test('MoySklad RFM is an honest compact distribution with a canonical full page', async ({ page }) => {
   const card = page.getByRole('heading', { name: 'RFM-сегменты', exact: true }).locator('xpath=ancestor::section[1]');
-  const metric = card.getByRole('group', { name: 'Метрика RFM-сегментов' });
+  const metric = card.getByRole('toolbar', { name: 'Метрика RFM-сегментов' });
   await expect(metric.getByRole('button', { name: 'Клиенты' })).toHaveAttribute('aria-pressed', 'true');
   await expect(card.getByText('Чемпионы', { exact: true })).toBeVisible();
   await expect(card.getByText('Под риском', { exact: true })).toBeVisible();

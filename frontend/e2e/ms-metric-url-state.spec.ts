@@ -16,10 +16,10 @@ test('metric controls survive reload and browser back while preserving the perio
     { theme: 'dark' },
   );
 
-  const grain = page.getByRole('group', { name: 'Грануляция' });
-  const chart = page.getByRole('group', { name: 'Тип графика' });
-  const metric = page.getByRole('group', { name: 'Метрика возвратов' });
-  const comparison = page.getByRole('group', { name: 'База сравнения' });
+  const grain = page.getByRole('toolbar', { name: 'Грануляция' });
+  const chart = page.getByRole('toolbar', { name: 'Тип графика' });
+  const metric = page.getByRole('toolbar', { name: 'Метрика возвратов' });
+  const comparison = page.getByRole('toolbar', { name: 'База сравнения' });
 
   await expect(grain.getByRole('button', { name: 'Неделя' })).toHaveAttribute('aria-pressed', 'true');
   await expect(chart.getByRole('button', { name: 'Столбцы' })).toHaveAttribute('aria-pressed', 'true');
@@ -66,13 +66,13 @@ test('channel links canonicalize invalid selections and incompatible chart state
   expect(canonical.get('view')).toBe('breakdown');
   expect(canonical.has('chart')).toBe(false);
 
-  await expect(page.getByRole('group', { name: 'Грануляция' }).getByRole('button', { name: 'Месяц' }))
+  await expect(page.getByRole('toolbar', { name: 'Грануляция' }).getByRole('button', { name: 'Месяц' }))
     .toHaveAttribute('aria-pressed', 'true');
-  await expect(page.getByRole('group', { name: 'Метрика' }).getByRole('button', { name: 'Заказы' }))
+  await expect(page.getByRole('toolbar', { name: 'Метрика' }).getByRole('button', { name: 'Заказы' }))
     .toHaveAttribute('aria-pressed', 'true');
-  await expect(page.getByRole('group', { name: 'Вид' }).getByRole('button', { name: 'По каналам' }))
+  await expect(page.getByRole('toolbar', { name: 'Вид' }).getByRole('button', { name: 'По каналам' }))
     .toHaveAttribute('aria-pressed', 'true');
-  await expect(page.getByRole('group', { name: 'Тип графика' })).toHaveCount(0);
+  await expect(page.getByRole('toolbar', { name: 'Тип графика' })).toHaveCount(0);
 
   const picker = page.getByRole('button', { name: 'Каналы: 3' });
   await picker.click();

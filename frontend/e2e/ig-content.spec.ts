@@ -467,6 +467,18 @@ test.describe('Instagram Контент 2.0 (desktop)', () => {
       body: await page.screenshot({ fullPage: true }),
       contentType: 'image/png',
     });
+  });
+
+  /**
+   * Split out of the surface test above: together they ran ~51s against a 45s budget, so the case
+   * failed on the clock rather than on a defect — and the timeout landed on whichever step happened
+   * to be last (a page.reload), which read as a hang and hid what was actually being checked.
+   * Column visibility is its own concern anyway: two reloads and a corrupted-storage path.
+   */
+  test('видимость колонок: скрытие, персист через reload и безопасный откат повреждённого значения', async ({ page }) => {
+    await boot(page);
+    await page.goto('/instagram/content');
+    await expect(page.locator('[data-ig-content-table] tbody tr').first()).toBeVisible();
 
     // Видимость колонок — shadcn DropdownMenu. «Просмотры» видна по умолчанию, скрываем её.
     const columns = page.getByRole('button', { name: 'Колонки' });

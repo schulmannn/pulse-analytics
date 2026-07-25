@@ -111,7 +111,7 @@ test.describe('TG Обзор — карточки топ-постов + пери
       }
       await expect(page.getByRole('group', { name: 'Период', exact: true })).toHaveCount(1);
       await expect(page.getByRole('group', { name: 'Период страницы' })).toHaveCount(0);
-      await expect(page.getByRole('group', { name: 'Период виджета' })).toHaveCount(0);
+      await expect(page.getByRole('toolbar', { name: 'Период виджета' })).toHaveCount(0);
     }
   });
 

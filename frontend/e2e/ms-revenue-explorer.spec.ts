@@ -17,12 +17,12 @@ test('MoySklad revenue drills into the full /metrics/ms-revenue page with workin
   await expect(page.getByRole('link', { name: /МойСклад · Обзор/ })).toBeVisible();
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(page.getByRole('heading', { name: 'Сравнение' })).toBeVisible();
-  await expect(page.getByRole('group', { name: 'База сравнения' })).toBeVisible();
+  await expect(page.getByRole('toolbar', { name: 'База сравнения' })).toBeVisible();
 
   // Контролы графика живут на самой странице: окно, грануляция, тип графика.
   const windowGroup = page.getByRole('group', { name: 'Окно', exact: true });
-  const grainGroup = page.getByRole('group', { name: 'Грануляция' });
-  const kindGroup = page.getByRole('group', { name: 'Тип графика' });
+  const grainGroup = page.getByRole('toolbar', { name: 'Грануляция' });
+  const kindGroup = page.getByRole('toolbar', { name: 'Тип графика' });
   await expect(windowGroup).toBeVisible();
   await expect(windowGroup.getByRole('button', { name: 'Свой период' })).toBeVisible();
   await expect(grainGroup).toBeVisible();

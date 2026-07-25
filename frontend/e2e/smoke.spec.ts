@@ -55,7 +55,7 @@ test('overview has one authoritative top-bar period and no card-local controls',
   const widgetPeriods = page.getByRole('group', { name: 'Период страницы' });
   await expect(pagePeriod).toHaveCount(1);
   await expect(widgetPeriods).toHaveCount(0);
-  await expect(page.getByRole('group', { name: 'Период виджета' })).toHaveCount(0);
+  await expect(page.getByRole('toolbar', { name: 'Период виджета' })).toHaveCount(0);
 
   // The page default wins over every stale saved widget override without rendering duplicate UI.
   await expect(pagePeriod.getByRole('button', { name: '30д' })).toHaveAttribute('aria-pressed', 'true');

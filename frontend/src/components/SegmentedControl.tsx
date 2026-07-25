@@ -1,3 +1,4 @@
+import { useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 
@@ -43,12 +44,23 @@ type SegmentedControlProps<T extends string> = SegmentedControlBaseProps<T> & Se
  * (the «glider») that travels to the selected segment. Segments are equal-width by construction
  * (a CSS grid of `1fr` columns), so the glider is one column wide and moves in whole-column steps.
  *
- * Semantics stay explicit: each segment is a real `<button aria-pressed>`, the track is a labelled
- * `role="group"`, and there are NO hidden native radio inputs. Every button carries its own explicit
- * focus-visible ring above the glider; disabled segments stay natively inert.
+ * Semantics stay explicit: each segment is a real `<button aria-pressed>` and there are NO hidden
+ * native radio inputs. Every button carries its own explicit focus-visible ring above the glider.
  * Motion is token-driven (`--motion-base` / `--ease-standard`), so the global reduced-motion net
  * collapses the slide automatically. When `value` matches no option the glider hides (used by the
  * period controls, where a picked custom range deselects every preset).
+ *
+ * Keyboard: the track is ONE tab stop, not one per segment. A roving tabindex keeps the selected
+ * segment focusable and ←/→ (plus Home/End) move between them, wrapping at the ends — a seven-preset
+ * track used to cost seven Tab presses to walk past. That is why the track is a `toolbar` rather
+ * than a plain group: roving tabindex is only discoverable if the container announces a pattern
+ * where arrows are expected. Arrows move FOCUS only; Space/Enter commits, so tabbing through a form
+ * cannot silently change a filter.
+ *
+ * Disabled segments use `aria-disabled`, not the native attribute. A natively disabled button is
+ * unfocusable — in a roving track that leaves a hole the arrows skip over, and worse, it swallows
+ * the `title` explaining WHY the option is unavailable (disabled elements fire no mouse events).
+ * This way the segment stays reachable and self-explaining; activation is blocked in the handler.
  */
 export function SegmentedControl<T extends string>({
   ariaLabel,
@@ -60,11 +72,29 @@ export function SegmentedControl<T extends string>({
   size = 'md',
   groupless = false,
 }: SegmentedControlProps<T>) {
+  const trackRef = useRef<HTMLDivElement>(null);
   const count = options.length;
+  const activeIndex = options.findIndex((opt) => opt.value === value);
+  // Каретка roving-tabindex. Держим ИНДЕКС, а не значение: у периодных треков value может не
+  // совпадать ни с одним сегментом (выбран свой диапазон → глайдер скрыт), и тогда фокусируемым
+  // должен остаться хоть кто-то, иначе в трек нельзя войти с клавиатуры вообще.
+  const [caret, setCaret] = useState(0);
+  const focusIndex = activeIndex >= 0 ? activeIndex : Math.min(caret, Math.max(0, count - 1));
+
+  /** Двигает фокус по треку с заворотом; отключённые сегменты НЕ пропускаем — они несут title,
+      объясняющий недоступность, и должны быть достижимы. */
+  const moveCaret = (next: number) => {
+    if (count === 0) return;
+    const wrapped = ((next % count) + count) % count;
+    setCaret(wrapped);
+    trackRef.current
+      ?.querySelector<HTMLButtonElement>(`[data-segment-index="${wrapped}"]`)
+      ?.focus();
+  };
+
   // No options → nothing mutually-exclusive to pick, and the glider width `100% / count` would
   // divide by zero. Render nothing rather than an empty, malformed track.
   if (count === 0) return null;
-  const activeIndex = options.findIndex((opt) => opt.value === value);
   const sizePad = size === 'sm' ? 'px-2 py-1 text-2xs' : 'px-2.5 py-1 text-xs';
 
   // The glider is one grid-column wide and slides in whole-column steps. Both the width and the
@@ -80,9 +110,23 @@ export function SegmentedControl<T extends string>({
 
   return (
     <div
+      ref={trackRef}
       data-segmented-control
-      role={groupless ? undefined : 'group'}
+      // `toolbar` even when groupless: the enclosing surface owns the visible LABEL, but the roving
+      // tabindex still needs a container that announces «arrows work here».
+      role="toolbar"
+      aria-orientation="horizontal"
       aria-label={groupless ? undefined : ariaLabel}
+      onKeyDown={(event) => {
+        switch (event.key) {
+          case 'ArrowLeft': moveCaret(focusIndex - 1); break;
+          case 'ArrowRight': moveCaret(focusIndex + 1); break;
+          case 'Home': moveCaret(0); break;
+          case 'End': moveCaret(count - 1); break;
+          default: return;
+        }
+        event.preventDefault();
+      }}
       className={cn('relative inline-grid rounded-full border border-border p-0.5', className)}
       style={{ gridTemplateColumns: `repeat(${count}, minmax(0, 1fr))` }}
     >
@@ -92,21 +136,33 @@ export function SegmentedControl<T extends string>({
         className="pointer-events-none absolute inset-y-0.5 left-0.5 rounded-full bg-secondary"
         style={gliderStyle}
       />
-      {options.map((opt) => {
+      {options.map((opt, index) => {
         const active = opt.value === value;
         return (
           <button
             key={opt.value}
             type="button"
+            data-segment-index={index}
             aria-pressed={active}
             aria-label={opt.ariaLabel}
             title={opt.title}
-            disabled={opt.disabled}
-            onClick={() => onChange(opt.value)}
+            // aria-disabled, не disabled: см. докстроку — иначе сегмент выпадает из обхода стрелками
+            // и молча съедает собственный title.
+            aria-disabled={opt.disabled || undefined}
+            tabIndex={index === focusIndex ? 0 : -1}
+            onFocus={() => setCaret(index)}
+            onClick={() => {
+              if (opt.disabled) return;
+              onChange(opt.value);
+            }}
             className={cn(
-              'relative z-10 inline-flex items-center justify-center rounded-full font-medium transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40 disabled:pointer-events-none disabled:opacity-40',
+              'relative z-10 inline-flex items-center justify-center rounded-full font-medium transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40',
               sizePad,
-              active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
+              opt.disabled
+                ? 'cursor-default opacity-40'
+                : active
+                  ? 'text-foreground'
+                  : 'text-muted-foreground hover:text-foreground',
               segmentClassName,
             )}
           >

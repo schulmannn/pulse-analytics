@@ -8,7 +8,7 @@ test.beforeEach(({ page: _page }, testInfo) => {
 test('cohort mode toggles retention / revenue / LTV, persisting in the URL across reload', async ({ page }) => {
   await bootDemo(page, '/metrics/ms-cohorts', { theme: 'dark' });
 
-  const mode = page.getByRole('group', { name: 'Режим когортной матрицы' });
+  const mode = page.getByRole('toolbar', { name: 'Режим когортной матрицы' });
   const matrix = page.getByRole('table');
 
   // Default: retention, no `mode` in the URL, cells rendered as percentages.

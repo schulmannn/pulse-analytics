@@ -52,8 +52,8 @@ test('reduced motion: chart marks and tooltip render in their final state', asyn
   await expect(morphGroup).toHaveAttribute('data-chart-morph-state', 'idle');
   const primary = chart.locator('[data-chart-series="primary"]');
   const oldPath = await primary.getAttribute('d');
-  await expect(page.getByRole('group', { name: 'Период', exact: true }).getByRole('button', { name: '30д' })).toHaveAttribute('aria-pressed', 'true');
-  await page.getByRole('group', { name: 'Период', exact: true }).getByRole('button', { name: '7д', exact: true }).click();
+  await expect(page.getByRole('toolbar', { name: 'Период', exact: true }).getByRole('button', { name: '30д' })).toHaveAttribute('aria-pressed', 'true');
+  await page.getByRole('toolbar', { name: 'Период', exact: true }).getByRole('button', { name: '7д', exact: true }).click();
   await expect.poll(() => primary.getAttribute('d')).not.toBe(oldPath);
   // JS motion observes the same preference: it snaps to the target without scheduling a RAF frame.
   await expect(morphGroup).toHaveAttribute('data-chart-morph-state', 'idle');
