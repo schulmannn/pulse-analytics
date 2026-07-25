@@ -325,7 +325,17 @@ function PostsTable({ allPosts, loadedCount }: { allPosts: NormalizedPost[]; loa
           </Button>
         </div>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-2xs text-muted-foreground">
-          <span className="tabular-nums" data-testid="content-result-count">{fmt.num(rows.length)} публ.</span>
+          {/* role=status: счётчик уже виден на экране, но он МЕНЯЕТСЯ от поиска и фильтров — без
+              live-региона пользователь скринридера печатает в поиск и не узнаёт, что выдача
+              схлопнулась до нуля. Озвучиваем существующую строку вместо скрытого дубля. */}
+          <span
+            className="tabular-nums"
+            role="status"
+            aria-live="polite"
+            data-testid="content-result-count"
+          >
+            {fmt.num(rows.length)} публ.
+          </span>
           {hasContentFilters && (
             <button
               type="button"

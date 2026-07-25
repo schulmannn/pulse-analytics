@@ -180,7 +180,7 @@ function VariantCarousel({
         >
           <div
             className={`flex gap-3 motion-reduce:transition-none ${
-              viewportW > 0 ? 'transition-transform duration-300 ease-out' : ''
+              viewportW > 0 ? 'transition-transform dur-reveal ease-house' : ''
             }`}
             style={{ transform: `translateX(${offset}px)` }}
           >
@@ -215,7 +215,7 @@ function VariantCarousel({
                     }
                     select(i);
                   }}
-                  className={`w-56 shrink-0 overflow-hidden rounded-lg border text-left transition-[opacity,transform,border-color] duration-300 motion-reduce:transition-none ${
+                  className={`w-56 shrink-0 overflow-hidden rounded-lg border text-left transition-[opacity,transform,border-color] dur-reveal ease-house motion-reduce:transition-none ${
                     active
                       ? 'border-primary ring-1 ring-primary/40'
                       : 'scale-[0.96] opacity-60 border-border hover:opacity-90'
@@ -255,7 +255,10 @@ function VariantCarousel({
             aria-label={`Тип ${i + 1}: ${v.label}`}
             aria-current={i === activeIdx || undefined}
             onClick={() => select(i)}
-            className={`h-1.5 rounded-full transition-all motion-reduce:transition-none ${
+            // Enumerated rather than `all`: the stretch IS a width tween here (a 1.5→4px pill that
+            // scaleX would visibly distort at the rounded caps), so the layout cost is accepted —
+            // but only for these two properties, not for every property the dot happens to carry.
+            className={`h-1.5 rounded-full transition-[width,background-color] dur-fast ease-house motion-reduce:transition-none ${
               i === activeIdx ? 'w-4 bg-primary' : 'w-1.5 bg-border hover:bg-ink3/60'
             }`}
           />

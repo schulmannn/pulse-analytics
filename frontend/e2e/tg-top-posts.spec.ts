@@ -57,9 +57,11 @@ test.describe('TG Обзор — карточки топ-постов + пери
     await page.getByRole('button', { name: /^15\s/ }).click();
     await page.getByRole('button', { name: 'Применить' }).click();
 
-    // Диапазон помечен: пресеты неактивны, чип диапазона (с «–») aria-pressed=true.
+    // Диапазон помечен: пресеты неактивны, а чип несёт сам диапазон в доступном имени (с «–»).
+    // Состояние живёт в НАЗВАНИИ, не в aria-pressed: чип — popover-триггер, у него уже есть
+    // aria-expanded от Radix, и второе состояние на той же кнопке скринридер читает как конфликт.
     const rangeChip = periodGroup.getByRole('button', { name: /–/ });
-    await expect(rangeChip).toHaveAttribute('aria-pressed', 'true');
+    await expect(rangeChip).toBeVisible();
     await expect(periodGroup.getByRole('button', { name: '30д' })).toHaveAttribute('aria-pressed', 'false');
 
     // Контент реально сузился под окно: за пустой период топа нет → карточки исчезают, честный empty.
@@ -73,7 +75,7 @@ test.describe('TG Обзор — карточки топ-постов + пери
     await page.getByRole('link', { name: 'Аналитика', exact: true }).click();
     await expect(page).toHaveURL(/\/analytics/);
     const analyticsPeriod = page.getByRole('group', { name: 'Период' });
-    await expect(analyticsPeriod.getByRole('button', { name: rangeLabel! })).toHaveAttribute('aria-pressed', 'true');
+    await expect(analyticsPeriod.getByRole('button', { name: rangeLabel! })).toBeVisible();
     // This is a historical window outside the demo graph data. A date-resolvable chart must not
     // fall back to the last archived points: the card stays mounted with an honest empty body.
     const viewsCard = page

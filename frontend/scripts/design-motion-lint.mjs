@@ -4,8 +4,13 @@
 //   node scripts/design-motion-lint.mjs      → report + exit 1 on canon violations
 // Canon (see frontend/DESIGN_TOKENS.md):
 //   • the house easing cubic-bezier(0.2, 0.7, 0.3, 1) must be var(--ease-standard), never inlined
-//   • UI durations come from the --motion-* ladder; raw ms/s live only in index.css :root, in the
-//     allow-listed bespoke illustration keyframes, or in framer on the landing
+//   • UI durations come from the --motion-* ladder. In .ts/.tsx that means the dur-* / ease-house
+//     utilities (index.css) — never a numeric `duration-300` or a bare `ease-out`. Raw ms/s live in
+//     index.css only: the :root ladder, the allow-listed bespoke illustration keyframes, and framer
+//     on the landing. (index.css itself is NOT scanned by the duration/easing-utility rules — it is
+//     where the exceptions legitimately live; the house-easing rule still applies to it.)
+//   • never `transition-all` — it animates layout-triggering properties (width/height/padding) too,
+//     which drops frames on a busy main thread. Enumerate: transition-[width] / transition-colors.
 //   • the type scale is the Tailwind fontSize ladder — no magic text-[Npx]
 //   • no arbitrary Tailwind motion values (duration-[…] / ease-[…] / delay-[…]) — use the scale/tokens
 import { readdirSync, readFileSync, statSync } from 'node:fs';
@@ -47,6 +52,30 @@ const rules = [
     id: 'arbitrary-motion-util',
     hint: 'use the duration scale / --motion-* tokens',
     test: (line) => /\b(?:duration|ease|delay)-\[/.test(line),
+  },
+  {
+    id: 'raw-duration-util',
+    hint: 'use dur-press / dur-fast / dur-base / dur-reveal (or anim-dur-fast)',
+    // Tailwind's numeric scale (duration-300) is off-ladder by construction: it re-types a number
+    // that already has a token. `duration-0` is exempt — it is the «disable this transition» idiom
+    // (motion-reduce:duration-0), not a timing choice. index.css owns the raw values, so it is
+    // skipped: that is where the ladder and the bespoke illustration loops are defined.
+    test: (line) => /\b(?:duration|delay)-(?!0\b|\[)\d/.test(line),
+    exempt: (rel) => rel.endsWith('.css'),
+  },
+  {
+    id: 'raw-ease-util',
+    hint: 'use ease-house (= var(--ease-standard))',
+    // Same reasoning: ease-out / ease-in-out are Tailwind's built-ins, not the house curve. The
+    // bespoke illustration keyframes (cartograph / connect / starfield / jiggle) legitimately use
+    // their own curves and live in index.css, which this rule skips.
+    test: (line) => /\bease-(?:in|out|linear|in-out)\b/.test(line),
+    exempt: (rel) => rel.endsWith('.css'),
+  },
+  {
+    id: 'transition-all',
+    hint: 'enumerate the properties — transition-all animates layout (width/height/padding) too',
+    test: (line) => /\btransition-all\b/.test(line),
   },
   {
     id: 'arbitrary-z-index',

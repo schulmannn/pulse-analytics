@@ -20,6 +20,12 @@ export interface SearchFieldProps {
   id?: string;
   inputRef?: React.Ref<HTMLInputElement>;
   onKeyDown?: React.KeyboardEventHandler<HTMLInputElement>;
+  /**
+   * Итог фильтрации одной строкой («12 постов»). Живёт в polite live-регионе: без него зрячий
+   * пользователь видит, как список схлопнулся, а пользователь скринридера печатает в пустоту и
+   * не узнаёт, что нашлось 0 из 40. Опционально — поверхности без счётчика просто не передают.
+   */
+  resultsLabel?: string;
 }
 
 /**
@@ -39,6 +45,7 @@ export function SearchField({
   id,
   inputRef,
   onKeyDown,
+  resultsLabel,
 }: SearchFieldProps) {
   const hasValue = value.length > 0;
   return (
@@ -53,7 +60,18 @@ export function SearchField({
         type="search"
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        onKeyDown={onKeyDown}
+        onKeyDown={(event) => {
+          // Escape очищает непустой поиск — конвенция поля поиска, и единственный способ сбросить
+          // фильтр с клавиатуры, не уводя фокус на кнопку-крестик. Гасим только когда есть что
+          // чистить: пустое поле должно отдать Escape наружу (закрыть попап/диалог над ним).
+          if (event.key === 'Escape' && value.length > 0) {
+            event.preventDefault();
+            event.stopPropagation();
+            onChange('');
+            return;
+          }
+          onKeyDown?.(event);
+        }}
         placeholder={placeholder}
         aria-label={ariaLabel}
         data-testid={testId}
@@ -71,6 +89,11 @@ export function SearchField({
         >
           <X aria-hidden="true" />
         </Button>
+      )}
+      {resultsLabel !== undefined && (
+        <span className="sr-only" role="status" aria-live="polite">
+          {resultsLabel}
+        </span>
       )}
     </div>
   );

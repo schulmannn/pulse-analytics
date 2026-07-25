@@ -39,4 +39,26 @@ describe('SearchField', () => {
     );
     expect(html).toContain('aria-label="Сбросить"');
   });
+
+  it('announces the result count in a polite live region only when the caller supplies one', () => {
+    const withCount = markup(
+      <SearchField value="куртка" onChange={() => {}} ariaLabel="Поиск" resultsLabel="3 отчёта" />,
+    );
+    expect(withCount).toContain('aria-live="polite"');
+    expect(withCount).toContain('role="status"');
+    expect(withCount).toContain('3 отчёта');
+    // Visually hidden: the count is an announcement, not a second on-screen counter.
+    expect(withCount).toContain('sr-only');
+
+    // A surface with no count renders no empty live region (an empty one still gets polled).
+    const withoutCount = markup(<SearchField value="куртка" onChange={() => {}} ariaLabel="Поиск" />);
+    expect(withoutCount).not.toContain('aria-live');
+  });
+
+  it('renders a zero-result announcement rather than falling back to silence', () => {
+    const html = markup(
+      <SearchField value="zzz" onChange={() => {}} ariaLabel="Поиск" resultsLabel="0 отчётов" />,
+    );
+    expect(html).toContain('0 отчётов');
+  });
 });

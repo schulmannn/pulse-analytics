@@ -70,12 +70,15 @@ export function PeriodChips({
         <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
           <PopoverTrigger asChild>
             {/* Part of the shared Button system rather than an ad-hoc pill; the active (picked-range)
-                state tints the same outline chip so it still reads as pressed next to the presets. */}
+                state tints the same outline chip so it still reads as pressed next to the presets.
+                NO aria-pressed here: Radix already owns aria-expanded/aria-haspopup on a popover
+                trigger, and a button cannot be a toggle and a disclosure at once (screen readers
+                would announce both states). The picked range is carried by the accessible NAME —
+                the label itself becomes «3 июн. – 12 июн.» — so the state stays announced. */}
             <Button
               type="button"
               variant="outline"
               size="xs"
-              aria-pressed={!!range}
               className={cn(
                 'font-medium',
                 range

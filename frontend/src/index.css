@@ -1259,6 +1259,51 @@
   font-feature-settings: 'tnum' 1;
 }
 
+/* ── Motion ladder, Tailwind-class side ─────────────────────────────────────────────────────────
+   The --motion-* / --ease-standard tokens were only reachable from hand-written CSS: in a component
+   the choices were an off-ladder numeric `duration-300` or a bracketed arbitrary value wrapping the
+   token — and the design-motion lint rejects the bracketed form by construction, so components
+   quietly re-typed the numbers instead. These
+   utilities close that gap — one canonical class per rung, and `scripts/design-motion-lint.mjs`
+   enforces them (`raw-duration-util` / `raw-ease-util`).
+
+   transition- and animation- duration stay SEPARATE on purpose: a component may transition on a
+   token beat while running an unrelated ambient keyframe (progress.tsx pairs `dur-reveal` with
+   `animate-pulse` — folding both into one class would drive the pulse at 300ms). Reduced motion is
+   already handled globally (the 0.01ms cap in @layer base), so these carry no per-rule guard. */
+/* Only for a property the JS rewrites every frame (pointer-driven transform): long enough to take
+   the stair-step off a per-event value, short enough that the element still reads as glued to the
+   cursor. Not a general «fast» rung — reach for dur-press/dur-fast for ordinary feedback. */
+@utility dur-track {
+  transition-duration: var(--motion-track);
+}
+
+@utility dur-press {
+  transition-duration: var(--motion-press);
+}
+
+@utility dur-fast {
+  transition-duration: var(--motion-fast);
+}
+
+@utility dur-base {
+  transition-duration: var(--motion-base);
+}
+
+@utility dur-reveal {
+  transition-duration: var(--motion-reveal);
+}
+
+@utility anim-dur-fast {
+  animation-duration: var(--motion-fast);
+}
+
+/* The house curve for both axes — `ease-out`/`ease-in-out` are off-canon (see DESIGN_TOKENS). */
+@utility ease-house {
+  transition-timing-function: var(--ease-standard);
+  animation-timing-function: var(--ease-standard);
+}
+
 @utility chip-tint-1 {
   /* Letter-avatar identity chips — bg + ink travel as one class so a chip can never end up
      with a mismatched pair. Picked via chipTint() (DashboardLayout); themed via --chip-N-*. */
@@ -1670,6 +1715,7 @@
   :root {
     --ease-standard: cubic-bezier(0.2, 0.7, 0.3, 1); /* entrance / settle ease-out — the house curve */
     --ease-chart-morph: cubic-bezier(0.25, 0.1, 0.25, 1); /* Recharts `ease` update curve */
+    --motion-track: 100ms;    /* smoothing for a transform written per pointermove frame   */
     --motion-press: 140ms;    /* tactile press feedback (button dip)                       */
     --motion-fast: 200ms;     /* quick opacity / colour fades                              */
     --motion-base: 240ms;     /* standard control transition (mode swap · icon · hover→active) */

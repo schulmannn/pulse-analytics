@@ -460,7 +460,7 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
       )}
 
       <div className="relative grid grid-cols-1 gap-6 xl:gap-8 lg:grid-cols-[minmax(0,1fr)_var(--inspector-w,300px)]">
-        <InspectorHandle />
+        <InspectorHandle controlsId="ig-metric-inspector" />
         <div className="min-w-0 space-y-6">
           {lvl != null && (
             <>
@@ -613,7 +613,7 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
         </div>
 
         {/* Explore rail — flat hairline sections (no widget chrome: these are controls, not cards). */}
-        <aside className="space-y-6">
+        <aside id="ig-metric-inspector" className="space-y-6">
           <RailSection title="Сравнение">
             {/* Итог окна — канонический дом итога после тихой шапки (v2: hero переехал сюда).
                 Для ig-follows это текущая база (то, чем ведёт страница), не сумма подписок. */}
@@ -722,7 +722,7 @@ function IgAggregatePage({ def, pair, windowDays, handle }: { def: IgAggDef; pai
       </div>
 
       <div className="relative grid grid-cols-1 gap-6 xl:gap-8 lg:grid-cols-[minmax(0,1fr)_var(--inspector-w,300px)]">
-        <InspectorHandle />
+        <InspectorHandle controlsId="ig-aggregate-inspector" />
         <div className="min-w-0 space-y-6">
           <ChartSection title="Период против периода" defaultSize="full" noExpand>
             {pair.hasCur ? (
@@ -755,7 +755,7 @@ function IgAggregatePage({ def, pair, windowDays, handle }: { def: IgAggDef; pai
           <WindowBar value={days} onChange={setDays} allowAll={false} />
         </div>
 
-        <aside className="space-y-6">
+        <aside id="ig-aggregate-inspector" className="space-y-6">
           {/* v2: итог живёт в «Сравнении» — первая секция rail. Прошлый период у агрегатной
               страницы уже разложен в основном блоке, поэтому здесь только строка итога. */}
           <RailSection title="Сравнение">
@@ -838,7 +838,7 @@ function IgErPage({
       </div>
 
       <div className="relative grid grid-cols-1 gap-6 xl:gap-8 lg:grid-cols-[minmax(0,1fr)_var(--inspector-w,300px)]">
-        <InspectorHandle />
+        <InspectorHandle controlsId="ig-er-inspector" />
         <div className="min-w-0 space-y-6">
           <ChartSection title="Период против периода" defaultSize="full" noExpand>
             {hasCur ? (
@@ -874,7 +874,7 @@ function IgErPage({
           <WindowBar value={days} onChange={setDays} allowAll={false} />
         </div>
 
-        <aside className="space-y-6">
+        <aside id="ig-er-inspector" className="space-y-6">
           {/* v2: итог живёт в «Сравнении» — первая секция rail. Прошлый период у ER уже
               разложен в основном блоке, поэтому здесь только строка итога. */}
           <RailSection title="Сравнение">
@@ -953,9 +953,9 @@ function IgChartShell({
       </div>
 
       <div className="relative grid grid-cols-1 gap-6 xl:gap-8 lg:grid-cols-[minmax(0,1fr)_var(--inspector-w,300px)]">
-        <InspectorHandle />
+        <InspectorHandle controlsId="ig-shell-inspector" />
         <div className="min-w-0 space-y-6">{children}</div>
-        <aside className="space-y-6">
+        <aside id="ig-shell-inspector" className="space-y-6">
           <RailSection title="Сравнение">{comparison}</RailSection>
           <RailSection title="О метрике">
             <dl className="space-y-3 text-sm">
