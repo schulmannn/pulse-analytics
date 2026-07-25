@@ -811,7 +811,7 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
                         aria-hidden="true"
                         data-testid="ig-content-open-indicator"
                         className={cn(
-                          'mx-auto size-4 transition-[opacity,transform,color] duration-200',
+                          'mx-auto size-4 transition-[opacity,transform,color] dur-fast ease-house',
                           isOpen
                             ? 'text-primary opacity-100'
                             : 'translate-x-1 text-muted-foreground opacity-0 group-hover:translate-x-0 group-hover:opacity-100 group-focus-within:translate-x-0 group-focus-within:opacity-100',

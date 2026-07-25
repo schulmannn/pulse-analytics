@@ -51,7 +51,7 @@ export function Breakdown({ items }: BreakdownProps) {
             className="relative flex items-center justify-between overflow-hidden rounded p-2"
           >
             <div
-              className="absolute bottom-0 left-0 top-0 rounded-sm transition-all"
+              className="absolute bottom-0 left-0 top-0 rounded-sm transition-[width] dur-base ease-house"
               style={{ width: `${percentage}%`, ...bgStyle }}
             />
             <span className="relative z-10 flex max-w-[65%] items-center gap-1.5 truncate text-sm font-medium text-foreground">

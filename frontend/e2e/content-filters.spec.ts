@@ -141,6 +141,19 @@ test.describe('Контент — URL-фильтры (desktop)', () => {
     await expect(rows).toHaveCount(1);
     await page.getByLabel('Поиск по публикациям').fill('nothing matches');
     await expect(page.getByText('Ничего не найдено по выбранным фильтрам.')).toBeVisible();
+    // Счётчик выдачи — live-регион: пустой результат объявляется, а не только рисуется.
+    await expect(page.getByTestId('content-result-count')).toHaveAttribute('aria-live', 'polite');
+    await expect(page.getByTestId('content-result-count')).toContainText('0 публ.');
+
+    // Escape очищает непустой поиск с клавиатуры (конвенция поля поиска) — фокус остаётся в поле,
+    // уходить на кнопку-крестик не требуется.
+    const search = page.getByLabel('Поиск по публикациям');
+    await search.focus();
+    await page.keyboard.press('Escape');
+    await expect(search).toHaveValue('');
+    await expect(search).toBeFocused();
+    await expect(page).not.toHaveURL(/q=/);
+
     await page.getByLabel('Поиск по публикациям').fill('launch');
 
     // Формат композируется с поиском (оба параметра в URL).

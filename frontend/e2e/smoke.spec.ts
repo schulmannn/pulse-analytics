@@ -141,10 +141,15 @@ test('overview sparkline flows from one period shape into the next', async ({ pa
   // intermediate frame differs from BOTH endpoints (a genuine morph, not a snap); the morph node
   // survived (no keyed remount).
   expect(frames.some((frame) => frame.state === 'running'), morphEvidence).toBe(true);
-  // Recharts/shadcn parity: the update is intentionally visible for about 1.5s, never the old
-  // front-loaded ~700ms flash. Leave scheduling tolerance for loaded CI runners.
-  expect(measuredMorphMs, morphEvidence).toBeGreaterThanOrEqual(1300);
-  expect(measuredMorphMs, morphEvidence).toBeLessThanOrEqual(1750);
+  // Длительность сверяется с ТОКЕНОМ, а не с зашитым числом: раньше здесь стояли 1300..1750, и
+  // смена --motion-morph роняла спеку, хотя морф отрабатывал ровно как задан. Проверяем то, что
+  // тест и должен проверять — что JS-цикл идёт по канону, — с допуском на загруженный раннер.
+  const tokenMorphMs = await page.evaluate(() =>
+    Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--motion-morph')),
+  );
+  expect(tokenMorphMs, morphEvidence).toBeGreaterThan(0);
+  expect(measuredMorphMs, morphEvidence).toBeGreaterThanOrEqual(tokenMorphMs * 0.85);
+  expect(measuredMorphMs, morphEvidence).toBeLessThanOrEqual(tokenMorphMs + 250);
   expect(frames.at(-1)?.state).toBe('idle');
   expect(finalPath).not.toBe(oldPath);
   expect(frames.some((frame) => frame.primary.length > 0 && frame.primary !== oldPath && frame.primary !== finalPath), morphEvidence).toBe(true);

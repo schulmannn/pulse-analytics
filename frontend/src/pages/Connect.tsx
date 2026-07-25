@@ -238,7 +238,10 @@ export function Connect() {
                       aria-label={`${s.name}${st === 'connected' ? ' — подключён' : st === 'soon' ? ' — скоро' : ' — доступно'}`}
                       onClick={() => setSelected(s.id)}
                       className={cn(
-                        'relative flex size-12 items-center justify-center rounded-full border bg-card transition-all duration-100 ease-out will-change-transform sm:size-14',
+                        // Enumerated + dur-track: the dock magnification below writes `transform`
+                        // on every pointermove, so this transition exists to smooth THAT — `all`
+                        // dragged size/layout properties into a per-frame tween for no reason.
+                        'relative flex size-12 items-center justify-center rounded-full border bg-card transition-[transform,border-color,background-color,color,opacity] dur-track ease-house will-change-transform sm:size-14',
                         st === 'connected' && 'border-primary/60 text-primary',
                         st === 'available' && 'border-border text-muted-foreground hover:border-muted-foreground hover:text-foreground',
                         st === 'soon' && 'border-dashed border-border text-muted-foreground opacity-60 hover:opacity-100',

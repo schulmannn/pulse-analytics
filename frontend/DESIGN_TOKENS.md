@@ -184,18 +184,48 @@ duration/easing.
 |---|---|---|
 | `--ease-standard` | `cubic-bezier(0.2, 0.7, 0.3, 1)` | the house entrance / settle ease-out |
 | `--ease-chart-morph` | `cubic-bezier(0.25, 0.1, 0.25, 1)` | Recharts `ease` parity for point-to-point chart updates |
+| `--motion-track` | 100ms | smoothing for a transform the JS rewrites every pointermove frame (dock magnification on Connect) — **not** a general «fast» rung |
 | `--motion-press` | 140ms | tactile press feedback (button dip) |
 | `--motion-fast` | 200ms | quick opacity / colour fades |
 | `--motion-base` | 240ms | standard control transition (mode swap · icon · hover→active) |
 | `--motion-glide` | 260ms | FLIP reorder glide · icon stroke draw-on |
 | `--motion-reveal` | 300ms | larger reveals (add-widget rise) |
 | `--motion-entrance` | 350ms | card mount rise |
-| `--motion-morph` | 1500ms | Recharts-parity point interpolation after a data-window change |
+| `--motion-morph` | 700ms | point interpolation after a data-window change (see note below) |
 
-Tailwind's `duration-{100,200,300}` + `ease-out` utilities are an accepted part of the scale;
-arbitrary `duration-[…]` / `ease-[…]` are **not** (lint hard-fails). CSS custom props resolve inside
-inline `style.transition` too, so JS-driven transitions use `var(--motion-glide) var(--ease-standard)`
-(see the reorder FLIP in `ChartWidget.tsx`).
+### Reaching the ladder from a component
+
+The ladder used to be unreachable from a Tailwind class: `duration-[var(--motion-base)]` is an
+arbitrary value (lint hard-fails it), so the only way out was to re-type the number as
+`duration-300`. That is why off-ladder durations kept reappearing. One utility per rung now closes
+the gap — defined in `src/index.css`, enforced by `scripts/design-motion-lint.mjs`:
+
+| Utility | Sets | Rung |
+|---|---|---|
+| `dur-track` · `dur-press` · `dur-fast` · `dur-base` · `dur-reveal` | `transition-duration` | the matching `--motion-*` |
+| `anim-dur-fast` | `animation-duration` | `--motion-fast` (tailwindcss-animate enter/exit on dialogs) |
+| `ease-house` | `transition-timing-function` + `animation-timing-function` | `--ease-standard` |
+
+Duration and *animation*-duration stay on separate utilities on purpose: a component may transition
+on a token beat while running an unrelated ambient keyframe (`ui/progress.tsx` pairs `dur-reveal`
+with `animate-pulse`; one merged class would drive the pulse at 300ms).
+
+**Numeric `duration-{100,200,300}` and bare `ease-out` / `ease-in-out` are no longer accepted** in
+`.ts`/`.tsx` — they re-type a number that already has a token, and the lint fails on them
+(`raw-duration-util` / `raw-ease-util`). `duration-0` stays allowed: it is the «disable this»
+idiom (`motion-reduce:duration-0`), not a timing choice. `index.css` is exempt from these two rules —
+it is where the ladder and the allow-listed bespoke illustration loops (cartograph / connect /
+starfield / jiggle) legitimately hold raw values. Arbitrary `duration-[…]` / `ease-[…]` / `delay-[…]`
+remain banned everywhere.
+
+**`transition-all` is banned** (`transition-all` rule): it sweeps layout-triggering properties
+(width / height / padding) into the tween, which drops frames when the main thread is busy.
+Enumerate instead — `transition-[width]`, `transition-transform`, `transition-colors`. Where a width
+tween genuinely IS the effect (the variant dots in `EditWidgetDialog`), name it explicitly so the
+layout cost is a visible decision rather than a side effect.
+
+CSS custom props resolve inside inline `style.transition` too, so JS-driven transitions use
+`var(--motion-glide) var(--ease-standard)` (see the reorder FLIP in `ChartWidget.tsx`).
 
 **Chart motion.** The full-size `LineChart` (line + area, primary and comparison) and shared `Sparkline`
 follow the shadcn/Recharts update model: after a period or filter change, old point coordinates are
@@ -209,6 +239,14 @@ comparison ghost keeps its pattern because point geometry changes without touchi
 Period-backed comparison surfaces retain the previous query result as placeholder data only for the
 same source, so a loading skeleton cannot unmount the old SVG before the morph starts; source changes
 still clear immediately and never flash another channel's metrics.
+
+**Why 700ms and not Recharts' 1500ms.** The morph is not a one-off delight animation: it fires on
+*every* period switch, source switch and filter change — a «десятки раз в день» operation. At 1500ms
+the reader waited a second and a half before the numbers stopped moving enough to be read, which
+inverts the point of the chart. 700ms still reads as a continuous shape flow (the thing the morph
+exists to communicate — these are the same series in a new window, not a new chart) while landing
+inside the register the rest of the ladder lives in. The JS fallback in `lib/chartMotionRuntime.ts`
+mirrors this number and must be changed with it — a RAF loop cannot read the CSS var mid-frame.
 
 Other micro-charts (`InlineSpark` / the custom `MsMultiLine`) keep the lighter `reveal` fade
 (`chart-fade-in`, `--motion-reveal`); bars grow from the baseline (`grow` — `scaleY` from a `fill-box`

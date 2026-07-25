@@ -767,7 +767,7 @@ export function MetricPage() {
 
       {/* relative + InspectorHandle: тянущаяся ширина инспектора (см. components/InspectorHandle). */}
       <div className="relative grid grid-cols-1 gap-6 xl:gap-7 lg:grid-cols-[minmax(0,1fr)_var(--inspector-w,280px)]">
-        <InspectorHandle defaultWidth={280} />
+        <InspectorHandle defaultWidth={280} controlsId="tg-metric-inspector" />
         {/* Main column — the big chart in four projections + contributing posts. */}
         <div className="min-w-0 space-y-6">
           {/* Chart card (артефакт: связная карточка) — заголовок + переключатель типа + меню одной
@@ -1191,7 +1191,7 @@ export function MetricPage() {
         {/* Composer rail (артефакт): аналитические карточки вместо волосяных секций у бордюра.
             «Сравнение» первым и с явной иерархией — итог окна доминирует, база и Δ вторичны;
             ниже — Разбивка и «О метрике» той же карточной иерархией. */}
-        <aside className="space-y-4">
+        <aside id="tg-metric-inspector" className="space-y-4">
           <RailSection title="Сравнение" mark="comparison">
             {/* Итог окна — доминанта карточки (hero переехал сюда после тихой шапки). */}
             <div className="text-2xs tracking-wide text-muted-foreground">Текущий период</div>

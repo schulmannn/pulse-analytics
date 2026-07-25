@@ -9,6 +9,9 @@ import { useEffect, useRef, useState } from 'react';
  *
  * A11y: role=separator (vertical) с клавиатурой — ←/→ по 16px (← шире: ручка у левого края
  * панели), Home/End к пределам; двойной клик/Enter-сброс возвращает дефолты обеих поверхностей.
+ * `controlsId` обязателен по спеке фокусируемого разделителя: без aria-controls скринридер
+ * объявляет «разделитель, 300», но не знает, ЧТО меняется. aria-valuetext даёт число единицами
+ * («300 пикселей») вместо голого value.
  */
 const STORAGE_KEY = 'pulse_inspector_w';
 const MIN_W = 240;
@@ -32,10 +35,21 @@ function loadStored(): number | null {
   }
 }
 
-export function InspectorHandle({ defaultWidth = 300 }: { defaultWidth?: number }) {
+export function InspectorHandle({
+  defaultWidth = 300,
+  controlsId,
+}: {
+  defaultWidth?: number;
+  /** `id` панели, ширину которой тянет ручка (см. aria-controls в докстроке). */
+  controlsId: string;
+}) {
   // null = пользователь не кастомизировал (поверхности живут своими дефолтами).
   const [width, setWidth] = useState<number | null>(loadStored);
   const dragRef = useRef<{ startX: number; startW: number } | null>(null);
+  // Ширина «в полёте»: во время перетаскивания onPointerMove пишет прямо в CSS-переменную мимо
+  // состояния (чтобы не ре-рендерить контент на каждый кадр) — из-за этого aria-valuenow протухал
+  // до отпускания кнопки. Держим отдельное лёгкое состояние только для ARIA.
+  const [dragW, setDragW] = useState<number | null>(null);
 
   // Синхронизируем :root при монтировании (и после reset'а) — источник истины один.
   useEffect(() => {
@@ -52,38 +66,49 @@ export function InspectorHandle({ defaultWidth = 300 }: { defaultWidth?: number 
     }
   };
 
-  const effective = width ?? defaultWidth;
+  const settled = width ?? defaultWidth;
+  const effective = dragW ?? settled;
 
   return (
     <div
       role="separator"
       aria-orientation="vertical"
       aria-label="Ширина панели инспектора"
+      aria-controls={controlsId}
       aria-valuemin={MIN_W}
       aria-valuemax={MAX_W}
       aria-valuenow={effective}
+      aria-valuetext={`${effective} пикселей`}
       tabIndex={0}
       data-testid="inspector-handle"
       onPointerDown={(event) => {
         if (event.button !== 0) return;
+        // preventDefault гасил и перевод фокуса — после перетаскивания мышью ручка оставалась
+        // без фокуса, и продолжить стрелками было нельзя. Ставим фокус явно.
         event.preventDefault();
+        event.currentTarget.focus();
         event.currentTarget.setPointerCapture(event.pointerId);
-        dragRef.current = { startX: event.clientX, startW: effective };
+        dragRef.current = { startX: event.clientX, startW: settled };
+        setDragW(settled);
       }}
       onPointerMove={(event) => {
         const drag = dragRef.current;
         if (!drag) return;
         // Ручка стоит слева от панели: движение ВЛЕВО делает панель шире.
-        applyRootWidth(clampW(drag.startW + (drag.startX - event.clientX)));
+        const next = clampW(drag.startW + (drag.startX - event.clientX));
+        applyRootWidth(next);
+        setDragW(next);
       }}
       onPointerUp={(event) => {
         const drag = dragRef.current;
         dragRef.current = null;
+        setDragW(null);
         if (!drag) return;
         commit(clampW(drag.startW + (drag.startX - event.clientX)));
       }}
       onPointerCancel={() => {
         dragRef.current = null;
+        setDragW(null);
         applyRootWidth(width);
       }}
       onDoubleClick={() => commit(null)}
