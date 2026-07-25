@@ -10,6 +10,7 @@ import { PERIOD_CHIPS } from '@/panels/report/blocks';
 import type { PeriodDays } from '@/lib/period';
 import { PillSelect } from '@/components/PillSelect';
 import { SegmentedControl } from '@/components/SegmentedControl';
+import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
 // Create-time templates: a compact set of curated starting points (selectable rows, not cards).
@@ -265,13 +266,14 @@ export function CreateReportDialog({ onClose }: { onClose: () => void }) {
             >
               Отмена
             </button>
-            <button
+            <Button
               type="submit"
               disabled={pending || !name.trim() || source == null}
-              className="btn-pill bg-primary px-4 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+              size="xs"
+              className="px-4"
             >
               {pending ? 'Создание…' : 'Создать отчёт'}
-            </button>
+            </Button>
           </div>
         </form>
       </div>

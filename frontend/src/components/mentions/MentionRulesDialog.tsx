@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import type { MentionRules, MentionSettings } from '@/api/schemas';
 import { useSaveMentionSettings } from '@/api/queries';
 import { Icon } from '@/components/nav-icons';
+import { Button } from '@/components/ui/button';
 import { useFocusTrap } from '@/lib/useFocusTrap';
 import { cn } from '@/lib/utils';
 
@@ -223,13 +224,14 @@ export function MentionRulesDialog({
               {settings.can_edit ? 'Отмена' : 'Закрыть'}
             </button>
             {settings.can_edit && (
-              <button
+              <Button
                 type="submit"
                 disabled={save.isPending || lines(include).length === 0}
-                className="btn-pill bg-primary px-4 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                size="xs"
+                className="px-4"
               >
                 {save.isPending ? 'Сохранение…' : 'Сохранить правила'}
-              </button>
+              </Button>
             )}
           </footer>
         </form>

@@ -22,6 +22,7 @@ import {
 import { fmt } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { BarChart } from '@/components/BarChart';
+import { Button } from '@/components/ui/button';
 import { PillSelect } from '@/components/PillSelect';
 import { SearchField } from '@/components/SearchField';
 import { ChartSection } from '@/components/ChartWidget';
@@ -240,23 +241,14 @@ export function MentionsDesktop() {
               >
                 Правила поиска
               </button>
-              <button
-                type="button"
-                onClick={() => void onRefresh()}
-                disabled={refreshing}
-                className="btn-pill bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
-              >
+              <Button type="button" onClick={() => void onRefresh()} disabled={refreshing}>
                 {refreshing ? 'Поиск…' : 'Найти упоминания'}
-              </button>
+              </Button>
             </div>
           ) : settings ? (
-            <button
-              type="button"
-              onClick={() => setRulesOpen(true)}
-              className="btn-pill bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-            >
+            <Button type="button" onClick={() => setRulesOpen(true)}>
               {settings.can_edit ? 'Настроить поиск' : 'Посмотреть правила'}
-            </button>
+            </Button>
           ) : (
             <button
               type="button"

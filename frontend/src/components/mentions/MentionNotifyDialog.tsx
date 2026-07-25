@@ -8,6 +8,7 @@ import {
   useUnbindMentionNotify,
 } from '@/api/queries';
 import { Icon } from '@/components/nav-icons';
+import { Button } from '@/components/ui/button';
 import { useFocusTrap } from '@/lib/useFocusTrap';
 import { cn } from '@/lib/utils';
 
@@ -177,14 +178,9 @@ export function MentionNotifyDialog({ onClose }: { onClose: () => void }) {
 
               {!bound && data.bot_configured && (
                 <div className="space-y-2 border-t border-border pt-4">
-                  <button
-                    type="button"
-                    onClick={() => void connectBot()}
-                    disabled={link.isPending}
-                    className="btn-pill bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-                  >
+                  <Button type="button" onClick={() => void connectBot()} disabled={link.isPending}>
                     {link.isPending ? 'Готовим ссылку…' : 'Привязать бота'}
-                  </button>
+                  </Button>
                   <p className="text-xs leading-5 text-muted-foreground">
                     Откроется чат с ботом — нажмите в нём <b>Start</b>. Ссылка действует 15 минут.
                     {linkOpened && ' Ждём подтверждение из Telegram…'}

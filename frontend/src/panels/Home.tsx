@@ -4,6 +4,7 @@ import { useChannels, useHistory, useTgFull } from '@/api/queries';
 import { latestDataMs } from '@/lib/freshness';
 import { ChannelRecencyProvider } from '@/lib/period';
 import { useMediaQuery } from '@/lib/useMediaQuery';
+import { Button } from '@/components/ui/button';
 import { WidgetGroup } from '@/components/widgets/WidgetGroup';
 import {
   HomeEditContext,
@@ -611,13 +612,9 @@ function HomeEmptyState({
           Соберите личную доску из ключевых метрик и сохранённых виджетов.
         </p>
         <div className="mt-5 flex flex-wrap items-center gap-3">
-          <button
-            type="button"
-            onClick={onAdd}
-            className="btn-pill bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-          >
+          <Button type="button" onClick={onAdd}>
             Добавить виджет
-          </button>
+          </Button>
           <button
             type="button"
             onClick={onSeedDefaults}
@@ -651,13 +648,9 @@ function HomeEmptyState({
         «На главную» на любом виджете.
       </p>
       <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
-        <button
-          type="button"
-          onClick={onEdit}
-          className="btn-pill bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-        >
+        <Button type="button" onClick={onEdit}>
           Добавить виджет
-        </button>
+        </Button>
         <button
           type="button"
           onClick={onSeedDefaults}

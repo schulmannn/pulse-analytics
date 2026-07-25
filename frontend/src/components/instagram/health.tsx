@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 import { Icon } from '@/components/nav-icons';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { useConnectIg, useIgOauthStatus } from '@/api/queries';
 
@@ -118,14 +119,14 @@ export function IgConnectPanel() {
             </div>
           </div>
           <div className="flex shrink-0 flex-col items-stretch gap-1.5">
-            <button
+            <Button
               type="button"
               onClick={() => connect.mutate()}
               disabled={connect.isPending || notReady}
-              className="btn-pill bg-primary px-3.5 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+              className="px-3.5"
             >
               {connect.isPending ? 'Открываю Instagram…' : 'Подключить Instagram'}
-            </button>
+            </Button>
             <button
               type="button"
               onClick={() => setOpen((o) => !o)}
