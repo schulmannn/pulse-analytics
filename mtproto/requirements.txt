@@ -1,3 +1,7 @@
+# Человекочитаемый ИСТОЧНИК зависимостей mtproto-сервиса. Прод-образ (Dockerfile.mtproto)
+# ставится по requirements.lock с --require-hashes; после правки здесь перегенерируй lock
+# (python 3.12, pip-tools):
+#   pip-compile --generate-hashes --output-file=mtproto/requirements.lock mtproto/requirements.txt
 telethon==1.43.2
 fastapi==0.140.0
 uvicorn==0.30.1

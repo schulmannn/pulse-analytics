@@ -10,8 +10,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 WORKDIR /app
 
-COPY mtproto/requirements.txt ./mtproto/requirements.txt
-RUN pip install --no-cache-dir -r mtproto/requirements.txt
+# Ставим строго по lock-файлу с хешами (pip-compile --generate-hashes из
+# mtproto/requirements.txt — тот остаётся человекочитаемым источником): подмена
+# артефакта на PyPI/зеркале не пройдёт проверку --require-hashes.
+COPY mtproto/requirements.lock ./mtproto/requirements.lock
+RUN pip install --no-cache-dir --require-hashes -r mtproto/requirements.lock
 
 RUN useradd --system --uid 10001 --user-group --create-home atlavue
 

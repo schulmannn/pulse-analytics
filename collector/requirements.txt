@@ -1,2 +1,8 @@
+# Человекочитаемый ИСТОЧНИК собственных зависимостей collector'а (стек Telethon/FastAPI он
+# получает из mtproto/requirements.txt — collector импортирует mtproto.service). Прод-образ
+# (Dockerfile.collector) ставится по collector/requirements.lock с --require-hashes; lock
+# скомпилирован из ОБОИХ источников — после правки любого из них перегенерируй (python 3.12,
+# pip-tools):
+#   pip-compile --generate-hashes --output-file=collector/requirements.lock collector/requirements.txt mtproto/requirements.txt
 telethon==1.43.2
 qrcode>=7.4,<9
