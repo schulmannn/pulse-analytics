@@ -99,22 +99,10 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      # Игноры ниже — ИЗВЕСТНЫЕ advisories transitive starlette 0.37.2 (тянется пином
-      # fastapi==0.111.0). Лечатся только бампом fastapi, а это отдельная работа: unit-тесты
-      # стабят fastapi через sys.modules, так что апгрейд требует ручной проверки живого
-      # сервиса. Снять весь блок --ignore-vuln при бампе fastapi; НОВЫЕ CVE в любом пакете
-      # джоб ловит сразу.
       - name: Audit Python dependencies (mtproto + collector)
         run: |
           pip install pip-audit
-          pip-audit -r mtproto/requirements.txt \
-            --ignore-vuln PYSEC-2026-161 \
-            --ignore-vuln PYSEC-2026-248 \
-            --ignore-vuln PYSEC-2026-249 \
-            --ignore-vuln PYSEC-2026-1941 \
-            --ignore-vuln PYSEC-2026-1943 \
-            --ignore-vuln PYSEC-2026-2280 \
-            --ignore-vuln PYSEC-2026-2281
+          pip-audit -r mtproto/requirements.txt
           pip-audit -r collector/requirements.txt
 
   frontend:
