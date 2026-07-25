@@ -4,6 +4,7 @@ import { useAddCampaignPosts, useCampaigns, useCreateCampaign } from '@/api/quer
 import type { Campaign, CampaignAddResult, CampaignPostInput } from '@/api/schemas';
 import { CampaignColorDot, CampaignStatusChip, canEditCampaign } from '@/components/campaigns/shared';
 import { EmptyState } from '@/components/EmptyState';
+import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { fmt } from '@/lib/format';
 import { useFocusTrap } from '@/lib/useFocusTrap';
@@ -109,13 +110,9 @@ export function AddToCampaignDialog({
               {result.res.invalid.length > 0 && <li>Не найдены в архиве: {fmt.num(result.res.invalid.length)}</li>}
             </ul>
             <div className="mt-4 flex justify-end border-t border-border pt-4">
-              <button
-                type="button"
-                onClick={onClose}
-                className="btn-pill bg-primary px-4 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90"
-              >
+              <Button type="button" onClick={onClose} size="xs" className="px-4">
                 Готово
-              </button>
+              </Button>
             </div>
           </div>
         ) : (
@@ -206,14 +203,15 @@ export function AddToCampaignDialog({
                   >
                     Отмена
                   </button>
-                  <button
+                  <Button
                     type="button"
                     onClick={() => void submit()}
                     disabled={pending || (createMode ? !newName.trim() : selectedId == null)}
-                    className="btn-pill bg-primary px-4 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                    size="xs"
+                    className="px-4"
                   >
                     {pending ? 'Добавление…' : 'Добавить'}
-                  </button>
+                  </Button>
                 </div>
               </div>
             )}

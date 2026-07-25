@@ -9,6 +9,7 @@ import { useFocusTrap } from '@/lib/useFocusTrap';
 import { useChannels } from '@/api/queries';
 import { PillSelect } from '@/components/PillSelect';
 import { SegmentedControl } from '@/components/SegmentedControl';
+import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import type { SeriesGrain, WidgetPrefs, WidgetSize } from '@/lib/widgetPrefsStore';
 import { SIZE_RANK, type WidgetVariant } from '@/components/widgets/variants';
@@ -498,13 +499,9 @@ export function EditWidgetDialog({ defaultTitle, prefs, variants, showPeriod, sh
           >
             Сбросить
           </button>
-          <button
-            type="button"
-            onClick={onClose}
-            className="btn-pill bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-          >
+          <Button type="button" onClick={onClose} size="sm" className="px-4 text-sm">
             Готово
-          </button>
+          </Button>
         </div>
       </div>
     </div>,

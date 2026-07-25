@@ -5,6 +5,7 @@ import { fmt } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { RichText } from '@/components/RichText';
 import { SourceIdentity } from '@/components/SourceIdentity';
+import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/nav-icons';
 import { useFocusTrap } from '@/lib/useFocusTrap';
 import { useLayerBack } from '@/lib/useLayerBack';
@@ -207,13 +208,9 @@ export function IgPostDetailModal({
               <span />
             )}
             {onAddToCampaign && (
-              <button
-                type="button"
-                onClick={onAddToCampaign}
-                className="btn-pill bg-primary px-3.5 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90"
-              >
+              <Button type="button" onClick={onAddToCampaign} size="xs" className="px-3.5">
                 Добавить в кампанию
-              </button>
+              </Button>
             )}
           </div>
         )}

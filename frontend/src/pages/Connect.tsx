@@ -8,6 +8,7 @@ import { ApiError, apiSend } from '@/api/client';
 import { fmt } from '@/lib/format';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 
 /**
@@ -592,12 +593,9 @@ function MoySkladPanel() {
           </p>
           <MsBackfillBlock />
           <div className="flex flex-wrap items-center gap-3">
-            <Link
-              to="/sklad"
-              className="btn-pill inline-flex bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-            >
-              Открыть Обзор склада →
-            </Link>
+            <Button asChild>
+              <Link to="/sklad">Открыть Обзор склада →</Link>
+            </Button>
             <button
               type="button"
               onClick={() => void disconnect()}
@@ -624,13 +622,9 @@ function MoySkladPanel() {
               autoComplete="off"
               className="h-9 min-w-0 flex-1 rounded border border-border bg-background px-3 text-sm text-foreground outline-hidden placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
             />
-            <button
-              type="submit"
-              disabled={!token.trim() || busy}
-              className="btn-pill shrink-0 bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
-            >
+            <Button type="submit" disabled={!token.trim() || busy} className="shrink-0">
               {busy ? 'Проверяем…' : 'Подключить'}
-            </button>
+            </Button>
           </form>
           {error && <p className="text-xs text-ember">{error}</p>}
           <p className="text-2xs text-muted-foreground">
@@ -728,12 +722,9 @@ function MetrikaPanel() {
             источники трафика уже считаются; дневной архив (включая историю счётчика) пополняется автоматически.
           </p>
           <div className="flex flex-wrap items-center gap-3">
-            <Link
-              to="/metrika"
-              className="btn-pill inline-flex bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-            >
-              Открыть Обзор Метрики →
-            </Link>
+            <Button asChild>
+              <Link to="/metrika">Открыть Обзор Метрики →</Link>
+            </Button>
             <button
               type="button"
               onClick={() => void disconnect()}
@@ -764,13 +755,9 @@ function MetrikaPanel() {
               autoComplete="off"
               className="h-9 min-w-0 flex-1 rounded border border-border bg-background px-3 text-sm text-foreground outline-hidden placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
             />
-            <button
-              type="submit"
-              disabled={!token.trim() || busy}
-              className="btn-pill shrink-0 bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
-            >
+            <Button type="submit" disabled={!token.trim() || busy} className="shrink-0">
               {busy ? 'Проверяем…' : 'Подключить'}
-            </button>
+            </Button>
           </form>
           {counters && (
             <div className="space-y-2">
@@ -835,14 +822,13 @@ function InstagramPanel() {
           </p>
           <div className="flex flex-wrap items-center gap-2">
             {serverReady && (
-              <button
+              <Button
                 type="button"
                 onClick={() => connect.mutate({ newSource: true })}
                 disabled={connect.isPending}
-                className="btn-pill bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
               >
                 {connect.isPending ? 'Открытие Instagram…' : 'Подключить ещё один аккаунт'}
-              </button>
+              </Button>
             )}
             <button
               type="button"
@@ -877,14 +863,15 @@ function InstagramPanel() {
                 Можно подключить <b className="font-medium text-foreground">свой</b> бизнес-аккаунт к
                 этому каналу вместо общего:
               </p>
-              <button
+              <Button
                 type="button"
                 onClick={() => connect.mutate()}
                 disabled={connect.isPending}
-                className="btn-pill bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+                size="lg"
+                className="px-5"
               >
                 {connect.isPending ? 'Открытие Instagram…' : 'Подключить свой аккаунт'}
-              </button>
+              </Button>
               {connectError && <p role="alert" className="text-xs font-medium text-destructive">{connectError}</p>}
             </>
           )}
@@ -895,14 +882,15 @@ function InstagramPanel() {
             Вход через Instagram — один клик. Нужен аккаунт <b className="font-medium text-foreground">Business</b> или{' '}
             <b className="font-medium text-foreground">Creator</b> (не личный). Facebook-страница не требуется.
           </p>
-          <button
+          <Button
             type="button"
             onClick={() => connect.mutate()}
             disabled={connect.isPending || notReady}
-            className="btn-pill bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+            size="lg"
+            className="px-5"
           >
             {connect.isPending ? 'Открытие Instagram…' : 'Войти через Instagram'}
-          </button>
+          </Button>
           {connectError && <p role="alert" className="text-xs font-medium text-destructive">{connectError}</p>}
           {notReady && (
             <p className="text-xs text-muted-foreground">
@@ -1212,14 +1200,9 @@ function TelegramPanel({
               <p className="text-sm leading-relaxed text-muted-foreground">
                 Отсканируйте QR-код в своём Telegram — каналы, где вы админ, подключатся автоматически. Устанавливать ничего не нужно.
               </p>
-              <button
-                type="button"
-                onClick={start}
-                disabled={busy}
-                className="btn-pill mt-4 bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
-              >
+              <Button type="button" onClick={start} disabled={busy} size="lg" className="mt-4 px-5">
                 {busy ? (startRetrying ? 'Telegram запускается…' : 'Подготовка кода…') : 'Показать QR-код'}
-              </button>
+              </Button>
               {err && <p role="alert" className="mt-3 text-xs font-medium text-destructive">{err}</p>}
             </div>
           )}
@@ -1278,14 +1261,9 @@ function TgScanning({
           className="mt-3 w-full rounded border border-border bg-background px-3 py-2 text-sm text-foreground outline-hidden focus:ring-1 focus:ring-primary"
         />
         {err && <p role="alert" className="mt-2 text-xs font-medium text-destructive">{err}</p>}
-        <button
-          type="button"
-          onClick={onSubmit}
-          disabled={busy || !password}
-          className="btn-pill mt-3 bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
-        >
+        <Button type="button" onClick={onSubmit} disabled={busy || !password} className="mt-3">
           {busy ? 'Проверка…' : 'Подтвердить'}
-        </button>
+        </Button>
       </div>
     );
   }
@@ -1338,14 +1316,9 @@ function TgReconnect({
           ? 'Telegram завершил прежнюю сессию, поэтому новые данные не поступают. Каналы и вся история сохранены — после повторного входа сбор продолжится с того же места.'
           : 'Можно войти заново, чтобы заменить текущую сессию Telegram. Каналы и история сохранятся.'}
       </p>
-      <button
-        type="button"
-        onClick={onReconnect}
-        disabled={busy}
-        className="btn-pill mt-4 bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
-      >
+      <Button type="button" onClick={onReconnect} disabled={busy} size="lg" className="mt-4 px-5">
         {busy ? (startRetrying ? 'Telegram запускается…' : 'Подготовка кода…') : 'Переподключить'}
-      </button>
+      </Button>
       {err && <p role="alert" className="mt-3 text-xs font-medium text-destructive">{err}</p>}
     </div>
   );
@@ -1443,14 +1416,9 @@ function TgConnected({ username, channels, onDisconnect, busy }: { username: str
           </ul>
 
           {selected.length > 0 && (
-            <button
-              type="button"
-              onClick={add}
-              disabled={adding}
-              className="btn-pill mt-3 bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
-            >
+            <Button type="button" onClick={add} disabled={adding} className="mt-3">
               {adding ? 'Добавление…' : `Добавить выбранные (${selected.length})`}
-            </button>
+            </Button>
           )}
           <div aria-live="polite">
             {addedCount != null && addedCount > 0 && (
@@ -1612,14 +1580,15 @@ function CollectorGuide({ channelName }: { channelName: string | null }) {
                   <span className="font-medium text-foreground">один раз</span>. Уже есть действующий ключ — этот шаг можно пропустить.
                 </p>
                 {!oneTimeKey && (
-                  <button
+                  <Button
                     type="button"
                     onClick={handleCreateKey}
                     disabled={createKey.isPending}
-                    className="btn-pill bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
+                    size="sm"
+                    className="px-4 text-sm"
                   >
                     {createKey.isPending ? 'Генерация…' : 'Создать ключ'}
-                  </button>
+                  </Button>
                 )}
                 {keyErr && <p role="alert" className="text-xs text-destructive">{keyErr}</p>}
                 {oneTimeKey && (
@@ -1726,17 +1695,13 @@ python collector/pulse_collector.py run      # дальше каждые 6 ч`}<
           Назад
         </button>
         {step < WIZARD_STEPS.length ? (
-          <button
-            type="button"
-            onClick={() => goTo(step + 1)}
-            className="btn-pill bg-primary px-4 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-          >
+          <Button type="button" onClick={() => goTo(step + 1)} size="xs" className="px-4">
             Далее
-          </button>
+          </Button>
         ) : (
-          <Link to="/" className="btn-pill bg-primary px-4 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90">
-            Открыть дашборд
-          </Link>
+          <Button asChild size="xs" className="px-4">
+            <Link to="/">Открыть дашборд</Link>
+          </Button>
         )}
       </div>
 

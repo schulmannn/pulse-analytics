@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { WidgetConfigControls } from '@/components/ConfigEditDialog';
 import { WidgetBody } from '@/components/ConfigWidget';
@@ -86,13 +87,9 @@ export function CreateWidgetDialog({
             >
               Отмена
             </button>
-            <button
-              type="button"
-              onClick={() => onAdd(draft)}
-              className="btn-pill bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-            >
+            <Button type="button" onClick={() => onAdd(draft)} size="sm" className="px-4 text-sm">
               Добавить на главную
-            </button>
+            </Button>
           </div>
         </div>
       </DialogContent>

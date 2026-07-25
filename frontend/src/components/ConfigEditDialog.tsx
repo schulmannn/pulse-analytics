@@ -3,6 +3,7 @@ import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { WidgetBody } from '@/components/ConfigWidget';
 import { PillSelect } from '@/components/PillSelect';
 import { SegmentedControl } from '@/components/SegmentedControl';
+import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { ChannelScope } from '@/lib/channel-context';
 import { ExpandedChartHeightContext } from '@/components/ExpandableChart';
@@ -147,13 +148,9 @@ export function ConfigEditDialog({
             <button type="button" onClick={reset} className="text-xs text-muted-foreground transition-colors hover:text-foreground">
               Сбросить
             </button>
-            <button
-              type="button"
-              onClick={onClose}
-              className="btn-pill bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-            >
+            <Button type="button" onClick={onClose} size="sm" className="px-4 text-sm">
               Готово
-            </button>
+            </Button>
           </div>
         </div>
       </DialogContent>
