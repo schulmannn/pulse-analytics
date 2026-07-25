@@ -5,4 +5,4 @@
 # pip-tools):
 #   pip-compile --generate-hashes --output-file=collector/requirements.lock collector/requirements.txt mtproto/requirements.txt
 telethon==1.43.2
-qrcode>=7.4,<9
+qrcode>=8.2,<9
