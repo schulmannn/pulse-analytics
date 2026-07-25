@@ -3,6 +3,7 @@ import { toast } from 'sonner';
 import { useCreateCampaign, useUpdateCampaign } from '@/api/queries';
 import type { Campaign, CampaignStatus } from '@/api/schemas';
 import { CAMPAIGN_STATUSES, CAMPAIGN_STATUS_LABEL } from '@/api/schemas';
+import { campaignColorCss } from '@/components/campaigns/shared';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import {
@@ -18,15 +19,10 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 
-// Приглушённая палитра меток в духе системы (один синий — акцент, остальные тихие).
-const COLOR_PRESETS = [
-  '#2d6be0',
-  '#0f9d8f',
-  '#b48a2f',
-  '#c2512d',
-  '#7c5cad',
-  '#6b7280',
-];
+// Палитра меток — категориальные токены темы (как у пикеров виджетов): цвет адаптируется
+// к светлой/тёмной теме через hsl(var(--chart-N-cat)). Легаси-hex у старых кампаний остаётся
+// валидным (сервер принимает оба формата), просто не подсвечивается свотчем.
+const COLOR_PRESETS = ['chart-1', 'chart-2', 'chart-3', 'chart-4', 'chart-5', 'chart-6'];
 
 /**
  * Создание/редактирование кампании — портальный диалог по канону ConfigEditDialog
@@ -177,7 +173,7 @@ export function CampaignDialog({
                       ? 'ring-2 ring-primary ring-offset-2 ring-offset-card'
                       : 'hover:scale-110',
                   )}
-                  style={{ backgroundColor: preset }}
+                  style={{ backgroundColor: campaignColorCss(preset) }}
                 />
               ))}
             </div>
