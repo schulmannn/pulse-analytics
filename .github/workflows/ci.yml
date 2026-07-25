@@ -84,7 +84,7 @@ jobs:
   # Аудит известных CVE в зависимостях. Гейтим только production-поверхность (--omit=dev) на
   # high+: dev-тулинг (vite/biome/playwright) обновляет Dependabot, а падение CI на каждом
   # low-advisory в сборочной цепочке давало бы постоянный шум вместо сигнала. Python: pip-audit
-  # резолвит requirements целиком, так что транзитивные CVE тоже видны.
+  # ходит по lock-файлам — точному прод-резолву с транзитивами (см. комментарий у шага).
   security:
     runs-on: ubuntu-latest
     steps:
@@ -105,11 +105,16 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+      # Аудитим lock-файлы (pip-compile --generate-hashes) — тот же точный прод-набор с
+      # транзитивами, который ставят Dockerfile.mtproto/Dockerfile.collector (--require-hashes);
+      # requirements.txt остаётся человекочитаемым ИСТОЧНИКОМ и аудита не требует. `pip-audit -r`
+      # принимает хешованные пины как есть (pip уходит в hash-checking режим) — проверено
+      # локально на pip-audit 2.10.x по обоим lock, обходных флагов (--no-deps) не нужно.
       - name: Audit Python dependencies (mtproto + collector)
         run: |
           pip install pip-audit
-          pip-audit -r mtproto/requirements.txt
-          pip-audit -r collector/requirements.txt
+          pip-audit -r mtproto/requirements.lock
+          pip-audit -r collector/requirements.lock
 
   frontend:
     runs-on: ubuntu-latest
