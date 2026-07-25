@@ -19,7 +19,9 @@
 const CAMPAIGNS_DB_OFF = { error: 'БД не подключена — кампании недоступны' };
 const ID_RE = /^\d{1,9}$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-const COLOR_RE = /^#[0-9a-f]{6}$/i;
+const COLOR_RE = /^#[0-9a-f]{6}$/i; // легаси-hex, нормализуется в lowercase при записи
+// Токен палитры темы: фронт рендерит hsl(var(--chart-N-cat)), цвет адаптируется к теме.
+const COLOR_TOKEN_RE = /^chart-[1-6]$/;
 const TG_REF_RE = /^\d{1,19}$/;
 const IG_REF_RE = /^[\w.-]{1,80}$/;
 const WRITE_ROLES = ['member', 'admin', 'owner'];
@@ -76,9 +78,11 @@ function registerCampaignsRoutes({ app, db, requireAuth, audit }) {
       out.description = d;
     }
     if (body.color !== undefined) {
-      if (body.color != null && (typeof body.color !== 'string' || !COLOR_RE.test(body.color))) {
-        return { error: 'color: ожидается #RRGGBB' };
+      if (body.color != null && (typeof body.color !== 'string'
+        || !(COLOR_RE.test(body.color) || COLOR_TOKEN_RE.test(body.color)))) {
+        return { error: 'color: ожидается #RRGGBB или chart-1..chart-6' };
       }
+      // Токен уже строго lowercase по регэкспу, hex нормализуем — toLowerCase безопасен для обоих.
       out.color = body.color ? body.color.toLowerCase() : null;
     }
     if (body.status !== undefined) {

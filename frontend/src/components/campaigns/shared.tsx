@@ -23,13 +23,28 @@ export function CampaignStatusChip({ status }: { status: string }) {
   );
 }
 
+// Серверный контракт цвета кампании: токен темы chart-1..chart-6 ИЛИ легаси-hex #RRGGBB.
+const CAMPAIGN_COLOR_TOKEN_RE = /^chart-[1-6]$/;
+const CAMPAIGN_COLOR_HEX_RE = /^#[0-9a-f]{6}$/i;
+
+/** CSS-значение цвета кампании: `chart-N` → `hsl(var(--chart-N-cat))` (категориальный токен,
+    адаптируется к теме), легаси-hex — как есть, всё остальное → undefined (нейтральная точка).
+    Единственный маппер для ЛЮБОГО рендера цвета кампании — свотчи и точки идут через него. */
+export function campaignColorCss(color: string | null | undefined): string | undefined {
+  if (!color) return undefined;
+  if (CAMPAIGN_COLOR_TOKEN_RE.test(color)) return `hsl(var(--${color}-cat))`;
+  if (CAMPAIGN_COLOR_HEX_RE.test(color)) return color;
+  return undefined;
+}
+
 /** Цветовая метка кампании; без цвета — нейтральная точка (hairline, без заливки). */
 export function CampaignColorDot({ color, className }: { color: string | null | undefined; className?: string }) {
+  const css = campaignColorCss(color);
   return (
     <span
       aria-hidden="true"
       className={cn('inline-block size-2.5 shrink-0 rounded-full border border-border', className)}
-      style={color ? { backgroundColor: color, borderColor: color } : undefined}
+      style={css ? { backgroundColor: css, borderColor: css } : undefined}
     />
   );
 }
