@@ -227,7 +227,10 @@ test('metric explorer redesign: cohesive chart card, comparison card, rank/pivot
   const cardTitle = card.getByRole('heading', { name: 'По дням' });
   await expect(cardTitle).toBeVisible();
   await expect(card.getByRole('button', { name: 'Тип графика: Линия' })).toBeVisible();
-  await expect(card.getByRole('button', { name: /^Меню виджета/ })).toBeVisible();
+  // Пин переехал из карточного «Меню виджета» в страничное действие (PR #351: explorer больше не
+  // несёт меню — WidgetMenu без group/homeKey/allowEdit не рендерится). Проверяем тот же
+  // пользовательский путь на его нынешнем контроле.
+  await expect(page.getByRole('button', { name: /Закрепить на Главной|На Главной/ })).toBeVisible();
   const toolbar = card.locator('[data-metric-toolbar]');
   await expect(toolbar).toBeVisible();
   await expect(toolbar.getByRole('group', { name: 'Гранулярность' })).toBeVisible();
@@ -326,6 +329,11 @@ test('metric explorer top posts use a contained interactive card', async ({ page
   await expect(card.locator('[data-top-post-format]')).toHaveCount(8);
   const firstRow = rows.first();
   const firstButton = firstRow.getByRole('button');
+  // PostDetailModal is a Radix MODAL dialog (shadcn wave #316): while it is open the whole page
+  // behind it is aria-hidden, so role-based queries legitimately cannot resolve the row button.
+  // The same element, addressed structurally, keeps the aria-pressed assertion checkable inside
+  // the dialog-open window without weakening what is asserted.
+  const firstButtonDom = firstRow.locator('button');
   await expect(firstButton).toHaveAttribute('aria-pressed', 'false');
 
   const cardBox = await card.boundingBox();
@@ -343,7 +351,7 @@ test('metric explorer top posts use a contained interactive card', async ({ page
   const dialog = page.getByRole('dialog', { name: 'Детали поста №1' });
   await expect(dialog).toBeVisible();
   await expect(firstRow).toHaveAttribute('data-top-post-selected', '');
-  await expect(firstButton).toHaveAttribute('aria-pressed', 'true');
+  await expect(firstButtonDom).toHaveAttribute('aria-pressed', 'true');
   await dialog.getByRole('button', { name: 'Закрыть' }).click();
   await expect(dialog).toHaveCount(0);
   await expect(firstRow).not.toHaveAttribute('data-top-post-selected', '');
