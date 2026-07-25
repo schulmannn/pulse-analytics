@@ -11,7 +11,7 @@ test('product card stays a compact ranking; expanded opens on concentration and 
 
   // Компакт неизменен: «Рейтинг» + метрика + строки рейтинга, без вида концентрации.
   await expect(card.getByText('Рейтинг', { exact: true })).toBeVisible();
-  await expect(card.getByRole('group', { name: 'Метрика рейтинга товаров' })).toBeVisible();
+  await expect(card.getByRole('toolbar', { name: 'Метрика рейтинга товаров' })).toBeVisible();
   await expect(card.getByText('Товар A', { exact: true })).toBeVisible();
   await expect(card.getByRole('button', { name: 'Концентрация' })).toHaveCount(0);
 
@@ -22,7 +22,7 @@ test('product card stays a compact ranking; expanded opens on concentration and 
   await expect(page.getByRole('dialog')).toHaveCount(0);
 
   // Разворот открывается на «Концентрации».
-  const viewSwitch = page.getByRole('group', { name: 'Вид отчёта товаров' });
+  const viewSwitch = page.getByRole('toolbar', { name: 'Вид отчёта товаров' });
   await expect(viewSwitch.getByRole('button', { name: 'Концентрация' })).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByText(/Доля топ-10/)).toBeVisible();
   await expect(page.getByText('100.0%', { exact: true })).toBeVisible();
@@ -40,13 +40,13 @@ test('product card stays a compact ranking; expanded opens on concentration and 
     const url = new URL(request.url());
     return url.pathname === '/api/ms/top-products' && url.searchParams.get('sort') === 'profit';
   });
-  await page.getByRole('group', { name: 'Метрика концентрации' }).getByRole('button', { name: 'Валовая прибыль' }).click();
+  await page.getByRole('toolbar', { name: 'Метрика концентрации' }).getByRole('button', { name: 'Валовая прибыль' }).click();
   await profitRequest;
   await expect(page.getByText(/дают эту долю положительной валовой прибыли/)).toBeVisible();
 
   // Вид «Рейтинг» возвращает полный список и свой селектор сортировки.
   await viewSwitch.getByRole('button', { name: 'Рейтинг' }).click();
-  await expect(page.getByRole('group', { name: 'Метрика рейтинга товаров' })).toBeVisible();
+  await expect(page.getByRole('toolbar', { name: 'Метрика рейтинга товаров' })).toBeVisible();
   await expect(page.getByText('Товар A', { exact: true })).toBeVisible();
 
   expect(await overflowingCards(page)).toEqual([]);

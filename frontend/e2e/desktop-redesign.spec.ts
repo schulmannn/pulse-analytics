@@ -184,7 +184,7 @@ test('desktop Instagram feed has one authoritative period and no card-local sele
   for (const route of ['/instagram', '/instagram/analytics']) {
     if (page.url().endsWith(route) === false) await page.goto(route);
     await expect(page.getByRole('group', { name: 'Период', exact: true })).toHaveCount(1);
-    await expect(page.getByRole('group', { name: 'Период виджета' })).toHaveCount(0);
+    await expect(page.getByRole('toolbar', { name: 'Период виджета' })).toHaveCount(0);
     await expect(page.getByRole('group', { name: 'Период страницы' })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Свой период' })).toBeVisible();
   }

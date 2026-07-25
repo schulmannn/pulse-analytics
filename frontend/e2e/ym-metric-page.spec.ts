@@ -145,7 +145,7 @@ test('Клик по карточке ym-visits ведёт на /metrics/ym-visit
   await expect(page.getByRole('heading', { name: 'Визиты', level: 1 })).toBeVisible();
 
   // Line/Bar на месте (реальная дневная серия).
-  await expect(page.getByRole('group', { name: 'Тип графика' })).toBeVisible();
+  await expect(page.getByRole('toolbar', { name: 'Тип графика' })).toBeVisible();
 
   // Назад-ссылка возвращает в Обзор Метрики.
   await page.getByRole('link', { name: /Метрика · Обзор/ }).click();
@@ -159,7 +159,7 @@ test('Прямой заход /metrics/ym-visits + reload рендерит и д
 
   await expect(page.getByRole('heading', { name: 'Визиты', level: 1 })).toBeVisible();
   await expect(page.locator('[data-source-identity]')).toContainText('Метрика');
-  await expect(page.getByRole('group', { name: 'Тип графика' })).toBeVisible();
+  await expect(page.getByRole('toolbar', { name: 'Тип графика' })).toBeVisible();
 
   await page.reload();
   await page.locator('main').waitFor({ state: 'visible', timeout: 25_000 });
@@ -175,10 +175,10 @@ test('Сравнение time-series честно деградирует на к
   await expect(page.getByText(/недостаточно истории за прошлый период/i)).toBeVisible();
 
   // Bar-режим переключается без падения.
-  await page.getByRole('group', { name: 'Тип графика' }).getByText('Столбцы').click();
+  await page.getByRole('toolbar', { name: 'Тип графика' }).getByText('Столбцы').click();
 
   // Для годового сравнения тоже не подставляем неполный или синтетический baseline.
-  await page.getByRole('group', { name: 'База сравнения' }).getByText('Год назад').click();
+  await page.getByRole('toolbar', { name: 'База сравнения' }).getByText('Год назад').click();
   await expect(page.getByText(/архив ym_daily пока не достаёт до прошлого года/i)).toBeVisible();
 });
 
@@ -193,7 +193,7 @@ test('ym-sources — полный список без селектора тип�
   await expect(page.getByText('Внутренние переходы')).toBeVisible();
 
   // Никакого выдуманного Line/Bar на breakdown-странице.
-  await expect(page.getByRole('group', { name: 'Тип графика' })).toHaveCount(0);
+  await expect(page.getByRole('toolbar', { name: 'Тип графика' })).toHaveCount(0);
 
   // Rail «Сравнение» честно объясняет, что сравнение периодов не рассчитывается.
   await expect(page.getByText(/сравнение периодов не рассчитывается/i)).toBeVisible();

@@ -109,7 +109,7 @@ test('metric line chart flows from one period shape into the next', async ({ pag
 
   // The explorer defaults to 30d. Sample every browser frame while switching to the genuinely
   // shorter 7d window so a fast polling client cannot miss the running state.
-  await expect(page.getByRole('group', { name: 'Период', exact: true }).getByRole('button', { name: '30д' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('toolbar', { name: 'Период', exact: true }).getByRole('button', { name: '30д' })).toHaveAttribute('aria-pressed', 'true');
   await chart.evaluate((svg) => {
     const state = window as unknown as { __morphFrames: Array<{ primary: string; comparison: string; state: string | null }> };
     state.__morphFrames = [];
@@ -127,7 +127,7 @@ test('metric line chart flows from one period shape into the next', async ({ pag
     };
     requestAnimationFrame(sample);
   });
-  await page.getByRole('group', { name: 'Период', exact: true }).getByRole('button', { name: '7д', exact: true }).click();
+  await page.getByRole('toolbar', { name: 'Период', exact: true }).getByRole('button', { name: '7д', exact: true }).click();
   await page.waitForTimeout(1950);
   const frames = await page.evaluate(() => (window as unknown as { __morphFrames: Array<{ primary: string; comparison: string; state: string | null }> }).__morphFrames);
   const finalPath = await primarySeries.getAttribute('d');
@@ -233,8 +233,8 @@ test('metric explorer redesign: cohesive chart card, comparison card, rank/pivot
   await expect(page.getByRole('button', { name: /Закрепить на Главной|На Главной/ })).toBeVisible();
   const toolbar = card.locator('[data-metric-toolbar]');
   await expect(toolbar).toBeVisible();
-  await expect(toolbar.getByRole('group', { name: 'Гранулярность' })).toBeVisible();
-  await expect(toolbar.getByRole('group', { name: 'Период' })).toBeVisible();
+  await expect(toolbar.getByRole('toolbar', { name: 'Гранулярность' })).toBeVisible();
+  await expect(toolbar.getByRole('toolbar', { name: 'Период' })).toBeVisible();
   await expect(toolbar.getByRole('button', { name: 'Свой диапазон' })).toBeVisible();
   await expect(toolbar.getByRole('button', { name: 'Предыдущее окно' })).toBeVisible();
   await expect(toolbar.getByRole('button', { name: 'Следующее окно' })).toBeVisible();
@@ -402,7 +402,7 @@ test('config widget opens a dedicated full-page explorer and applies its draft',
   await expect(page).toHaveURL(/\/widgets\/probe1$/);
   await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
   await expect(page.getByRole('dialog')).toHaveCount(0);
-  const viz = page.getByRole('group', { name: 'Визуализация' });
+  const viz = page.getByRole('toolbar', { name: 'Визуализация' });
   await expect(viz).toBeVisible();
   await viz.getByRole('button', { name: 'Столбцы' }).click();
 

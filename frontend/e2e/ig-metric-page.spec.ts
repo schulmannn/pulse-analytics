@@ -154,10 +154,10 @@ test.describe('Instagram chart cards — /metrics/ig-*', () => {
       // Никогда не generic-оверлей — это выделенный route.
       await expect(page.locator('[role="dialog"]')).toHaveCount(0);
       // Ни одна страница не фабрикует сравнение периодов и не даёт выбора Line/Bar.
-      await expect(page.getByRole('group', { name: 'База сравнения' })).toHaveCount(0);
-      await expect(page.getByRole('group', { name: 'Тип графика' })).toHaveCount(0);
+      await expect(page.getByRole('toolbar', { name: 'База сравнения' })).toHaveCount(0);
+      await expect(page.getByRole('toolbar', { name: 'Тип графика' })).toHaveCount(0);
       // Тайм-бар окна есть только у пост/timeframe-производных страниц.
-      await expect(page.getByRole('group', { name: 'Окно' })).toHaveCount(route.periodControl ? 1 : 0);
+      await expect(page.getByRole('toolbar', { name: 'Окно' })).toHaveCount(route.periodControl ? 1 : 0);
     });
   }
 
@@ -181,7 +181,7 @@ test.describe('Instagram chart cards — /metrics/ig-*', () => {
     await expect(page.locator('[role="dialog"]')).toHaveCount(0);
     await expect(page.getByRole('heading', { name: 'Лучшее время для публикации', level: 1 })).toBeVisible();
     // Heatmap — своя форма: ни выбора типа графика, ни тайм-бара.
-    await expect(page.getByRole('group', { name: 'Тип графика' })).toHaveCount(0);
+    await expect(page.getByRole('toolbar', { name: 'Тип графика' })).toHaveCount(0);
   });
 
   test('клик по «Вовлечённость по форматам» на /instagram/content ведёт на route', async ({ page }) => {
@@ -191,7 +191,7 @@ test.describe('Instagram chart cards — /metrics/ig-*', () => {
     await expect(page).toHaveURL(/\/metrics\/ig-format-engagement$/);
     await expect(page.locator('[role="dialog"]')).toHaveCount(0);
     await expect(page.getByRole('heading', { name: 'Вовлечённость по форматам', level: 1 })).toBeVisible();
-    await expect(page.getByRole('group', { name: 'Окно' })).toBeVisible();
+    await expect(page.getByRole('toolbar', { name: 'Окно' })).toBeVisible();
   });
 
   test('campaign scope сохраняется в content-card → fullscreen → back и ограничивает данные', async ({ page }) => {

@@ -268,8 +268,8 @@ test.describe('Упоминания — desktop периодная поверх�
     await expect(page).toHaveURL(/p=7d/);
     await expect(page.getByRole('dialog')).toHaveCount(0);
     await expect(page.getByRole('heading', { level: 1, name: 'Упоминания по дням' })).toBeVisible();
-    await expect(page.getByRole('group', { name: 'Тип графика' })).toBeVisible();
-    await expect(page.getByRole('group', { name: 'База сравнения' })).toBeVisible();
+    await expect(page.getByRole('toolbar', { name: 'Тип графика' })).toBeVisible();
+    await expect(page.getByRole('toolbar', { name: 'База сравнения' })).toBeVisible();
     await expect(page.getByRole('group', { name: 'Окно' })).toBeVisible();
     await expect(page.getByText('Telegram · @demo', { exact: true })).toBeVisible();
 
@@ -284,8 +284,8 @@ test.describe('Упоминания — desktop периодная поверх�
     await expect(page.getByRole('heading', { level: 1, name: 'Кто упоминает' })).toBeVisible();
     await expect(page.getByText('@smm', { exact: true })).toBeVisible();
     await expect(page.getByText('@blog', { exact: true })).toBeVisible();
-    await expect(page.getByRole('group', { name: 'Тип графика' })).toHaveCount(0);
-    await expect(page.getByRole('group', { name: 'База сравнения' })).toHaveCount(0);
+    await expect(page.getByRole('toolbar', { name: 'Тип графика' })).toHaveCount(0);
+    await expect(page.getByRole('toolbar', { name: 'База сравнения' })).toHaveCount(0);
     await expect(page.getByRole('group', { name: 'Окно' })).toBeVisible();
     await expect(page.locator('main').getByRole('link', { name: /Упоминания$/ }).first()).toHaveAttribute(
       'href',
