@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo } from 'react';
 import type { ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
-import { ChartSection as RailSection } from '@/components/instagram/shared';
+
 import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { PeriodChips } from '@/components/PeriodChips';
@@ -73,7 +73,7 @@ import {
 } from '@/panels/sklad/MsTopProducts';
 import { MsStockTable, STOCK_SORT_OPTIONS, type MsStockSort } from '@/panels/sklad/MsStock';
 import { isMsMetricKey } from '@/panels/sklad/msMetricKeys';
-import { AboutRow, ComparisonDeltaRow, WindowBarShell } from '@/components/metric/shared';
+import { AboutRow, ComparisonDeltaRow, WindowBarShell, RailSection } from '@/components/metric/shared';
 
 /**
  * Полностраничные метрики МойСклада — `/metrics/ms-*`. Каждая раскрываемая карточка Обзора/Клиентов/

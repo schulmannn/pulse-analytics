@@ -15,7 +15,7 @@ import { LineChart } from '@/components/LineChart';
 import { PeriodChips } from '@/components/PeriodChips';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { SourceIdentity } from '@/components/SourceIdentity';
-import { ChartSection as RailSection } from '@/components/instagram/shared';
+
 import { Skeleton } from '@/components/ui/skeleton';
 import { serializeContentPeriod } from '@/lib/contentFilters';
 import { fmt } from '@/lib/format';
@@ -28,7 +28,7 @@ import { usePeriod, type PeriodDays } from '@/lib/period';
 import { useExplorerChartHeight } from '@/lib/useExplorerChartHeight';
 import { SegSelect } from '@/panels/MetricPage';
 import { isMentionsMetricKey } from '@/panels/mentions/mentionsMetricKeys';
-import { AboutRow, WindowBarShell } from '@/components/metric/shared';
+import { AboutRow, WindowBarShell, RailSection } from '@/components/metric/shared';
 
 type ChartKind = 'line' | 'bar';
 type CompareMode = 'off' | 'prev';

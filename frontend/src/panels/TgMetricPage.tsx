@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
-import { ChartSection as RailSection } from '@/components/instagram/shared';
+
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { PeriodChips } from '@/components/PeriodChips';
 import { SourceIdentity } from '@/components/SourceIdentity';
@@ -42,7 +42,7 @@ import {
 } from '@/panels/TgAnalytics';
 import { deriveWeekdayReach, deriveFormatViews } from '@/panels/Compare';
 import { deriveHashtags } from '@/panels/Hashtags';
-import { AboutRow, WindowBarShell } from '@/components/metric/shared';
+import { AboutRow, WindowBarShell, RailSection } from '@/components/metric/shared';
 
 /**
  * Полностраничные «дополнительные» графики Telegram — `/metrics/tg-*`. Это те карточки вкладок

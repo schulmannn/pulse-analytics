@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
-import { ChartSection as RailSection } from '@/components/instagram/shared';
+
 import { ChartExpandedContext } from '@/components/ExpandableChart';
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
@@ -50,7 +50,7 @@ import {
   joinNote,
 } from '@/panels/metrika/YmOverview';
 import { isYmMetricKey } from '@/panels/metrika/ymMetricKeys';
-import { AboutRow, ComparisonDeltaRow, WindowBarShell } from '@/components/metric/shared';
+import { AboutRow, ComparisonDeltaRow, WindowBarShell, RailSection } from '@/components/metric/shared';
 
 /**
  * Полностраничные метрики «Яндекс.Метрики» — `/metrics/ym-*`. Каждая карточка Обзора /metrika ведёт

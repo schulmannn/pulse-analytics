@@ -20,7 +20,7 @@ import {
   CampaignStatusChip,
   NetworkBadge,
 } from '@/components/campaigns/shared';
-import { ChartSection as RailSection } from '@/components/instagram/shared';
+
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   comparisonText,
@@ -47,7 +47,7 @@ import {
   campaignBackPath,
   isCampaignMetricKey,
 } from '@/panels/campaign/campaignMetricKeys';
-import { AboutRow, WindowBarShell } from '@/components/metric/shared';
+import { AboutRow, WindowBarShell, RailSection } from '@/components/metric/shared';
 
 type ChartKind = 'line' | 'bar';
 
