@@ -53,6 +53,7 @@ export function ReportDocumentDesktop({
   // unless the viewer already has an explicit window (custom range / shared ?p= / ?from). Mirrors
   // the mobile surface so both open on the same period.
   const restoredRef = useRef(false);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: one-shot restore, guarded by the ref
   useEffect(() => {
     if (restoredRef.current) return;
     restoredRef.current = true;
@@ -60,7 +61,6 @@ export function ReportDocumentDesktop({
     const search = typeof window !== 'undefined' ? window.location.search : '';
     if (search.includes('p=') || search.includes('from=')) return;
     data.setDays(baseline.periodDays);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot restore, guarded by the ref
   }, []);
 
   if (data.status === 'pending') return <DesktopSkeleton />;

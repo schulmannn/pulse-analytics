@@ -15,7 +15,7 @@
   `routes/` → `services/` → `repos/` → `db/` (+ `jobs/`, `infrastructure/`, `middleware/`,
   `lib/`); фасад `db.js` сохраняет форму вызовов.
 - **`server/migrations/*.sql`** — forward-only, применяются на старте (`npm start`).
-- **`frontend/`** — React 18 + Vite + TS (strict), TanStack Query + Zod и Tailwind;
+- **`frontend/`** — React 19 + Vite + TS (strict), TanStack Query + Zod и Tailwind;
   build → `frontend/dist`, отдаётся Express на `/`. Канон дизайна — `frontend/DESIGN_TOKENS.md`.
 - **`mtproto/service.py`** — Python/FastAPI + Telethon, приватный `:8001`.
 - **`collector/pulse_collector.py`** — локальный агент пользователя (SQLite queue/retry).

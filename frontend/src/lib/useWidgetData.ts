@@ -48,7 +48,6 @@ export function useWidgetData(config: WidgetConfig): { result: WidgetResult; isL
     return resolveWidgetMetric(config, ctx);
     // Date.now() is read inside deliberately (a fresh resolve on data/period change uses the
     // current instant; it isn't a dependency — the window rounds to day buckets anyway).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [config, days, period, full, history, channels, graphs, channelId]);
 
   // Loading = a channel is selected AND the two universal TG sources (posts + subscriber archive)

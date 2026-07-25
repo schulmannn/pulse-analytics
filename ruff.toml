@@ -1,0 +1,11 @@
+# Линт Python-контура (mtproto, collector, python-тесты). Набор намеренно минимальный и
+# сигнальный: pyflakes (F) ловит реальные ошибки (undefined name, unused import/variable),
+# E4/E7/E9 — импорты, сравнения, синтаксис. Компактные однострочники `if x: raise`, широкие
+# `except Exception` в деградациях и FastAPI-шные `Body(...)`-дефолты — осознанный стиль
+# сервиса, поэтому стилевые семейства (E501, BLE, B008, UP и пр.) не включаются.
+target-version = "py312"
+include = ["mtproto/**/*.py", "collector/**/*.py", "test/**/*.py"]
+
+[lint]
+select = ["E4", "E7", "E9", "F"]
+ignore = ["E701", "E702"]

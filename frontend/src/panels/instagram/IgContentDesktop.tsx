@@ -260,9 +260,8 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
     periodMedian(scope.map(get).filter((v): v is number => v != null));
   // One median per metric column, keyed the same as the column — used by cells AND the inspector.
   const medians = useMemo(
+    // biome-ignore lint/correctness/useExhaustiveDependencies: scope identity is enough — the getters are module constants
     () => Object.fromEntries(METRIC_COLS.map((c) => [c.key, medianOf(c.get)])) as Record<MetricCol['key'], number | null>,
-    // scope identity is enough — the getters are module constants.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [scope],
   );
   const reachMedian = medians.reach;

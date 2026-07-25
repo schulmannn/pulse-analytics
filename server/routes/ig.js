@@ -169,7 +169,9 @@ function registerIgRoutes({
       const data = useArchive ? await db.getIgTags(100).catch(() => live) : live;
       res.json({ data, live_count: live.length });
     } catch (e) {
-      res.status(200).json({ data: [], error: e.message }); // section degrades, page survives
+      // raw e.message can carry upstream/Graph internals — log it, serve a stable string.
+      log('warn', 'ig_tags_degraded', { error: e.message });
+      res.status(200).json({ data: [], error: 'Упоминания Instagram временно недоступны' }); // section degrades, page survives
     }
   });
 
@@ -345,7 +347,8 @@ function registerIgRoutes({
       cacheSet(cacheKey, result);
       res.json(result);
     } catch (e) {
-      res.status(200).json({ data: [], error: e.message }); // graceful: section degrades, page survives
+      log('warn', 'ig_breakdowns_degraded', { error: e.message });
+      res.status(200).json({ data: [], error: 'Разбивки аудитории временно недоступны' }); // graceful: section degrades, page survives
     }
   });
 
@@ -362,7 +365,8 @@ function registerIgRoutes({
       cacheSet(cacheKey, result);
       res.json(result);
     } catch (e) {
-      res.status(200).json({ data: [], error: e.message });
+      log('warn', 'ig_online_degraded', { error: e.message });
+      res.status(200).json({ data: [], error: 'Данные об активности временно недоступны' });
     }
   });
 
@@ -436,7 +440,8 @@ function registerIgRoutes({
       cacheSet(cacheKey, result, IG_STORIES_TTL);
       res.json(result);
     } catch (e) {
-      res.status(200).json({ data: [], error: e.message });
+      log('warn', 'ig_stories_degraded', { error: e.message });
+      res.status(200).json({ data: [], error: 'Сторис временно недоступны' });
     }
   });
 
@@ -452,7 +457,8 @@ function registerIgRoutes({
     try {
       res.json({ enabled: db.enabled, rows: channelId ? await db.listIgDailyForActor(channelId, req.user, days) : [] });
     } catch (e) {
-      res.status(200).json({ enabled: db.enabled, rows: [], error: e.message });
+      log('warn', 'ig_history_read_failed', { error: e.message });
+      res.status(200).json({ enabled: db.enabled, rows: [], error: 'История временно недоступна' });
     }
   });
 }

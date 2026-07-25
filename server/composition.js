@@ -7,7 +7,7 @@
 const { rateLimit, ipKeyGenerator } = require('express-rate-limit');
 const crypto = require('crypto');
 const { createDatabase } = require('./db');
-const { hashPassword, verifyPassword, rateLimitKey } = require('./lib/auth');
+const { hashPassword, verifyPassword, rateLimitKey, readCookie, SESSION_COOKIE } = require('./lib/auth');
 const { captionSnippet } = require('./lib/caption');
 const { fetchWithTimeout } = require('./lib/http');
 const { createMtprotoClient } = require('./lib/mtproto-client');
@@ -121,8 +121,15 @@ function createComposition(config, overrides = {}) {
     limit: 600,
     // v8: сырые IPv6 в ключах запрещены валидацией — ipKeyGenerator нормализует до /56-бакета
     // (иначе ротация адресов внутри одного /64 обнуляла бы лимит). uid-ветка не меняется.
+    // Cookie-транспорт сессии (фаза 1 миграции) обязан попадать в тот же per-user бакет:
+    // без чтения cookie такие запросы откатывались бы на per-IP и пользователи за одним
+    // NAT делили бы общий лимит. Приоритет заголовка зеркалит requireAuth: присутствующий,
+    // но битый заголовок НЕ подменяется cookie.
     keyGenerator: (req) =>
-      rateLimitKey(parseToken(req.headers['x-session-token']), req.ip ? ipKeyGenerator(req.ip) : undefined),
+      rateLimitKey(
+        parseToken(req.headers['x-session-token'] || readCookie(req.headers.cookie, SESSION_COOKIE)),
+        req.ip ? ipKeyGenerator(req.ip) : undefined,
+      ),
     message: { error: 'Слишком много запросов. Попробуй через 15 минут.' },
   });
 

@@ -57,17 +57,18 @@ function registerAccountRoutes({ app, requireAuth, requireSuper, db, audit, send
     } catch (e) { next(e); }
   });
 
-  app.patch('/api/admin/users/:id', requireAuth, requireSuper, async (req, res) => {
+  app.patch('/api/admin/users/:id', requireAuth, requireSuper, async (req, res, next) => {
     if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
     const id = parseInt(req.params.id, 10);
     if (!id) return res.status(400).json({ error: 'bad id' });
+    const b = req.body || {};
     // don't let an admin lock themselves out
-    if (req.user.uid === id && (req.body.role === 'user' || req.body.status === 'disabled')) {
+    if (req.user.uid === id && (b.role === 'user' || b.status === 'disabled')) {
       return res.status(400).json({ error: 'Нельзя понизить или отключить собственный аккаунт' });
     }
     try {
       const before = await db.getUserById(id);
-      const u = await db.updateUser(id, { role: req.body.role, status: req.body.status });
+      const u = await db.updateUser(id, { role: b.role, status: b.status });
       if (!u) return res.status(404).json({ error: 'Пользователь не найден' });
       audit(req, 'admin.user_updated', {
         target_uid: id,
@@ -75,7 +76,14 @@ function registerAccountRoutes({ app, requireAuth, requireSuper, db, audit, send
         after: { role: u.role, status: u.status },
       }).catch(() => {});
       res.json(u);
-    } catch (e) { res.status(400).json({ error: e.message }); }
+    } catch (e) {
+      // 400 — только для валидационных строк репо; сбой БД обязан дойти до центрального
+      // обработчика (503 db-unavailable / generic 500), а не выйти 400-кой с текстом драйвера.
+      if (e && (e.message === 'bad role' || e.message === 'bad status')) {
+        return res.status(400).json({ error: e.message });
+      }
+      next(e);
+    }
   });
 
   // Admin-стирание аккаунта (GDPR F4, второй путь). Суперюзеров панель не удаляет — владелец

@@ -47,6 +47,7 @@ import {
   campaignBackPath,
   isCampaignMetricKey,
 } from '@/panels/campaign/campaignMetricKeys';
+import { AboutRow } from '@/components/metric/shared';
 
 type ChartKind = 'line' | 'bar';
 
@@ -232,15 +233,6 @@ function CampaignMetricShell({
           </Link>
         </aside>
       </div>
-    </div>
-  );
-}
-
-function AboutRow({ label, text }: { label: string; text: string }) {
-  return (
-    <div>
-      <dt className="text-2xs tracking-wide text-muted-foreground">{label}</dt>
-      <dd className="mt-0.5 text-sm leading-relaxed text-foreground">{text}</dd>
     </div>
   );
 }

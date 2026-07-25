@@ -40,6 +40,7 @@ import { useIgScopedPosts } from '@/panels/instagram/igContentScope';
 import { useExplorerChartHeight } from '@/lib/useExplorerChartHeight';
 import { lazyWithReload } from '@/lib/lazyWithReload';
 import type { ReactNode } from 'react';
+import { AboutRow, ComparisonDeltaRow } from '@/components/metric/shared';
 
 /**
  * Instagram metric pages — the drill target the unified chart contract points IG cards at
@@ -657,15 +658,7 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
                   <span className="text-xs text-muted-foreground">{cmpLabel}</span>
                   <span className="tabular-nums">{sumPrev != null ? fmt.kpi(sumPrev) : '—'}</span>
                 </div>
-                {compareDelta != null && (
-                  <div className="flex items-baseline justify-between gap-3 border-t border-border pt-2">
-                    <span className="text-xs text-muted-foreground">Изменение</span>
-                    <span className={`text-xs font-medium tabular-nums ${compareDelta >= 0 ? 'text-verdant' : 'text-ember'}`}>
-                      {compareDelta >= 0 ? '▲' : '▼'}
-                      {Math.abs(compareDelta).toFixed(1)}%
-                    </span>
-                  </div>
-                )}
+                {compareDelta != null && <ComparisonDeltaRow delta={compareDelta} />}
               </div>
             ) : cmp === 'year' ? (
               <p className="text-xs text-muted-foreground">Архив пока не достаёт до прошлого года — дневная история копится в ig_daily, сравнение включится само.</p>
@@ -894,15 +887,6 @@ function IgErPage({
           </Link>
         </aside>
       </div>
-    </div>
-  );
-}
-
-function AboutRow({ label, text }: { label: string; text: string }) {
-  return (
-    <div>
-      <dt className="text-2xs tracking-wide text-muted-foreground">{label}</dt>
-      <dd className="mt-0.5 text-sm leading-relaxed text-foreground">{text}</dd>
     </div>
   );
 }
