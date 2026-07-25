@@ -258,6 +258,7 @@ export function Home() {
   // registry key stays in the (account-synced) pinned list as the stable cross-device pointer; the
   // config is device-local (widgetStore) and re-heals per device from that device's prefs.
   const pinnedSig = pinned.join('|');
+  // biome-ignore lint/correctness/useExhaustiveDependencies: pinned захвачен через pinnedSig (контент-сигнатура) — свежий массив на каждый рендер ожидаем
   useEffect(() => {
     // Desktop-only: split the legacy Telegram «Показатели» composite into five independent cards
     // before the generic legacy heal (which then skips `kpi`). Idempotent — a no-op once split.
@@ -274,8 +275,6 @@ export function Home() {
       if (prefs.hidden) setWidgetHidden(newId, true);
       remapGroupOrder('home', oldId, newId);
     }
-    // pinned is captured via pinnedSig (its content signature); a fresh array each render is expected.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pinnedSig, isDesktop]);
 
   return (

@@ -60,7 +60,7 @@ const DataDeletion = lazyFrom(() => import('@/pages/Legal'), 'DataDeletion');
 /** React.lazy over a NAMED export (all pages here export by name, not default). The factory is
     wrapped in lazyWithReload: after a deploy a stale tab requests a chunk that no longer exists —
     the wrapper reloads the page ONCE (fresh index → fresh chunks) instead of showing an error. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+// biome-ignore lint/suspicious/noExplicitAny: generic-граница React.lazy — пропсы компонента здесь не сужаются
 function lazyFrom<M extends Record<K, ComponentType<any>>, K extends keyof M & string>(
   load: () => Promise<M>,
   name: K,

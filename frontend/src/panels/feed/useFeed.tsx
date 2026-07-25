@@ -106,9 +106,9 @@ export function LazyBlock({ eager, onMount, children }: { eager: boolean; onMoun
     };
   }, [visible]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: onMount — колбэк родителя, эффект осознанно срабатывает только по visible
   useEffect(() => {
     if (visible) onMount();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
 
   if (visible) return <>{children}</>;

@@ -263,14 +263,13 @@ function ChatThread({ chatId }: { chatId: number }) {
 
   // Вопрос, принесённый router-state'ом (hero Главной / индекс): автоотправка ровно один раз,
   // state сразу очищается — F5 не переспросит.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: send стабилен в рамках жизни компонента (замыкание на chatId через key-remount)
   useEffect(() => {
     const q = (location.state as { q?: string } | null)?.q;
     if (!q || autoSentRef.current || !query.isSuccess) return;
     autoSentRef.current = true;
     navigate(location.pathname, { replace: true, state: null });
     send(q);
-    // send стабилен в рамках жизни компонента (замыкание на chatId через key-remount).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.state, query.isSuccess]);
 
   if (query.isLoading) {
@@ -464,8 +463,7 @@ function ToolChips({ tools }: { tools: PendingTool[]; streaming?: boolean }) {
     <div className="flex flex-wrap items-center gap-1.5">
       {tools.map((t, i) => (
         <span
-          // Один инструмент может вызываться несколько раз — индекс в паре с именем стабилен в рамках стрима.
-          // eslint-disable-next-line react/no-array-index-key
+          // biome-ignore lint/suspicious/noArrayIndexKey: один инструмент может вызываться несколько раз — индекс в паре с именем стабилен в рамках стрима
           key={`${t.name}-${i}`}
           className="inline-flex items-center gap-1.5 rounded-full border border-border px-2.5 py-0.5 text-2xs font-medium text-muted-foreground"
         >
@@ -539,8 +537,7 @@ function ToolSources({ trace }: { trace: AiToolTrace[] }) {
       {open && (
         <ul className="mt-1.5 space-y-1 border-l border-border pl-3">
           {trace.map((entry, index) => (
-            // Один инструмент может вызываться несколько раз — индекс стабилен для устоявшегося трейса.
-            // eslint-disable-next-line react/no-array-index-key
+            // biome-ignore lint/suspicious/noArrayIndexKey: один инструмент может вызываться несколько раз — индекс стабилен для устоявшегося трейса
             <li key={`${entry.name}-${index}`} className="flex items-start gap-1.5 text-muted-foreground">
               <span className="mt-0.5">{entry.ok === false ? <CrossIcon /> : <CheckIcon />}</span>
               <span>
@@ -562,8 +559,8 @@ function AiRichBlocks({ text }: { text: string }) {
     <div className="space-y-2 text-sm leading-relaxed text-foreground">
       {blocks.map((block, i) => {
         if (block.kind === 'heading') {
-          // eslint-disable-next-line react/no-array-index-key
           return (
+            // biome-ignore lint/suspicious/noArrayIndexKey: блоки ответа append-only в рамках стрима
             <p key={i} className="pt-1 font-medium">
               <RichText text={block.text} />
             </p>
@@ -571,10 +568,10 @@ function AiRichBlocks({ text }: { text: string }) {
         }
         if (block.kind === 'list') {
           return (
-            // eslint-disable-next-line react/no-array-index-key
+            // biome-ignore lint/suspicious/noArrayIndexKey: блоки ответа append-only в рамках стрима
             <ul key={i} className="space-y-1 pl-5">
               {block.items.map((item, j) => (
-                // eslint-disable-next-line react/no-array-index-key
+                // biome-ignore lint/suspicious/noArrayIndexKey: пункты списка append-only в рамках стрима
                 <li key={j} className="list-disc marker:text-muted-foreground">
                   <RichText text={item} />
                 </li>
@@ -583,7 +580,7 @@ function AiRichBlocks({ text }: { text: string }) {
           );
         }
         return (
-          // eslint-disable-next-line react/no-array-index-key
+          // biome-ignore lint/suspicious/noArrayIndexKey: блоки ответа append-only в рамках стрима
           <p key={i} className="whitespace-pre-wrap">
             <RichText text={block.text} />
           </p>

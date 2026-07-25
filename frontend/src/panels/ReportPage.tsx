@@ -197,7 +197,7 @@ function ReportDocumentBody({
     if (!dirtyRef.current) return;
     dirtyRef.current = false;
     updateReport.mutate({ config: cfgRef.current });
-  }, [updateReport.mutate]); // eslint-disable-line react-hooks/exhaustive-deps -- mutate is stable
+  }, [updateReport.mutate]); // mutate is stable
 
   const commitConfig = useCallback(
     (patch: Partial<ReportConfig>) => {

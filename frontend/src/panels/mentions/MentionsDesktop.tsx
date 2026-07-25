@@ -139,10 +139,10 @@ export function MentionsDesktop() {
     : null;
 
   // Drop a stale ?source= (not in the current period's options) so the filter can't wedge the view.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: update стабилен (setter URL-состояния), эффект осознанно реагирует только на данные
   useEffect(() => {
     if (!filters.source || !data) return;
     if (!sourceOptions.some((o) => o.channel_id === filters.source)) update({ source: '' });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters.source, data, sourceOptions]);
 
   // Derived view model — all hooks run unconditionally (before the loading/empty gates below).
