@@ -1,6 +1,7 @@
 import { createContext, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { ReactNode } from 'react';
+import { Button } from '@/components/ui/button';
 import { observeSize } from '@/lib/observeSize';
 import { getPrefs, setGroupOrder, setPrefs, subscribeStore, useGroupOrder } from '@/lib/widgetPrefsStore';
 
@@ -431,14 +432,14 @@ export function WidgetGroup({ id, className, children }: WidgetGroupProps) {
       <div ref={groupRootRef} className={className} data-widget-group-root>{children}</div>
       {reorderMode &&
         createPortal(
-          <button
+          <Button
             type="button"
             data-reorder-done
             onClick={() => setReorderMode(false)}
-            className="btn-pill fixed bottom-6 left-1/2 z-popover -translate-x-1/2 bg-primary px-6 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+            className="fixed bottom-6 left-1/2 z-popover -translate-x-1/2 px-6"
           >
             Готово
-          </button>,
+          </Button>,
           document.body,
         )}
       {hidden.length > 0 && (

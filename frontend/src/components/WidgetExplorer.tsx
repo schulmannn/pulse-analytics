@@ -1,10 +1,10 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
 import { WidgetConfigControls } from '@/components/ConfigEditDialog';
 import { WidgetBody } from '@/components/ConfigWidget';
 import { WidgetErrorBoundary } from '@/components/WidgetErrorBoundary';
 import { Button } from '@/components/ui/button';
 import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
+import { MetricBackLink } from '@/components/metric/shared';
 import { ChannelScope } from '@/lib/channel-context';
 import { editorSpec } from '@/lib/widgetCapabilities';
 import { normalizeWidget, type WidgetConfig } from '@/lib/widgetConfig';
@@ -51,12 +51,7 @@ export function WidgetExplorer({
   const label = draft.title || spec.label;
   return (
     <div className="space-y-5">
-      <Link
-        to={backTo}
-        className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
-      >
-        <span aria-hidden="true">←</span> Главная
-      </Link>
+      <MetricBackLink to={backTo}>Главная</MetricBackLink>
 
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
@@ -78,6 +73,9 @@ export function WidgetExplorer({
         )}
       </header>
 
+      {/* Намеренно НЕ MetricColumns: здесь grid-item'ы другие — левая колонка сама является
+          card-рамкой графика, а aside несёт min-w-0 (плотные контролы у фикс. rail 320px),
+          а не space-y-6. */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_320px] xl:gap-8">
         <div className="min-w-0 rounded-2xl border border-border bg-card p-4 sm:p-5">
           {draft.source != null ? <ChannelScope channelId={draft.source}>{chart}</ChannelScope> : chart}
