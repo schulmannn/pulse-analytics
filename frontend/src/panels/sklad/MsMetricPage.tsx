@@ -73,7 +73,7 @@ import {
 } from '@/panels/sklad/MsTopProducts';
 import { MsStockTable, STOCK_SORT_OPTIONS, type MsStockSort } from '@/panels/sklad/MsStock';
 import { isMsMetricKey } from '@/panels/sklad/msMetricKeys';
-import { AboutRow, ComparisonDeltaRow, WindowBarShell, RailSection } from '@/components/metric/shared';
+import { AboutRow, ComparisonDeltaRow, MetricBackLink, MetricColumns, MetricDescriptor, WindowBarShell, RailSection } from '@/components/metric/shared';
 
 /**
  * Полностраничные метрики МойСклада — `/metrics/ms-*`. Каждая раскрываемая карточка Обзора/Клиентов/
@@ -280,44 +280,42 @@ function MsMetricShell({
 }) {
   return (
     <div className="space-y-5">
-      <Link
-        to={back.to}
-        className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
-      >
-        <span aria-hidden="true">←</span> {back.label}
-      </Link>
+      <MetricBackLink to={back.to}>{back.label}</MetricBackLink>
 
       <div>
         <h1 className="text-2xl font-medium tracking-tight text-foreground">{term}</h1>
         <SourceIdentity network="ms" className="mt-1 max-w-full" />
-        {descriptor && <div className="mt-1.5 text-xs text-muted-foreground">{descriptor}</div>}
+        {descriptor && <MetricDescriptor>{descriptor}</MetricDescriptor>}
       </div>
 
-      <div className="grid grid-cols-1 gap-6 xl:gap-8 lg:grid-cols-[minmax(0,1fr)_300px]">
-        <div className="min-w-0 space-y-6">{children}</div>
-        <aside className="space-y-6">
-          <RailSection title="Сравнение">
-            {comparison ?? (
-              <p className="text-xs leading-relaxed text-muted-foreground">
-                Для этого отчёта нет одной канонической метрики периода — сравнение не рассчитывается.
-              </p>
-            )}
-          </RailSection>
-          <RailSection title="О метрике">
-            <dl className="space-y-3 text-sm">
-              <AboutRow label="Как считается" text={about.formula} />
-              {about.included && <AboutRow label="Что учитывается" text={about.included} />}
-              <AboutRow label="Источник" text={about.source} />
-            </dl>
-          </RailSection>
-          <Link
-            to={back.to}
-            className="inline-flex items-center gap-1 text-xs font-medium text-primary transition-colors hover:text-primary/80"
-          >
-            Открыть раздел <span aria-hidden="true">→</span>
-          </Link>
-        </aside>
-      </div>
+      <MetricColumns
+        rail={
+          <>
+            <RailSection title="Сравнение">
+              {comparison ?? (
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  Для этого отчёта нет одной канонической метрики периода — сравнение не рассчитывается.
+                </p>
+              )}
+            </RailSection>
+            <RailSection title="О метрике">
+              <dl className="space-y-3 text-sm">
+                <AboutRow label="Как считается" text={about.formula} />
+                {about.included && <AboutRow label="Что учитывается" text={about.included} />}
+                <AboutRow label="Источник" text={about.source} />
+              </dl>
+            </RailSection>
+            <Link
+              to={back.to}
+              className="inline-flex items-center gap-1 text-xs font-medium text-primary transition-colors hover:text-primary/80"
+            >
+              Открыть раздел <span aria-hidden="true">→</span>
+            </Link>
+          </>
+        }
+      >
+        {children}
+      </MetricColumns>
     </div>
   );
 }

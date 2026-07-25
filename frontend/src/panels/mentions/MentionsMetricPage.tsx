@@ -28,7 +28,7 @@ import { usePeriod, type PeriodDays } from '@/lib/period';
 import { useExplorerChartHeight } from '@/lib/useExplorerChartHeight';
 import { SegSelect } from '@/panels/MetricPage';
 import { isMentionsMetricKey } from '@/panels/mentions/mentionsMetricKeys';
-import { AboutRow, WindowBarShell, RailSection } from '@/components/metric/shared';
+import { AboutRow, MetricBackLink, MetricColumns, MetricDescriptor, WindowBarShell, RailSection } from '@/components/metric/shared';
 
 type ChartKind = 'line' | 'bar';
 type CompareMode = 'off' | 'prev';
@@ -84,38 +84,36 @@ function MentionsMetricShell({
 }) {
   return (
     <div className="space-y-5">
-      <Link
-        to={backTo}
-        className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
-      >
-        <span aria-hidden="true">←</span> Упоминания
-      </Link>
+      <MetricBackLink to={backTo}>Упоминания</MetricBackLink>
 
       <div>
         <h1 className="text-2xl font-medium tracking-tight text-foreground">{term}</h1>
         <SourceIdentity network="tg" className="mt-1 max-w-full" />
-        <div className="mt-1.5 text-xs text-muted-foreground">{descriptor}</div>
+        <MetricDescriptor>{descriptor}</MetricDescriptor>
       </div>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_300px] xl:gap-8">
-        <div className="min-w-0 space-y-6">{children}</div>
-        <aside className="space-y-6">
-          <RailSection title="Сравнение">{comparison}</RailSection>
-          <RailSection title="О метрике">
-            <dl className="space-y-3 text-sm">
-              <AboutRow label="Как считается" text={about.formula} />
-              <AboutRow label="Что учитывается" text={about.included} />
-              <AboutRow label="Источник" text={about.source} />
-            </dl>
-          </RailSection>
-          <Link
-            to={backTo}
-            className="inline-flex items-center gap-1 text-xs font-medium text-primary transition-colors hover:text-primary/80"
-          >
-            Открыть Упоминания <span aria-hidden="true">→</span>
-          </Link>
-        </aside>
-      </div>
+      <MetricColumns
+        rail={
+          <>
+            <RailSection title="Сравнение">{comparison}</RailSection>
+            <RailSection title="О метрике">
+              <dl className="space-y-3 text-sm">
+                <AboutRow label="Как считается" text={about.formula} />
+                <AboutRow label="Что учитывается" text={about.included} />
+                <AboutRow label="Источник" text={about.source} />
+              </dl>
+            </RailSection>
+            <Link
+              to={backTo}
+              className="inline-flex items-center gap-1 text-xs font-medium text-primary transition-colors hover:text-primary/80"
+            >
+              Открыть Упоминания <span aria-hidden="true">→</span>
+            </Link>
+          </>
+        }
+      >
+        {children}
+      </MetricColumns>
     </div>
   );
 }

@@ -40,7 +40,7 @@ import { useIgScopedPosts } from '@/panels/instagram/igContentScope';
 import { useExplorerChartHeight } from '@/lib/useExplorerChartHeight';
 import { lazyWithReload } from '@/lib/lazyWithReload';
 import type { ReactNode } from 'react';
-import { AboutRow, ComparisonDeltaRow, WindowBarShell, RailSection } from '@/components/metric/shared';
+import { AboutRow, ComparisonDeltaRow, MetricBackLink, MetricDescriptor, WindowBarShell, RailSection } from '@/components/metric/shared';
 
 /**
  * Instagram metric pages — the drill target the unified chart contract points IG cards at
@@ -415,9 +415,7 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
 
   return (
     <div className="space-y-5">
-      <Link to="/instagram" className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground">
-        <span aria-hidden="true">←</span> Instagram
-      </Link>
+      <MetricBackLink to="/instagram">Instagram</MetricBackLink>
 
       {/* Тихая шапка v2: страница ведёт ИМЕНЕМ метрики, итог окна живёт в «Сравнении» справа
           (hero в шапке его дублировал), окно — в тайм-баре под графиком. На <lg rail уезжает под
@@ -432,7 +430,7 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
             <DeltaPill delta={lvlTrend} />
             <span className="text-xs tracking-wide text-muted-foreground">{periodLabel}</span>
           </div>
-          <div className="mt-1.5 text-xs text-muted-foreground">
+          <MetricDescriptor>
             {lvlDiff != null && lvlDiff !== 0 ? (
               <>
                 изменение за окно:{' '}
@@ -444,7 +442,7 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
             ) : (
               'база без изменений за окно'
             )}
-          </div>
+          </MetricDescriptor>
         </div>
       ) : (
         <div>
@@ -455,7 +453,7 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
             <DeltaPill delta={trend} />
             <span className="text-xs tracking-wide text-muted-foreground">{periodLabel}</span>
           </div>
-          <div className="mt-1.5 text-xs text-muted-foreground">сумма по дням за окно</div>
+          <MetricDescriptor>сумма по дням за окно</MetricDescriptor>
         </div>
       )}
 
@@ -695,9 +693,7 @@ function IgAggregatePage({ def, pair, windowDays, handle }: { def: IgAggDef; pai
   const deltaPct = pair.hasPrev && pair.prev > 0 ? ((pair.cur - pair.prev) / pair.prev) * 100 : null;
   return (
     <div className="space-y-5">
-      <Link to="/instagram" className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground">
-        <span aria-hidden="true">←</span> Instagram
-      </Link>
+      <MetricBackLink to="/instagram">Instagram</MetricBackLink>
 
       {/* Тихая шапка v2: имя метрики ведёт, итог окна живёт в «Сравнении» справа; компактный итог
           остаётся только на узких экранах (там rail уезжает под основной блок). */}
@@ -710,7 +706,7 @@ function IgAggregatePage({ def, pair, windowDays, handle }: { def: IgAggDef; pai
           <span className="text-xs tracking-wide text-muted-foreground">{windowDays} дн.</span>
         </div>
         {/* «внизу страницы» больше не правда: тайм-бар живёт под блоком периода (v2). */}
-        <div className="mt-1.5 text-xs text-muted-foreground">агрегат за выбранное окно</div>
+        <MetricDescriptor>агрегат за выбранное окно</MetricDescriptor>
       </div>
 
       <div className="relative grid grid-cols-1 gap-6 xl:gap-8 lg:grid-cols-[minmax(0,1fr)_var(--inspector-w,300px)]">
@@ -811,9 +807,7 @@ function IgErPage({
   const trend = hasCur && hasPrev ? pctDelta(erReach, erReachPrev) : null;
   return (
     <div className="space-y-5">
-      <Link to="/instagram" className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground">
-        <span aria-hidden="true">←</span> Instagram
-      </Link>
+      <MetricBackLink to="/instagram">Instagram</MetricBackLink>
 
       {/* Тихая шапка v2: имя метрики ведёт, итог окна живёт в «Сравнении» справа; компактный итог
           остаётся только на узких экранах (там rail уезжает под основной блок). */}
@@ -826,7 +820,7 @@ function IgErPage({
           <span className="text-xs tracking-wide text-muted-foreground">{windowDays} дн.</span>
         </div>
         {/* «внизу страницы» больше не правда: тайм-бар живёт под блоком периода (v2). */}
-        <div className="mt-1.5 text-xs text-muted-foreground">агрегат за выбранное окно</div>
+        <MetricDescriptor>агрегат за выбранное окно</MetricDescriptor>
       </div>
 
       <div className="relative grid grid-cols-1 gap-6 xl:gap-8 lg:grid-cols-[minmax(0,1fr)_var(--inspector-w,300px)]">
@@ -925,14 +919,12 @@ function IgChartShell({
 }) {
   return (
     <div className="space-y-5">
-      <Link to={back.to} className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground">
-        <span aria-hidden="true">←</span> {back.label}
-      </Link>
+      <MetricBackLink to={back.to}>{back.label}</MetricBackLink>
 
       <div>
         <h1 className="text-2xl font-medium tracking-tight text-foreground">{term}</h1>
         <div className="mt-1 text-xs tracking-wide text-muted-foreground">{handle ? `Instagram ${handle}` : 'Instagram'}</div>
-        {descriptor && <div className="mt-1.5 text-xs text-muted-foreground">{descriptor}</div>}
+        {descriptor && <MetricDescriptor>{descriptor}</MetricDescriptor>}
       </div>
 
       <div className="relative grid grid-cols-1 gap-6 xl:gap-8 lg:grid-cols-[minmax(0,1fr)_var(--inspector-w,300px)]">

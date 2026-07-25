@@ -410,14 +410,15 @@ managed-first. Живой поиск упоминаний также работ�
 
 1. Записать в этот документ инварианты Яндекс.Метрики (#341–#350) и Telegram-уведомлений
    (#354, #356): границы tenant-доступа, шифрование токенов, семантика метрик и вебхука.
-2. Извлечь общую оболочку metric-страниц: каркас (`AboutRow`, comparison-rail, window-bar)
-   дословно скопирован уже в семи файлах (`MetricPage`, `IgMetricPage`, `MsMetricPage`,
-   `TgMetricPage`, `CampaignMetricPage`, `MentionsMetricPage`, `YmMetricPage`) и формулы
-   дельты начали расходиться; каждая новая вертикаль клонирует паттерн дальше.
-3. Добавить tenant scope в legacy `ig_tags` до любых lifecycle/retention-изменений этой таблицы; пока
+2. Добавить tenant scope в legacy `ig_tags` до любых lifecycle/retention-изменений этой таблицы; пока
    архив тегов остаётся глобальным и намеренно исключён из нового retention-контура.
-4. После авторизации Railway снять обязательный snapshot для PR #228 и создать второй service для
+3. После авторизации Railway снять обязательный snapshot для PR #228 и создать второй service для
    code-ready recovery worker; до этого production безопасно остаётся в режиме `inline`.
+
+Общая оболочка metric-страниц СОБРАНА (волны #364–#372): `components/metric/shared.tsx` владеет
+`MetricBackLink`, `MetricColumns`, `MetricDescriptor`, `RailSection`, `WindowBarShell`, `AboutRow`,
+`ComparisonDeltaRow` — новая вертикаль обязана строиться из них, а не клонировать разметку.
+Инспекторные гриды MetricPage/IgMetricPage намеренно вне оболочки (другая колонка и ритм).
 
 ## Известные ограничения и риски
 

@@ -41,7 +41,7 @@ import { CHART_MAX_POINTS, pickIndexes } from '@/lib/msSeries';
 import { useExplorerChartHeight } from '@/lib/useExplorerChartHeight';
 import { splitDailyWindows } from '@/lib/delta';
 import { MediaThumb } from '@/components/MediaThumb';
-import { AboutRow, RailSection } from '@/components/metric/shared';
+import { AboutRow, MetricBackLink, MetricDescriptor, RailSection } from '@/components/metric/shared';
 
 /** Короткий день недели для тултипов дневной гранулы («чт, 2 июл») — артефакт v2. */
 const WEEKDAY_FMT = new Intl.DateTimeFormat('ru-RU', { weekday: 'short' });
@@ -734,9 +734,7 @@ export function MetricPage() {
     <div className="space-y-4">
       {/* Breadcrumb + страничные действия (артефакт v2): «Закрепить» кладёт метрику на Главную. */}
       <div className="flex items-center justify-between gap-3">
-        <Link to="/" className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground">
-          <span aria-hidden="true">←</span> Обзор
-        </Link>
+        <MetricBackLink to="/">Обзор</MetricBackLink>
         <button
           type="button"
           onClick={pinMetricToHome}
@@ -762,7 +760,7 @@ export function MetricPage() {
           <DeltaPill delta={meta.trend} />
           <span className="text-xs tracking-wide text-muted-foreground">{periodLabel}</span>
         </div>
-        {meta.caption ? <div className="mt-1.5 text-xs text-muted-foreground">{meta.caption}</div> : null}
+        {meta.caption ? <MetricDescriptor>{meta.caption}</MetricDescriptor> : null}
       </div>
 
       {/* relative + InspectorHandle: тянущаяся ширина инспектора (см. components/InspectorHandle). */}
