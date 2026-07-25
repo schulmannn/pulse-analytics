@@ -41,6 +41,7 @@ import { CHART_MAX_POINTS, pickIndexes } from '@/lib/msSeries';
 import { useExplorerChartHeight } from '@/lib/useExplorerChartHeight';
 import { splitDailyWindows } from '@/lib/delta';
 import { MediaThumb } from '@/components/MediaThumb';
+import { AboutRow } from '@/components/metric/shared';
 
 /** Короткий день недели для тултипов дневной гранулы («чт, 2 июл») — артефакт v2. */
 const WEEKDAY_FMT = new Intl.DateTimeFormat('ru-RU', { weekday: 'short' });
@@ -1369,15 +1370,6 @@ function DeltaBadge({ value }: { value: number }) {
       <span aria-hidden="true">{up ? '▲' : down ? '▼' : '—'}</span>
       {Math.abs(value).toFixed(1)}%
     </span>
-  );
-}
-
-function AboutRow({ label, text }: { label: string; text: string }) {
-  return (
-    <div>
-      <dt className="text-2xs tracking-wide text-muted-foreground">{label}</dt>
-      <dd className="mt-0.5 text-sm leading-relaxed text-foreground">{text}</dd>
-    </div>
   );
 }
 

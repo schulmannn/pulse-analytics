@@ -50,6 +50,7 @@ import {
   joinNote,
 } from '@/panels/metrika/YmOverview';
 import { isYmMetricKey } from '@/panels/metrika/ymMetricKeys';
+import { AboutRow, ComparisonDeltaRow } from '@/components/metric/shared';
 
 /**
  * Полностраничные метрики «Яндекс.Метрики» — `/metrics/ym-*`. Каждая карточка Обзора /metrika ведёт
@@ -175,15 +176,6 @@ function YmMetricShell({
           </Link>
         </aside>
       </div>
-    </div>
-  );
-}
-
-function AboutRow({ label, text }: { label: string; text: string }) {
-  return (
-    <div>
-      <dt className="text-2xs tracking-wide text-muted-foreground">{label}</dt>
-      <dd className="mt-0.5 text-sm leading-relaxed text-foreground">{text}</dd>
     </div>
   );
 }
@@ -433,15 +425,7 @@ function YmSeriesPage({ def }: { def: YmSeriesDef }) {
                 <span className="text-xs text-muted-foreground">{cmpLabel}</span>
                 <span className="tabular-nums">{sumPrev != null ? fmt.kpi(sumPrev) : '—'}</span>
               </div>
-              {compareDelta != null && (
-                <div className="flex items-baseline justify-between gap-3 border-t border-border pt-2">
-                  <span className="text-xs text-muted-foreground">Изменение</span>
-                  <span className={`text-xs font-medium tabular-nums ${compareDelta >= 0 ? 'text-verdant' : 'text-ember'}`}>
-                    {compareDelta >= 0 ? '▲' : '▼'}
-                    {Math.abs(compareDelta).toFixed(1)}%
-                  </span>
-                </div>
-              )}
+              {compareDelta != null && <ComparisonDeltaRow delta={compareDelta} />}
             </div>
           ) : cmp === 'year' ? (
             <p className="text-xs text-muted-foreground">
