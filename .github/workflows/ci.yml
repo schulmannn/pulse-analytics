@@ -59,6 +59,11 @@ jobs:
           DATABASE_URL: postgresql://postgres@localhost:5432/pulse
       - run: npm run check
       - run: python -m py_compile mtproto/service.py collector/pulse_collector.py
+      # Версия пиннится: новый релиз ruff с новыми правилами не должен внезапно красить CI.
+      - name: Lint Python (ruff)
+        run: |
+          pip install ruff==0.16.0
+          ruff check mtproto collector test
       - run: python -m unittest discover -s test -p "test_*.py"
       - name: Parse inline browser scripts
         run: |
@@ -83,28 +88,21 @@ jobs:
           node-version: 20
       - name: Audit npm dependencies (server)
         run: npm audit --omit=dev --audit-level=high
+      # GHSA-qwww-vcr4-c8h2 (react-router: CSRF в RSC-режиме) приложение не затрагивает: RSC/server-
+      # режим react-router не используется (клиентский BrowserRouter поверх Express-статики, RSC-API
+      # в коде нет), а фикс существует только в мажоре v8. audit-ci даёт точечный allowlist поверх
+      # той же npm-audit базы — новые advisories по-прежнему валят джоб. Снять allowlist при бампе
+      # react-router-dom на исправленную версию (Dependabot предложит).
       - name: Audit npm dependencies (frontend)
-        run: npm audit --omit=dev --audit-level=high
+        run: npx -y audit-ci@^7 --high --skip-dev --allowlist GHSA-qwww-vcr4-c8h2
         working-directory: frontend
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      # Игноры ниже — ИЗВЕСТНЫЕ advisories transitive starlette 0.37.2 (тянется пином
-      # fastapi==0.111.0). Лечатся только бампом fastapi, а это отдельная работа: unit-тесты
-      # стабят fastapi через sys.modules, так что апгрейд требует ручной проверки живого
-      # сервиса. Снять весь блок --ignore-vuln при бампе fastapi; НОВЫЕ CVE в любом пакете
-      # джоб ловит сразу.
       - name: Audit Python dependencies (mtproto + collector)
         run: |
           pip install pip-audit
-          pip-audit -r mtproto/requirements.txt \
-            --ignore-vuln PYSEC-2026-161 \
-            --ignore-vuln PYSEC-2026-248 \
-            --ignore-vuln PYSEC-2026-249 \
-            --ignore-vuln PYSEC-2026-1941 \
-            --ignore-vuln PYSEC-2026-1943 \
-            --ignore-vuln PYSEC-2026-2280 \
-            --ignore-vuln PYSEC-2026-2281
+          pip-audit -r mtproto/requirements.txt
           pip-audit -r collector/requirements.txt
 
   frontend:

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
-import { ChartSection as RailSection } from '@/components/instagram/shared';
+
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { PeriodChips } from '@/components/PeriodChips';
 import { SourceIdentity } from '@/components/SourceIdentity';
@@ -42,6 +42,7 @@ import {
 } from '@/panels/TgAnalytics';
 import { deriveWeekdayReach, deriveFormatViews } from '@/panels/Compare';
 import { deriveHashtags } from '@/panels/Hashtags';
+import { AboutRow, WindowBarShell, RailSection } from '@/components/metric/shared';
 
 /**
  * Полностраничные «дополнительные» графики Telegram — `/metrics/tg-*`. Это те карточки вкладок
@@ -142,15 +143,6 @@ function TgMetricShell({
   );
 }
 
-function AboutRow({ label, text }: { label: string; text: string }) {
-  return (
-    <div>
-      <dt className="text-2xs tracking-wide text-muted-foreground">{label}</dt>
-      <dd className="mt-0.5 text-sm leading-relaxed text-foreground">{text}</dd>
-    </div>
-  );
-}
-
 /** Полноэкранная карточка с раскрытым (не-expandable) телом — та же роль, что у YmReportCard.
     Раскрытые контексты дают LineChart/BarChart полную высоту explorer'а (heatmap их игнорирует). */
 function TgReportCard({ id, title, action, children }: { id: string; title: string; action?: ReactNode; children: ReactNode }) {
@@ -191,11 +183,10 @@ function TgHeatmapPage() {
         </WidgetPeriodProvider>
       </TgReportCard>
 
-      <div className="flex flex-wrap items-center gap-2 border-t border-border pt-2.5 print:hidden">
-        <span className="text-xs font-medium text-muted-foreground">Окно</span>
+      <WindowBarShell>
         <span className="flex-1" />
         <PeriodChips ariaLabel="Окно" value={days} onChange={setDays} range={range} onRangeChange={setRange} />
-      </div>
+      </WindowBarShell>
     </TgMetricShell>
   );
 }
@@ -349,11 +340,10 @@ function useTgMetricWindow(): TgMetricWindow {
 /** Пресеты окна одной строкой под карточкой (тайм-бар принадлежит контенту, а не краю экрана). */
 function TgWindowBar({ window }: { window: TgMetricWindow }) {
   return (
-    <div className="flex flex-wrap items-center gap-2 border-t border-border pt-2.5 print:hidden">
-      <span className="text-xs font-medium text-muted-foreground">Окно</span>
+    <WindowBarShell>
       <span className="flex-1" />
       <PeriodChips ariaLabel="Окно" value={window.days} onChange={window.setDays} range={window.range} onRangeChange={window.setRange} />
-    </div>
+    </WindowBarShell>
   );
 }
 

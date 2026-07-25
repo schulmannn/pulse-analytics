@@ -2,7 +2,9 @@
 # ПРИВАТНЫЙ сервис на Railway (без публичного домена). Слушает MTPROTO_PORT
 # (по умолчанию 8001) на 0.0.0.0; web-сервис зовёт его по приватной сети.
 # Часть сплита рантаймов: Node в этом образе НЕТ (см. Dockerfile.web).
-FROM python:3.11-slim
+# 3.12 — та же версия, на которой CI гоняет python-тесты (setup-python в ci.yml):
+# прод и тесты не должны расходиться по рантайму.
+FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1

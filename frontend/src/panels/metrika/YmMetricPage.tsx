@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
-import { ChartSection as RailSection } from '@/components/instagram/shared';
+
 import { ChartExpandedContext } from '@/components/ExpandableChart';
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
@@ -50,6 +50,7 @@ import {
   joinNote,
 } from '@/panels/metrika/YmOverview';
 import { isYmMetricKey } from '@/panels/metrika/ymMetricKeys';
+import { AboutRow, ComparisonDeltaRow, WindowBarShell, RailSection } from '@/components/metric/shared';
 
 /**
  * Полностраничные метрики «Яндекс.Метрики» — `/metrics/ym-*`. Каждая карточка Обзора /metrika ведёт
@@ -179,15 +180,6 @@ function YmMetricShell({
   );
 }
 
-function AboutRow({ label, text }: { label: string; text: string }) {
-  return (
-    <div>
-      <dt className="text-2xs tracking-wide text-muted-foreground">{label}</dt>
-      <dd className="mt-0.5 text-sm leading-relaxed text-foreground">{text}</dd>
-    </div>
-  );
-}
-
 // ── Window controls ──────────────────────────────────────────────────────────────────────────
 
 interface YmMetricWindow {
@@ -209,8 +201,7 @@ function useYmMetricWindow(): YmMetricWindow {
 /** Пресеты окна одной строкой под графиком/отчётом (тайм-бар принадлежит контенту, а не краю экрана). */
 function YmControlBar({ window, extra }: { window: YmMetricWindow; extra?: ReactNode }) {
   return (
-    <div className="flex flex-wrap items-center gap-2 border-t border-border pt-2.5 print:hidden">
-      <span className="text-xs font-medium text-muted-foreground">Окно</span>
+    <WindowBarShell>
       <PeriodChips
         ariaLabel="Окно"
         value={window.days}
@@ -219,7 +210,7 @@ function YmControlBar({ window, extra }: { window: YmMetricWindow; extra?: React
         onRangeChange={window.setRange}
       />
       {extra}
-    </div>
+    </WindowBarShell>
   );
 }
 
@@ -433,15 +424,7 @@ function YmSeriesPage({ def }: { def: YmSeriesDef }) {
                 <span className="text-xs text-muted-foreground">{cmpLabel}</span>
                 <span className="tabular-nums">{sumPrev != null ? fmt.kpi(sumPrev) : '—'}</span>
               </div>
-              {compareDelta != null && (
-                <div className="flex items-baseline justify-between gap-3 border-t border-border pt-2">
-                  <span className="text-xs text-muted-foreground">Изменение</span>
-                  <span className={`text-xs font-medium tabular-nums ${compareDelta >= 0 ? 'text-verdant' : 'text-ember'}`}>
-                    {compareDelta >= 0 ? '▲' : '▼'}
-                    {Math.abs(compareDelta).toFixed(1)}%
-                  </span>
-                </div>
-              )}
+              {compareDelta != null && <ComparisonDeltaRow delta={compareDelta} />}
             </div>
           ) : cmp === 'year' ? (
             <p className="text-xs text-muted-foreground">
@@ -520,8 +503,7 @@ function YmSeriesPage({ def }: { def: YmSeriesDef }) {
         )}
       </ChartWidget>
 
-      <div className="flex flex-wrap items-center gap-2 border-t border-border pt-2.5 print:hidden">
-        <span className="text-xs font-medium text-muted-foreground">Окно</span>
+      <WindowBarShell>
         <span className="flex-1" />
         <SegmentedControl
           ariaLabel="Окно"
@@ -529,7 +511,7 @@ function YmSeriesPage({ def }: { def: YmSeriesDef }) {
           onChange={(d) => setDays(Number(d) as PeriodDays)}
           options={WINDOW_PILLS.map((chip) => ({ value: String(chip.days), content: chip.label }))}
         />
-      </div>
+      </WindowBarShell>
 
       {pinnedValid != null && (
         <PinnedDayPanel

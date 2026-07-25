@@ -330,6 +330,7 @@ function createApp(deps) {
     githubRepo: config.github.repo,
     githubDispatchToken: config.github.dispatchToken,
     notionCrash,
+    log,
   });
 
   // ── Sprint 3F-3 catover: new Vite/React SPA is the primary dashboard, served at '/' ──

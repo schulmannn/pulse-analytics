@@ -198,12 +198,12 @@ function DashboardMock({ reduce }: { reduce: boolean }) {
   const typeProg = useMotionValue(reduce ? 1 : 0);
   const typed = useTransform(typeProg, (v) => RISK_LINE.slice(0, Math.round(RISK_LINE.length * v)));
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: одноразовая intro-анимация; motion values стабильны, reduce гардится внутри
   useEffect(() => {
     if (reduce) return;
     const c1 = animate(views, 48210, { delay: 0.35, duration: 1.4, ease: EASE });
     const c2 = animate(typeProg, 1, { delay: 1.6, duration: 1.25, ease: 'linear' });
     return () => { c1.stop(); c2.stop(); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const fade = (delay: number) => ({

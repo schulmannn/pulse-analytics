@@ -20,7 +20,7 @@ import {
   CampaignStatusChip,
   NetworkBadge,
 } from '@/components/campaigns/shared';
-import { ChartSection as RailSection } from '@/components/instagram/shared';
+
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   comparisonText,
@@ -47,6 +47,7 @@ import {
   campaignBackPath,
   isCampaignMetricKey,
 } from '@/panels/campaign/campaignMetricKeys';
+import { AboutRow, WindowBarShell, RailSection } from '@/components/metric/shared';
 
 type ChartKind = 'line' | 'bar';
 
@@ -236,15 +237,6 @@ function CampaignMetricShell({
   );
 }
 
-function AboutRow({ label, text }: { label: string; text: string }) {
-  return (
-    <div>
-      <dt className="text-2xs tracking-wide text-muted-foreground">{label}</dt>
-      <dd className="mt-0.5 text-sm leading-relaxed text-foreground">{text}</dd>
-    </div>
-  );
-}
-
 function CampaignReportCard({
   id,
   title,
@@ -376,8 +368,7 @@ function CampaignTimelineMetric({
         )}
       </CampaignReportCard>
       {modes.length > 1 && active && (
-        <div className="flex flex-wrap items-center gap-2 border-t border-border pt-2.5 print:hidden">
-          <span className="text-xs font-medium text-muted-foreground">Показатель</span>
+        <WindowBarShell label="Показатель">
           <span className="flex-1" />
           <SegmentedControl
             ariaLabel="Показатель"
@@ -385,7 +376,7 @@ function CampaignTimelineMetric({
             onChange={selectMode}
             options={modes.map((mode) => ({ value: mode.key, content: mode.label }))}
           />
-        </div>
+        </WindowBarShell>
       )}
     </CampaignMetricShell>
   );

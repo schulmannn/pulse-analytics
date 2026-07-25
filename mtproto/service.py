@@ -61,7 +61,6 @@ log = logging.getLogger(__name__)
 API_ID       = int(os.getenv('TG_API_ID', '0'))
 API_HASH     = os.getenv('TG_API_HASH', '')
 SESSION      = os.getenv('TG_SESSION', '')
-PHONE        = os.getenv('TG_PHONE', '')
 CHANNEL      = os.getenv('TG_CHANNEL', '')
 # Internal-auth token for web → mtproto calls; the web service sends the same
 # value in x-internal-token. Fail-closed: when unset, data routes answer 503
@@ -673,89 +672,9 @@ async def get_graphs(points: int = Query(default=45, le=400), x_internal_token: 
         entity = await asyncio.wait_for(tg.get_entity(CHANNEL), timeout=TELETHON_CALL_TIMEOUT_S)
         stats = await asyncio.wait_for(
             tg(GetBroadcastStatsRequest(channel=entity, dark=False)), timeout=TELETHON_CALL_TIMEOUT_S)
-
-        async def resolve(g):
-            if isinstance(g, StatsGraphAsync):
-                try:
-                    g = await asyncio.wait_for(
-                        tg(LoadAsyncGraphRequest(token=g.token)), timeout=TELETHON_CALL_TIMEOUT_S)
-                except asyncio.TimeoutError:
-                    raise
-                except FloodWaitError:
-                    raise
-                except Exception:
-                    return None
-            if isinstance(g, StatsGraph):
-                try:
-                    return json.loads(g.json.data)
-                except Exception:
-                    return None
-            return None
-
-        def cols_of(data):
-            cols  = data.get('columns', [])
-            names = data.get('names', {})
-            types = data.get('types', {})
-            x, series = [], []
-            for c in cols:
-                cid, vals = c[0], c[1:]
-                if cid == 'x':
-                    x = vals
-                else:
-                    series.append({'name': names.get(cid, cid),
-                                   'type': types.get(cid, 'line'),
-                                   'values': vals})
-            return x, series
-
-        def timeseries(data, last=45):
-            if not data:
-                return None
-            x, series = cols_of(data)
-            x = x[-last:]
-            for s in series:
-                s['values'] = s['values'][-last:]
-            return {'x': x, 'series': series}
-
-        def aggregate(data, top=8):
-            if not data:
-                return None
-            _, series = cols_of(data)
-            agg = [{'label': s['name'], 'value': sum(v or 0 for v in s['values'])} for s in series]
-            agg = [a for a in agg if a['value'] > 0]
-            agg.sort(key=lambda a: a['value'], reverse=True)
-            return agg[:top]
-
-        def sum_daily(data):
-            """Sum all y-series per x-point → {x, values} (e.g. total reactions/day)."""
-            if not data:
-                return None
-            x, series = cols_of(data)
-            if not series:
-                return None
-            n = len(series[0]['values'])
-            return {'x': x, 'values': [sum((s['values'][i] or 0) for s in series) for i in range(n)]}
-
-        top_hours = None
-        th = await resolve(getattr(stats, 'top_hours_graph', None))
-        if th:
-            x, series = cols_of(th)
-            if series:
-                top_hours = {'hours': x, 'values': series[0]['values'], 'name': series[0]['name']}
-
-        emotion = await resolve(getattr(stats, 'reactions_by_emotion_graph', None))
-
-        return {
-            'available':                True,
-            'growth':                   timeseries(await resolve(getattr(stats, 'growth_graph', None)), points),
-            'followers':                timeseries(await resolve(getattr(stats, 'followers_graph', None)), points),
-            'views_by_source':          aggregate(await resolve(getattr(stats, 'views_by_source_graph', None))),
-            'new_followers_by_source':  aggregate(await resolve(getattr(stats, 'new_followers_by_source_graph', None))),
-            'languages':                aggregate(await resolve(getattr(stats, 'languages_graph', None)), top=6),
-            'reactions_sentiment':      aggregate(emotion),
-            'reactions_daily':          sum_daily(emotion),
-            'interactions':             timeseries(await resolve(getattr(stats, 'interactions_graph', None)), points),
-            'top_hours':                top_hours,
-        }
+        # SINGLE definition of graph parsing: _graphs_payload is shared with the managed
+        # /qr/collect path, so the global and per-session responses can never drift.
+        return await _graphs_payload(tg, stats, points)
     except asyncio.TimeoutError:
         raise HTTPException(status_code=503, detail='mtproto_timeout')
     except FloodWaitError:

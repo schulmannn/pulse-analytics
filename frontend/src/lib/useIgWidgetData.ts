@@ -45,7 +45,6 @@ export function useIgWidgetData(config: WidgetConfig): { result: WidgetResult; i
       },
     };
     return resolveWidgetMetric(config, ctx);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [config, days, period, profileQ.data, insightsQ.data, breakdownsQ.data, onlineQ.data, historyQ.data]);
 
   // Loading = a channel is selected AND the core IG sources (profile + insights) are still pending

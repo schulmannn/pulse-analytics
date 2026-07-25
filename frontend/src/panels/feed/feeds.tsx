@@ -47,7 +47,7 @@ export interface NetworkFeedDef {
 }
 
 /** React.lazy over a NAMED export (the IG cluster exports everything by name). */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+// biome-ignore lint/suspicious/noExplicitAny: generic-граница React.lazy — пропсы компонента здесь не сужаются
 function lazyFrom<M extends Record<K, ComponentType<any>>, K extends keyof M & string>(
   load: () => Promise<M>,
   name: K,

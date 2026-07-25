@@ -15,7 +15,7 @@ import { LineChart } from '@/components/LineChart';
 import { PeriodChips } from '@/components/PeriodChips';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { SourceIdentity } from '@/components/SourceIdentity';
-import { ChartSection as RailSection } from '@/components/instagram/shared';
+
 import { Skeleton } from '@/components/ui/skeleton';
 import { serializeContentPeriod } from '@/lib/contentFilters';
 import { fmt } from '@/lib/format';
@@ -28,6 +28,7 @@ import { usePeriod, type PeriodDays } from '@/lib/period';
 import { useExplorerChartHeight } from '@/lib/useExplorerChartHeight';
 import { SegSelect } from '@/panels/MetricPage';
 import { isMentionsMetricKey } from '@/panels/mentions/mentionsMetricKeys';
+import { AboutRow, WindowBarShell, RailSection } from '@/components/metric/shared';
 
 type ChartKind = 'line' | 'bar';
 type CompareMode = 'off' | 'prev';
@@ -119,15 +120,6 @@ function MentionsMetricShell({
   );
 }
 
-function AboutRow({ label, text }: { label: string; text: string }) {
-  return (
-    <div>
-      <dt className="text-2xs tracking-wide text-muted-foreground">{label}</dt>
-      <dd className="mt-0.5 text-sm leading-relaxed text-foreground">{text}</dd>
-    </div>
-  );
-}
-
 function MentionsReportCard({
   id,
   title,
@@ -154,8 +146,7 @@ function MentionsReportCard({
 function WindowBar() {
   const { days, setDays, range, setRange } = usePeriod();
   return (
-    <div className="flex flex-wrap items-center gap-2 border-t border-border pt-2.5 print:hidden">
-      <span className="text-xs font-medium text-muted-foreground">Окно</span>
+    <WindowBarShell>
       <span className="flex-1" />
       <PeriodChips
         ariaLabel="Окно"
@@ -164,7 +155,7 @@ function WindowBar() {
         range={range}
         onRangeChange={setRange}
       />
-    </div>
+    </WindowBarShell>
   );
 }
 

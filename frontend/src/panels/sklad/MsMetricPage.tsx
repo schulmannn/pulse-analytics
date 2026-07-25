@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo } from 'react';
 import type { ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
-import { ChartSection as RailSection } from '@/components/instagram/shared';
+
 import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { PeriodChips } from '@/components/PeriodChips';
@@ -73,6 +73,7 @@ import {
 } from '@/panels/sklad/MsTopProducts';
 import { MsStockTable, STOCK_SORT_OPTIONS, type MsStockSort } from '@/panels/sklad/MsStock';
 import { isMsMetricKey } from '@/panels/sklad/msMetricKeys';
+import { AboutRow, ComparisonDeltaRow, WindowBarShell, RailSection } from '@/components/metric/shared';
 
 /**
  * Полностраничные метрики МойСклада — `/metrics/ms-*`. Каждая раскрываемая карточка Обзора/Клиентов/
@@ -321,15 +322,6 @@ function MsMetricShell({
   );
 }
 
-function AboutRow({ label, text }: { label: string; text: string }) {
-  return (
-    <div>
-      <dt className="text-2xs tracking-wide text-muted-foreground">{label}</dt>
-      <dd className="mt-0.5 text-sm leading-relaxed text-foreground">{text}</dd>
-    </div>
-  );
-}
-
 /** Пресеты окна одной строкой под графиком (тайм-бар принадлежит графику, а не краю экрана). */
 interface MsMetricWindow {
   days: PeriodDays;
@@ -359,8 +351,7 @@ function ControlBar({
   extra?: ReactNode;
 }) {
   return (
-    <div className="flex flex-wrap items-center gap-2 border-t border-border pt-2.5 print:hidden">
-      <span className="text-xs font-medium text-muted-foreground">Окно</span>
+    <WindowBarShell>
       <PeriodChips
         ariaLabel="Окно"
         value={window.days}
@@ -381,7 +372,7 @@ function ControlBar({
         />
       )}
       {extra}
-    </div>
+    </WindowBarShell>
   );
 }
 
@@ -441,14 +432,7 @@ function ComparisonReadout({
             <span className="text-xs text-muted-foreground">Пред. период</span>
             <span className="tabular-nums">{previous == null ? '—' : format(previous)}</span>
           </div>
-          {delta != null && (
-            <div className="flex items-baseline justify-between gap-3 border-t border-border pt-2">
-              <span className="text-xs text-muted-foreground">Изменение</span>
-              <span className={`text-xs font-medium tabular-nums ${delta >= 0 ? 'text-verdant' : 'text-ember'}`}>
-                {delta >= 0 ? '▲' : '▼'}{Math.abs(delta).toFixed(1)}%
-              </span>
-            </div>
-          )}
+          {delta != null && <ComparisonDeltaRow delta={delta} />}
         </div>
       )}
     </div>
