@@ -124,6 +124,9 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
+      # Design-token canon (motion ladder, type scale, layering). Static and ~instant, so it runs
+      # before the suite: a re-typed duration should fail in seconds, not after the e2e leg.
+      - run: npm run lint:motion
       - run: npm test
       - run: npm run build
       - run: node scripts/check-bundle-size.mjs

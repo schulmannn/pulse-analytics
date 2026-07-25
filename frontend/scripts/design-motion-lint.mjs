@@ -35,6 +35,44 @@ function* walk(dir) {
 // rules: the house easing stays canonical everywhere.
 const BESPOKE_TYPE = ['src/pages/Landing.tsx', 'src/pages/Legal.tsx'];
 
+/**
+ * A transitioned property that forces the browser to re-layout every frame.
+ *
+ * Box-model and inset properties, including their directional longhands (padding-bottom,
+ * margin-inline-start, …) — writing the longhand is the easiest way to slip past a naive list, so
+ * the shorthands are generated rather than enumerated. Durations in CSS always come from the
+ * ladder, so `<prop> var(--motion-…)` marks a transitioned property without parsing multi-line
+ * transition lists.
+ */
+const SIDE = '(?:-(?:top|right|bottom|left|inline|block|start|end))';
+const LAYOUT_PROP_TRANSITION = new RegExp(
+  String.raw`^\s*(?:transition:\s*)?(?:` +
+    [
+      String.raw`(?:min-|max-)?(?:width|height)`,
+      String.raw`(?:padding|margin|inset)${SIDE}{0,2}`,
+      String.raw`(?:row-|column-)?gap`,
+      String.raw`(?:top|right|bottom|left)`,
+      String.raw`flex-basis`,
+    ].join('|') +
+    String.raw`)\s+var\(--motion-`,
+);
+
+/**
+ * Does the CSS rule block containing this line carry an opt-out marker?
+ *
+ * Scans backwards to the block's opening brace, so a marker written above the declaration (or in
+ * the block's doc comment) applies to that block and nothing else — a note left on one rule cannot
+ * silently excuse the next one. Bounded by the file start; the `{` terminator makes it cheap.
+ */
+function blockHasMarker({ lines, index }, marker) {
+  if (lines[index].includes(marker)) return true;
+  for (let i = index - 1; i >= 0; i--) {
+    if (lines[i].includes(marker)) return true;
+    if (lines[i].includes('{')) return false;
+  }
+  return false;
+}
+
 const rules = [
   {
     id: 'house-easing-inlined',
@@ -78,6 +116,23 @@ const rules = [
     test: (line) => /\btransition-all\b/.test(line),
   },
   {
+    id: 'layout-animating-transition',
+    hint: 'animate transform/opacity — or mark the block «layout-anim-ok: why» if the reflow IS the effect',
+    // The CSS half of the transition-all rule. Transitioning width/height/padding/inset makes the
+    // browser re-layout on every frame, which drops frames the moment the main thread is busy —
+    // Emil Kowalski's first performance rule, and the one violation `transition-all` could not see
+    // because hand-written CSS names its properties explicitly.
+    //
+    // This is a WARNING WITH AN ESCAPE HATCH, not a ban: three surfaces here animate layout on
+    // purpose (a layout-pushing sidebar rail cannot be a transform — the content must reflow). Those
+    // carry a `layout-anim-ok:` note in their rule block, so each one is a decision someone wrote
+    // down rather than a habit that slipped in.
+    //
+    // Durations in CSS always come from the ladder, so `<prop> var(--motion-…)` identifies a
+    // transitioned property without having to parse multi-line transition lists.
+    test: (line, ctx) => LAYOUT_PROP_TRANSITION.test(line) && !blockHasMarker(ctx, 'layout-anim-ok'),
+  },
+  {
     id: 'arbitrary-z-index',
     hint: 'use the layering scale (z-sticky … z-tooltip) — see DESIGN_TOKENS «Layering»',
     // Arbitrary z-index (z-[999]) side-steps the ladder and reintroduces the tie-fights the scale
@@ -95,7 +150,7 @@ for (const file of walk(srcDir)) {
   lines.forEach((line, i) => {
     for (const rule of rules) {
       if (rule.exempt?.(rel)) continue;
-      if (rule.test(line)) {
+      if (rule.test(line, { lines, index: i, rel })) {
         violations++;
         console.log(`  ${rel}:${i + 1}  [${rule.id}] ${rule.hint}`);
         console.log(`      ${line.trim()}`);
