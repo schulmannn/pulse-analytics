@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
 import { endOfLocalDay, shiftLocalDays, startOfLocalDay } from '@/lib/period';
 
 /**
@@ -193,14 +194,15 @@ export function DateRangePicker({ value, onApply, onReset }: Props) {
       </div>
 
       <div className="mt-2 flex gap-2">
-        <button
+        <Button
           type="button"
           disabled={!canApply}
           onClick={() => canApply && onApply({ from: startOfLocalDay(from), to: endOfLocalDay(to) })}
-          className="btn-pill flex-1 bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+          size="xs"
+          className="flex-1"
         >
           Применить
-        </button>
+        </Button>
         <button
           type="button"
           onClick={onReset}

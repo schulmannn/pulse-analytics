@@ -16,6 +16,7 @@ import { cn } from '@/lib/utils';
 import { ChannelAvatar } from '@/components/ChannelAvatar';
 import { EmptyState } from '@/components/EmptyState';
 import { SourceStatus } from '@/components/SourceStatus';
+import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useConfirm } from '@/components/ConfirmDialogProvider';
 import {
@@ -112,13 +113,13 @@ export function ChannelsSection() {
                 className="w-full rounded border bg-background py-2 pl-7 pr-3 font-mono text-sm focus:outline-hidden focus:ring-1 focus:ring-primary"
               />
             </div>
-            <button
+            <Button
               type="submit"
               disabled={createChannelMutation.isPending || !usernameInput.trim()}
-              className="btn-pill shrink-0 bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+              className="shrink-0"
             >
               {createChannelMutation.isPending ? 'Добавление…' : 'Подключить'}
-            </button>
+            </Button>
           </form>
           {errorMessage && <p role="alert" id="add-channel-err" className="mt-2.5 text-xs font-medium text-destructive">{errorMessage}</p>}
         </div>
