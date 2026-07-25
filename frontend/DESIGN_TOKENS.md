@@ -191,7 +191,7 @@ duration/easing.
 | `--motion-glide` | 260ms | FLIP reorder glide · icon stroke draw-on |
 | `--motion-reveal` | 300ms | larger reveals (add-widget rise) |
 | `--motion-entrance` | 350ms | card mount rise |
-| `--motion-morph` | 1500ms | Recharts-parity point interpolation after a data-window change |
+| `--motion-morph` | 700ms | point interpolation after a data-window change (see note below) |
 
 ### Reaching the ladder from a component
 
@@ -239,6 +239,14 @@ comparison ghost keeps its pattern because point geometry changes without touchi
 Period-backed comparison surfaces retain the previous query result as placeholder data only for the
 same source, so a loading skeleton cannot unmount the old SVG before the morph starts; source changes
 still clear immediately and never flash another channel's metrics.
+
+**Why 700ms and not Recharts' 1500ms.** The morph is not a one-off delight animation: it fires on
+*every* period switch, source switch and filter change — a «десятки раз в день» operation. At 1500ms
+the reader waited a second and a half before the numbers stopped moving enough to be read, which
+inverts the point of the chart. 700ms still reads as a continuous shape flow (the thing the morph
+exists to communicate — these are the same series in a new window, not a new chart) while landing
+inside the register the rest of the ladder lives in. The JS fallback in `lib/chartMotionRuntime.ts`
+mirrors this number and must be changed with it — a RAF loop cannot read the CSS var mid-frame.
 
 Other micro-charts (`InlineSpark` / the custom `MsMultiLine`) keep the lighter `reveal` fade
 (`chart-fade-in`, `--motion-reveal`); bars grow from the baseline (`grow` — `scaleY` from a `fill-box`

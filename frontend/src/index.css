@@ -1722,7 +1722,7 @@
     --motion-glide: 260ms;    /* FLIP reorder glide · icon stroke draw-on                  */
     --motion-reveal: 300ms;   /* larger reveals (add-widget rise)                          */
     --motion-entrance: 350ms; /* card mount rise                                           */
-    --motion-morph: 1500ms;   /* Recharts-parity chart UPDATE morph (shape flow, RAF)      */
+    --motion-morph: 700ms;    /* chart UPDATE morph (shape flow, RAF) — см. DESIGN_TOKENS   */
   }
 
   /* ── Chart series roles (semantic layer over the deep/muted palette) ────────────────────────────
