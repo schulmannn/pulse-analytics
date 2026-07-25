@@ -28,7 +28,7 @@ import { usePeriod, type PeriodDays } from '@/lib/period';
 import { useExplorerChartHeight } from '@/lib/useExplorerChartHeight';
 import { SegSelect } from '@/panels/MetricPage';
 import { isMentionsMetricKey } from '@/panels/mentions/mentionsMetricKeys';
-import { AboutRow } from '@/components/metric/shared';
+import { AboutRow, WindowBarShell } from '@/components/metric/shared';
 
 type ChartKind = 'line' | 'bar';
 type CompareMode = 'off' | 'prev';
@@ -146,8 +146,7 @@ function MentionsReportCard({
 function WindowBar() {
   const { days, setDays, range, setRange } = usePeriod();
   return (
-    <div className="flex flex-wrap items-center gap-2 border-t border-border pt-2.5 print:hidden">
-      <span className="text-xs font-medium text-muted-foreground">Окно</span>
+    <WindowBarShell>
       <span className="flex-1" />
       <PeriodChips
         ariaLabel="Окно"
@@ -156,7 +155,7 @@ function WindowBar() {
         range={range}
         onRangeChange={setRange}
       />
-    </div>
+    </WindowBarShell>
   );
 }
 

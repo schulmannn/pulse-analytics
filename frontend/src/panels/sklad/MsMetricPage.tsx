@@ -73,7 +73,7 @@ import {
 } from '@/panels/sklad/MsTopProducts';
 import { MsStockTable, STOCK_SORT_OPTIONS, type MsStockSort } from '@/panels/sklad/MsStock';
 import { isMsMetricKey } from '@/panels/sklad/msMetricKeys';
-import { AboutRow, ComparisonDeltaRow } from '@/components/metric/shared';
+import { AboutRow, ComparisonDeltaRow, WindowBarShell } from '@/components/metric/shared';
 
 /**
  * Полностраничные метрики МойСклада — `/metrics/ms-*`. Каждая раскрываемая карточка Обзора/Клиентов/
@@ -351,8 +351,7 @@ function ControlBar({
   extra?: ReactNode;
 }) {
   return (
-    <div className="flex flex-wrap items-center gap-2 border-t border-border pt-2.5 print:hidden">
-      <span className="text-xs font-medium text-muted-foreground">Окно</span>
+    <WindowBarShell>
       <PeriodChips
         ariaLabel="Окно"
         value={window.days}
@@ -373,7 +372,7 @@ function ControlBar({
         />
       )}
       {extra}
-    </div>
+    </WindowBarShell>
   );
 }
 

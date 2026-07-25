@@ -40,7 +40,7 @@ import { useIgScopedPosts } from '@/panels/instagram/igContentScope';
 import { useExplorerChartHeight } from '@/lib/useExplorerChartHeight';
 import { lazyWithReload } from '@/lib/lazyWithReload';
 import type { ReactNode } from 'react';
-import { AboutRow, ComparisonDeltaRow } from '@/components/metric/shared';
+import { AboutRow, ComparisonDeltaRow, WindowBarShell } from '@/components/metric/shared';
 
 /**
  * Instagram metric pages — the drill target the unified chart contract points IG cards at
@@ -264,8 +264,7 @@ const WINDOW_PILLS = [
     молча показывал 90д — окно, которое страница не может исполнить, не предлагаем. */
 function WindowBar({ value, onChange, allowAll = true }: { value: number; onChange: (days: PeriodDays) => void; allowAll?: boolean }) {
   return (
-    <div className="flex flex-wrap items-center gap-2 border-t border-border pt-2.5 print:hidden">
-      <span className="text-xs font-medium text-muted-foreground">Окно</span>
+    <WindowBarShell>
       <span className="flex-1" />
       {/* Presets on the shared sliding-glider primitive. */}
       <SegmentedControl
@@ -277,7 +276,7 @@ function WindowBar({ value, onChange, allowAll = true }: { value: number; onChan
           content: chip.label,
         }))}
       />
-    </div>
+    </WindowBarShell>
   );
 }
 

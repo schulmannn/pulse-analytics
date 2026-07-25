@@ -47,7 +47,7 @@ import {
   campaignBackPath,
   isCampaignMetricKey,
 } from '@/panels/campaign/campaignMetricKeys';
-import { AboutRow } from '@/components/metric/shared';
+import { AboutRow, WindowBarShell } from '@/components/metric/shared';
 
 type ChartKind = 'line' | 'bar';
 
@@ -368,8 +368,7 @@ function CampaignTimelineMetric({
         )}
       </CampaignReportCard>
       {modes.length > 1 && active && (
-        <div className="flex flex-wrap items-center gap-2 border-t border-border pt-2.5 print:hidden">
-          <span className="text-xs font-medium text-muted-foreground">Показатель</span>
+        <WindowBarShell label="Показатель">
           <span className="flex-1" />
           <SegmentedControl
             ariaLabel="Показатель"
@@ -377,7 +376,7 @@ function CampaignTimelineMetric({
             onChange={selectMode}
             options={modes.map((mode) => ({ value: mode.key, content: mode.label }))}
           />
-        </div>
+        </WindowBarShell>
       )}
     </CampaignMetricShell>
   );
