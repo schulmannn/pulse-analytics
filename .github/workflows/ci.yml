@@ -59,6 +59,11 @@ jobs:
           DATABASE_URL: postgresql://postgres@localhost:5432/pulse
       - run: npm run check
       - run: python -m py_compile mtproto/service.py collector/pulse_collector.py
+      # Версия пиннится: новый релиз ruff с новыми правилами не должен внезапно красить CI.
+      - name: Lint Python (ruff)
+        run: |
+          pip install ruff==0.16.0
+          ruff check mtproto collector test
       - run: python -m unittest discover -s test -p "test_*.py"
       - name: Parse inline browser scripts
         run: |
