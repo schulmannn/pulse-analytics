@@ -83,13 +83,15 @@ test.describe('desktop /home workspace (dark, 1440)', () => {
     await expect(edit).toHaveAttribute('aria-pressed', 'false');
 
     await add.click();
-    await expect(page.getByRole('dialog', { name: 'Каталог метрик' })).toBeVisible();
+    // Accessible name = the catalog's DialogTitle «Добавить метрику» (Radix dialog since the
+    // shadcn wave #316; the old hand-rolled wrapper carried aria-label «Каталог метрик»).
+    await expect(page.getByRole('dialog', { name: 'Добавить метрику' })).toBeVisible();
     // The direct add path never flips the board into edit mode.
     await expect(edit).toHaveAttribute('aria-pressed', 'false');
 
     // Escape closes the catalog and restores focus to the opener (focus-trap contract).
     await page.keyboard.press('Escape');
-    await expect(page.getByRole('dialog', { name: 'Каталог метрик' })).toHaveCount(0);
+    await expect(page.getByRole('dialog', { name: 'Добавить метрику' })).toHaveCount(0);
     await expect(add).toBeFocused();
   });
 
@@ -286,10 +288,11 @@ test.describe('desktop /home workspace (dark, 1440)', () => {
     await testInfo.attach('home-empty-dark', { path: shot, contentType: 'image/png' });
 
     // Primary CTA opens the catalog directly (both header + empty-state buttons share the name).
+    // Accessible name = the catalog's DialogTitle «Добавить метрику» (Radix dialog since #316).
     await page.getByRole('button', { name: 'Добавить виджет', exact: true }).first().click();
-    await expect(page.getByRole('dialog', { name: 'Каталог метрик' })).toBeVisible();
+    await expect(page.getByRole('dialog', { name: 'Добавить метрику' })).toBeVisible();
     await page.keyboard.press('Escape');
-    await expect(page.getByRole('dialog', { name: 'Каталог метрик' })).toHaveCount(0);
+    await expect(page.getByRole('dialog', { name: 'Добавить метрику' })).toHaveCount(0);
 
     // «Собрать по умолчанию» seeds a board; the demo channel has a connected IG source, so a
     // relevant IG widget is included (the TG-only exclusion path is covered by the unit test).

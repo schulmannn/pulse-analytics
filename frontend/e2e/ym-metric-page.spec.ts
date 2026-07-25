@@ -202,15 +202,25 @@ test('ym-sources — полный список без селектора тип�
   await expect(page.getByLabel('Цель для источников трафика')).toBeVisible();
 });
 
-test('все 18 карточек Метрики имеют рабочую полноэкранную route-страницу без dialog-оверлея', async ({ page }, testInfo) => {
-  test.skip(testInfo.project.name !== 'desktop-1440', 'Метрика — desktop-first поверхность');
-  test.setTimeout(90_000);
-  await bootMetrika(page, '/metrics/ym-visits');
+// Обход всех 18 route-страниц, нарезанный на чанки: каждый `page.goto` — ПОЛНАЯ перезагрузка
+// приложения через dev-сервер (~10с на медленной машине), и один сквозной тест на 18 маршрутов не
+// укладывается ни в какой разумный бюджет (умирал на ~7-м goto при 90с). Чанки берут те же записи
+// из YM_ROUTE_HEADINGS по порядку, поэтому суммарно покрыты ВСЕ 18 маршрутов с теми же ассертами.
+const YM_ROUTE_ENTRIES = Object.entries(YM_ROUTE_HEADINGS);
+const YM_ROUTE_CHUNK = 6;
+for (let start = 0; start < YM_ROUTE_ENTRIES.length; start += YM_ROUTE_CHUNK) {
+  const chunk = YM_ROUTE_ENTRIES.slice(start, start + YM_ROUTE_CHUNK);
+  test(`все 18 карточек Метрики имеют рабочую полноэкранную route-страницу без dialog-оверлея (маршруты ${start + 1}–${start + chunk.length} из ${YM_ROUTE_ENTRIES.length})`, async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== 'desktop-1440', 'Метрика — desktop-first поверхность');
+    // Бюджет чанка: boot + 6 полных перезагрузок dev-сервера; первый чанк прогревает vite.
+    test.setTimeout(150_000);
+    await bootMetrika(page, `/metrics/${chunk[0][0]}`);
 
-  for (const [metricKey, heading] of Object.entries(YM_ROUTE_HEADINGS)) {
-    await page.goto(`/metrics/${metricKey}`);
-    await expect(page).toHaveURL(new RegExp(`/metrics/${metricKey}$`));
-    await expect(page.getByRole('heading', { name: heading, level: 1 })).toBeVisible();
-    await expect(page.locator('[role="dialog"]')).toHaveCount(0);
-  }
-});
+    for (const [metricKey, heading] of chunk) {
+      await page.goto(`/metrics/${metricKey}`);
+      await expect(page).toHaveURL(new RegExp(`/metrics/${metricKey}$`));
+      await expect(page.getByRole('heading', { name: heading, level: 1 })).toBeVisible();
+      await expect(page.locator('[role="dialog"]')).toHaveCount(0);
+    }
+  });
+}

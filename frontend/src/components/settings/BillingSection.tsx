@@ -1,3 +1,4 @@
+import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { PLAN_LABEL, setPlan, usePlan, type PlanId } from '@/lib/plan';
 import { SettingsGroup, SettingsIcon, SettingsRow } from '@/components/settings/primitives';
@@ -111,21 +112,27 @@ function PlanCard({ plan, active }: { plan: PlanDef; active: boolean }) {
           </li>
         ))}
       </ul>
-      <button
+      {/* Канонический Button: solid-ветка = variant default как есть; тихие ветки = secondary с
+          прозрачным фоном (кнопка лежит прямо на bg-card диалога настроек — bg-background из
+          варианта дал бы видимую плашку). h-auto py-1.5 вместо фикс-высоты xs сохраняет прежнюю
+          авто-геометрию: у ветвей с бордером внешняя высота на 2px больше solid-ветки, как и было.
+          Активная ветка — постоянное disabled-состояние с собственным стилем, поэтому дефолтное
+          disabled:opacity-50 возвращено к полной непрозрачности (раньше затемнения не было). */}
+      <Button
         type="button"
         disabled={active}
         onClick={() => setPlan(plan.id)}
+        variant={active || plan.id === 'free' ? 'secondary' : 'default'}
+        size="xs"
         className={cn(
-          'btn-pill mt-4 w-full px-3 py-1.5 text-xs font-medium transition-colors',
+          'mt-4 h-auto w-full py-1.5',
           active
-            ? 'cursor-default border border-border text-muted-foreground'
-            : plan.id === 'free'
-              ? 'border border-border text-foreground hover:bg-muted'
-              : 'bg-primary text-primary-foreground hover:bg-primary/90',
+            ? 'bg-transparent text-muted-foreground disabled:opacity-100'
+            : plan.id === 'free' && 'bg-transparent',
         )}
       >
         {active ? 'Текущий план' : plan.id === 'free' ? 'Перейти на Free' : `Перейти на ${PLAN_LABEL[plan.id]}`}
-      </button>
+      </Button>
     </div>
   );
 }
