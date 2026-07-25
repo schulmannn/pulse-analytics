@@ -21,7 +21,7 @@ import {
 import type { WindowPair, IgBreakdownItem } from '@/lib/igMetrics';
 import { pctDelta } from '@/lib/delta';
 import { fmt } from '@/lib/format';
-import { windowIgSeries, ChartSection as RailSection, KpiCard } from '@/components/instagram/shared';
+import { windowIgSeries, KpiCard } from '@/components/instagram/shared';
 import { BestTimeHeatmap } from '@/components/instagram/audience';
 import { ChartSection } from '@/components/ChartWidget';
 import { LineChart } from '@/components/LineChart';
@@ -40,7 +40,7 @@ import { useIgScopedPosts } from '@/panels/instagram/igContentScope';
 import { useExplorerChartHeight } from '@/lib/useExplorerChartHeight';
 import { lazyWithReload } from '@/lib/lazyWithReload';
 import type { ReactNode } from 'react';
-import { AboutRow, ComparisonDeltaRow, WindowBarShell } from '@/components/metric/shared';
+import { AboutRow, ComparisonDeltaRow, WindowBarShell, RailSection } from '@/components/metric/shared';
 
 /**
  * Instagram metric pages — the drill target the unified chart contract points IG cards at
