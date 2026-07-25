@@ -47,7 +47,7 @@ import {
   campaignBackPath,
   isCampaignMetricKey,
 } from '@/panels/campaign/campaignMetricKeys';
-import { AboutRow, WindowBarShell, RailSection } from '@/components/metric/shared';
+import { AboutRow, MetricBackLink, MetricColumns, MetricDescriptor, WindowBarShell, RailSection } from '@/components/metric/shared';
 
 type ChartKind = 'line' | 'bar';
 
@@ -193,12 +193,7 @@ function CampaignMetricShell({
 }) {
   return (
     <div className="space-y-5">
-      <Link
-        to={backTo}
-        className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
-      >
-        <span aria-hidden="true">←</span> {campaign.name}
-      </Link>
+      <MetricBackLink to={backTo}>{campaign.name}</MetricBackLink>
 
       <div>
         <div className="flex flex-wrap items-center gap-2">
@@ -211,28 +206,31 @@ function CampaignMetricShell({
           {(summary.ig?.posts ?? 0) > 0 && <NetworkBadge network="ig" />}
           <span className="text-2xs text-muted-foreground">{campaign.name}</span>
         </div>
-        <div className="mt-1.5 text-xs text-muted-foreground">{descriptor}</div>
+        <MetricDescriptor>{descriptor}</MetricDescriptor>
       </div>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_300px] xl:gap-8">
-        <div className="min-w-0 space-y-6">{children}</div>
-        <aside className="space-y-6">
-          <RailSection title="Сравнение">{comparison}</RailSection>
-          <RailSection title="О графике">
-            <dl className="space-y-3 text-sm">
-              <AboutRow label="Как считается" text={about.formula} />
-              <AboutRow label="Что учитывается" text={about.included} />
-              <AboutRow label="Источник" text={about.source} />
-            </dl>
-          </RailSection>
-          <Link
-            to={backTo}
-            className="inline-flex items-center gap-1 text-xs font-medium text-primary transition-colors hover:text-primary/80"
-          >
-            Открыть кампанию <span aria-hidden="true">→</span>
-          </Link>
-        </aside>
-      </div>
+      <MetricColumns
+        rail={
+          <>
+            <RailSection title="Сравнение">{comparison}</RailSection>
+            <RailSection title="О графике">
+              <dl className="space-y-3 text-sm">
+                <AboutRow label="Как считается" text={about.formula} />
+                <AboutRow label="Что учитывается" text={about.included} />
+                <AboutRow label="Источник" text={about.source} />
+              </dl>
+            </RailSection>
+            <Link
+              to={backTo}
+              className="inline-flex items-center gap-1 text-xs font-medium text-primary transition-colors hover:text-primary/80"
+            >
+              Открыть кампанию <span aria-hidden="true">→</span>
+            </Link>
+          </>
+        }
+      >
+        {children}
+      </MetricColumns>
     </div>
   );
 }
