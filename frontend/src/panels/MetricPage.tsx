@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
 import { InspectorHandle } from '@/components/InspectorHandle';
-import type { ReactNode } from 'react';
 import { Link, Navigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAnnotations, useChannels, useHistory, useTgFull } from '@/api/queries';
@@ -41,7 +40,7 @@ import { CHART_MAX_POINTS, pickIndexes } from '@/lib/msSeries';
 import { useExplorerChartHeight } from '@/lib/useExplorerChartHeight';
 import { splitDailyWindows } from '@/lib/delta';
 import { MediaThumb } from '@/components/MediaThumb';
-import { AboutRow } from '@/components/metric/shared';
+import { AboutRow, RailSection } from '@/components/metric/shared';
 
 /** Короткий день недели для тултипов дневной гранулы («чт, 2 июл») — артефакт v2. */
 const WEEKDAY_FMT = new Intl.DateTimeFormat('ru-RU', { weekday: 'short' });
@@ -1192,7 +1191,7 @@ export function MetricPage() {
             «Сравнение» первым и с явной иерархией — итог окна доминирует, база и Δ вторичны;
             ниже — Разбивка и «О метрике» той же карточной иерархией. */}
         <aside className="space-y-4">
-          <RailCard title="Сравнение" mark="comparison">
+          <RailSection title="Сравнение" mark="comparison">
             {/* Итог окна — доминанта карточки (hero переехал сюда после тихой шапки). */}
             <div className="text-2xs tracking-wide text-muted-foreground">Текущий период</div>
             <div className="mt-1 text-3xl font-medium leading-none tabular-nums text-foreground">{meta.total}</div>
@@ -1233,10 +1232,10 @@ export function MetricPage() {
                 )}
               </div>
             )}
-          </RailCard>
+          </RailSection>
 
           {field && (
-            <RailCard title="Разбивка" mark="breakdown">
+            <RailSection title="Разбивка" mark="breakdown">
               <SegSelect
                 ariaLabel="Измерение разбивки"
                 value={dim}
@@ -1247,16 +1246,16 @@ export function MetricPage() {
                 ]}
               />
               <Breakdown items={breakdownItems} />
-            </RailCard>
+            </RailSection>
           )}
 
-          <RailCard title="О метрике" mark="about">
+          <RailSection title="О метрике" mark="about">
             <dl className="space-y-3 text-sm">
               {def.formula && <AboutRow label="Как считается" text={def.formula} />}
               {def.included && <AboutRow label="Что учитывается" text={def.included} />}
               {def.source && <AboutRow label="Источник" text={def.source} />}
             </dl>
-          </RailCard>
+          </RailSection>
 
           <Link
             to="/analytics"
@@ -1344,18 +1343,6 @@ function ChartTypeIcon({ kind }: { kind: 'line' | 'bar' | 'rank' | 'pivot' }) {
 
 /** Analytical rail card — a titled rounded surface shared by Сравнение / Разбивка / О метрике, so
     the rail reads as a stack of cards rather than disconnected hairline sections. */
-function RailCard({ title, mark, children }: { title: string; mark?: string; children: ReactNode }) {
-  return (
-    <section
-      data-rail-card={mark}
-      className="rounded-2xl border border-border bg-card p-4 shadow-xs dark:border-white/6 sm:p-5"
-    >
-      <h3 className="text-xs font-medium tracking-wider text-muted-foreground">{title}</h3>
-      <div className="mt-3">{children}</div>
-    </section>
-  );
-}
-
 /** Colour-coded change badge for the comparison card — the one evaluated Δ that leans on tone
     (gain = verdant, loss = ember); direction also rides the ▲/▼ glyph for colour-blind safety. */
 function DeltaBadge({ value }: { value: number }) {

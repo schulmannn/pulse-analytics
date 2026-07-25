@@ -50,7 +50,7 @@ import {
   joinNote,
 } from '@/panels/metrika/YmOverview';
 import { isYmMetricKey } from '@/panels/metrika/ymMetricKeys';
-import { AboutRow, ComparisonDeltaRow } from '@/components/metric/shared';
+import { AboutRow, ComparisonDeltaRow, WindowBarShell } from '@/components/metric/shared';
 
 /**
  * Полностраничные метрики «Яндекс.Метрики» — `/metrics/ym-*`. Каждая карточка Обзора /metrika ведёт
@@ -201,8 +201,7 @@ function useYmMetricWindow(): YmMetricWindow {
 /** Пресеты окна одной строкой под графиком/отчётом (тайм-бар принадлежит контенту, а не краю экрана). */
 function YmControlBar({ window, extra }: { window: YmMetricWindow; extra?: ReactNode }) {
   return (
-    <div className="flex flex-wrap items-center gap-2 border-t border-border pt-2.5 print:hidden">
-      <span className="text-xs font-medium text-muted-foreground">Окно</span>
+    <WindowBarShell>
       <PeriodChips
         ariaLabel="Окно"
         value={window.days}
@@ -211,7 +210,7 @@ function YmControlBar({ window, extra }: { window: YmMetricWindow; extra?: React
         onRangeChange={window.setRange}
       />
       {extra}
-    </div>
+    </WindowBarShell>
   );
 }
 
@@ -504,8 +503,7 @@ function YmSeriesPage({ def }: { def: YmSeriesDef }) {
         )}
       </ChartWidget>
 
-      <div className="flex flex-wrap items-center gap-2 border-t border-border pt-2.5 print:hidden">
-        <span className="text-xs font-medium text-muted-foreground">Окно</span>
+      <WindowBarShell>
         <span className="flex-1" />
         <SegmentedControl
           ariaLabel="Окно"
@@ -513,7 +511,7 @@ function YmSeriesPage({ def }: { def: YmSeriesDef }) {
           onChange={(d) => setDays(Number(d) as PeriodDays)}
           options={WINDOW_PILLS.map((chip) => ({ value: String(chip.days), content: chip.label }))}
         />
-      </div>
+      </WindowBarShell>
 
       {pinnedValid != null && (
         <PinnedDayPanel

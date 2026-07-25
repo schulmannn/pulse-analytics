@@ -42,7 +42,7 @@ import {
 } from '@/panels/TgAnalytics';
 import { deriveWeekdayReach, deriveFormatViews } from '@/panels/Compare';
 import { deriveHashtags } from '@/panels/Hashtags';
-import { AboutRow } from '@/components/metric/shared';
+import { AboutRow, WindowBarShell } from '@/components/metric/shared';
 
 /**
  * Полностраничные «дополнительные» графики Telegram — `/metrics/tg-*`. Это те карточки вкладок
@@ -183,11 +183,10 @@ function TgHeatmapPage() {
         </WidgetPeriodProvider>
       </TgReportCard>
 
-      <div className="flex flex-wrap items-center gap-2 border-t border-border pt-2.5 print:hidden">
-        <span className="text-xs font-medium text-muted-foreground">Окно</span>
+      <WindowBarShell>
         <span className="flex-1" />
         <PeriodChips ariaLabel="Окно" value={days} onChange={setDays} range={range} onRangeChange={setRange} />
-      </div>
+      </WindowBarShell>
     </TgMetricShell>
   );
 }
@@ -341,11 +340,10 @@ function useTgMetricWindow(): TgMetricWindow {
 /** Пресеты окна одной строкой под карточкой (тайм-бар принадлежит контенту, а не краю экрана). */
 function TgWindowBar({ window }: { window: TgMetricWindow }) {
   return (
-    <div className="flex flex-wrap items-center gap-2 border-t border-border pt-2.5 print:hidden">
-      <span className="text-xs font-medium text-muted-foreground">Окно</span>
+    <WindowBarShell>
       <span className="flex-1" />
       <PeriodChips ariaLabel="Окно" value={window.days} onChange={window.setDays} range={window.range} onRangeChange={window.setRange} />
-    </div>
+    </WindowBarShell>
   );
 }
 

@@ -5,6 +5,33 @@
  * новая вертикаль не клонировала разметку дальше.
  */
 
+import type { ReactNode } from 'react';
+
+/** Каноническая rail-секция metric-страницы: плоский заголовок с hairline (канон «ничего не
+    кричит», без card-рамки). `mark` → `data-rail-card` — на него смотрят e2e (interactions.spec). */
+export function RailSection({ title, mark, children }: { title: string; mark?: string; children: ReactNode }) {
+  return (
+    <section data-rail-card={mark} className="space-y-3">
+      <h3 className="flex items-center gap-3 text-xs font-medium tracking-wider text-muted-foreground">
+        <span className="whitespace-nowrap">{title}</span>
+        <span aria-hidden="true" className="h-px flex-1 bg-border" />
+      </h3>
+      {children}
+    </section>
+  );
+}
+
+/** Единый chrome тайм-бара окна: hairline сверху + метка слева; контролы (PeriodChips /
+    SegmentedControl / спейсер) остаются у страницы — семантики периода различаются. */
+export function WindowBarShell({ label = 'Окно', children }: { label?: string; children: ReactNode }) {
+  return (
+    <div className="flex flex-wrap items-center gap-2 border-t border-border pt-2.5 print:hidden">
+      <span className="text-xs font-medium text-muted-foreground">{label}</span>
+      {children}
+    </div>
+  );
+}
+
 /** Строка «О метрике»: термин + пояснение внутри `<dl>`. */
 export function AboutRow({ label, text }: { label: string; text: string }) {
   return (
