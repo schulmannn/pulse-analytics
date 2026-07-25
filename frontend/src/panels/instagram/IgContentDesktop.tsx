@@ -609,7 +609,7 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
         >
           <SortButton label="Дата" active={filters.sort === 'date'} order={filters.order} onClick={() => toggleSort('date')} />
         </th>
-        <th aria-hidden="true" className="sticky right-0 z-[2] w-10 bg-surface-table px-2"></th>
+        <th aria-hidden="true" className="sticky right-0 ig-sticky-action-head w-10 bg-surface-table px-2"></th>
       </tr>
     </thead>
   );
@@ -805,7 +805,7 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
                   <td className="px-3 pr-4 text-right text-xs tabular-nums text-muted-foreground sm:pr-5">
                     {post.timestamp ? fmt.date(post.timestamp) : <span className="text-muted-foreground/40">—</span>}
                   </td>
-                  <td className="sticky right-0 z-[1] w-10 border-l border-border/0 bg-inherit px-2 text-center transition-colors group-hover:border-border/40">
+                  <td className="sticky right-0 ig-sticky-action-cell w-10 border-l border-border/0 bg-inherit px-2 text-center transition-colors group-hover:border-border/40">
                     {clickable && (
                       <ChevronRight
                         aria-hidden="true"

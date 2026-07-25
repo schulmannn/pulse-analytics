@@ -1259,6 +1259,22 @@
   font-feature-settings: 'tnum' 1;
 }
 
+/* ── Sticky action column, IG publications table ─────────────────────────────────────────────────
+   The stacking here is LOCAL to one table: the pinned action cell must sit above its own scrolling
+   row, and the header cell above the body cells it overlaps. That is a different concern from the
+   app-wide --z-index-* ladder (sticky 20 · nav 30 · popover 40 …), which arbitrates between whole
+   surfaces — putting these on it would over-promote a table cell above real page chrome.
+
+   `@utility report-table` already solves the identical problem with a plain local z-index inside a
+   named block; these two mirror that, so the bracketed values can leave the markup entirely. */
+@utility ig-sticky-action-head {
+  z-index: 2;
+}
+
+@utility ig-sticky-action-cell {
+  z-index: 1;
+}
+
 /* ── Motion ladder, Tailwind-class side ─────────────────────────────────────────────────────────
    The --motion-* / --ease-standard tokens were only reachable from hand-written CSS: in a component
    the choices were an off-ladder numeric `duration-300` or a bracketed arbitrary value wrapping the
@@ -1302,6 +1318,12 @@
 @utility ease-house {
   transition-timing-function: var(--ease-standard);
   animation-timing-function: var(--ease-standard);
+}
+
+/* The leave half of the pair. Reach for it on an exit/close state (data-[state=closed]:ease-exit). */
+@utility ease-exit {
+  transition-timing-function: var(--ease-exit);
+  animation-timing-function: var(--ease-exit);
 }
 
 @utility chip-tint-1 {
@@ -1360,6 +1382,9 @@
   color: hsl(var(--foreground));
   background: hsl(var(--foreground) / 0.07);
   border: 1px solid hsl(var(--foreground) / 0.08);
+  /* layout-anim-ok: the chip grows 36px → 108px inside a fixed-width slot, revealing the label as
+     it goes. scaleX would smear the rounded caps and the glyph; the reflow is contained to this
+     element because the slot reserves the full width, so the header never re-flows around it. */
   transition:
     width var(--motion-base) var(--ease-standard),
     gap var(--motion-base) var(--ease-standard),
@@ -1714,6 +1739,10 @@
      Full canon + usage: frontend/DESIGN_TOKENS.md. */
   :root {
     --ease-standard: cubic-bezier(0.2, 0.7, 0.3, 1); /* entrance / settle ease-out — the house curve */
+    /* The house curve mirrored (x₁,y₁,x₂,y₂ → 1-x₂,1-y₂,1-x₁,1-y₁): accelerating instead of
+       settling. An element LEAVING should not decelerate into its own disappearance — ease-out on an
+       exit reads as hesitation. Same family, so enter and leave stay recognisably one system. */
+    --ease-exit: cubic-bezier(0.7, 0, 0.8, 0.3);
     --ease-chart-morph: cubic-bezier(0.25, 0.1, 0.25, 1); /* Recharts `ease` update curve */
     --motion-track: 100ms;    /* smoothing for a transform written per pointermove frame   */
     --motion-press: 140ms;    /* tactile press feedback (button dip)                       */
@@ -1721,7 +1750,7 @@
     --motion-base: 240ms;     /* standard control transition (mode swap · icon · hover→active) */
     --motion-glide: 260ms;    /* FLIP reorder glide · icon stroke draw-on                  */
     --motion-reveal: 300ms;   /* larger reveals (add-widget rise)                          */
-    --motion-entrance: 350ms; /* card mount rise                                           */
+    --motion-entrance: 300ms; /* card mount rise (was 350ms — over the <300ms UI ceiling)   */
     --motion-morph: 700ms;    /* chart UPDATE morph (shape flow, RAF) — см. DESIGN_TOKENS   */
   }
 
@@ -1988,6 +2017,10 @@
    No JS timers: rapid toggles reverse the CSS transition, and the global reduced-motion net collapses
    every duration to ~0. */
   .sidebar-shell {
+    /* layout-anim-ok: this rail PUSHES the page rather than overlaying it (see the note above), so
+       the width tween is the effect — a transform would slide the panel over the content and leave
+       a gap where the board should have grown. Every rule in this sidebar block inherits that
+       reasoning; the collapse is one continuous surface, not seven independent tweens. */
     transition: width var(--motion-reveal) var(--ease-standard);
   }
 
@@ -1996,6 +2029,7 @@
    Both are absolutely placed and animate transform on the shared beat, so the source card below
    travels continuously rather than jumping when a flex row would become a column. */
   .sidebar-actions {
+    /* layout-anim-ok: part of the pushing rail — the well collapses with the panel. */
     height: 1.75rem;
     margin-inline: 0.75rem;
     transition:
@@ -2128,6 +2162,7 @@
   /* Section headings and the separator rhythm change continuously too. Keeping both states mounted
    avoids the old one-frame jump from `mt-4` straight to `border + mt-3 + pt-3`. */
   .sidebar-shell .sidebar-nav-group-labelled {
+    /* layout-anim-ok: part of the pushing rail — the heading rhythm closes with the panel. */
     margin-top: 1rem;
     border-top: 1px solid transparent;
     padding-top: 0;
@@ -2142,6 +2177,8 @@
     padding-top: 0.75rem;
   }
   .sidebar-shell .sidebar-section-label {
+    /* layout-anim-ok: part of the pushing rail — the label collapses its own height to zero so the
+       rows above and below close up; an opacity-only fade would leave a dead 1.5rem band. */
     overflow: hidden;
     max-height: 1.5rem;
     opacity: 1;
@@ -2273,6 +2310,9 @@
    narrowing itself still applies, just without the tween. Mobile (<lg) keeps its full-bleed board. */
   @media (min-width: 1024px) {
     .home-board-canvas {
+      /* layout-anim-ok: edit mode narrows the board so the widget rail has room. The cards must
+         re-flow into the narrower canvas — a transform would scale them instead of re-laying them
+         out, which is precisely what this must not do to a grid of charts. */
       margin-inline: auto;
       max-width: 100%;
       transition: max-width var(--motion-base) var(--ease-standard);
@@ -2395,7 +2435,8 @@
     }
   }
   .home-remove-exit {
-    animation: home-remove-out var(--motion-fast) var(--ease-standard) both;
+    /* An exit, so it accelerates away rather than settling out (see --ease-exit). */
+    animation: home-remove-out var(--motion-fast) var(--ease-exit) both;
   }
   /* The fixed «+ Добавить виджет» dock rises into place while preserving its centered translateX. */
   @keyframes add-widget-in {

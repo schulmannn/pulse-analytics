@@ -183,6 +183,7 @@ duration/easing.
 | Token | Value | Use |
 |---|---|---|
 | `--ease-standard` | `cubic-bezier(0.2, 0.7, 0.3, 1)` | the house entrance / settle ease-out |
+| `--ease-exit` | `cubic-bezier(0.7, 0, 0.8, 0.3)` | the house curve **mirrored** — exits accelerate away instead of settling. An element leaving should not decelerate into its own disappearance; ease-out on an exit reads as hesitation |
 | `--ease-chart-morph` | `cubic-bezier(0.25, 0.1, 0.25, 1)` | Recharts `ease` parity for point-to-point chart updates |
 | `--motion-track` | 100ms | smoothing for a transform the JS rewrites every pointermove frame (dock magnification on Connect) — **not** a general «fast» rung |
 | `--motion-press` | 140ms | tactile press feedback (button dip) |
@@ -190,7 +191,7 @@ duration/easing.
 | `--motion-base` | 240ms | standard control transition (mode swap · icon · hover→active) |
 | `--motion-glide` | 260ms | FLIP reorder glide · icon stroke draw-on |
 | `--motion-reveal` | 300ms | larger reveals (add-widget rise) |
-| `--motion-entrance` | 350ms | card mount rise |
+| `--motion-entrance` | 300ms | card mount rise (was 350ms — over both the <300ms UI ceiling and the playbook's 200-300ms band for entering elements). Shares a value with `--motion-reveal` but stays a separate rung: mounting a card and revealing a panel are different intents and will drift apart again |
 | `--motion-morph` | 700ms | point interpolation after a data-window change (see note below) |
 
 ### Reaching the ladder from a component
@@ -205,6 +206,7 @@ the gap — defined in `src/index.css`, enforced by `scripts/design-motion-lint.
 | `dur-track` · `dur-press` · `dur-fast` · `dur-base` · `dur-reveal` | `transition-duration` | the matching `--motion-*` |
 | `anim-dur-fast` | `animation-duration` | `--motion-fast` (tailwindcss-animate enter/exit on dialogs) |
 | `ease-house` | `transition-timing-function` + `animation-timing-function` | `--ease-standard` |
+| `ease-exit` | same two properties | `--ease-exit` — reach for it on a close/leave state (`data-[state=closed]:ease-exit`) |
 
 Duration and *animation*-duration stay on separate utilities on purpose: a component may transition
 on a token beat while running an unrelated ambient keyframe (`ui/progress.tsx` pairs `dur-reveal`
@@ -310,8 +312,28 @@ Run from `frontend/`:
 
 - `node scripts/contrast-tokens.mjs` — WCAG contrast for the colour tokens (text 4.5 / non-text 3.0;
   hairlines warn-only). Pairs with the axe `e2e/a11y-contrast.spec.ts` gate (rendered text).
-- `npm run lint:motion` (`node scripts/design-motion-lint.mjs`) — hard-fails on an inlined house easing,
-  magic `text-[Npx]`, or arbitrary `duration-[…]/ease-[…]/delay-[…]` under `src/`. The public
-  marketing landing (`pages/Landing.tsx`, its own framer system) and `pages/Legal.tsx` (long-form
-  prose) are exempt from the **type-scale** rule only — the motion rules apply everywhere. Migrating
-  those two surfaces onto the scale is a separate, deliberate task.
+- `npm run lint:motion` (`node scripts/design-motion-lint.mjs`) — **gated in CI** (the `frontend` job,
+  ahead of the suite). Hard-fails on an inlined house easing, magic `text-[Npx]`, arbitrary
+  `duration-[…]/ease-[…]/delay-[…]`, off-ladder `duration-300`/`ease-out`, `transition-all`,
+  arbitrary `z-[N]`, or a transition on a layout-triggering property. The public marketing landing
+  (`pages/Landing.tsx`, its own framer system) and `pages/Legal.tsx` (long-form prose) are exempt
+  from the **type-scale** rule only — the motion rules apply everywhere. Migrating those two
+  surfaces onto the scale is a separate, deliberate task.
+
+### Animating layout on purpose
+
+`layout-animating-transition` flags a transition on width / height / padding / margin / inset / gap:
+the browser re-lays-out every frame, which drops frames as soon as the main thread is busy. It is a
+gate with an escape hatch, not a ban — write `layout-anim-ok: <why>` inside the CSS rule block and
+the rule stands down for that block only (the marker is scoped by the enclosing `{`, so a note on
+one rule cannot quietly excuse the next).
+
+Three surfaces hold that marker today, all for the same reason — **the reflow is the effect**:
+
+| Block | Why a transform will not do |
+|---|---|
+| `.sidebar-shell` and its children | The rail *pushes* the page instead of overlaying it; a transform would slide the panel over the content and leave a gap where the board should have grown |
+| `@utility edit-toggle` | A 36 → 108px chip inside a fixed slot; `scaleX` would smear the rounded caps and the glyph |
+| `.home-board-canvas` | Edit mode narrows the board so cards re-flow into it — scaling a grid of charts is exactly the wrong outcome |
+
+Anything new that wants the marker should be able to fill in that third column.
