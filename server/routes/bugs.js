@@ -6,7 +6,7 @@ const { canDispatchBugKind, sanitizeForPrompt } = require('../lib/bugfix_gate');
 function registerBugsRoutes({
   app, express, db, rateLimit, requireAuth, requireSuper, fetchWithTimeout, AUTH_SECRET,
   commitSha, githubRepo, githubDispatchToken,
-  notionCrash,
+  notionCrash, log,
 }) {
   // ════════════════════════════════════════════════════════════════
   //  БАГ-ТРЕКЕР (Postgres)
@@ -24,10 +24,14 @@ function registerBugsRoutes({
   app.get('/api/bugs', requireAuth, requireSuper, async (req, res) => {
     try {
       res.json({ enabled: db.enabled, statuses: db.BUG_STATUSES, kinds: db.BUG_KINDS, bugs: await db.listBugs(req.query.status) });
-    } catch (e) { res.status(200).json({ enabled: db.enabled, bugs: [], error: e.message }); }
+    } catch (e) {
+      // raw e.message can carry SQL/DSN internals — log it, serve a stable degradation string.
+      log('warn', 'bugs_list_read_failed', { error: e.message });
+      res.status(200).json({ enabled: db.enabled, bugs: [], error: 'Список багов временно недоступен' });
+    }
   });
 
-  app.patch('/api/bugs/:id', requireAuth, requireSuper, async (req, res) => {
+  app.patch('/api/bugs/:id', requireAuth, requireSuper, async (req, res, next) => {
     if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
     const id = parseInt(req.params.id, 10);
     if (!id) return res.status(400).json({ error: 'bad id' });
@@ -35,7 +39,11 @@ function registerBugsRoutes({
       const bug = await db.updateBug(id, (req.body && req.body.status));
       if (!bug) return res.status(404).json({ error: 'not found' });
       res.json(bug);
-    } catch (e) { res.status(400).json({ error: e.message }); }
+    } catch (e) {
+      // 400 — только для валидационной строки репо; сбой БД идёт в центральный обработчик.
+      if (e && e.message === 'bad status') return res.status(400).json({ error: e.message });
+      next(e);
+    }
   });
 
   app.delete('/api/bugs/:id', requireAuth, requireSuper, async (req, res, next) => {

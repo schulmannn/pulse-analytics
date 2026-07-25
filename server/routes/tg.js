@@ -332,7 +332,9 @@ function registerTgRoutes({
       const data = await mtprotoFetch('/health');
       res.json({ available: true, ...data });
     } catch (e) {
-      res.json({ available: false, error: e.message });
+      // raw e.message can carry internal endpoint details — log it, serve a stable string.
+      log('warn', 'mtproto_health_probe_failed', { error: e.message });
+      res.json({ available: false, error: 'MTProto-сервис недоступен' });
     }
   });
 
