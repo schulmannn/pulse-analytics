@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Outlet, useLocation, useOutletContext, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
+import { qk } from '@/api/queryKeys';
 import { useIgData } from '@/lib/useIgData';
 import type { IgData } from '@/lib/useIgData';
 import { useSelectedChannel } from '@/lib/channel-context';
@@ -65,7 +66,7 @@ function useIgConnectNotice() {
       const ch = parseInt(params.get('ch') ?? '', 10);
       if (Number.isFinite(ch) && ch > 0) {
         setChannelId(ch);
-        qc.invalidateQueries({ queryKey: ['channels'] });
+        qc.invalidateQueries({ queryKey: qk.channels });
       }
       qc.invalidateQueries({ predicate: (q) => String(q.queryKey[0]).startsWith('ig-') });
     }
