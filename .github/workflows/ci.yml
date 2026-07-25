@@ -88,8 +88,13 @@ jobs:
           node-version: 20
       - name: Audit npm dependencies (server)
         run: npm audit --omit=dev --audit-level=high
+      # GHSA-qwww-vcr4-c8h2 (react-router: CSRF в RSC-режиме) приложение не затрагивает: RSC/server-
+      # режим react-router не используется (клиентский BrowserRouter поверх Express-статики, RSC-API
+      # в коде нет), а фикс существует только в мажоре v8. audit-ci даёт точечный allowlist поверх
+      # той же npm-audit базы — новые advisories по-прежнему валят джоб. Снять allowlist при бампе
+      # react-router-dom на исправленную версию (Dependabot предложит).
       - name: Audit npm dependencies (frontend)
-        run: npm audit --omit=dev --audit-level=high
+        run: npx -y audit-ci@^7 --high --skip-dev --allowlist GHSA-qwww-vcr4-c8h2
         working-directory: frontend
       - uses: actions/setup-python@v6
         with:
