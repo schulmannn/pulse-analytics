@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import { Cartograph } from '@/components/Cartograph';
+import { Button } from '@/components/ui/button';
 
 /**
  * 404 — a route that isn't on the map. Renders inside the dashboard content area (the shell/nav
@@ -14,12 +15,9 @@ export function NotFound() {
       <p className="mt-2 max-w-sm text-sm text-muted-foreground">
         Страница не найдена или переехала. Вернёмся к обзору.
       </p>
-      <Link
-        to="/"
-        className="btn-pill mt-6 bg-primary px-5 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-      >
-        К обзору
-      </Link>
+      <Button asChild className="mt-6 px-5">
+        <Link to="/">К обзору</Link>
+      </Button>
     </div>
   );
 }

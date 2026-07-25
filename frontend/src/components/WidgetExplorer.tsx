@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { WidgetConfigControls } from '@/components/ConfigEditDialog';
 import { WidgetBody } from '@/components/ConfigWidget';
 import { WidgetErrorBoundary } from '@/components/WidgetErrorBoundary';
+import { Button } from '@/components/ui/button';
 import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
 import { ChannelScope } from '@/lib/channel-context';
 import { editorSpec } from '@/lib/widgetCapabilities';
@@ -65,14 +66,15 @@ export function WidgetExplorer({
           </p>
         </div>
         {onApply && (
-          <button
+          <Button
             type="button"
             disabled={!changed}
             onClick={() => onApply(draft)}
-            className="btn-pill shrink-0 bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
+            size="sm"
+            className="shrink-0 px-4 text-sm"
           >
             Применить к виджету
-          </button>
+          </Button>
         )}
       </header>
 

@@ -5,6 +5,7 @@ import type { NormalizedPost } from '@/lib/posts';
 import { fmt, ruAxisLabel } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { Dialog, DialogOverlay, DialogPortal, DialogTitle, useRestoreOpenerFocus } from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
 import { MetricInfo } from '@/components/InfoTooltip';
 import { getDrillMetric, getMetric, type MetricDef } from '@/lib/widgetMetrics';
 import { useLayerBack } from '@/lib/useLayerBack';
@@ -251,13 +252,14 @@ export function PostDetailModal({
               <span />
             )}
             {onAddToCampaign && (
-              <button
+              <Button
                 type="button"
                 onClick={onAddToCampaign}
-                className="btn-pill hidden bg-primary px-3.5 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 lg:inline-flex"
+                size="xs"
+                className="hidden px-3.5 lg:inline-flex"
               >
                 Добавить в кампанию
-              </button>
+              </Button>
             )}
           </div>
         )}

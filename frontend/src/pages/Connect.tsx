@@ -5,6 +5,7 @@ import QRCode from 'qrcode';
 import { useQueryClient } from '@tanstack/react-query';
 import { useChannels, useCollectorStatus, useConnectIg, useCreateKey, useDisconnectIg, useIgOauthStatus, useMsBackfillStatus, useMsStatus, useTgQrStatus, useYmStatus } from '@/api/queries';
 import { ApiError, apiSend } from '@/api/client';
+import { qk } from '@/api/queryKeys';
 import { fmt } from '@/lib/format';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { cn } from '@/lib/utils';
@@ -424,7 +425,7 @@ function MsBackfillBlock() {
         return;
       }
     }
-    await qc.invalidateQueries({ queryKey: ['ms-backfill'] });
+    await qc.invalidateQueries({ queryKey: qk.msBackfill.all });
   };
   const monthLabel = (m?: string | null) =>
     m ? new Date(`${m}-01T00:00:00`).toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' }) : null;
@@ -537,10 +538,10 @@ function MoySkladPanel() {
 
   const invalidateMs = () =>
     Promise.all([
-      qc.invalidateQueries({ queryKey: ['channels'] }),
-      qc.invalidateQueries({ queryKey: ['ms-status'] }),
-      qc.invalidateQueries({ queryKey: ['ms-summary'] }),
-      qc.invalidateQueries({ queryKey: ['ms-top-products'] }),
+      qc.invalidateQueries({ queryKey: qk.channels }),
+      qc.invalidateQueries({ queryKey: qk.msStatus.all }),
+      qc.invalidateQueries({ queryKey: qk.msSummary.all }),
+      qc.invalidateQueries({ queryKey: qk.msTopProducts.all }),
     ]);
 
   const submit = async (e: FormEvent) => {
@@ -653,10 +654,10 @@ function MetrikaPanel() {
 
   const invalidateYm = () =>
     Promise.all([
-      qc.invalidateQueries({ queryKey: ['channels'] }),
-      qc.invalidateQueries({ queryKey: ['ym-status'] }),
-      qc.invalidateQueries({ queryKey: ['ym-summary'] }),
-      qc.invalidateQueries({ queryKey: ['ym-sources'] }),
+      qc.invalidateQueries({ queryKey: qk.channels }),
+      qc.invalidateQueries({ queryKey: qk.ymStatus.all }),
+      qc.invalidateQueries({ queryKey: qk.ymSummary.all }),
+      qc.invalidateQueries({ queryKey: qk.ymSources.all }),
     ]);
 
   const connect = async (counterId?: string) => {
@@ -1017,7 +1018,7 @@ function TelegramPanel({
     if (pollRef.current) { window.clearTimeout(pollRef.current); pollRef.current = null; }
   };
 
-  const refreshStatus = () => qc.invalidateQueries({ queryKey: ['tg-qr-status'] });
+  const refreshStatus = () => qc.invalidateQueries({ queryKey: qk.tgQrStatus });
 
   const onConnected = (username: string | null, chans: QrChannel[]) => {
     stopPoll();
@@ -1367,7 +1368,7 @@ function TgConnected({ username, channels, onDisconnect, busy }: { username: str
         { channels: selected.map((c) => ({ id: c.id, title: c.title, username: c.username })) },
         AddChannelsSchema,
       );
-      await qc.invalidateQueries({ queryKey: ['channels'] });
+      await qc.invalidateQueries({ queryKey: qk.channels });
       setAddedCount(r.added ?? selected.length);
     } catch (e) {
       setAddErr(e instanceof Error ? e.message : 'Не удалось добавить каналы');
@@ -1494,7 +1495,7 @@ function CollectorGuide({ channelName }: { channelName: string | null }) {
   useEffect(() => {
     if (!onCheckStep || channelId == null) return;
     const timer = window.setInterval(
-      () => qc.invalidateQueries({ queryKey: ['collector-status', channelId] }),
+      () => qc.invalidateQueries({ queryKey: qk.collectorStatus(channelId) }),
       5000,
     );
     return () => window.clearInterval(timer);

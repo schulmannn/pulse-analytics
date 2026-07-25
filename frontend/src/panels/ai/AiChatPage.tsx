@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { useChannels, useMe } from '@/api/queries';
+import { qk } from '@/api/queryKeys';
 import { AiAskControls, AiSendButton } from '@/panels/ai/AiAskControls';
 import { AiEmptyState } from '@/panels/ai/AiEmptyState';
 import { composeAiQuestion, emptyAiAskContext, type AiAskContext } from '@/lib/aiAsk';
@@ -235,7 +236,7 @@ function ChatThread({ chatId }: { chatId: number }) {
         } else if (ev.type === 'error') {
           setBanner(ev.message);
         } else if (ev.type === 'done' || ev.type === 'meta') {
-          if (ev.type === 'meta') void qc.invalidateQueries({ queryKey: ['ai-chats'] });
+          if (ev.type === 'meta') void qc.invalidateQueries({ queryKey: qk.aiChats });
         }
       },
     })
@@ -246,9 +247,9 @@ function ChatThread({ chatId }: { chatId: number }) {
       .finally(() => {
         // Персистентная версия хода (включая частичный ответ при сбое) приходит рефетчем;
         // pending снимается только после него — без мигания и без дублей.
-        void qc.invalidateQueries({ queryKey: ['ai-chat', chatId] }).finally(() => {
+        void qc.invalidateQueries({ queryKey: qk.aiChat(chatId) }).finally(() => {
           setPending(null);
-          void qc.invalidateQueries({ queryKey: ['ai-chats'] });
+          void qc.invalidateQueries({ queryKey: qk.aiChats });
         });
       });
   };

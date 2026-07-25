@@ -4,6 +4,7 @@ import { Link, Navigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAnnotations, useChannels, useHistory, useTgFull } from '@/api/queries';
 import { apiSend } from '@/api/client';
+import { qk } from '@/api/queryKeys';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { usePeriod } from '@/lib/period';
 import type { PeriodDays } from '@/lib/period';
@@ -673,7 +674,7 @@ export function MetricPage() {
     try {
       await apiSend('POST', `/api/channels/${channelId}/annotations`, { day: dayKey, label });
       setAnnLabel('');
-      await queryClient.invalidateQueries({ queryKey: ['annotations', channelId] });
+      await queryClient.invalidateQueries({ queryKey: qk.annotations(channelId) });
     } catch {
       setAnnError('Не удалось сохранить событие — нужны права участника воркспейса.');
     } finally {
@@ -686,7 +687,7 @@ export function MetricPage() {
     setAnnError(null);
     try {
       await apiSend('DELETE', `/api/channels/${channelId}/annotations/${annId}`);
-      await queryClient.invalidateQueries({ queryKey: ['annotations', channelId] });
+      await queryClient.invalidateQueries({ queryKey: qk.annotations(channelId) });
     } catch {
       setAnnError('Не удалось удалить событие.');
     } finally {

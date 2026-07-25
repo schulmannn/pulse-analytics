@@ -10,6 +10,7 @@ const STALE_STATUS = 60 * 1000;        // свежесть-статусы (colle
 
 import { z } from 'zod';
 import { apiGet, apiSend } from '@/api/client';
+import { qk } from '@/api/queryKeys';
 import { msPeriodKey, msPeriodQuery, type MsPeriod } from '@/lib/msPeriod';
 import type { CampaignSourceScope } from '@/lib/campaignSources';
 import {
@@ -68,7 +69,7 @@ import type { DateRange, PeriodDays } from '@/lib/period';
 /** Current session. retry:false so a 401 surfaces immediately (→ login gate). */
 export function useMe() {
   return useQuery({
-    queryKey: ['me'],
+    queryKey: qk.me,
     staleTime: STALE_LIVE,
     queryFn: ({ signal }) => apiGet('/api/auth/me', MeSchema, { signal }),
     retry: false,
@@ -80,14 +81,14 @@ export function useUpdateAvatar() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (dataUrl: string) => apiSend('POST', '/api/me/avatar', { dataUrl }, AuthOkSchema),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['me'] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.me }),
   });
 }
 export function useRemoveAvatar() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: () => apiSend('DELETE', '/api/me/avatar', undefined, AuthOkSchema),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['me'] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.me }),
   });
 }
 
@@ -246,7 +247,7 @@ export function useMentions() {
   const { channelId } = useSelectedChannel();
   return useQuery({
     enabled: false,
-    queryKey: ['mentions', channelId],
+    queryKey: qk.mentions(channelId),
     queryFn: ({ signal }) => apiGet('/api/tg/mtproto/mentions', MentionsSchema, { signal, channelId }),
   });
 }
@@ -256,7 +257,7 @@ export function useMentionSettings() {
   const { channelId } = useSelectedChannel();
   return useQuery({
     enabled: channelId != null,
-    queryKey: ['mention-settings', channelId],
+    queryKey: qk.mentionSettings(channelId),
     staleTime: STALE_STATUS,
     retry: false,
     queryFn: ({ signal }) =>
@@ -274,8 +275,8 @@ export function useSaveMentionSettings() {
       return apiSend('PUT', '/api/tg/mention-settings', body, MentionSettingsSchema, { channelId });
     },
     onSuccess: (data) => {
-      qc.setQueryData(['mention-settings', channelId], data);
-      return qc.invalidateQueries({ queryKey: ['mentions', channelId] });
+      qc.setQueryData(qk.mentionSettings(channelId), data);
+      return qc.invalidateQueries({ queryKey: qk.mentions(channelId) });
     },
   });
 }
@@ -288,7 +289,7 @@ export function useMentionNotifyStatus(poll = false) {
   const { channelId } = useSelectedChannel();
   return useQuery({
     enabled: channelId != null,
-    queryKey: ['mention-notify', channelId],
+    queryKey: qk.mentionNotify(channelId),
     staleTime: STALE_STATUS,
     retry: false,
     refetchInterval: poll ? 3000 : false,
@@ -316,7 +317,7 @@ export function useSetMentionNotify() {
       if (channelId == null) return Promise.reject(new Error('Сначала выберите канал'));
       return apiSend('PUT', '/api/tg/mention-notify', body, MentionNotifySubscriptionSchema, { channelId });
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['mention-notify', channelId] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.mentionNotify(channelId) }),
   });
 }
 
@@ -329,7 +330,7 @@ export function useRunMentionNotify() {
       if (channelId == null) return Promise.reject(new Error('Сначала выберите канал'));
       return apiSend('POST', '/api/tg/mention-notify/run', {}, MentionNotifyRunSchema, { channelId });
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['mention-notify', channelId] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.mentionNotify(channelId) }),
   });
 }
 
@@ -339,7 +340,7 @@ export function useUnbindMentionNotify() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: () => apiSend('DELETE', '/api/tg/mention-notify/binding', undefined, AuthOkSchema),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['mention-notify', channelId] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.mentionNotify(channelId) }),
   });
 }
 
@@ -626,7 +627,7 @@ export function useTgGraphs(opts?: { enabled?: boolean }) {
 export function useTgQrStatus(enabled = true) {
   return useQuery({
     enabled,
-    queryKey: ['tg-qr-status'],
+    queryKey: qk.tgQrStatus,
     staleTime: STALE_STATUS,
     queryFn: ({ signal }) => apiGet('/api/tg/qr/status', TgQrStatusSchema, { signal }),
   });
@@ -637,7 +638,7 @@ const OkSchema = z.object({ ok: z.boolean() }).passthrough();
 
 export function useChannels() {
   return useQuery({
-    queryKey: ['channels'],
+    queryKey: qk.channels,
     staleTime: STALE_LIVE,
     queryFn: ({ signal }) => apiGet('/api/channels', ChannelsResponseSchema, { signal }),
   });
@@ -741,7 +742,7 @@ export function useMsStatus() {
   const { channelId } = useSelectedChannel();
   return useQuery({
     enabled: channelId != null,
-    queryKey: ['ms-status', channelId],
+    queryKey: qk.msStatus.byChannel(channelId),
     staleTime: STALE_STATUS,
     retry: false,
     queryFn: ({ signal }) => apiGet('/api/ms/status', MsStatusSchema, { signal, channelId }),
@@ -842,7 +843,7 @@ export function useYmStatus() {
   const { channelId } = useSelectedChannel();
   return useQuery({
     enabled: channelId != null,
-    queryKey: ['ym-status', channelId],
+    queryKey: qk.ymStatus.byChannel(channelId),
     staleTime: STALE_STATUS,
     retry: false,
     queryFn: ({ signal }) => apiGet('/api/ym/status', YmStatusSchema, { signal, channelId }),
@@ -856,7 +857,7 @@ export function useYmSummary(period: MsPeriod, opts?: { enabled?: boolean }) {
   return useQuery({
     // opts.enabled — внешний гейт поверх канального (офскрин-виджеты Главной), queryKey прежний.
     enabled: channelId != null && opts?.enabled !== false,
-    queryKey: ['ym-summary', channelId, ...msPeriodKey(period)],
+    queryKey: qk.ymSummary.window(channelId, period),
     staleTime: STALE_LIVE,
     retry: false,
     queryFn: ({ signal }) => apiGet(`/api/ym/summary?${msPeriodQuery(period)}`, YmSummarySchema, { signal, channelId }),
@@ -874,7 +875,7 @@ export function useYmSources(period: MsPeriod, goalId: number | null = null) {
   const goal = ymGoalParam(goalId);
   return useQuery({
     enabled: channelId != null,
-    queryKey: ['ym-sources', channelId, ...msPeriodKey(period), goal ?? 0],
+    queryKey: qk.ymSources.window(channelId, period, goal),
     staleTime: STALE_LIVE,
     retry: false,
     queryFn: ({ signal }) =>
@@ -1240,7 +1241,7 @@ export function useMsBackfillStatus(enabled: boolean, pollAnyway = false) {
   // зацикливает вывод TQueryFnData и схлопывает тип данных в {}.
   return useQuery<MsBackfillStatus, Error>({
     enabled: enabled && channelId != null,
-    queryKey: ['ms-backfill', channelId],
+    queryKey: qk.msBackfill.byChannel(channelId),
     retry: false,
     // Живой прогресс: опрос каждые 2с пока история грузится ИЛИ пока вызывающий ждёт старта
     // (pollAnyway): движок пишет running-строку только ПОСЛЕ живой оценки объёма (~секунда),
@@ -1608,7 +1609,7 @@ export function useMsSummary(period: MsPeriod, opts?: { enabled?: boolean }) {
   return useQuery({
     // opts.enabled — внешний гейт поверх канального (офскрин-виджеты Главной), queryKey прежний.
     enabled: channelId != null && opts?.enabled !== false,
-    queryKey: ['ms-summary', channelId, ...msPeriodKey(period)],
+    queryKey: qk.msSummary.window(channelId, period),
     staleTime: STALE_LIVE,
     retry: false,
     queryFn: ({ signal }) => apiGet(`/api/ms/summary?${msPeriodQuery(period)}`, MsSummarySchema, { signal, channelId }),
@@ -1621,7 +1622,7 @@ export function useMsTopProducts(period: MsPeriod, limit = 10, sort: MsProductSo
   const { channelId } = useSelectedChannel();
   return useQuery({
     enabled: enabled && channelId != null,
-    queryKey: ['ms-top-products', channelId, ...msPeriodKey(period), limit, sort],
+    queryKey: qk.msTopProducts.window(channelId, period, limit, sort),
     staleTime: STALE_LIVE,
     retry: false,
     queryFn: ({ signal }) =>
@@ -1692,7 +1693,7 @@ export type ChartAnnotation = z.infer<typeof AnnotationSchema>;
 export function useAnnotations(channelId: number | null) {
   return useQuery({
     enabled: channelId != null,
-    queryKey: ['annotations', channelId],
+    queryKey: qk.annotations(channelId),
     staleTime: STALE_ARCHIVE,
     retry: false,
     queryFn: ({ signal }) => apiGet(`/api/channels/${channelId}/annotations`, AnnotationsResponseSchema, { signal }),
@@ -1702,7 +1703,7 @@ export function useAnnotations(channelId: number | null) {
 export function useChannelKeys(id: number | null) {
   return useQuery({
     enabled: id != null,
-    queryKey: ['channel-keys', id],
+    queryKey: qk.channelKeys(id),
     staleTime: STALE_LIVE,
     queryFn: ({ signal }) =>
       apiGet(`/api/channels/${id}/keys`, z.object({ keys: z.array(KeySchema) }).passthrough(), { signal }),
@@ -1712,7 +1713,7 @@ export function useChannelKeys(id: number | null) {
 export function useCollectorStatus(id: number | null) {
   return useQuery({
     enabled: id != null,
-    queryKey: ['collector-status', id],
+    queryKey: qk.collectorStatus(id),
     staleTime: STALE_STATUS,
     queryFn: ({ signal }) => apiGet(`/api/channels/${id}/collector-status`, CollectorStatusResponseSchema, { signal }),
   });
@@ -1720,7 +1721,7 @@ export function useCollectorStatus(id: number | null) {
 
 export function useAdminUsers() {
   return useQuery({
-    queryKey: ['admin-users'],
+    queryKey: qk.adminUsers,
     staleTime: STALE_LIVE,
     queryFn: ({ signal }) => apiGet('/api/admin/users', AdminUsersResponseSchema, { signal }),
   });
@@ -1728,7 +1729,7 @@ export function useAdminUsers() {
 
 export function useBugs() {
   return useQuery({
-    queryKey: ['bugs'],
+    queryKey: qk.bugs,
     staleTime: STALE_LIVE,
     queryFn: ({ signal }) => apiGet('/api/bugs', BugsResponseSchema, { signal }),
   });
@@ -1738,7 +1739,7 @@ export function useCreateChannel() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: { username: string }) => apiSend('POST', '/api/channels', body, ChannelSchema),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['channels'] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.channels }),
   });
 }
 
@@ -1746,7 +1747,7 @@ export function useDeleteChannel() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: number) => apiSend('DELETE', `/api/channels/${id}`, undefined, OkSchema),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['channels'] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.channels }),
   });
 }
 
@@ -1754,7 +1755,7 @@ export function useCreateKey(channelId: number) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: { label: string }) => apiSend('POST', `/api/channels/${channelId}/key`, body, CreateKeyResponseSchema),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['channel-keys', channelId] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.channelKeys(channelId) }),
   });
 }
 
@@ -1762,7 +1763,7 @@ export function useRevokeKey(channelId: number) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (keyId: number) => apiSend('DELETE', `/api/channels/${channelId}/key/${keyId}`, undefined, OkSchema),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['channel-keys', channelId] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.channelKeys(channelId) }),
   });
 }
 
@@ -1770,7 +1771,7 @@ export function useUpdateUser(id: number) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: { role?: string; status?: string }) => apiSend('PATCH', `/api/admin/users/${id}`, body, AdminUserSchema),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin-users'] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.adminUsers }),
   });
 }
 
@@ -1779,7 +1780,7 @@ export function useAdminDeleteUser() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: number) => apiSend('DELETE', `/api/admin/users/${id}`, undefined, OkSchema),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin-users'] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.adminUsers }),
   });
 }
 
@@ -1807,7 +1808,7 @@ export function useCreateBug() {
   return useMutation({
     mutationFn: (body: { text: string; severity: string; context: string; kind: string }) =>
       apiSend('POST', '/api/bugs', body, BugSchema),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['bugs'] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.bugs }),
   });
 }
 
@@ -1815,7 +1816,7 @@ export function useUpdateBugStatus(id: number) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: { status: string }) => apiSend('PATCH', `/api/bugs/${id}`, body, BugSchema),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['bugs'] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.bugs }),
   });
 }
 
@@ -1823,7 +1824,7 @@ export function useDeleteBug() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: number) => apiSend('DELETE', `/api/bugs/${id}`, undefined, OkSchema),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['bugs'] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.bugs }),
   });
 }
 
@@ -1836,7 +1837,7 @@ export type ReportSchedule = 'none' | 'weekly' | 'monthly';
 export function useReports(enabled = true) {
   return useQuery({
     enabled,
-    queryKey: ['reports'],
+    queryKey: qk.reports,
     staleTime: STALE_LIVE,
     queryFn: ({ signal }) => apiGet('/api/reports', ReportsResponseSchema, { signal }),
   });
@@ -1846,7 +1847,7 @@ export function useReports(enabled = true) {
 export function useReport(id: number | null) {
   return useQuery({
     enabled: id != null,
-    queryKey: ['report', id],
+    queryKey: qk.report(id),
     staleTime: STALE_LIVE,
     queryFn: ({ signal }) => apiGet(`/api/reports/${id}`, ReportResponseSchema, { signal }),
   });
@@ -1859,8 +1860,8 @@ export function useCreateReport() {
       apiSend('POST', '/api/reports', body, ReportResponseSchema),
     onSuccess: (data) => {
       // Seed the detail cache so the follow-up navigate renders without a refetch.
-      qc.setQueryData(['report', data.report.id], data);
-      return qc.invalidateQueries({ queryKey: ['reports'] });
+      qc.setQueryData(qk.report(data.report.id), data);
+      return qc.invalidateQueries({ queryKey: qk.reports });
     },
   });
 }
@@ -1873,8 +1874,8 @@ export function useUpdateReport(id: number) {
     onSuccess: (data) => {
       // The PUT echoes the full report — write it straight into the detail cache (no refetch
       // after every debounced config save) and refresh the list (name / updated_at ordering).
-      qc.setQueryData(['report', id], data);
-      return qc.invalidateQueries({ queryKey: ['reports'] });
+      qc.setQueryData(qk.report(id), data);
+      return qc.invalidateQueries({ queryKey: qk.reports });
     },
   });
 }
@@ -1883,7 +1884,7 @@ export function useDeleteReport() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: number) => apiSend('DELETE', `/api/reports/${id}`, undefined, OkSchema),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['reports'] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.reports }),
   });
 }
 
@@ -1894,7 +1895,7 @@ export function useDeleteReport() {
 export function useCampaigns(channelId: number | null = null) {
   return useQuery({
     enabled: !isDemoMode() && channelId != null,
-    queryKey: ['campaigns', channelId],
+    queryKey: qk.campaigns.list(channelId),
     staleTime: STALE_LIVE,
     queryFn: ({ signal }) => apiGet(`/api/campaigns?channel_id=${channelId}`, CampaignsResponseSchema, { signal }),
   });
@@ -1903,7 +1904,7 @@ export function useCampaigns(channelId: number | null = null) {
 export function useCampaign(id: number | null) {
   return useQuery({
     enabled: id != null && !isDemoMode(),
-    queryKey: ['campaign', id],
+    queryKey: qk.campaign(id),
     staleTime: STALE_LIVE,
     queryFn: ({ signal }) => apiGet(`/api/campaigns/${id}`, CampaignResponseSchema, { signal }),
   });
@@ -1914,7 +1915,7 @@ export function useCampaign(id: number | null) {
 export function useCampaignPosts(id: number | null) {
   return useQuery({
     enabled: id != null && !isDemoMode(),
-    queryKey: ['campaign-posts', id],
+    queryKey: qk.campaignPosts(id),
     staleTime: STALE_LIVE,
     queryFn: ({ signal }) => apiGet(`/api/campaigns/${id}/posts`, CampaignPostsResponseSchema, { signal }),
   });
@@ -1931,7 +1932,7 @@ export function useCampaignSummary(
     : '';
   return useQuery({
     enabled: enabled && id != null && !isDemoMode(),
-    queryKey: ['campaign-summary', id, scopeKey],
+    queryKey: qk.campaignSummary(id, scopeKey),
     staleTime: STALE_LIVE,
     queryFn: ({ signal }) => apiGet(`/api/campaigns/${id}/summary${query}`, CampaignSummaryResponseSchema, { signal }),
   });
@@ -1952,8 +1953,8 @@ export function useCreateCampaign() {
     mutationFn: (body: CampaignBody & { name: string; channel_id: number }) =>
       apiSend('POST', '/api/campaigns', body, CampaignResponseSchema),
     onSuccess: (data) => {
-      qc.setQueryData(['campaign', data.campaign.id], data);
-      return qc.invalidateQueries({ queryKey: ['campaigns'] });
+      qc.setQueryData(qk.campaign(data.campaign.id), data);
+      return qc.invalidateQueries({ queryKey: qk.campaigns.all });
     },
   });
 }
@@ -1963,10 +1964,10 @@ export function useUpdateCampaign(id: number) {
   return useMutation({
     mutationFn: (body: CampaignBody) => apiSend('PATCH', `/api/campaigns/${id}`, body, CampaignResponseSchema),
     onSuccess: (data) => {
-      qc.setQueryData(['campaign', id], data);
+      qc.setQueryData(qk.campaign(id), data);
       // Сводка несёт копию campaign-строки в заголовке — обновляем и её.
-      qc.invalidateQueries({ queryKey: ['campaign-summary', id] });
-      return qc.invalidateQueries({ queryKey: ['campaigns'] });
+      qc.invalidateQueries({ queryKey: qk.campaignSummary(id) });
+      return qc.invalidateQueries({ queryKey: qk.campaigns.all });
     },
   });
 }
@@ -1976,10 +1977,10 @@ export function useDeleteCampaign() {
   return useMutation({
     mutationFn: (id: number) => apiSend('DELETE', `/api/campaigns/${id}`, undefined, OkSchema),
     onSuccess: (_data, id) => {
-      qc.removeQueries({ queryKey: ['campaign', id] });
-      qc.removeQueries({ queryKey: ['campaign-posts', id] });
-      qc.removeQueries({ queryKey: ['campaign-summary', id] });
-      return qc.invalidateQueries({ queryKey: ['campaigns'] });
+      qc.removeQueries({ queryKey: qk.campaign(id) });
+      qc.removeQueries({ queryKey: qk.campaignPosts(id) });
+      qc.removeQueries({ queryKey: qk.campaignSummary(id) });
+      return qc.invalidateQueries({ queryKey: qk.campaigns.all });
     },
   });
 }
@@ -1991,10 +1992,10 @@ export function useAddCampaignPosts() {
     mutationFn: ({ campaignId, items }: { campaignId: number; items: CampaignPostInput[] }) =>
       apiSend('POST', `/api/campaigns/${campaignId}/posts`, { items }, CampaignAddResultSchema),
     onSuccess: (_data, { campaignId }) => {
-      qc.invalidateQueries({ queryKey: ['campaign', campaignId] });
-      qc.invalidateQueries({ queryKey: ['campaign-posts', campaignId] });
-      qc.invalidateQueries({ queryKey: ['campaign-summary', campaignId] });
-      return qc.invalidateQueries({ queryKey: ['campaigns'] });
+      qc.invalidateQueries({ queryKey: qk.campaign(campaignId) });
+      qc.invalidateQueries({ queryKey: qk.campaignPosts(campaignId) });
+      qc.invalidateQueries({ queryKey: qk.campaignSummary(campaignId) });
+      return qc.invalidateQueries({ queryKey: qk.campaigns.all });
     },
   });
 }
@@ -2005,10 +2006,10 @@ export function useRemoveCampaignPosts() {
     mutationFn: ({ campaignId, items }: { campaignId: number; items: CampaignPostInput[] }) =>
       apiSend('DELETE', `/api/campaigns/${campaignId}/posts`, { items }, CampaignRemoveResultSchema),
     onSuccess: (_data, { campaignId }) => {
-      qc.invalidateQueries({ queryKey: ['campaign', campaignId] });
-      qc.invalidateQueries({ queryKey: ['campaign-posts', campaignId] });
-      qc.invalidateQueries({ queryKey: ['campaign-summary', campaignId] });
-      return qc.invalidateQueries({ queryKey: ['campaigns'] });
+      qc.invalidateQueries({ queryKey: qk.campaign(campaignId) });
+      qc.invalidateQueries({ queryKey: qk.campaignPosts(campaignId) });
+      qc.invalidateQueries({ queryKey: qk.campaignSummary(campaignId) });
+      return qc.invalidateQueries({ queryKey: qk.campaigns.all });
     },
   });
 }
