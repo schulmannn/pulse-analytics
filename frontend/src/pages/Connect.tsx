@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
+import { toast } from 'sonner';
 import { z } from 'zod';
 import QRCode from 'qrcode';
 import { useQueryClient } from '@tanstack/react-query';
@@ -559,6 +560,7 @@ function MoySkladPanel() {
       const res = (await apiSend('POST', '/api/ms/connect', { token: value })) as { org_name?: string };
       setFreshOrg(res?.org_name || 'организация');
       setToken('');
+      toast('МойСклад подключён');
       await invalidateMs();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Не удалось подключить МойСклад.');
@@ -574,6 +576,7 @@ function MoySkladPanel() {
     try {
       await apiSend('DELETE', '/api/ms/account');
       setFreshOrg(null);
+      toast('МойСклад отключён');
       await invalidateMs();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Не удалось отключить источник.');
@@ -684,6 +687,7 @@ function MetrikaPanel() {
       setFreshName(res?.counter_name || res?.site || 'счётчик');
       setToken('');
       setCounters(null);
+      toast('Метрика подключена');
       await invalidateYm();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Не удалось подключить Яндекс.Метрику.');
@@ -704,6 +708,7 @@ function MetrikaPanel() {
     try {
       await apiSend('DELETE', '/api/ym/account');
       setFreshName(null);
+      toast('Метрика отключена');
       await invalidateYm();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Не удалось отключить источник.');
@@ -836,7 +841,7 @@ function InstagramPanel() {
             )}
             <button
               type="button"
-              onClick={() => disconnect.mutate()}
+              onClick={() => disconnect.mutate(undefined, { onSuccess: () => toast('Instagram отключён') })}
               disabled={disconnect.isPending}
               className="btn-pill border border-border px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-destructive disabled:opacity-50"
             >
@@ -1135,7 +1140,11 @@ function TelegramPanel({
 
   const disconnect = async () => {
     setBusy(true);
-    try { await apiSend('DELETE', '/api/tg/qr/session', undefined, OkSchema); } catch { /* ignore */ }
+    // Тост — только при удачном DELETE; провал молча игнорируется (сессия и так мертва), не тостить.
+    try {
+      await apiSend('DELETE', '/api/tg/qr/session', undefined, OkSchema);
+      toast('Telegram отключён');
+    } catch { /* ignore */ }
     if (!alive.current) return;
     setBusy(false);
     setPhase('idle');

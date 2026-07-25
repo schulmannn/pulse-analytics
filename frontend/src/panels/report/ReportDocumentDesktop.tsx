@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { toast } from 'sonner';
 import { useConfirm } from '@/components/ConfirmDialogProvider';
 import { cn } from '@/lib/utils';
 import { Pencil, Printer, Save, X } from 'lucide-react';
@@ -118,7 +119,13 @@ export function ReportDocumentDesktop({
 
   const save = () => {
     if (savePending || !nameValid || !sourceValid) return;
-    updateReport.mutate(draftToPutBody(draft, report.config), { onSuccess: () => setMode('read') });
+    updateReport.mutate(draftToPutBody(draft, report.config), {
+      // Выход в read сам по себе неотличим от «Отмены» — тост подтверждает, что PUT долетел.
+      onSuccess: () => {
+        setMode('read');
+        toast('Отчёт сохранён');
+      },
+    });
   };
   const handleDelete = async () => {
     const ok = await confirm({
@@ -126,7 +133,12 @@ export function ReportDocumentDesktop({
       reason: 'Документ и его настройки будут удалены.',
     });
     if (!ok) return;
-    deleteReport.mutate(report.id, { onSuccess: () => navigate('/reports', { replace: true }) });
+    deleteReport.mutate(report.id, {
+      onSuccess: () => {
+        toast('Отчёт удалён');
+        navigate('/reports', { replace: true });
+      },
+    });
   };
 
   const periodText = data.rangeLabel ?? reportPeriodLabel(editing ? draft.periodDays : baseline.periodDays);

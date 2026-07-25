@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { toast } from 'sonner';
 import type { MentionRules, MentionSettings } from '@/api/schemas';
 import { useSaveMentionSettings } from '@/api/queries';
 import { Icon } from '@/components/nav-icons';
@@ -84,7 +85,11 @@ export function MentionRulesDialog({
     }
     setLocalError(null);
     const result = await save.mutateAsync(rules).catch(() => null);
-    if (result) onClose();
+    if (result) {
+      onClose();
+      // Диалог закрывается мгновенно — без тоста успех неотличим от отмены (канон CampaignDialog).
+      toast('Правила сохранены');
+    }
   };
 
   const ownSource = ownSourceLabel(settings);

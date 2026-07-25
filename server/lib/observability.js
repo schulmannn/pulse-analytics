@@ -1,6 +1,7 @@
 'use strict';
 
 const crypto = require('crypto');
+const { runWithRequestId } = require('./requestContext');
 
 function log(level, event, fields = {}) {
   const record = {
@@ -35,7 +36,9 @@ function requestContext(req, res, next) {
       channel_id: req.channel && req.channel.id != null ? req.channel.id : undefined,
     });
   });
-  next();
+  // Весь downstream запроса (роуты → сервисы → mtproto-клиент) выполняется внутри
+  // AsyncLocalStorage-store: getRequestId() отдаёт id без прокидывания по сигнатурам.
+  runWithRequestId(req.requestId, next);
 }
 
 function hashIp(ip, secret) {

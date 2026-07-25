@@ -1,3 +1,4 @@
+import { toast } from 'sonner';
 import { useConnectIg, useDisconnectIg, useIgOauthStatus } from '@/api/queries';
 import { fmt } from '@/lib/format';
 import {
@@ -82,7 +83,7 @@ export function InstagramSection() {
                       type="button"
                       variant="destructive"
                       size="sm"
-                      onClick={() => disconnect.mutate()}
+                      onClick={() => disconnect.mutate(undefined, { onSuccess: () => toast('Instagram отключён') })}
                     >
                       Отключить
                     </Button>

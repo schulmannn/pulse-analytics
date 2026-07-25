@@ -8,6 +8,7 @@
 
 const { createBreaker } = require('./mtprotoBreaker');
 const { fetchWithTimeout } = require('./http');
+const { getRequestId } = require('./requestContext');
 
 const DEFAULT_MTPROTO_URL = 'http://localhost:8001';
 // Heavy Telethon endpoints (stats graphs, velocity, mentions) are serialized on the
@@ -95,13 +96,19 @@ function createMtprotoClient(
       Object.entries(params).forEach(([k, v]) =>
         url.searchParams.set(k, String(v)),
       );
+      // Сквозная трассировка web → Python: id текущего HTTP-запроса из AsyncLocalStorage
+      // (lib/requestContext). Фоновые jobs идут вне request-store — заголовок не шлётся.
+      const requestId = getRequestId();
       let res;
       for (let attempt = 1; attempt <= 3; attempt++) {
         try {
           res = await fetchImpl(
             url.toString(),
             {
-              headers: { 'x-internal-token': MTPROTO_TOKEN },
+              headers: {
+                'x-internal-token': MTPROTO_TOKEN,
+                ...(requestId ? { 'x-request-id': requestId } : {}),
+              },
             },
             timeoutMs,
           );
@@ -187,6 +194,8 @@ function createMtprotoClient(
       Object.entries(params).forEach(([k, v]) =>
         url.searchParams.set(k, String(v)),
       );
+      // Как в mtprotoFetch: request-id из AsyncLocalStorage, вне запроса — без заголовка.
+      const requestId = getRequestId();
       let res;
       const maxAttempts = retryConnectionErrors ? 3 : 1;
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -197,6 +206,7 @@ function createMtprotoClient(
               method: 'POST',
               headers: {
                 'x-internal-token': MTPROTO_TOKEN,
+                ...(requestId ? { 'x-request-id': requestId } : {}),
                 ...(body ? { 'content-type': 'application/json' } : {}),
               },
               body: body ? JSON.stringify(body) : undefined,

@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { toast } from 'sonner';
 import {
   useMentionNotifyLink,
   useMentionNotifyStatus,
@@ -89,7 +90,8 @@ export function MentionNotifyDialog({ onClose }: { onClose: () => void }) {
   const sendDays = data?.subscription.send_days?.length ? data.subscription.send_days : [1, 2, 3, 4, 5, 6, 7];
   const sendHour = data?.subscription.send_hour ?? 10;
   const saveSchedule = (patch: { send_days?: number[]; send_hour?: number }) =>
-    toggle.mutate({ enabled, ...patch });
+    // Тост только для правок расписания: тумблер вкл/выкл виден сам (переключатель + статус-текст).
+    toggle.mutate({ enabled, ...patch }, { onSuccess: () => toast('Расписание сохранено') });
   const toggleDay = (day: number) => {
     const next = sendDays.includes(day) ? sendDays.filter((d) => d !== day) : [...sendDays, day];
     if (next.length === 0) return;   // «ни одного дня» — бессмыслица, последний чип не снимается
@@ -303,7 +305,7 @@ export function MentionNotifyDialog({ onClose }: { onClose: () => void }) {
                   </span>
                   <button
                     type="button"
-                    onClick={() => unbind.mutate()}
+                    onClick={() => unbind.mutate(undefined, { onSuccess: () => toast('Бот отвязан') })}
                     disabled={unbind.isPending}
                     className="btn-pill px-3 py-1.5 font-medium text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
                   >

@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react';
+import { toast } from 'sonner';
 import { useBugs, useCreateBug, useUpdateBugStatus, useDeleteBug } from '@/api/queries';
 import { PillSelect } from '@/components/PillSelect';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -117,7 +118,7 @@ export function Bugs() {
                 availableStatuses={availableStatuses}
                 onDelete={async (id) => {
                   const ok = await confirm({ title: 'Удалить запись из баг-трекера?' });
-                  if (ok) deleteBugMutation.mutate(id);
+                  if (ok) deleteBugMutation.mutate(id, { onSuccess: () => toast('Тикет удалён') });
                 }}
               />
             ))}

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { toast } from 'sonner';
 import { useAdminDeleteUser, useAdminUsers, useUpdateUser } from '@/api/queries';
 import { ErrorState } from '@/components/ErrorState';
 import { PillSelect } from '@/components/PillSelect';
@@ -134,6 +135,7 @@ function DeleteUserButton({ user, isMe }: { user: UserRowCardProps['user']; isMe
     }
     try {
       await deleteUser.mutateAsync(user.id);
+      toast('Пользователь удалён');
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Не удалось удалить');
       setArmed(false);

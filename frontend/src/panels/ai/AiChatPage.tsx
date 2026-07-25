@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
+import { toast } from 'sonner';
 import { useQueryClient } from '@tanstack/react-query';
 import { useChannels, useMe } from '@/api/queries';
 import { qk } from '@/api/queryKeys';
@@ -333,7 +334,14 @@ function ChatThread({ chatId }: { chatId: number }) {
             aria-label="Удалить чат"
             title="Удалить чат"
             disabled={del.isPending || !!pending}
-            onClick={() => del.mutate(chatId, { onSuccess: () => navigate('/ai') })}
+            onClick={() =>
+              del.mutate(chatId, {
+                onSuccess: () => {
+                  toast('Чат удалён');
+                  navigate('/ai');
+                },
+              })
+            }
             className="rounded p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-destructive disabled:opacity-50"
           >
             <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="h-4 w-4" aria-hidden="true">
