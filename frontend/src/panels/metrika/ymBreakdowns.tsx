@@ -18,6 +18,7 @@ import {
   type YmBreakdownParams,
 } from '@/api/queries';
 import { ChartExpandedContext } from '@/components/ExpandableChart';
+import { ShareRows } from '@/components/ShareRows';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { TableSkeleton } from '@/components/ui/dataSkeleton';
@@ -129,47 +130,24 @@ export function YmBreakdownRows({
   rows: Array<{ key: string; label: string; value: number; note: string | null }>;
   /** Слово хвоста в родительном падеже множественного («визитов», «достижений», «просмотров»). */
   tailWord: string;
-  /** Итог ПОЛНОГО отчёта для «Ещё N … из M.»; null — хвост без «из M». */
+  /** Итог ПОЛНОГО отчёта — знаменатель долей. null → падаем на сумму показанных строк. */
   unitTotal?: number | null;
   /** Приглушённая сноска под списком (усечение целей, визиты без метки). */
   footnote?: string | null;
 }) {
   const expanded = useContext(ChartExpandedContext);
-  // Сервер уже сортирует по убыванию; пересортировка здесь — страховка стабильности вида.
-  const ranked = [...rows].sort((a, b) => b.value - a.value || a.key.localeCompare(b.key));
-  const top = expanded ? ranked : ranked.slice(0, 4);
-  const tail = expanded ? [] : ranked.slice(4);
-  const restValue = tail.reduce((acc, row) => acc + row.value, 0);
-  const max = Math.max(1, ...top.map((row) => Math.max(0, row.value)));
+  // Знаменатель — итог ПОЛНОГО отчёта, когда сервер его дал: доля должна считаться от всего
+  // трафика, а не от суммы показанных строк, иначе «45%» на компакте и на развороте — разные 45%.
+  const total = unitTotal ?? rows.reduce((acc, r) => acc + Math.max(0, r.value), 0);
   return (
-    <div className={expanded ? 'space-y-2 pt-1' : 'space-y-1.5'}>
-      {top.map((r) => (
-        <div key={r.key}>
-          <div className="flex items-baseline justify-between gap-3 text-xs">
-            <span className="min-w-0 truncate text-foreground">{r.label}</span>
-            <span className="shrink-0 tabular-nums text-muted-foreground">
-              <span className="font-medium text-foreground">{fmt.num(r.value)}</span>
-              {r.note != null && <>{' · '}{r.note}</>}
-            </span>
-          </div>
-          <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted">
-            <div
-              className="h-full rounded-full"
-              style={{
-                width: `${Math.max(4, Math.round((Math.max(0, r.value) / max) * 100))}%`,
-                backgroundColor: 'hsl(var(--chart-role-primary) / 0.75)',
-              }}
-            />
-          </div>
-        </div>
-      ))}
-      {restValue > 0 && (
-        <p className="text-2xs text-muted-foreground">
-          Ещё {fmt.num(restValue)} {tailWord}{unitTotal != null ? ` из ${fmt.num(unitTotal)}` : ''}.
-        </p>
-      )}
-      {footnote != null && <p className="text-2xs text-muted-foreground">{footnote}</p>}
-    </div>
+    <ShareRows
+      rows={rows}
+      total={total}
+      tailWord={tailWord}
+      expanded={expanded}
+      cumulative={expanded}
+      footnote={footnote}
+    />
   );
 }
 

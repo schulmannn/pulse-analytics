@@ -403,6 +403,9 @@ test('Обзор Метрики: карточки метрик, источник
   await expect(page.getByText('Переходы из поисковых систем')).toBeVisible();
   await expect(page.getByText('Прямые заходы')).toBeVisible();
   await expect(page.getByText('Внутренние переходы')).toHaveCount(0);
+  // Хвост компакта: знаменатель (145) остался — он и есть честная часть строки; изменилась
+  // только форма (строка «Прочее» с собственной дорожкой вместо текста под списком).
+  await expect(page.getByText('Прочее · 1', { exact: true }).first()).toBeVisible();
   await expect(page.getByText(/Ещё 4 визитов из 145/)).toBeVisible();
 
   // Карточки-разрезы грузятся ПРОГРЕССИВНО (deferData): офскрин-карточка не шлёт свой запрос,
