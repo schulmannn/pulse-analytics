@@ -1,35 +1,18 @@
-import { useContext, useState } from 'react';
-import { ChartExpandedContext } from '@/components/ExpandableChart';
-import {
-  useYmAge,
-  useYmCities,
-  useYmCountries,
-  useYmDevices,
-  useYmExits,
-  useYmGender,
-  useYmGoals,
-  useYmHourly,
-  useYmLandings,
-  useYmMessengers,
-  useYmPages,
-  useYmReferrers,
-  useYmSocial,
-  useYmSources,
-  useYmSummary,
-  useYmUtm,
-} from '@/api/queries';
+import { useState } from 'react';
+import { useYmGoals, useYmHourly, useYmSummary } from '@/api/queries';
 import { PillSelect } from '@/components/PillSelect';
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
 import { ChartCardBody } from '@/components/chartWidget/ChartCardBody';
 import { LineChart } from '@/components/LineChart';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
-import { ChartSkeleton, TableSkeleton } from '@/components/ui/dataSkeleton';
+import { ChartSkeleton } from '@/components/ui/dataSkeleton';
 import { InlineSpark } from '@/components/InlineSpark';
 import { lttbDownsample } from '@/lib/downsample';
 import { fmt } from '@/lib/format';
 import { usePagePeriod } from '@/lib/period';
 import { useMsPagePeriod } from '@/lib/msPeriod';
+import { YM_BREAKDOWNS } from '@/panels/metrika/ymBreakdowns';
 
 /**
  * Обзор «Яндекс.Метрики» — веб-аналитика сайта рядом с аналитикой каналов. Все числа приходят
@@ -37,87 +20,12 @@ import { useMsPagePeriod } from '@/lib/msPeriod';
  * ym_daily и best-effort обогащает точными live-итогами). Величины (визиты, посетители, просмотры
  * страниц) — свои и никогда не смешиваются с TG-просмотрами или IG-охватом. Когда period totals
  * недоступны, подпись посетителей честно отмечает, что итог является суммой дневных уникальных.
+ *
+ * 14 разрезов (источники/гео/демография/цели/UTM/страницы) живут ОДНОЙ таблицей в
+ * `ymBreakdowns.tsx` — та же дефиниция кормит и карточку доски, и полностраничный `/metrics/ym-*`.
+ * Каждая карточка тянет свои данные сама и (deferData) откладывает запрос, пока не подойдёт к
+ * вьюпорту: раньше все 17 запросов летели на каждый вход в /metrika и на каждую смену периода.
  */
-/** Локализация типов устройств по стабильному значению ym:s:deviceCategory. Reporting API может
-    вернуть числовой id, а документация группировки называет строковые значения — поддерживаем оба. */
-export const YM_DEVICE_LABELS: Record<string, string> = {
-  '1': 'Десктоп',
-  '2': 'Смартфоны',
-  '3': 'Планшеты',
-  '4': 'ТВ',
-  desktop: 'Десктоп',
-  mobile: 'Смартфоны',
-  tablet: 'Планшеты',
-  tv: 'ТВ',
-};
-
-/** Локализация возрастных групп по стабильному id ym:s:ageInterval (нижняя граница интервала).
-    lang=ru обычно уже отдаёт русскую подпись, но по id мы даём единый продуктовый формат и не
-    зависим от языка ответа API; неизвестный id падает на имя из ответа. */
-export const YM_AGE_LABELS: Record<string, string> = {
-  '17': 'До 18 лет',
-  '18': '18–24 года',
-  '25': '25–34 года',
-  '35': '35–44 года',
-  '45': '45–54 года',
-  '55': '55 лет и старше',
-};
-
-/** Локализация пола по стабильному значению ym:s:gender (male/female), имя API — фолбэк. */
-export const YM_GENDER_LABELS: Record<string, string> = {
-  male: 'Мужчины',
-  female: 'Женщины',
-};
-
-/** Методологическая подпись соцдема: оценочная природа, фактическое покрытие и privacy-redaction
-    перечисляются отдельно. При нулевом total процент не выдумывается. */
-export const demographicsFootnote = (data: {
-  coverage_percent: number | null;
-  contains_sensitive_data: boolean;
-}): string => {
-  const coverage =
-    data.coverage_percent == null
-      ? null
-      : `определено для ${data.coverage_percent.toLocaleString('ru-RU', { maximumFractionDigits: 1 })}% визитов`;
-  const base = ['Оценка Метрики (Crypta)', coverage].filter(Boolean).join(' · ');
-  return data.contains_sensitive_data
-    ? `${base}. Часть данных скрыта при малой выборке.`
-    : `${base}.`;
-};
-
-/** Вторичный контекст строки разреза: посетители + отказы (когда доступны). Отказы nullable —
-    «—»-семантика: при null подпункт отказов просто опускается, а не превращается в «0%». */
-export const breakdownNote = (users: number, bounceRate: number | null): string =>
-  [
-    `${fmt.num(users)} чел.`,
-    bounceRate != null ? `${bounceRate.toLocaleString('ru-RU', { maximumFractionDigits: 1 })}% отказов` : null,
-  ]
-    .filter(Boolean)
-    .join(' · ');
-
-/** Контекст выбранной цели для строки разреза: конверсия (CR, %) + число достижений. Возвращает
-    null, когда цель не выбрана (goalId==null) — тогда строка остаётся с базовым (визиты/отказы)
-    контекстом. Конверсия/достижения nullable по отдельности: показываем то, что реально пришло. */
-export const goalNote = (
-  goalId: number | null | undefined,
-  reaches: number | null | undefined,
-  conversion: number | null | undefined,
-): string | null => {
-  if (goalId == null) return null;
-  return (
-    [
-      conversion != null ? `CR ${conversion.toLocaleString('ru-RU', { maximumFractionDigits: 2 })}%` : null,
-      reaches != null ? `${fmt.num(reaches)} достиж.` : null,
-    ]
-      .filter(Boolean)
-      .join(' · ') || null
-  );
-};
-
-/** Склейка базового и целевого контекста строки в одну note-строку (базовый всегда, цель — если есть). */
-export const joinNote = (base: string | null, goal: string | null): string | null =>
-  [base, goal].filter(Boolean).join(' · ') || null;
-
 export function YmOverview() {
   const pp = usePagePeriod();
   const days = pp ? pp.days : 30;
@@ -125,6 +33,8 @@ export function YmOverview() {
   // хелпер): «Всё» (0) берёт серии из ym_daily, живые окна — 7/30/90/точный диапазон.
   const period = useMsPagePeriod();
   const windowLabel = pp?.range ? 'за выбранный период' : days === 0 ? 'за всё время' : `за ${days} дн.`;
+  // Словарь целей нужен САМОЙ доске (опции синхронных селекторов), поэтому единственный разрез,
+  // который остаётся на уровне страницы. Карточка «Цели» читает тот же ключ — второго запроса нет.
   const goals = useYmGoals(period);
   // Одна ЯВНО выбранная цель атрибуции на всю доску: источники/UTM/устройства/страницы входа
   // читают один и тот же выбор. Селекторы появляются, ТОЛЬКО когда на счётчике есть цели. Храним
@@ -139,20 +49,7 @@ export function YmOverview() {
   const selectedGoalId = validGoalValue !== '' ? Number(validGoalValue) : null;
 
   const summary = useYmSummary(period);
-  const sources = useYmSources(period, selectedGoalId);
-  const referrers = useYmReferrers(period);
-  const social = useYmSocial(period);
-  const messengers = useYmMessengers(period);
-  const countries = useYmCountries(period);
-  const cities = useYmCities(period);
-  const age = useYmAge(period);
-  const gender = useYmGender(period);
-  const devices = useYmDevices(period, selectedGoalId);
-  const utm = useYmUtm(period, selectedGoalId);
-  const pages = useYmPages(period);
-  const landings = useYmLandings(period, selectedGoalId);
   const hourly = useYmHourly(period);
-  const exits = useYmExits(period);
   // Общие опции + рендер синхронного селектора цели (одинаковое value/handler на всех карточках,
   // card-specific aria-label). Показываем ТОЛЬКО при наличии целей — иначе UI как прежде.
   const goalOptions = [
@@ -266,501 +163,21 @@ export function YmOverview() {
           Полные 24 клетки, подпись отмечает час пика. Визиты — своя единица, не TG/IG-метрики. */}
       <YmHourlyCard hourly={hourly} windowLabel={windowLabel} />
 
-      <ChartWidget
-        id="ym-sources"
-        title="Источники трафика"
-        fixedSize="half"
-        drillTo="/metrics/ym-sources"
-        action={goalSelect('Цель для источников трафика')}
-      >
-        {sources.isPending ? (
-          <TableSkeleton rows={4} columns={2} className="py-2" />
-        ) : sources.isError ? (
-          <ErrorState
-            compact
-            size="table"
-            className="py-4"
-            title="Не удалось получить источники трафика"
-            reason={sources.error instanceof Error ? sources.error.message : 'ошибка'}
-            onRetry={() => sources.refetch()}
-            retrying={sources.isFetching}
-          />
-        ) : sources.data.rows.length === 0 ? (
-          <EmptyState compact size="table" title="Нет визитов за период." />
-        ) : (
-          <YmBreakdownRows
-            rows={sources.data.rows.map((r) => ({
-              key: r.id ?? r.name ?? 'unknown',
-              label: r.name ?? 'Другие источники',
-              value: r.visits,
-              note: joinNote(
-                `${fmt.num(r.users)} чел.`,
-                goalNote(sources.data.goal_id, r.goal_reaches, r.goal_conversion),
-              ),
-            }))}
-            tailWord="визитов"
-            unitTotal={sources.data.visits_total}
-          />
-        )}
-      </ChartWidget>
-
-      {/* Реферальные сайты: внешние домены (externalRefererDomain) — визиты + отказы по строке. */}
-      <ChartWidget id="ym-referrers" title="Реферальные сайты" fixedSize="half" drillTo="/metrics/ym-referrers">
-        {referrers.isPending ? (
-          <TableSkeleton rows={4} columns={2} className="py-2" />
-        ) : referrers.isError ? (
-          <ErrorState
-            compact
-            size="table"
-            className="py-4"
-            title="Не удалось получить реферальные сайты"
-            reason={referrers.error instanceof Error ? referrers.error.message : 'ошибка'}
-            onRetry={() => referrers.refetch()}
-            retrying={referrers.isFetching}
-          />
-        ) : referrers.data.rows.length === 0 ? (
-          <EmptyState
-            compact
-            size="table"
-            title="Реферальных переходов за период нет."
-            reason="Здесь появятся внешние сайты, приводящие трафик по ссылкам."
-          />
-        ) : (
-          <YmBreakdownRows
-            rows={referrers.data.rows.map((r) => ({
-              key: r.name ?? r.id ?? 'unknown',
-              label: r.name ?? r.id ?? 'домен',
-              value: r.visits,
-              note: breakdownNote(r.users, r.bounce_rate),
-            }))}
-            tailWord="визитов"
-            unitTotal={referrers.data.visits_total}
-          />
-        )}
-      </ChartWidget>
-
-      {/* Соцсети: конкретные сети (lastsignSocialNetwork) — визиты + отказы по строке. */}
-      <ChartWidget id="ym-social" title="Соцсети" fixedSize="half" drillTo="/metrics/ym-social">
-        {social.isPending ? (
-          <TableSkeleton rows={4} columns={2} className="py-2" />
-        ) : social.isError ? (
-          <ErrorState
-            compact
-            size="table"
-            className="py-4"
-            title="Не удалось получить соцсети"
-            reason={social.error instanceof Error ? social.error.message : 'ошибка'}
-            onRetry={() => social.refetch()}
-            retrying={social.isFetching}
-          />
-        ) : social.data.rows.length === 0 ? (
-          <EmptyState
-            compact
-            size="table"
-            title="Переходов из соцсетей за период нет."
-            reason="Здесь появятся конкретные соцсети, приводящие трафик."
-          />
-        ) : (
-          <YmBreakdownRows
-            rows={social.data.rows.map((r) => ({
-              key: r.id ?? r.name ?? 'unknown',
-              label: r.name ?? r.id ?? 'соцсеть',
-              value: r.visits,
-              note: breakdownNote(r.users, r.bounce_rate),
-            }))}
-            tailWord="визитов"
-            unitTotal={social.data.visits_total}
-          />
-        )}
-      </ChartWidget>
-
-      {/* Мессенджеры: отдельная размерность Метрики — Telegram не теряется внутри «Соцсетей». */}
-      <ChartWidget id="ym-messengers" title="Мессенджеры" fixedSize="half" drillTo="/metrics/ym-messengers">
-        {messengers.isPending ? (
-          <TableSkeleton rows={4} columns={2} className="py-2" />
-        ) : messengers.isError ? (
-          <ErrorState
-            compact
-            size="table"
-            className="py-4"
-            title="Не удалось получить мессенджеры"
-            reason={messengers.error instanceof Error ? messengers.error.message : 'ошибка'}
-            onRetry={() => messengers.refetch()}
-            retrying={messengers.isFetching}
-          />
-        ) : messengers.data.rows.length === 0 ? (
-          <EmptyState
-            compact
-            size="table"
-            title="Переходов из мессенджеров за период нет."
-            reason="Здесь появятся Telegram и другие мессенджеры, приводящие трафик."
-          />
-        ) : (
-          <YmBreakdownRows
-            rows={messengers.data.rows.map((r) => ({
-              key: r.id ?? r.name ?? 'unknown',
-              label: r.name ?? r.id ?? 'мессенджер',
-              value: r.visits,
-              note: breakdownNote(r.users, r.bounce_rate),
-            }))}
-            tailWord="визитов"
-            unitTotal={messengers.data.visits_total}
-          />
-        )}
-      </ChartWidget>
-
-      {/* Устройства: тип устройства (deviceCategory) — локализация по стабильному id, имя — фолбэк. */}
-      <ChartWidget
-        id="ym-devices"
-        title="Устройства"
-        fixedSize="half"
-        drillTo="/metrics/ym-devices"
-        action={goalSelect('Цель для устройств')}
-      >
-        {devices.isPending ? (
-          <TableSkeleton rows={4} columns={2} className="py-2" />
-        ) : devices.isError ? (
-          <ErrorState
-            compact
-            size="table"
-            className="py-4"
-            title="Не удалось получить устройства"
-            reason={devices.error instanceof Error ? devices.error.message : 'ошибка'}
-            onRetry={() => devices.refetch()}
-            retrying={devices.isFetching}
-          />
-        ) : devices.data.rows.length === 0 ? (
-          <EmptyState compact size="table" title="Нет визитов за период." />
-        ) : (
-          <YmBreakdownRows
-            rows={devices.data.rows.map((r) => ({
-              key: r.id ?? r.name ?? 'unknown',
-              label: (r.id != null ? YM_DEVICE_LABELS[r.id] : undefined) ?? r.name ?? 'Другие устройства',
-              value: r.visits,
-              note: joinNote(
-                breakdownNote(r.users, r.bounce_rate),
-                goalNote(devices.data.goal_id, r.goal_reaches, r.goal_conversion),
-              ),
-            }))}
-            tailWord="визитов"
-            unitTotal={devices.data.visits_total}
-          />
-        )}
-      </ChartWidget>
-
-      {/* Страны: география посетителей (regionCountry) — визиты + отказы по строке, имя lang=ru. */}
-      <ChartWidget id="ym-countries" title="Страны" fixedSize="half" drillTo="/metrics/ym-countries">
-        {countries.isPending ? (
-          <TableSkeleton rows={4} columns={2} className="py-2" />
-        ) : countries.isError ? (
-          <ErrorState
-            compact
-            size="table"
-            className="py-4"
-            title="Не удалось получить страны"
-            reason={countries.error instanceof Error ? countries.error.message : 'ошибка'}
-            onRetry={() => countries.refetch()}
-            retrying={countries.isFetching}
-          />
-        ) : countries.data.rows.length === 0 ? (
-          <EmptyState compact size="table" title="Нет визитов за период." />
-        ) : (
-          <YmBreakdownRows
-            rows={countries.data.rows.map((r) => ({
-              key: r.id ?? r.name ?? 'unknown',
-              label: r.name ?? r.id ?? 'страна',
-              value: r.visits,
-              note: breakdownNote(r.users, r.bounce_rate),
-            }))}
-            tailWord="визитов"
-            unitTotal={countries.data.visits_total}
-            footnote="География определяется Метрикой по данным визита, а не по GPS."
-          />
-        )}
-      </ChartWidget>
-
-      {/* Города: география посетителей (regionCity) — отдельная от страны размерность. */}
-      <ChartWidget id="ym-cities" title="Города" fixedSize="half" drillTo="/metrics/ym-cities">
-        {cities.isPending ? (
-          <TableSkeleton rows={4} columns={2} className="py-2" />
-        ) : cities.isError ? (
-          <ErrorState
-            compact
-            size="table"
-            className="py-4"
-            title="Не удалось получить города"
-            reason={cities.error instanceof Error ? cities.error.message : 'ошибка'}
-            onRetry={() => cities.refetch()}
-            retrying={cities.isFetching}
-          />
-        ) : cities.data.rows.length === 0 ? (
-          <EmptyState compact size="table" title="Нет визитов за период." />
-        ) : (
-          <YmBreakdownRows
-            rows={cities.data.rows.map((r) => ({
-              key: r.id ?? r.name ?? 'unknown',
-              label: r.name ?? r.id ?? 'город',
-              value: r.visits,
-              note: breakdownNote(r.users, r.bounce_rate),
-            }))}
-            tailWord="визитов"
-            unitTotal={cities.data.visits_total}
-          />
-        )}
-      </ChartWidget>
-
-      {/* Возраст: демография посетителей (ageInterval) — локализация по стабильному id, имя — фолбэк. */}
-      <ChartWidget id="ym-age" title="Возраст" fixedSize="half" drillTo="/metrics/ym-age">
-        {age.isPending ? (
-          <TableSkeleton rows={4} columns={2} className="py-2" />
-        ) : age.isError ? (
-          <ErrorState
-            compact
-            size="table"
-            className="py-4"
-            title="Не удалось получить возраст"
-            reason={age.error instanceof Error ? age.error.message : 'ошибка'}
-            onRetry={() => age.refetch()}
-            retrying={age.isFetching}
-          />
-        ) : age.data.rows.length === 0 ? (
-          <div>
-            <EmptyState compact size="table" title="Демографические данные недоступны за период." />
-            <p className="text-2xs text-muted-foreground">{demographicsFootnote(age.data)}</p>
-          </div>
-        ) : (
-          <YmBreakdownRows
-            rows={age.data.rows.map((r) => ({
-              key: r.id ?? r.name ?? 'unknown',
-              label: (r.id != null ? YM_AGE_LABELS[r.id] : undefined) ?? r.name ?? 'возраст неизвестен',
-              value: r.visits,
-              note: breakdownNote(r.users, r.bounce_rate),
-            }))}
-            tailWord="визитов"
-            unitTotal={age.data.visits_total}
-            footnote={demographicsFootnote(age.data)}
-          />
-        )}
-      </ChartWidget>
-
-      {/* Пол: демография посетителей (gender) — локализация по стабильному id male/female. */}
-      <ChartWidget id="ym-gender" title="Пол" fixedSize="half" drillTo="/metrics/ym-gender">
-        {gender.isPending ? (
-          <TableSkeleton rows={4} columns={2} className="py-2" />
-        ) : gender.isError ? (
-          <ErrorState
-            compact
-            size="table"
-            className="py-4"
-            title="Не удалось получить пол"
-            reason={gender.error instanceof Error ? gender.error.message : 'ошибка'}
-            onRetry={() => gender.refetch()}
-            retrying={gender.isFetching}
-          />
-        ) : gender.data.rows.length === 0 ? (
-          <div>
-            <EmptyState compact size="table" title="Демографические данные недоступны за период." />
-            <p className="text-2xs text-muted-foreground">{demographicsFootnote(gender.data)}</p>
-          </div>
-        ) : (
-          <YmBreakdownRows
-            rows={gender.data.rows.map((r) => ({
-              key: r.id ?? r.name ?? 'unknown',
-              label: (r.id != null ? YM_GENDER_LABELS[r.id] : undefined) ?? r.name ?? 'не определён',
-              value: r.visits,
-              note: breakdownNote(r.users, r.bounce_rate),
-            }))}
-            tailWord="визитов"
-            unitTotal={gender.data.visits_total}
-            footnote={demographicsFootnote(gender.data)}
-          />
-        )}
-      </ChartWidget>
-
-      {/* Цели: reaches за окно + конверсия отдельной метрикой (CR не выводится из reaches). */}
-      <ChartWidget id="ym-goals" title="Цели" fixedSize="half" drillTo="/metrics/ym-goals">
-        {goals.isPending ? (
-          <TableSkeleton rows={4} columns={2} className="py-2" />
-        ) : goals.isError ? (
-          <ErrorState
-            compact
-            size="table"
-            className="py-4"
-            title="Не удалось получить цели"
-            reason={goals.error instanceof Error ? goals.error.message : 'ошибка'}
-            onRetry={() => goals.refetch()}
-            retrying={goals.isFetching}
-          />
-        ) : goals.data.rows.length === 0 ? (
-          <EmptyState
-            compact
-            size="table"
-            title="На счётчике нет целей."
-            reason="Настройте цели в Яндекс.Метрике — конверсии появятся здесь."
-          />
-        ) : (
-          <YmBreakdownRows
-            rows={goals.data.rows.map((g) => ({
-              key: g.id,
-              label: g.name ?? `Цель ${g.id}`,
-              value: g.reaches,
-              // Конверсия — не знаковая дельта (fmt.pct) и не целое (fmt.num): доли процента
-              // значимы, локаль ru даёт запятую.
-              note: `CR ${g.conversion_rate.toLocaleString('ru-RU', { maximumFractionDigits: 2 })}%`,
-            }))}
-            tailWord="достижений"
-            footnote={goals.data.truncated ? 'Показаны первые 20 целей счётчика.' : null}
-          />
-        )}
-      </ChartWidget>
-
-      {/* UTM: только размеченные визиты в строках; неразмеченные — честной сноской, не строкой. */}
-      <ChartWidget
-        id="ym-utm"
-        title="UTM-метки"
-        fixedSize="half"
-        drillTo="/metrics/ym-utm"
-        action={goalSelect('Цель для UTM-меток')}
-      >
-        {utm.isPending ? (
-          <TableSkeleton rows={4} columns={2} className="py-2" />
-        ) : utm.isError ? (
-          <ErrorState
-            compact
-            size="table"
-            className="py-4"
-            title="Не удалось получить UTM-разметку"
-            reason={utm.error instanceof Error ? utm.error.message : 'ошибка'}
-            onRetry={() => utm.refetch()}
-            retrying={utm.isFetching}
-          />
-        ) : utm.data.rows.length === 0 ? (
-          <EmptyState
-            compact
-            size="table"
-            title="UTM-меток за период нет."
-            reason="Размечайте ссылки в постах utm_source — источники появятся здесь."
-          />
-        ) : (
-          <YmBreakdownRows
-            rows={utm.data.rows.map((r) => ({
-              key: r.id ?? r.name ?? 'unknown',
-              label: r.name ?? r.id ?? 'utm',
-              value: r.visits,
-              note: joinNote(`${fmt.num(r.users)} чел.`, goalNote(utm.data.goal_id, r.goal_reaches, r.goal_conversion)),
-            }))}
-            tailWord="визитов"
-            unitTotal={utm.data.tagged_visits}
-            footnote={
-              utm.data.untagged_visits > 0
-                ? `Без метки — ${fmt.num(utm.data.untagged_visits)} визитов из ${fmt.num(utm.data.visits_total)}.`
-                : null
-            }
-          />
-        )}
-      </ChartWidget>
-
-      {/* Топ-страницы: hits-отчёт (просмотры страниц ≠ визиты — другая единица, чем сверху). */}
-      <ChartWidget id="ym-pages" title="Топ-страницы" fixedSize="half" drillTo="/metrics/ym-pages">
-        {pages.isPending ? (
-          <TableSkeleton rows={4} columns={2} className="py-2" />
-        ) : pages.isError ? (
-          <ErrorState
-            compact
-            size="table"
-            className="py-4"
-            title="Не удалось получить страницы"
-            reason={pages.error instanceof Error ? pages.error.message : 'ошибка'}
-            onRetry={() => pages.refetch()}
-            retrying={pages.isFetching}
-          />
-        ) : pages.data.rows.length === 0 ? (
-          <EmptyState compact size="table" title="Нет просмотров за период." />
-        ) : (
-          <YmBreakdownRows
-            rows={pages.data.rows.map((r) => ({
-              key: r.path,
-              label: r.path,
-              value: r.pageviews,
-              note: `${fmt.num(r.users)} чел.`,
-            }))}
-            tailWord="просмотров"
-            unitTotal={pages.data.pageviews_total}
-          />
-        )}
-      </ChartWidget>
-
-      {/* Страницы входа (startURLPath): визиты + отказы, опц. конверсия выбранной цели. */}
-      <ChartWidget
-        id="ym-landings"
-        title="Страницы входа"
-        fixedSize="half"
-        drillTo="/metrics/ym-landings"
-        action={goalSelect('Цель для страниц входа')}
-      >
-        {landings.isPending ? (
-          <TableSkeleton rows={4} columns={2} className="py-2" />
-        ) : landings.isError ? (
-          <ErrorState
-            compact
-            size="table"
-            className="py-4"
-            title="Не удалось получить страницы входа"
-            reason={landings.error instanceof Error ? landings.error.message : 'ошибка'}
-            onRetry={() => landings.refetch()}
-            retrying={landings.isFetching}
-          />
-        ) : landings.data.rows.length === 0 ? (
-          <EmptyState compact size="table" title="Нет визитов по страницам входа за период." />
-        ) : (
-          <YmBreakdownRows
-            rows={landings.data.rows.map((r) => ({
-              key: r.path,
-              label: r.path,
-              value: r.visits,
-              // Отказы всегда; конверсия/достижения цели — только когда цель выбрана и метрика пришла.
-              note: joinNote(
-                r.bounce_rate != null
-                  ? `${r.bounce_rate.toLocaleString('ru-RU', { maximumFractionDigits: 1 })}% отказов`
-                  : null,
-                goalNote(landings.data.goal_id, r.goal_reaches, r.goal_conversion),
-              ),
-            }))}
-            tailWord="визитов"
-            unitTotal={landings.data.visits_total}
-          />
-        )}
-      </ChartWidget>
-
-      {/* Страницы выхода (endURLPath): зеркало входов — где визиты заканчиваются, + отказы по строке. */}
-      <ChartWidget id="ym-exits" title="Страницы выхода" fixedSize="half" drillTo="/metrics/ym-exits">
-        {exits.isPending ? (
-          <TableSkeleton rows={4} columns={2} className="py-2" />
-        ) : exits.isError ? (
-          <ErrorState
-            compact
-            size="table"
-            className="py-4"
-            title="Не удалось получить страницы выхода"
-            reason={exits.error instanceof Error ? exits.error.message : 'ошибка'}
-            onRetry={() => exits.refetch()}
-            retrying={exits.isFetching}
-          />
-        ) : exits.data.rows.length === 0 ? (
-          <EmptyState compact size="table" title="Нет визитов по страницам выхода за период." />
-        ) : (
-          <YmBreakdownRows
-            rows={exits.data.rows.map((r) => ({
-              key: r.path,
-              label: r.path,
-              value: r.visits,
-              note: breakdownNote(r.users, r.bounce_rate),
-            }))}
-            tailWord="визитов"
-            unitTotal={exits.data.visits_total}
-          />
-        )}
-      </ChartWidget>
+      {/* 14 разрезов из общей таблицы: карточка = заголовок + (опц.) селектор цели + тело разреза.
+          deferData откладывает запрос карточки, пока она не подойдёт к вьюпорту. */}
+      {YM_BREAKDOWNS.map((def) => (
+        <ChartWidget
+          key={def.key}
+          id={def.key}
+          title={def.title}
+          fixedSize="half"
+          drillTo={`/metrics/${def.key}`}
+          deferData
+          action={def.goalAria ? goalSelect(def.goalAria) : undefined}
+        >
+          <def.Body period={period} goalId={selectedGoalId} surface="board" />
+        </ChartWidget>
+      ))}
     </div>
   );
 }
@@ -976,62 +393,6 @@ function YmQualityStrip({
         Роботы «по поведению» учтены в визитах и качестве, а не исключены автоматически.
       </p>
       {notes.length > 0 && <p className="mt-1 text-2xs text-muted-foreground">{notes.join(' · ')}</p>}
-    </div>
-  );
-}
-
-/** Общие строки breakdown-карточек Метрики (источники/цели/UTM/страницы): компактный топ-4 по
-    value + сводный хвост «Ещё N <word> [из M]»; разворот карточки показывает ВСЕ строки отчёта.
-    Бары — тихий одноцветный канон (цвет серии, не оценка), как статусы заказов у МС. */
-export function YmBreakdownRows({
-  rows,
-  tailWord,
-  unitTotal = null,
-  footnote = null,
-}: {
-  rows: Array<{ key: string; label: string; value: number; note: string | null }>;
-  /** Слово хвоста в родительном падеже множественного («визитов», «достижений», «просмотров»). */
-  tailWord: string;
-  /** Итог ПОЛНОГО отчёта для «Ещё N … из M.»; null — хвост без «из M». */
-  unitTotal?: number | null;
-  /** Приглушённая сноска под списком (усечение целей, визиты без метки). */
-  footnote?: string | null;
-}) {
-  const expanded = useContext(ChartExpandedContext);
-  // Сервер уже сортирует по убыванию; пересортировка здесь — страховка стабильности вида.
-  const ranked = [...rows].sort((a, b) => b.value - a.value || a.key.localeCompare(b.key));
-  const top = expanded ? ranked : ranked.slice(0, 4);
-  const tail = expanded ? [] : ranked.slice(4);
-  const restValue = tail.reduce((acc, row) => acc + row.value, 0);
-  const max = Math.max(1, ...top.map((row) => Math.max(0, row.value)));
-  return (
-    <div className={expanded ? 'space-y-2 pt-1' : 'space-y-1.5'}>
-      {top.map((r) => (
-        <div key={r.key}>
-          <div className="flex items-baseline justify-between gap-3 text-xs">
-            <span className="min-w-0 truncate text-foreground">{r.label}</span>
-            <span className="shrink-0 tabular-nums text-muted-foreground">
-              <span className="font-medium text-foreground">{fmt.num(r.value)}</span>
-              {r.note != null && <>{' · '}{r.note}</>}
-            </span>
-          </div>
-          <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted">
-            <div
-              className="h-full rounded-full"
-              style={{
-                width: `${Math.max(4, Math.round((Math.max(0, r.value) / max) * 100))}%`,
-                backgroundColor: 'hsl(var(--chart-role-primary) / 0.75)',
-              }}
-            />
-          </div>
-        </div>
-      ))}
-      {restValue > 0 && (
-        <p className="text-2xs text-muted-foreground">
-          Ещё {fmt.num(restValue)} {tailWord}{unitTotal != null ? ` из ${fmt.num(unitTotal)}` : ''}.
-        </p>
-      )}
-      {footnote != null && <p className="text-2xs text-muted-foreground">{footnote}</p>}
     </div>
   );
 }

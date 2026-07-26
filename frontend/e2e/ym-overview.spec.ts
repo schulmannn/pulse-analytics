@@ -405,39 +405,48 @@ test('Обзор Метрики: карточки метрик, источник
   await expect(page.getByText('Внутренние переходы')).toHaveCount(0);
   await expect(page.getByText(/Ещё 4 визитов из 145/)).toBeVisible();
 
+  // Карточки-разрезы грузятся ПРОГРЕССИВНО (deferData): офскрин-карточка не шлёт свой запрос,
+  // пока не подойдёт к вьюпорту. Поэтому перед проверкой содержимого доскролливаем заголовок —
+  // ровно как это уже делали нижние карточки из-за content-visibility.
+  const revealed = async (name: string) => {
+    const heading = page.getByRole('heading', { name, exact: true });
+    await heading.scrollIntoViewIfNeeded();
+    await expect(heading).toBeVisible();
+  };
+
   // Слайс 2 — цели: имя + reaches + конверсия отдельной метрикой.
-  await expect(page.getByRole('heading', { name: 'Цели', exact: true })).toBeVisible();
+  await revealed('Цели');
   await expect(page.getByText('Оформление заказа')).toBeVisible();
   await expect(page.getByText(/CR 2,4%/)).toBeVisible();
 
   // Слайс 2 — UTM: размеченные строки + честная сноска о визитах без метки.
-  await expect(page.getByRole('heading', { name: 'UTM-метки', exact: true })).toBeVisible();
+  await revealed('UTM-метки');
   await expect(page.getByText('instagram', { exact: true })).toBeVisible();
   await expect(page.getByText(/Без метки — 100 визитов из 145/)).toBeVisible();
 
   // Слайс 2 — топ-страницы: пути, компактный топ-4 (5-я строка спрятана) + хвост «из полного отчёта».
-  await expect(page.getByRole('heading', { name: 'Топ-страницы', exact: true })).toBeVisible();
+  await revealed('Топ-страницы');
   await expect(page.getByText('/catalog/notebooks')).toBeVisible();
   await expect(page.getByText('/blog/new-collection')).toHaveCount(0);
   await expect(page.getByText(/Ещё 20 просмотров из 402/)).toBeVisible();
 
   // Слайс аудитории/источников — реферальные сайты: внешние домены + хвост своего total.
-  await expect(page.getByRole('heading', { name: 'Реферальные сайты', exact: true })).toBeVisible();
+  await revealed('Реферальные сайты');
   await expect(page.getByText('vc.ru', { exact: true })).toBeVisible();
   await expect(page.getByText('pikabu.ru')).toHaveCount(0);
   await expect(page.getByText(/Ещё 10 визитов из 210/)).toBeVisible();
 
   // Соцсети: конкретные сети (lastsignSocialNetwork) + отказы вторичным контекстом.
-  await expect(page.getByRole('heading', { name: 'Соцсети', exact: true })).toBeVisible();
+  await revealed('Соцсети');
   await expect(page.getByText('ВКонтакте', { exact: true })).toBeVisible();
   await expect(page.getByText(/35,4% отказов/)).toBeVisible();
 
   // Telegram у Метрики относится к отдельной размерности Messenger, а не SocialNetwork.
-  await expect(page.getByRole('heading', { name: 'Мессенджеры', exact: true })).toBeVisible();
+  await revealed('Мессенджеры');
   await expect(page.getByText('Telegram', { exact: true })).toBeVisible();
 
   // Устройства: локализация по СТАБИЛЬНОМУ id (id '2' → «Смартфоны»), сырое имя API не течёт.
-  await expect(page.getByRole('heading', { name: 'Устройства', exact: true })).toBeVisible();
+  await revealed('Устройства');
   await expect(page.getByText('Смартфоны', { exact: true })).toBeVisible();
   await expect(page.getByText('Mobile')).toHaveCount(0);
 
@@ -528,10 +537,12 @@ test('Атрибуция цели: синхронные селекторы ис�
   test.skip(testInfo.project.name !== 'desktop-1440', 'Метрика — desktop-first поверхность');
   await bootMetrika(page, '/metrika');
 
-  const sourcesSel = page.getByLabel('Цель для источников трафика');
-  const devicesSel = page.getByLabel('Цель для устройств');
-  const utmSel = page.getByLabel('Цель для UTM-меток');
-  const landingsSel = page.getByLabel('Цель для страниц входа');
+  // role=combobox — именно ТРИГГЕР пилюли: у раскрытого списка Radix тот же aria-label, и на кадре
+  // закрывающей анимации getByLabel матчил бы сразу два узла (strict-mode violation).
+  const sourcesSel = page.getByRole('combobox', { name: 'Цель для источников трафика' });
+  const devicesSel = page.getByRole('combobox', { name: 'Цель для устройств' });
+  const utmSel = page.getByRole('combobox', { name: 'Цель для UTM-меток' });
+  const landingsSel = page.getByRole('combobox', { name: 'Цель для страниц входа' });
 
   // Дефолт — «Без цели» на всех карточках (топ-цель НЕ подставляется автоматически).
   await expect(sourcesSel).toContainText('Без цели');

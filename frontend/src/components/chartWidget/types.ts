@@ -44,6 +44,12 @@ export interface ChartSectionProps {
   stripToolbar?: boolean;
   /** Personal Home registry key used by the pin/unpin command. */
   homeKey?: string;
+  /** Прогрессивная загрузка вне Главной: тело карточки не фетчит, пока карточка не подойдёт к
+      вьюпорту (тот же механизм, что у `homeKey`-карточек доски — WidgetInViewContext). Явный
+      opt-in, а не вывод из `drillTo`: `drillTo` есть и у общих тел (история/тепловая карта/
+      скорость/топ-посты/упоминания), которые уже читают контекст и на рабочих страницах обязаны
+      грузиться сразу. Работает только если тело реально читает `useWidgetInView()`. */
+  deferData?: boolean;
   /** Enables grain, include-today, and target controls for compatible series widgets. */
   seriesOptions?: boolean;
   /** Overrides prefs-backed editing for config-driven widgets. */
