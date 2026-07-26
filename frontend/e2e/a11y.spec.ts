@@ -38,6 +38,8 @@ const ROUTES = [
   { path: '/analytics', name: 'analytics' },
   { path: '/posts', name: 'posts' },
   { path: '/home', name: 'home' },
+  { path: '/connect?source=moysklad', name: 'connect-moysklad' },
+  { path: '/connect?source=metrika', name: 'connect-metrika' },
 ];
 
 for (const route of ROUTES) {

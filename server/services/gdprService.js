@@ -11,12 +11,12 @@
 // Экспорт СТРИМИТСЯ, а не буферизуется: архивы канала (daily/posts/mentions/velocity/…,
 // до 730 дн × N каналов) целиком в один JS-объект = OOM веб-процесса (Fable-finding). Поэтому
 // каждый архивный массив тянется keyset-страницами фиксированного размера и пишется в res
-// по мере готовности — память ограничена одной страницей, не всем архивом. `workspaces`, `reports`
-// и перечень `channels` тоже пагинируются id-keyset'ом: schema разрешает будущие team-workspaces,
-// у reports нет пер-юзер капа, а channels-цикл не должен опираться на продуктовый кап ради
-// memory-proof. Буферизуются только singleton account/prefs/telegram_session. Размер страницы
-// приходит из config через dep (services читают только внедрённые зависимости, не окружение —
-// check:boundaries).
+// по мере готовности — память ограничена одной страницей, не всем архивом. `workspaces`, `reports`,
+// личные `mention_notify_subscriptions` и перечень `channels` тоже пагинируются keyset'ом: schema
+// разрешает будущие team-workspaces, у reports/подписок нет пер-юзер капа, а channels-цикл не
+// должен опираться на продуктовый кап ради memory-proof. Буферизуются только singleton
+// account/prefs/telegram_session. Размер страницы приходит из config через dep (services читают
+// только внедрённые зависимости, не окружение — check:boundaries).
 const EXPORT_PAGE_SIZE_DEFAULT = 1000;
 // Потолок keyset-страницы (defense-in-depth): даже если в сервис прилетит гигантский pageSize
 // (тестовый шов или ошибка вызывающего), одна страница не должна разрушить ограничение памяти.
@@ -89,6 +89,10 @@ const ARCHIVE_SPECS = {
     from: 'ms_returns', chanCol: 'channel_id',
     cols: 'return_id, moment, sum_kopecks, agent_id, agent_name, updated_at',
     keys: [{ col: 'return_id', cast: 'text' }], order: 'return_id ASC',
+  },
+  ymDaily: {
+    from: 'ym_daily', cols: '*', chanCol: 'channel_id',
+    keys: [{ col: 'day', cast: 'date' }], order: 'day ASC',
   },
   igDaily: {
     from: 'ig_daily', cols: '*', chanCol: 'channel_id',
@@ -315,6 +319,38 @@ function createGdprService({ pool, enabled, transaction, exportPageSize }) {
     await w.write(']');
   }
 
+  // Подписки принадлежат пользователю, а не владельцу канала: участник team-workspace вправе
+  // подписаться на общий канал через собственную managed-сессию. Поэтому их нельзя собирать
+  // внутри цикла только по owner_uid-каналам. Стримим все строки uid по уникальному channel_id
+  // keyset'ом. Намеренно НЕ JOIN'им channels и не экспортируем title/username/rules/archive:
+  // собственная строка подписки переносима, чужие данные канала — нет.
+  async function streamMentionNotifySubscriptions(w, q, uid, PAGE) {
+    await w.write('[');
+    let cursor = null;
+    let first = true;
+    for (;;) {
+      if (w.closed) throw new ExportAborted();
+      const sql = `SELECT channel_id, enabled, send_days, send_hour, last_run_at,
+                          last_notified_at, last_error, created_at, updated_at
+                     FROM mention_notify_subscriptions
+                    WHERE uid=$1`
+        + (cursor != null ? ' AND channel_id > $2' : '')
+        + ` ORDER BY channel_id ASC LIMIT $${cursor != null ? 3 : 2}`;
+      const params = cursor != null ? [uid, cursor, PAGE] : [uid, PAGE];
+      const { rows } = await q(sql, params);
+      if (rows.length === 0) break;
+      let buf = '';
+      for (const row of rows) {
+        buf += (first ? '' : ',') + JSON.stringify(row);
+        first = false;
+      }
+      await w.write(buf);
+      if (rows.length < PAGE) break;
+      cursor = rows[rows.length - 1].channel_id;
+    }
+    await w.write(']');
+  }
+
   /* Экспорт персональных данных (GDPR portability) — один JSON-файл, СТРИМОМ (см. шапку модуля).
      Учётные данные не экспортируются НИКОГДА: pass_hash, token_version, tg_sessions.session_enc,
      ig_accounts.access_token_enc, ym_accounts.access_token_enc, tg_notify_bindings.link_token_hash
@@ -380,6 +416,11 @@ function createGdprService({ pool, enabled, transaction, exportPageSize }) {
       // Присутствие подключения — да; сама сессия — никогда (это credential, не данные).
       await w.write(`"telegram_session":${JSON.stringify(tgSession)},`);
       await w.write(`"telegram_notify_binding":${JSON.stringify(tgNotifyBinding)},`);
+      // Личные подписки живут на uid и могут указывать на доступный team-канал другого owner.
+      // Экспортируем их отдельно от owner-only channels, без JOIN/данных самого канала.
+      await w.write('"mention_notify_subscriptions":');
+      await streamMentionNotifySubscriptions(w, q, uid, PAGE);
+      await w.write(',');
       await w.write(`"channels":[`);
 
       // Каналы тоже id-keyset'ом: перечень не опирается на продуктовый кап ради memory-proof, а
@@ -412,6 +453,9 @@ function createGdprService({ pool, enabled, transaction, exportPageSize }) {
           await w.write(',"annotations":'); await streamArchive(w, client, ARCHIVE_SPECS.annotations, ch.id, PAGE);
           await w.write(',"ms_orders":'); await streamArchive(w, client, ARCHIVE_SPECS.msOrders, ch.id, PAGE);
           await w.write(',"ms_returns":'); await streamArchive(w, client, ARCHIVE_SPECS.msReturns, ch.id, PAGE);
+          // Архив Метрики живёт после disconnect ym_accounts, поэтому входит в общий архив
+          // независимо от текущего наличия singleton-подключения ниже.
+          await w.write(',"ym_daily":'); await streamArchive(w, client, ARCHIVE_SPECS.ymDaily, ch.id, PAGE);
           await w.write('}'); // /archive
 
           const mentionSettings = (await q(

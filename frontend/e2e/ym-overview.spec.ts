@@ -594,7 +594,8 @@ test('Подключение Метрики: токен → выбор счёт�
 
   // Панель источника выбрана дип-линком.
   await expect(page.getByRole('heading', { name: 'Яндекс.Метрика' })).toBeVisible();
-  const tokenInput = page.getByPlaceholder('OAuth-токен Яндекса');
+  const tokenInput = page.getByLabel('OAuth-токен Яндекса');
+  await expect(tokenInput).toHaveAttribute('aria-describedby', 'yandex-metrika-token-help');
   await tokenInput.fill('y0_test_oauth_token');
   await page.getByRole('button', { name: 'Подключить', exact: true }).click();
 

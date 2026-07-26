@@ -71,13 +71,24 @@ export function RadialShare({
   centerCaption?: string;
   format?: (n: number) => string;
 }) {
-  const gradId = useId();
+  const titleId = useId();
   const [hover, setHover] = useState<string | null>(null);
 
-  const shown = segments.filter((s) => s.value > 0).sort((a, b) => b.value - a.value);
+  // Граница компонента не пропускает отрицательные/NaN/Infinity в SVG-геометрию. Ноль честно
+  // означает отсутствие сегмента; невалидный `total` не превращает path в `NaN`, а возвращает
+  // построение к сумме валидных показанных значений.
+  const shown = segments
+    .map((segment) => ({
+      ...segment,
+      value: Number.isFinite(segment.value) ? Math.max(0, segment.value) : 0,
+    }))
+    .filter((segment) => segment.value > 0)
+    .sort((a, b) => b.value - a.value || a.key.localeCompare(b.key));
   const shownSum = shown.reduce((acc, s) => acc + s.value, 0);
-  const whole = Math.max(shownSum, total ?? 0);
-  if (!shown.length || whole <= 0) return null;
+  if (!shown.length || !Number.isFinite(shownSum) || shownSum <= 0) return null;
+  const safeTotal = total != null && Number.isFinite(total) && total >= 0 ? total : null;
+  const whole = Math.max(shownSum, safeTotal ?? 0);
+  if (!Number.isFinite(whole) || whole <= 0) return null;
 
   // Остаток — то, что сервер посчитал в итоге, но не отнёс ни к одной категории (Метрика скрывает
   // демографию при малой выборке). Рисуем его приглушённым, а не растягиваем сегменты на 100%.
@@ -107,13 +118,22 @@ export function RadialShare({
   });
 
   const active = arcs.find((a) => a.key === hover) ?? null;
-  const label = `Состав: ${arcs.map((a) => `${a.label} ${a.pct.toFixed(0)}%`).join(', ')}`;
+  const totalCaption = centerCaption ?? unitWord;
+  const label = `Всего ${format(whole)} ${totalCaption}. Состав: ${arcs
+    .map((a) => `${a.label} — ${format(a.value)} ${unitWord}, ${a.pct.toFixed(1)}%`)
+    .join('; ')}`;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="relative min-h-0 flex-1">
-        <svg viewBox={`0 0 ${VB} ${CY + 14}`} className="h-full w-full" role="img" aria-label={label}>
-          <title id={gradId}>{label}</title>
+        <svg
+          viewBox={`0 0 ${VB} ${CY + 14}`}
+          className="h-full w-full"
+          role="img"
+          aria-labelledby={titleId}
+          focusable="false"
+        >
+          <title id={titleId}>{label}</title>
           {arcs.map((a) => (
             <path
               key={a.key}
@@ -123,6 +143,8 @@ export function RadialShare({
               className="transition-opacity dur-base ease-house"
               onMouseEnter={() => setHover(a.key)}
               onMouseLeave={() => setHover((h) => (h === a.key ? null : h))}
+              aria-hidden="true"
+              focusable="false"
             />
           ))}
           {/* Итог в центре — как Label внутри PolarRadiusAxis у shadcn. На наведении подменяется
@@ -135,13 +157,27 @@ export function RadialShare({
           </text>
         </svg>
       </div>
-      {/* Легенда: свотч, подпись, доля (charts/tooltip). Она же — доступная альтернатива дуге. */}
-      <ul className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-2xs">
+      {/* Легенда — постоянная доступная читалка дуги: touch/keyboard не зависят от mouse hover,
+          а сырое значение не теряется за одним процентом. На 320/390px остаётся одна колонка. */}
+      <ul
+        aria-label="Легенда состава"
+        className="mt-1 grid min-w-0 grid-cols-1 gap-x-3 gap-y-1 text-2xs sm:grid-cols-2"
+      >
         {arcs.map((a) => (
-          <li key={a.key} className="flex items-center gap-1.5">
-            <span aria-hidden="true" className="h-2.5 w-2.5 shrink-0 rounded-[2px]" style={{ backgroundColor: a.color }} />
-            <span className="text-muted-foreground">{a.label}</span>
-            <span className="font-medium tabular-nums text-foreground">{a.pct.toFixed(1)}%</span>
+          <li
+            key={a.key}
+            className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-x-1.5"
+          >
+            <span
+              aria-hidden="true"
+              className="h-2.5 w-2.5 shrink-0 rounded-[2px]"
+              style={{ backgroundColor: a.color }}
+            />
+            <span className="min-w-0 truncate text-muted-foreground" title={a.label}>{a.label}</span>
+            <span className="col-start-2 min-w-0 tabular-nums text-foreground">
+              <span className="font-medium">{format(a.value)} {unitWord}</span>
+              <span className="text-muted-foreground"> · {a.pct.toFixed(1)}%</span>
+            </span>
           </li>
         ))}
       </ul>

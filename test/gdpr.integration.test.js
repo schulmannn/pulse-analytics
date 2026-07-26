@@ -128,6 +128,21 @@ async function seedRichUser(tag) {
        (channel_id, include_terms, exclude_terms, exclude_sources, match_mode, updated_by)
      VALUES ($1, ARRAY['brand'], ARRAY['spam'], ARRAY['noise'], 'word', $2)`,
     [ch, uid]);
+  await pool.query(
+    `INSERT INTO mention_notify_subscriptions (channel_id, uid, enabled, send_days, send_hour)
+     VALUES ($1, $2, true, ARRAY[1, 3], 11)`,
+    [ch, uid]);
+  await pool.query(
+    `INSERT INTO ym_accounts
+       (channel_id, counter_id, counter_name, site, counter_created_day, access_token_enc)
+     VALUES ($1, $2, $3, $4, CURRENT_DATE - 30, 'iv:tag:SECRET_YM_TOKEN')`,
+    [ch, `${nonce}-${tag}-counter`, `Counter ${tag}`, `https://${tag}.example`]);
+  await pool.query(
+    `INSERT INTO ym_daily
+       (channel_id, day, visits, users, pageviews, bounce_rate, avg_visit_duration_seconds,
+        page_depth, new_users, percent_new_visitors, robot_visits, robot_percentage)
+     VALUES ($1, CURRENT_DATE, 100, 80, 140, 12.5, 61.5, 2.4, 20, 25, 3, 3)`,
+    [ch]);
   return { uid, ws, src, ch };
 }
 
@@ -171,8 +186,11 @@ test('erasure: deleteUserAccount removes every user-linked row, spares neighbour
     ['channel_daily', `SELECT count(*) FROM channel_daily WHERE channel_id=$1`, [a.ch]],
     ['posts', `SELECT count(*) FROM posts WHERE channel_id=$1`, [a.ch]],
     ['channel_mention_settings', `SELECT count(*) FROM channel_mention_settings WHERE channel_id=$1`, [a.ch]],
+    ['mention_notify_subscriptions', `SELECT count(*) FROM mention_notify_subscriptions WHERE uid=$1`, [a.uid]],
     ['ig_accounts', `SELECT count(*) FROM ig_accounts WHERE channel_id=$1`, [a.ch]],
     ['ig_daily', `SELECT count(*) FROM ig_daily WHERE channel_id=$1`, [a.ch]],
+    ['ym_accounts', `SELECT count(*) FROM ym_accounts WHERE channel_id=$1`, [a.ch]],
+    ['ym_daily', `SELECT count(*) FROM ym_daily WHERE channel_id=$1`, [a.ch]],
     ['chart_annotations', `SELECT count(*) FROM chart_annotations WHERE channel_id=$1`, [a.ch]],
     ['ms_orders', `SELECT count(*) FROM ms_orders WHERE channel_id=$1`, [a.ch]],
     ['ms_returns', `SELECT count(*) FROM ms_returns WHERE channel_id=$1`, [a.ch]],
@@ -234,8 +252,14 @@ test('export: streamUserExport carries the archive but never credentials or fore
   assert.strictEqual(data.channels[0].archive.ms_orders.length, 1, 'MoySklad orders archive included');
   assert.strictEqual(data.channels[0].archive.ms_returns.length, 1, 'MoySklad returns archive included');
   assert.strictEqual(data.channels[0].archive.ms_returns[0].agent_name, 'Personal customer');
+  assert.strictEqual(data.channels[0].archive.ym_daily.length, 1, 'Yandex Metrika history included');
+  assert.strictEqual(data.channels[0].archive.ym_daily[0].visits, '100');
+  assert.strictEqual(data.channels[0].yandex_metrika.counter_id, `${nonce}-exp-a-counter`,
+    'Yandex Metrika non-secret identity included');
   assert.deepStrictEqual(data.channels[0].mention_settings.include_terms, ['brand'], 'mention rules included');
   assert.strictEqual(data.channels[0].mention_settings.match_mode, 'word');
+  assert.deepStrictEqual(data.mention_notify_subscriptions.map((s) => s.channel_id), [a.ch],
+    'personal mention subscription included at the top level');
   assert.ok(data.channels[0].instagram, 'ig profile included');
   assert.strictEqual(data.channels[0].instagram.daily.length, 1, 'ig daily included');
   assert.ok(data.telegram_session, 'tg connection presence included');
@@ -243,12 +267,50 @@ test('export: streamUserExport carries the archive but never credentials or fore
 
   // The credential blacklist: nothing that smells like a secret may appear ANYWHERE in the JSON.
   const flat = res.body();
-  for (const secret of ['SECRET_TG_SESSION', 'SECRET_IG_TOKEN', 'pass_hash', 'session_enc', 'access_token_enc', 'token_version']) {
+  for (const secret of [
+    'SECRET_TG_SESSION', 'SECRET_IG_TOKEN', 'SECRET_YM_TOKEN',
+    'pass_hash', 'session_enc', 'access_token_enc', 'token_version',
+  ]) {
     assert.ok(!flat.includes(secret), `export must not contain ${secret}`);
   }
 
   const exportedIds = data.channels.map((c) => c.id);
   assert.ok(!exportedIds.includes(b.ch), 'membership channel (foreign data) excluded');
+});
+
+test('export: a subscriber gets their shared-channel subscription without foreign channel data', { skip }, async () => {
+  const owner = await seedRichUser('sub-owner');
+  const member = await seedRichUser('sub-member');
+  await pool.query(
+    `INSERT INTO workspace_members (workspace_id, uid, role) VALUES ($1, $2, 'member')`,
+    [owner.ws, member.uid]);
+  await pool.query(
+    `INSERT INTO mention_notify_subscriptions
+       (channel_id, uid, enabled, send_days, send_hour, last_error)
+     VALUES ($1, $2, true, ARRAY[2, 4], 17, 'search_failed')`,
+    [owner.ch, member.uid]);
+
+  const { outcome, res, json: data } = await runExport(member.uid, { pageSize: 1 });
+  assert.strictEqual(outcome, 'ok');
+  assert.deepStrictEqual(data.channels.map((c) => c.id), [member.ch],
+    'owner-only channel export does not pull in the shared channel');
+  assert.deepStrictEqual(
+    data.mention_notify_subscriptions.map((s) => s.channel_id),
+    [member.ch, owner.ch].sort((a, b) => a - b),
+    'own + shared subscriptions cross pageSize=1 without omission or duplication',
+  );
+
+  const sharedSubscription = data.mention_notify_subscriptions.find((s) => s.channel_id === owner.ch);
+  assert.ok(sharedSubscription, 'the member’s personal subscription to the shared channel is exported');
+  assert.deepStrictEqual(sharedSubscription.send_days, [2, 4]);
+  assert.strictEqual(sharedSubscription.send_hour, 17);
+  assert.strictEqual(sharedSubscription.last_error, 'search_failed');
+
+  const flat = res.body();
+  assert.ok(!flat.includes(`chan_${nonce}_sub-owner`), 'shared channel username/title is not exported');
+  assert.ok(!flat.includes(`${nonce}-sub-owner-counter`), 'shared channel integration identity is not exported');
+  assert.ok(!flat.includes('Counter sub-owner'), 'shared channel Metrika metadata is not exported');
+  assert.ok(!flat.includes('SECRET_YM_TOKEN'), 'shared channel credential is never exported');
 });
 
 test('export: keyset pages tile the archive with no duplication/omission, incl. equal timestamps', { skip }, async () => {
@@ -260,6 +322,10 @@ test('export: keyset pages tile the archive with no duplication/omission, incl. 
   for (let n = 1; n <= 4; n++) {
     await pool.query(`INSERT INTO channel_daily (channel_id, day, views) VALUES ($1, ${day(n)}, $2)`, [a.ch, n]);
     await pool.query(`INSERT INTO ig_daily (channel_id, day, reach) VALUES ($1, ${day(n)}, $2)`, [a.ch, n]);
+    await pool.query(
+      `INSERT INTO ym_daily (channel_id, day, visits, users, pageviews)
+       VALUES ($1, ${day(n)}, $2, $2, $2)`,
+      [a.ch, n]);
     await pool.query(
       `INSERT INTO ig_media_daily (channel_id, media_id, day, reach) VALUES ($1, $2, ${day(n)}, $3)`,
       [a.ch, `media-${n}`, n]);
@@ -283,7 +349,9 @@ test('export: keyset pages tile the archive with no duplication/omission, incl. 
   const big = (await runExport(a.uid, { pageSize: 1000 })).json.channels[0].archive;
   const small = (await runExport(a.uid, { pageSize: 2 })).json.channels[0].archive;
 
-  for (const arr of ['daily', 'posts', 'mentions', 'velocity', 'annotations', 'ms_orders', 'ms_returns']) {
+  for (const arr of [
+    'daily', 'posts', 'mentions', 'velocity', 'annotations', 'ms_orders', 'ms_returns', 'ym_daily',
+  ]) {
     assert.deepStrictEqual(small[arr], big[arr], `${arr}: paged read equals single-shot read`);
   }
   // Every post present exactly once (no dupes, no holes) despite the shared timestamp + page split.

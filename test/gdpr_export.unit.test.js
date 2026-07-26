@@ -58,6 +58,16 @@ test('pageQuery: первая страница — без предиката, LI
   assert.match(sql, /SELECT \*, day::text AS __c0 FROM channel_daily WHERE channel_id = \$1 ORDER BY day ASC LIMIT \$2$/);
 });
 
+test('pageQuery: ym_daily использует тот же bounded day-keyset', () => {
+  const sql = pageQuery(ARCHIVE_SPECS.ymDaily, true, [false]);
+  assert.strictEqual(
+    sql,
+    'SELECT *, day::text AS __c0 FROM ym_daily'
+    + ' WHERE channel_id = $1 AND (((day IS NULL OR day > $2::date)))'
+    + ' ORDER BY day ASC LIMIT $3',
+  );
+});
+
 test('pageQuery: следующая страница posts — курсор $2..$3, LIMIT $4', () => {
   const sql = pageQuery(ARCHIVE_SPECS.posts, true, [false, false]);
   assert.match(sql, /LIMIT \$4$/);
@@ -194,11 +204,20 @@ test('стрим: собирает валидный JSON прежней форм
     account: { id: 5, email: 'e', role: 'user', status: 'active', avatar_url: null, created_at: 'T' },
     channels: [{ id: 9, username: 'u', title: 't', source: 'collector', tg_channel_id: null, created_at: 'T' }],
     pages: {
+      mention_notify_subscriptions: [[{
+        channel_id: 19, enabled: true, send_days: [], send_hour: 10,
+        last_run_at: null, last_notified_at: null, last_error: null,
+        created_at: 'T', updated_at: 'T',
+      }]],
       // Две полные страницы (по 2) + короткая → цикл должен запросить 2 раза с курсором и остановиться.
       channel_daily: [
         [{ day: '2024-01-01', views: 1, __c0: '2024-01-01' }, { day: '2024-01-02', views: 2, __c0: '2024-01-02' }],
         [{ day: '2024-01-03', views: 3, __c0: '2024-01-03' }],
       ],
+      ym_daily: [[{
+        channel_id: 9, day: '2024-01-01', visits: '7', users: '6', pageviews: '8',
+        __c0: '2024-01-01',
+      }]],
       ms_orders: [[{
         order_id: 'order-1', moment: '2024-01-02T10:00:00Z', sum_kopecks: '15000',
         agent_id: 'agent-1', agent_name: 'Customer', __c0: 'order-1',
@@ -228,6 +247,9 @@ test('стрим: собирает валидный JSON прежней форм
   assert.deepStrictEqual(doc.channels[0].archive.ms_orders.map((r) => r.order_id), ['order-1']);
   assert.deepStrictEqual(doc.channels[0].archive.ms_returns.map((r) => r.return_id), ['return-1']);
   assert.ok(!('__c0' in doc.channels[0].archive.ms_returns[0]), 'MoySklad cursor alias is not exported');
+  assert.deepStrictEqual(doc.channels[0].archive.ym_daily.map((r) => r.visits), ['7']);
+  assert.ok(!('__c0' in doc.channels[0].archive.ym_daily[0]), 'YM cursor alias is not exported');
+  assert.deepStrictEqual(doc.mention_notify_subscriptions.map((s) => s.channel_id), [19]);
   assert.deepStrictEqual(doc.channels[0].instagram, null);
 
   // Курсор второй страницы = последний __c0 первой ('2024-01-02').
@@ -235,6 +257,45 @@ test('стрим: собирает валидный JSON прежней форм
   assert.strictEqual(dailyCalls.length, 2, 'ровно две страницы (вторая короткая — стоп)');
   assert.deepStrictEqual(dailyCalls[0].params, [9, 2]);
   assert.deepStrictEqual(dailyCalls[1].params, [9, '2024-01-02', 2]);
+
+  const subscriptionCalls = pool.capture.filter((c) => c.table === 'mention_notify_subscriptions');
+  assert.strictEqual(subscriptionCalls.length, 2, 'top-level paged read + legacy owned-channel singleton');
+  assert.deepStrictEqual(subscriptionCalls[0].params, [5, 2]);
+  assert.doesNotMatch(subscriptionCalls[0].text, /\bJOIN\b|\bFROM\s+channels\b/i,
+    'subscription export does not join or reveal channel data');
+});
+
+test('стрим: личные подписки пагинируются по channel_id независимо от owner-only channels', async () => {
+  const pool = fakePool({
+    account: { id: 5, email: 'e', role: 'user', status: 'active', avatar_url: null, created_at: 'T' },
+    channels: [],
+    pages: {
+      mention_notify_subscriptions: [
+        [
+          { channel_id: 7, enabled: true, send_days: [], send_hour: 9 },
+          { channel_id: 11, enabled: false, send_days: [1, 3], send_hour: 12 },
+        ],
+        [{ channel_id: 19, enabled: true, send_days: [5], send_hour: 18 }],
+      ],
+    },
+  });
+  const svc = createGdprService({ pool, enabled: true, transaction: null, exportPageSize: 2 });
+  const res = collectorRes();
+  const outcome = await svc.streamUserExport(5, res, { onReady() {} });
+  assert.strictEqual(outcome, 'ok');
+
+  const doc = JSON.parse(res.body());
+  assert.deepStrictEqual(doc.channels, [], 'subscription does not pull a non-owned channel into export');
+  assert.deepStrictEqual(doc.mention_notify_subscriptions.map((s) => s.channel_id), [7, 11, 19]);
+
+  const calls = pool.capture.filter((c) => c.table === 'mention_notify_subscriptions');
+  assert.strictEqual(calls.length, 2);
+  assert.deepStrictEqual(calls[0].params, [5, 2]);
+  assert.match(calls[0].text, /WHERE uid=\$1 ORDER BY channel_id ASC LIMIT \$2$/);
+  assert.deepStrictEqual(calls[1].params, [5, 11, 2]);
+  assert.match(calls[1].text, /AND channel_id > \$2 ORDER BY channel_id ASC LIMIT \$3$/);
+  assert.ok(calls.every((c) => !/\bJOIN\b|\bFROM\s+channels\b/i.test(c.text)),
+    'no shared-channel metadata query is introduced');
 });
 
 test('стрим: NULL date_published в курсоре posts → плейсхолдер пропущен, параметры без null', async () => {

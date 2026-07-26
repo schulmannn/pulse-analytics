@@ -621,7 +621,7 @@ function MoySkladPanel() {
               Отключить
             </button>
           </div>
-          {error && <p className="text-xs text-ember">{error}</p>}
+          {error && <p role="alert" className="text-xs text-ember">{error}</p>}
         </div>
       ) : (
         <div className="mt-4 space-y-4">
@@ -630,20 +630,24 @@ function MoySkladPanel() {
             откройте <b className="font-medium text-foreground">Настройки → Обмен данными → Токены API</b> и создайте токен.
           </p>
           <form onSubmit={submit} className="flex items-center gap-2">
+            <label htmlFor="moysklad-api-token" className="sr-only">Токен API МойСклада</label>
             <input
+              id="moysklad-api-token"
               type="password"
               value={token}
               onChange={(e) => setToken(e.target.value)}
               placeholder="Токен API МойСклада"
               autoComplete="off"
+              aria-invalid={error ? true : undefined}
+              aria-describedby={error ? 'moysklad-api-token-help moysklad-api-token-error' : 'moysklad-api-token-help'}
               className="h-9 min-w-0 flex-1 rounded border border-border bg-background px-3 text-sm text-foreground outline-hidden placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
             />
             <Button type="submit" disabled={!token.trim() || busy} className="shrink-0">
               {busy ? 'Проверяем…' : 'Подключить'}
             </Button>
           </form>
-          {error && <p className="text-xs text-ember">{error}</p>}
-          <p className="text-2xs text-muted-foreground">
+          {error && <p id="moysklad-api-token-error" role="alert" className="text-xs text-ember">{error}</p>}
+          <p id="moysklad-api-token-help" className="text-2xs text-muted-foreground">
             Токен хранится только на сервере в зашифрованном виде (AES-256-GCM) и не попадает в логи.
           </p>
         </div>
@@ -753,7 +757,7 @@ function MetrikaPanel() {
               Отключить
             </button>
           </div>
-          {error && <p className="text-xs text-ember">{error}</p>}
+          {error && <p role="alert" className="text-xs text-ember">{error}</p>}
         </div>
       ) : (
         <div className="mt-4 space-y-4">
@@ -763,7 +767,9 @@ function MetrikaPanel() {
             можно на oauth.yandex.ru для своего приложения.
           </p>
           <form onSubmit={submit} className="flex items-center gap-2">
+            <label htmlFor="yandex-metrika-token" className="sr-only">OAuth-токен Яндекса</label>
             <input
+              id="yandex-metrika-token"
               type="password"
               value={token}
               onChange={(e) => {
@@ -772,6 +778,8 @@ function MetrikaPanel() {
               }}
               placeholder="OAuth-токен Яндекса"
               autoComplete="off"
+              aria-invalid={error ? true : undefined}
+              aria-describedby={error ? 'yandex-metrika-token-help yandex-metrika-token-error' : 'yandex-metrika-token-help'}
               className="h-9 min-w-0 flex-1 rounded border border-border bg-background px-3 text-sm text-foreground outline-hidden placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
             />
             <Button type="submit" disabled={!token.trim() || busy} className="shrink-0">
@@ -799,8 +807,8 @@ function MetrikaPanel() {
               ))}
             </div>
           )}
-          {error && <p className="text-xs text-ember">{error}</p>}
-          <p className="text-2xs text-muted-foreground">
+          {error && <p id="yandex-metrika-token-error" role="alert" className="text-xs text-ember">{error}</p>}
+          <p id="yandex-metrika-token-help" className="text-2xs text-muted-foreground">
             Токен хранится только на сервере в зашифрованном виде (AES-256-GCM) и не попадает в логи.
           </p>
         </div>
@@ -1273,17 +1281,22 @@ function TgScanning({
   if (phase === 'password') {
     return (
       <div className="mx-auto w-full max-w-xs">
-        <p className="text-sm text-muted-foreground">У аккаунта включена двухфакторная защита. Введите облачный пароль Telegram:</p>
+        <label htmlFor="telegram-cloud-password" className="block text-sm text-muted-foreground">
+          У аккаунта включена двухфакторная защита. Введите облачный пароль Telegram:
+        </label>
         <input
+          id="telegram-cloud-password"
           type="password"
-          autoFocus
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') onSubmit(); }}
           placeholder="Облачный пароль"
+          autoComplete="off"
+          aria-invalid={err ? true : undefined}
+          aria-describedby={err ? 'telegram-cloud-password-error' : undefined}
           className="mt-3 w-full rounded border border-border bg-background px-3 py-2 text-sm text-foreground outline-hidden focus:ring-1 focus:ring-primary"
         />
-        {err && <p role="alert" className="mt-2 text-xs font-medium text-destructive">{err}</p>}
+        {err && <p id="telegram-cloud-password-error" role="alert" className="mt-2 text-xs font-medium text-destructive">{err}</p>}
         <Button type="button" onClick={onSubmit} disabled={busy || !password} className="mt-3">
           {busy ? 'Проверка…' : 'Подтвердить'}
         </Button>

@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 
@@ -78,8 +78,19 @@ export function SegmentedControl<T extends string>({
   // Каретка roving-tabindex. Держим ИНДЕКС, а не значение: у периодных треков value может не
   // совпадать ни с одним сегментом (выбран свой диапазон → глайдер скрыт), и тогда фокусируемым
   // должен остаться хоть кто-то, иначе в трек нельзя войти с клавиатуры вообще.
-  const [caret, setCaret] = useState(0);
-  const focusIndex = activeIndex >= 0 ? activeIndex : Math.min(caret, Math.max(0, count - 1));
+  const [caret, setCaret] = useState(() => (activeIndex >= 0 ? activeIndex : 0));
+  const focusIndex = Math.min(caret, Math.max(0, count - 1));
+
+  // A value change from outside the track (URL state, reset, another synchronized control) moves
+  // the single tab stop to the newly selected answer. Arrow navigation does not change `value`, so
+  // it is deliberately free to keep moving `caret` across several segments between commits.
+  useEffect(() => {
+    setCaret((current) => (
+      activeIndex >= 0
+        ? activeIndex
+        : Math.min(current, Math.max(0, count - 1))
+    ));
+  }, [activeIndex, count]);
 
   /** Двигает фокус по треку с заворотом; отключённые сегменты НЕ пропускаем — они несут title,
       объясняющий недоступность, и должны быть достижимы. */
