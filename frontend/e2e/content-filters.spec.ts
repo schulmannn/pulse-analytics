@@ -189,7 +189,8 @@ test.describe('Контент — URL-фильтры (desktop)', () => {
     const downloadPromise = page.waitForEvent('download');
     await page.getByRole('button', { name: 'Экспорт показанных публикаций в CSV' }).click();
     const download = await downloadPromise;
-    expect(download.suggestedFilename()).toMatch(/^telegram-content-тестовый-канал-\d{4}-\d{2}-\d{2}_\d{4}-\d{2}-\d{2}\.csv$/u);
+    // Слаг транслитерирован: Chrome отбрасывает весь `download` с не-ASCII (см. slugify).
+    expect(download.suggestedFilename()).toMatch(/^telegram-content-testovyy-kanal-\d{4}-\d{2}-\d{2}_\d{4}-\d{2}-\d{2}\.csv$/);
     const downloadPath = await download.path();
     if (!downloadPath) throw new Error('Telegram content CSV has no local download path');
     const csv = await readFile(downloadPath, 'utf8');

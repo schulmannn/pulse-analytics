@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import type { Page, TestInfo } from '@playwright/test';
 import { AxeBuilder } from '@axe-core/playwright';
-import { bootDemo, detailOverlayOpener } from './helpers';
+import { bootDemo, detailOverlayOpener, openDetailOverlay } from './helpers';
 
 /**
  * Accessibility gate. Two layers:
@@ -49,7 +49,7 @@ for (const route of ROUTES) {
 
 test('axe: no serious violations — detail overlay open', async ({ page }, testInfo) => {
   await bootDemo(page, '/');
-  await detailOverlayOpener(page).click();
+  await openDetailOverlay(page);
   await expect(page.getByRole('dialog')).toBeVisible();
   await expectNoSeriousViolations(page, testInfo, 'detail-overlay');
 });

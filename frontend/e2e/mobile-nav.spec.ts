@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { bootDemo, detailOverlayOpener } from './helpers';
+import { bootDemo, openDetailOverlay } from './helpers';
 
 /**
  * Mobile navigation & reachability (card «Mobile dashboard navigation»). Two things get gated here at
@@ -79,7 +79,7 @@ test('mobile 390: detail deep-links, Back closes it, reload reopens, source surv
   const sourceLabelBefore = await page.getByRole('button', { name: /^Источник/ }).getAttribute('aria-label');
 
   // Open a widget's detail from its header ↗ button → the URL gains ?detail= (a pushed history entry).
-  await detailOverlayOpener(page).click();
+  await openDetailOverlay(page);
   await expect(page).toHaveURL(/[?&]detail=/);
   await expect(page.getByRole('dialog', { name: /^График/ })).toBeVisible();
 
@@ -111,7 +111,7 @@ test('mobile 390: page period survives a detail open/close round-trip', async ({
   await allPill.click();
   await expect(allPill).toHaveAttribute('aria-pressed', 'true');
 
-  await detailOverlayOpener(page).click();
+  await openDetailOverlay(page);
   await expect(page.getByRole('dialog', { name: /^График/ })).toBeVisible();
   await page.goBack();
   await expect(page.getByRole('dialog', { name: /^График/ })).toHaveCount(0);

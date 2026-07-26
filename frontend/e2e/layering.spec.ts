@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { bootDemo, detailOverlayOpener } from './helpers';
+import { bootDemo, detailOverlayOpener, openDetailOverlay, openDetailOverlayByKeyboard } from './helpers';
 
 /**
  * Layering scale (DESIGN_TOKENS «Layering»). Overlays pull from one named z-index ladder so nothing
@@ -20,7 +20,7 @@ test('overlays follow the layering scale (modal above nav, covers content)', asy
   expect(navZ, 'z-nav utility should resolve to a real stacking value').toBeGreaterThan(0);
 
   // Open a widget detail overlay — a body-portaled surface at z-modal.
-  await detailOverlayOpener(page).click();
+  await openDetailOverlay(page);
   const dialog = page.locator('[role="dialog"]').first();
   await expect(dialog).toBeVisible();
   const dialogZ = await dialog.evaluate((el) => Number(getComputedStyle(el).zIndex) || 0);
@@ -49,18 +49,22 @@ test('overlays follow the layering scale (modal above nav, covers content)', asy
  */
 test('detail overlay dismisses on outside-click (scrim) and Escape', async ({ page }) => {
   await bootDemo(page, '/');
+  // Кнопка «Развернуть» — цель ФОКУСА (sr-only после #351); открываем оверлей кликом по карточке,
+  // как это делает пользователь мышью, а фокус-возврат проверяем по самой кнопке.
   const opener = detailOverlayOpener(page);
 
   // Outside-click: open, then click a top-corner pixel — that hits the z-modal scrim (proof it's
   // above the app chrome) whose onClick closes the overlay.
-  await opener.click();
+  await openDetailOverlay(page);
   await expect(page.locator('[role="dialog"]')).toBeVisible();
   await page.mouse.click(6, 6);
   await expect(page.locator('[role="dialog"]')).toHaveCount(0);
 
   // Escape: reopen and dismiss via the keyboard (capture-phase Escape in DetailShell); focus returns
-  // to the opener so a keyboard user isn't dropped to <body>.
-  await opener.click();
+  // to the opener so a keyboard user isn't dropped to <body>. Открываем ИМЕННО с клавиатуры — это
+  // тот путь, у которого есть опенер для возврата фокуса (мышиный клик по заголовку не фокусирует
+  // ничего, и вернуться было бы некуда).
+  await openDetailOverlayByKeyboard(page);
   await expect(page.locator('[role="dialog"]')).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(page.locator('[role="dialog"]')).toHaveCount(0);
