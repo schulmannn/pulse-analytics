@@ -1,4 +1,5 @@
 import { useContext, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { ShareTrack } from '@/components/ShareRows';
 import { useMsChannelSeries, useMsGeography, useMsSalesByChannel } from '@/api/queries';
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
 import { ChartCardBody } from '@/components/chartWidget/ChartCardBody';
@@ -667,7 +668,6 @@ export function MsChannelRows({
     return arr;
   }, [rows, sort]);
   const shown = expanded ? sorted : sorted.slice(0, 8);
-  const maxSum = Math.max(...rows.map((r) => r.sum), 1);
   const restOrders = (expanded ? [] : sorted.slice(8)).reduce((acc, r) => acc + r.orders, 0) + noChannel;
 
   return (
@@ -702,14 +702,9 @@ export function MsChannelRows({
                 {pluralRu(r.orders, ['заказ', 'заказа', 'заказов'])} · ср. {fmt.short(aov(r))} ₽
               </span>
             </div>
-            <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted">
-              <div
-                className="h-full rounded-full"
-                style={{
-                  width: `${Math.max(3, Math.round((r.sum / maxSum) * 100))}%`,
-                  backgroundColor: 'hsl(var(--chart-role-primary) / 0.75)',
-                }}
-              />
+            {/* Доля от ЦЕЛОГО, а не от лидера: канал с 40% выручки и должен занимать 40% дорожки. */}
+            <div className="mt-1 flex">
+              <ShareTrack pct={totalSum > 0 ? (r.sum / totalSum) * 100 : 0} height="h-1.5" />
             </div>
           </div>
         );
@@ -774,7 +769,6 @@ export function MsChannelContribution({
   const shownIds = useMemo(() => new Set(shown.map((item) => item.id)), [shown]);
   const hidden = sorted.filter((item) => !shownIds.has(item.id));
   const total = items.reduce((sum, item) => sum + msChannelContributionCurrent(item, metric), 0);
-  const max = Math.max(...items.map((item) => msChannelContributionCurrent(item, metric)), 1);
   const hiddenValue = hidden.reduce((sum, item) => sum + msChannelContributionCurrent(item, metric), 0);
 
   return (
@@ -834,14 +828,8 @@ export function MsChannelContribution({
                 )}
               </span>
             </div>
-            <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted">
-              <div
-                className="h-full rounded-full"
-                style={{
-                  width: `${currentValue === 0 ? 0 : Math.max(3, Math.round((currentValue / max) * 100))}%`,
-                  backgroundColor: `hsl(var(--chart-role-primary) / ${it.synthetic ? '0.4' : '0.75'})`,
-                }}
-              />
+            <div className="mt-1 flex">
+              <ShareTrack pct={currentValue === 0 ? 0 : share} height="h-1.5" muted={it.synthetic} />
             </div>
           </div>
         );
@@ -873,7 +861,6 @@ export function MsGeographyRows({
   const expanded = useContext(ChartExpandedContext);
   const shown = expanded ? rows : rows.slice(0, 5);
   const hiddenCities = expanded ? 0 : Math.max(0, rows.length - shown.length);
-  const maxOrders = rows[0]?.orders ?? 1;
   const cityRows = shown.map((r) => (
     <div key={r.city}>
       <div className="flex items-baseline justify-between gap-3 text-xs">
@@ -882,14 +869,8 @@ export function MsGeographyRows({
           <span className="font-medium text-foreground">{fmt.num(r.orders)}</span> · {fmt.short(r.sum)} ₽
         </span>
       </div>
-      <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted">
-        <div
-          className="h-full rounded-full"
-          style={{
-            width: `${Math.max(3, Math.round((r.orders / maxOrders) * 100))}%`,
-            backgroundColor: 'hsl(var(--chart-role-primary) / 0.75)',
-          }}
-        />
+      <div className="mt-1 flex">
+        <ShareTrack pct={totalOrders > 0 ? (r.orders / totalOrders) * 100 : 0} height="h-1.5" />
       </div>
     </div>
   ));

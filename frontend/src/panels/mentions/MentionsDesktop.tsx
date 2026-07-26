@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { ShareTrack } from '@/components/ShareRows';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useMentionSettings, useMentions, useMentionsArchive } from '@/api/queries';
 import { usePagePeriod } from '@/lib/period';
@@ -477,7 +478,9 @@ function SourceLeaderboard({
   onSelect: (channelId: string) => void;
 }) {
   if (options.length === 0) return <EmptyState compact size="chart" title="Нет упоминающих каналов за период." />;
-  const max = Math.max(...options.map((o) => o.count), 1);
+  // Знаменатель долей — ВСЕ упоминания периода, а не только показанная пятёрка: иначе доля
+  // менялась бы от того, сколько строк влезло в карточку.
+  const totalCount = options.reduce((acc, o) => acc + o.count, 0);
   const top = options.slice(0, 5);
   const selectedOption = selected ? options.find((option) => option.channel_id === selected) : null;
   const visible = selectedOption && !top.includes(selectedOption)
@@ -510,10 +513,13 @@ function SourceLeaderboard({
                 {fmt.short(o.views)} просм.
               </span>
             </div>
-            <div className="mt-1 h-1 overflow-hidden rounded-full bg-muted">
-              <div
-                className={cn('h-full rounded-full', active ? 'bg-primary' : 'bg-primary/50')}
-                style={{ width: `${Math.max(3, Math.round((o.count / max) * 100))}%` }}
+            {/* Доля от ЦЕЛОГО: площадка с 40% упоминаний занимает 40% дорожки, а не всю её,
+                если она просто первая. Разметка строки своя — это кликабельный фильтр. */}
+            <div className="mt-1 flex">
+              <ShareTrack
+                pct={totalCount > 0 ? (o.count / totalCount) * 100 : 0}
+                height="h-1"
+                color={active ? 'hsl(var(--primary))' : undefined}
               />
             </div>
           </button>
