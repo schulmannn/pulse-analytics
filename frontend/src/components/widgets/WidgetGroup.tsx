@@ -260,16 +260,36 @@ export function WidgetGroup({ id, className, children }: WidgetGroupProps) {
   const sequenceRef = useRef(sequence);
   sequenceRef.current = sequence;
 
+  // Живой заголовок карточки для объявлений (переименование живёт в prefs, как у чипов ниже).
+  // Читается через ref, чтобы move() не менял идентичность на каждую регистрацию виджета.
+  const registeredRef = useRef(registered);
+  registeredRef.current = registered;
+  const [announcement, setAnnouncement] = useState('');
+  const titleOf = useCallback(
+    (widgetId: string) =>
+      getPrefs(widgetId).title || registeredRef.current.find((r) => r.id === widgetId)?.title || widgetId,
+    [],
+  );
+
   const move = useCallback(
     (widgetId: string, dir: -1 | 1) => {
       const seq = [...sequenceRef.current];
       const i = seq.indexOf(widgetId);
       const j = i + dir;
-      if (i < 0 || j < 0 || j >= seq.length) return;
+      if (i < 0) return;
+      // Край списка — не молчим: клавиатурный пользователь не видит, что перестановка не случилась.
+      if (j < 0 || j >= seq.length) {
+        setAnnouncement(`«${titleOf(widgetId)}» — уже ${dir < 0 ? 'в начале' : 'в конце'}`);
+        return;
+      }
       [seq[i], seq[j]] = [seq[j], seq[i]];
       setGroupOrder(id, seq);
+      // Позиция считается по ВИДИМЫМ карточкам: скрытые живут в той же последовательности, но на
+      // доске их нет — номер «3 из 7» при пяти видимых был бы враньём.
+      const visible = seq.filter((wid) => !getPrefs(wid).hidden);
+      setAnnouncement(`«${titleOf(widgetId)}» — позиция ${visible.indexOf(widgetId) + 1} из ${visible.length}`);
     },
-    [id],
+    [id, titleOf],
   );
 
   // Live reorder while dragging: place the dragged widget at the hovered widget's slot.
@@ -430,16 +450,24 @@ export function WidgetGroup({ id, className, children }: WidgetGroupProps) {
   return (
     <GroupCtx.Provider value={ctxValue}>
       <div ref={groupRootRef} className={className} data-widget-group-root>{children}</div>
+      {/* Клавиатурная перестановка немая по природе (двигается CSS-order, DOM не меняется) —
+          объявляем новую позицию. Без role="status": на /home уже есть свой статус-регион, и второй
+          с той же ролью ломал бы однозначность запросов к нему. */}
+      <p aria-live="polite" aria-atomic="true" data-reorder-status className="sr-only">
+        {announcement}
+      </p>
       {reorderMode &&
         createPortal(
-          <Button
-            type="button"
-            data-reorder-done
-            onClick={() => setReorderMode(false)}
-            className="fixed bottom-6 left-1/2 z-popover -translate-x-1/2 px-6"
-          >
-            Готово
-          </Button>,
+          <div className="fixed bottom-6 left-1/2 z-popover flex -translate-x-1/2 flex-col items-center gap-2">
+            {/* Подсказка про клавиатуру: ручка в шапке карточки — единственный вход в стрелочную
+                перестановку, сама по себе она не обнаруживается. */}
+            <p className="rounded-full border border-border bg-card px-3 py-1 text-2xs text-muted-foreground">
+              Перетащите карточку или выберите её ручку и двигайте стрелками ← →
+            </p>
+            <Button type="button" data-reorder-done onClick={() => setReorderMode(false)} className="px-6">
+              Готово
+            </Button>
+          </div>,
           document.body,
         )}
       {hidden.length > 0 && (

@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { ICON_BUTTON_CLASS } from './constants';
-import { WidgetMenu } from './WidgetMenu';
+import { MenuIcon, WidgetMenu } from './WidgetMenu';
 import type { WidgetMenuProps } from './WidgetMenu';
 
 interface PresenceState {
@@ -20,6 +20,8 @@ interface WidgetHeaderProps {
   removePresence: PresenceState;
   onRemove: () => void;
   onExpand: () => void;
+  /** Клавиатурная перестановка в reorder-режиме (группа виджетов; вне группы — undefined). */
+  onReorderMove?: (dir: -1 | 1) => void;
   menu: Omit<WidgetMenuProps, 'homeKey'>;
 }
 
@@ -34,6 +36,7 @@ export function WidgetHeader({
   removePresence,
   onRemove,
   onExpand,
+  onReorderMove,
   menu,
 }: WidgetHeaderProps) {
   // A «floating» strip parks the controls in the top-right corner over a headline-less summary; a
@@ -86,6 +89,36 @@ export function WidgetHeader({
           className={`sr-only ${removePresence.mounted || reorder ? 'hidden' : ''}`}
         >
           Развернуть
+        </button>
+      )}
+      {reorder && onReorderMove && (
+        // Ручка перестановки: единственный фокусируемый элемент карточки в reorder-режиме (меню и
+        // «убрать» здесь invisible). Указательный жест остаётся у всей карточки — pointerdown
+        // гасим, иначе section-level обработчик preventDefault'ит и ручка не получает фокус.
+        // Кольцо фокуса даёт глобальное правило index.css (button:focus-visible), своё не заводим.
+        <button
+          type="button"
+          data-reorder-handle
+          aria-label={`Переместить виджет «${label}»`}
+          aria-keyshortcuts="ArrowLeft ArrowRight"
+          title="Стрелки ← → — переместить"
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => event.stopPropagation()}
+          onKeyDown={(event) => {
+            const dir: -1 | 1 | 0 =
+              event.key === 'ArrowLeft' || event.key === 'ArrowUp'
+                ? -1
+                : event.key === 'ArrowRight' || event.key === 'ArrowDown'
+                  ? 1
+                  : 0;
+            if (dir === 0) return;
+            event.preventDefault();
+            event.stopPropagation();
+            onReorderMove(dir);
+          }}
+          className={`${ICON_BUTTON_CLASS} hover:text-foreground`}
+        >
+          <MenuIcon kind="drag" />
         </button>
       )}
       <WidgetMenu {...menu} homeKey={homeKey} />

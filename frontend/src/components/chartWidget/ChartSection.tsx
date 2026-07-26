@@ -150,6 +150,7 @@ export function ChartSection(props: ChartSectionProps) {
           removePresence={model.controls.removePresence}
           onRemove={model.controls.removeFromHome}
           onExpand={model.expansion.openExpand}
+          onReorderMove={group ? (dir) => group.move(widgetId, dir) : undefined}
           menu={{
             open: model.controls.menuOpen,
             onOpenChange: model.controls.setMenuOpen,

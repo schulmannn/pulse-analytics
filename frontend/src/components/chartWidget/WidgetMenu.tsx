@@ -210,7 +210,9 @@ function MenuSeparator() {
   return <div role="separator" className="mx-1 my-1 h-px bg-border" />;
 }
 
-function MenuIcon({ kind }: { kind: 'edit' | 'hide' | 'drag' | 'home' }) {
+/** Глифы виджет-меню. Экспортируется, потому что тот же `drag`-глиф носит клавиатурная ручка
+    перестановки в WidgetHeader — одна иконка на одно действие, без второй копии путей. */
+export function MenuIcon({ kind }: { kind: 'edit' | 'hide' | 'drag' | 'home' }) {
   return (
     <svg
       viewBox="0 0 16 16"

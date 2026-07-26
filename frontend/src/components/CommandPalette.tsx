@@ -5,8 +5,14 @@ import { useChannels, useLogout, useMe } from '@/api/queries';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { setCommandPaletteOpen, toggleCommandPalette, useCommandPaletteOpen } from '@/lib/command-palette';
 import { DRILL_KEYS } from '@/lib/kpiDerive';
-import { NETWORKS } from '@/lib/networks';
+import { NetworkGlyph } from '@/lib/networks';
 import { setActiveNetwork } from '@/lib/networkStore';
+import {
+  buildIgMetricCommands,
+  buildNetworkRouteCommands,
+  buildSourceCommands,
+} from '@/lib/paletteCommands';
+import type { PaletteChannel } from '@/lib/paletteCommands';
 import { getDrillMetric } from '@/lib/widgetMetrics';
 import { Icon } from '@/components/nav-icons';
 import type { IconName } from '@/components/nav-icons';
@@ -54,16 +60,10 @@ export function useCommandPalette() {
   return { open, setOpen };
 }
 
-const ROUTES: Array<{ path: string; label: string; icon: IconName; search: string }> = [
-  { path: '/', label: 'Обзор', icon: 'overview', search: 'обзор главная overview' },
-  { path: '/analytics', label: 'Аналитика', icon: 'analytics', search: 'аналитика графики analytics' },
-  { path: '/posts', label: 'Контент', icon: 'posts', search: 'контент посты публикации posts content' },
-  { path: '/mentions', label: 'Упоминания', icon: 'mentions', search: 'упоминания mentions' },
+// Сетевые разделы (Обзор/Аналитика/Контент/… каждой сети) строятся из реестра lib/networks —
+// см. lib/paletteCommands. Здесь остаются ТОЛЬКО маршруты вне сетей: их ни один реестр не описывает.
+const EXTRA_ROUTES: Array<{ path: string; label: string; icon: IconName; search: string }> = [
   { path: '/reports', label: 'Отчёты', icon: 'report', search: 'отчёты отчёт отчет reports report документ' },
-  { path: '/instagram', label: 'Instagram · Обзор', icon: 'overview', search: 'instagram инстаграм обзор' },
-  { path: '/instagram/analytics', label: 'Instagram · Аналитика', icon: 'analytics', search: 'instagram инстаграм аналитика' },
-  { path: '/instagram/content', label: 'Instagram · Контент', icon: 'posts', search: 'instagram инстаграм контент посты' },
-  { path: '/instagram/audience', label: 'Instagram · Аудитория', icon: 'audience', search: 'instagram инстаграм аудитория' },
   { path: '/settings', label: 'Настройки', icon: 'gear', search: 'настройки settings' },
 ];
 
@@ -71,28 +71,6 @@ const SUPERUSER_ROUTES: Array<{ path: string; label: string; icon: IconName; sea
   { path: '/admin', label: 'Админ', icon: 'admin', search: 'админ admin' },
   { path: '/bugs', label: 'Баги', icon: 'bugs', search: 'баги bugs фидбек' },
 ];
-
-// Сети — из ЕДИНОГО реестра lib/networks (его докстринг: «Everything network-shaped reads THIS
-// list»). Локальный кортеж молча выпадал бы из ⌘K при добавлении новой сети (аудит).
-const SOURCE_NETWORKS = NETWORKS.map((n) => ({ key: n.key as 'tg' | 'ig', name: n.name, color: n.color, to: n.home }));
-
-/** Tiny brand glyph for a network badge (currentColor; the call site tints it the brand colour). */
-function NetworkGlyph({ k }: { k: 'tg' | 'ig' }) {
-  if (k === 'tg') {
-    return (
-      <svg viewBox="0 0 24 24" fill="currentColor" className="h-1.5 w-1.5" aria-hidden="true">
-        <path d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71L12.6 16.3l-1.99 1.93c-.23.23-.42.42-.83.42z" />
-      </svg>
-    );
-  }
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="h-1.5 w-1.5" aria-hidden="true">
-      <rect x="2.5" y="2.5" width="19" height="19" rx="5.5" />
-      <circle cx="12" cy="12" r="4.2" />
-      <circle cx="17.4" cy="6.6" r="1.1" fill="currentColor" stroke="none" />
-    </svg>
-  );
-}
 
 // Search history (MRU command ids) — the palette opens on «Недавнее», like Claude's search.
 const RECENTS_KEY = 'pulse_palette_recents';
@@ -136,21 +114,22 @@ function PaletteDialog({ close }: { close: () => void }) {
 
   const iconFor = (name: IconName) => <Icon name={name} className="h-4 w-4 shrink-0" />;
 
-  // Hide the Instagram nav shortcuts until some channel has a linked IG account — consistent with
-  // the source switcher (no IG surface for unconnected workspaces).
-  const anyIgConnected = (channelsQuery.data?.channels ?? []).some((c) => !!c.ig_connected);
+  // Разделы: сетевые — из реестра (сеть показывается, только если её выставляет хотя бы один канал
+  // мастерской: тот же предикат hasChannel, что у сайдбара и SourceSwitcher), затем внесетевые.
+  const channels: PaletteChannel[] = channelsQuery.data?.channels ?? [];
   const routeCommands: PaletteCommand[] = [
-    ...ROUTES,
-    ...(me.data?.role === 'superuser' ? SUPERUSER_ROUTES : []),
-  ]
-    .filter((route) => anyIgConnected || !route.path.startsWith('/instagram'))
-    .map((route) => ({
-      id: `route:${route.path}`,
-      label: route.label,
-      search: `перейти ${route.search}`.toLowerCase(),
-      icon: iconFor(route.icon),
-      run: () => navigate(route.path),
-    }));
+    ...buildNetworkRouteCommands(channels),
+    ...EXTRA_ROUTES.map((route) => ({ ...route, id: `route:${route.path}`, search: `перейти ${route.search}`.toLowerCase() })),
+    ...(me.data?.role === 'superuser'
+      ? SUPERUSER_ROUTES.map((route) => ({ ...route, id: `route:${route.path}`, search: `перейти ${route.search}`.toLowerCase() }))
+      : []),
+  ].map((route) => ({
+    id: route.id,
+    label: route.label,
+    search: route.search,
+    icon: iconFor(route.icon),
+    run: () => navigate(route.path),
+  }));
 
   // Metric pages — first-class search targets (steep's «Jump to» reaches metrics too).
   const metricCommands: PaletteCommand[] = DRILL_KEYS.map((key) => {
@@ -163,65 +142,44 @@ function PaletteDialog({ close }: { close: () => void }) {
       run: () => navigate(`/metrics/${key}`),
     };
   });
-  // The IG metric pages too — the list mirrors the MetricRoute dispatcher (IgMetricPage);
-  // a new IG metric registers here as well (аудит: палитра не допрыгивала до IG-метрик).
-  const IG_METRICS: Array<[string, string]> = [
-    ['ig-reach', 'Охват (IG)'],
-    ['ig-follows', 'Подписки (IG)'],
-    ['ig-views', 'Просмотры (IG)'],
-    ['ig-interactions', 'Взаимодействия (IG)'],
-    ['ig-likes', 'Лайки (IG)'],
-    ['ig-saves', 'Сохранения (IG)'],
-    ['ig-er', 'Вовлечённость ER (IG)'],
-  ];
-  const igMetricCommands: PaletteCommand[] = IG_METRICS.map(([key, term]) => ({
-    id: `metric:${key}`,
-    label: term,
-    search: `метрика instagram ${term}`.toLowerCase(),
+  // IG-метрики — тем же реестровым гейтом, что и IG-разделы (раньше показывались всегда).
+  const igMetricCommands: PaletteCommand[] = buildIgMetricCommands(channels).map((metric) => ({
+    id: metric.id,
+    label: metric.label,
+    search: metric.search,
     icon: iconFor('analytics'),
-    run: () => navigate(`/metrics/${key}`),
+    run: () => navigate(`/metrics/${metric.key}`),
   }));
 
-  // Sources = (channel × network). Each channel yields a Telegram row and an Instagram row; picking
-  // one selects the channel AND lands on that network — the Cmd+K twin of the sidebar SourceSwitcher.
-  const channels = channelsQuery.data?.channels ?? [];
-  const sourceCommands: PaletteCommand[] = channels.length >= 2
-    ? channels.flatMap((channel) => {
-        const name = String(channel.username || channel.title || channel.id);
-        const chip = (
-          <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-sm bg-muted text-2xs font-medium text-muted-foreground">
-            {name.slice(0, 1).toUpperCase()}
-          </span>
-        );
-        return SOURCE_NETWORKS
-          // IG source only for channels with a linked account — mirrors the sidebar switcher.
-          .filter((net) => net.key !== 'ig' || !!channel.ig_connected)
-          .map((net) => ({
-          id: `source:${net.key}:${channel.id}`,
-          label: `@${name} · ${net.name}`,
-          search: `перейти сменить источник канал ${net.name} ${name}`.toLowerCase(),
-          icon: (
-            <span className="relative flex shrink-0">
-              {chip}
-              <span
-                className="absolute -bottom-1 -right-1 flex h-2.5 w-2.5 items-center justify-center rounded-full border border-border bg-background"
-                style={{ color: net.color }}
-                aria-hidden="true"
-              >
-                <NetworkGlyph k={net.key} />
-              </span>
-            </span>
-          ),
-          run: () => {
-            setChannelId(channel.id);
-            // Persist the network too — the destination owns it, but this avoids a one-frame flash
-            // of the previous network in the shell before navigation resolves.
-            setActiveNetwork(net.key);
-            navigate(net.to);
-          },
-        }));
-      })
-    : [];
+  // Sources = (channel × network), где пара реально существует (реестровый hasChannel): выбор
+  // селектит канал И приземляет на эту сеть — ⌘K-двойник сайдбарного SourceSwitcher. Глиф — тот же
+  // реестровый NetworkGlyph, что рисует сети в сайдбаре (третьей копии SVG в приложении нет).
+  const sourceCommands: PaletteCommand[] = buildSourceCommands(channels).map((source) => ({
+    id: source.id,
+    label: source.label,
+    search: source.search,
+    icon: (
+      <span className="relative flex shrink-0">
+        <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-sm bg-muted text-2xs font-medium text-muted-foreground">
+          {source.channelName.slice(0, 1).toUpperCase()}
+        </span>
+        <span
+          className="absolute -bottom-1 -right-1 flex h-2.5 w-2.5 items-center justify-center rounded-full border border-border bg-background"
+          style={{ color: source.network.color }}
+          aria-hidden="true"
+        >
+          <NetworkGlyph k={source.network.key} className="h-1.5 w-1.5" />
+        </span>
+      </span>
+    ),
+    run: () => {
+      setChannelId(source.channelId);
+      // Persist the network too — the destination owns it, but this avoids a one-frame flash
+      // of the previous network in the shell before navigation resolves.
+      setActiveNetwork(source.network.key);
+      navigate(source.network.home);
+    },
+  }));
 
   const logoutCommand: PaletteCommand = {
     id: 'logout',
