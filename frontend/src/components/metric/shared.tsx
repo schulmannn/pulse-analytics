@@ -39,9 +39,34 @@ export function MetricDescriptor({ children }: { children: ReactNode }) {
   return <div className="mt-1.5 text-xs text-muted-foreground">{children}</div>;
 }
 
-/** Каноническая rail-секция metric-страницы: плоский заголовок с hairline (канон «ничего не
-    кричит», без card-рамки). `mark` → `data-rail-card` — на него смотрят e2e (interactions.spec). */
-export function RailSection({ title, mark, children }: { title: string; mark?: string; children: ReactNode }) {
+/** Rail-секция metric-страницы в двух канонах. `variant="flat"` (по умолчанию) — плоский заголовок
+    с hairline («ничего не кричит», без рамки), так живут шесть вертикалей. `variant="card"` —
+    аналитическая карточка composer-rail'а MetricPage: заголовок без hairline на card-поверхности.
+    Card-ветка НЕ несёт `space-y-*`: её дети расставляют собственные `mt-*` (см. MetricPage), и
+    вертикальный ритм от контейнера их бы перебил. `mark` → `data-rail-card` в обеих ветках —
+    на него смотрят e2e (interactions.spec). */
+export function RailSection({
+  title,
+  mark,
+  variant = 'flat',
+  children,
+}: {
+  title: string;
+  mark?: string;
+  variant?: 'flat' | 'card';
+  children: ReactNode;
+}) {
+  if (variant === 'card') {
+    return (
+      <section
+        data-rail-card={mark}
+        className="rounded-2xl border border-border bg-card p-4 shadow-xs dark:border-white/6 sm:p-5"
+      >
+        <h3 className="text-xs font-medium tracking-wider text-muted-foreground">{title}</h3>
+        <div className="mt-3">{children}</div>
+      </section>
+    );
+  }
   return (
     <section data-rail-card={mark} className="space-y-3">
       <h3 className="flex items-center gap-3 text-xs font-medium tracking-wider text-muted-foreground">

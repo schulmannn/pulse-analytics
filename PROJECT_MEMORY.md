@@ -510,6 +510,17 @@ Google OAuth origins, Railway-service для recovery worker.
 - В отложенной светлой теме active-period chip пока даёт контраст 4.22:1 вместо 4.5:1; в мобильной
   ветке period controls имеют высоту 22px вместо целевых 32px. Оба долга зафиксированы тестами и не
   исправляются внутри завершённой desktop dark-программы.
+- **Lint-гейт a11y частичный.** `biome.json` перечисляет все 38 a11y-правил поимённо: 24 правила с
+  нулём нарушений подняты до `error` (регрессия по ним валит `npm run lint` и CI), 14 правил с
+  открытым долгом остаются `warn` и НЕ гейтятся. Открыто 129 находок: `noNoninteractiveElement-
+  Interactions` 40, `useSemanticElements` 22, `noStaticElementInteractions` 19, `useKeyWithClick-
+  Events` 19, `noSvgWithoutTitle` 6, `useFocusableInteractive` 6, `noLabelWithoutControl` 4,
+  `noAutofocus` 4, `useButtonType` 3, `noAriaHiddenOnFocusable` 2, по 1 — `useAriaPropsForRole`,
+  `useAriaPropsSupportedByRole`, `noNoninteractiveElementToInteractiveRole`, `noNoninteractive-
+  Tabindex`. Правило переводится в `error` только после того, как его счётчик доведён до нуля.
+  Вне a11y гейт по-прежнему пуст: остальные 1124 находки (complexity/style/suspicious/correctness,
+  в т.ч. `useExhaustiveDependencies` 22 и `noUnusedFunctionParameters` 33) имеют severity `warn`,
+  а `npm run lint` фильтрует `--diagnostic-level=error` — это отдельный незакрытый долг.
 
 ## Поддерживаемые документы
 

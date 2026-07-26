@@ -76,6 +76,54 @@ describe('api error humanization', () => {
     expect(err.message).toBe('Канал не найден');
   });
 
+  // server/app.js отдаёт `{ error: 'internal_error' }` на любой необработанный 500 — токен нужен
+  // логам/мониторингу, но пользователю обязан достаться русский текст, а не машинный код.
+  it('never shows the internal_error token — falls back to the human 500 message', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => Response.json({ error: 'internal_error', request_id: 'req-1' }, { status: 500 })),
+    );
+    const err = await failGet();
+    expect(err.status).toBe(500);
+    expect(err.message).toBe('Сервер временно недоступен — попробуйте позже');
+    expect(err.message).not.toContain('internal_error');
+  });
+
+  it('hides the other machine codes the server emits (404 not_found, 403 csrf, 400 not_configured)', async () => {
+    const cases = [
+      { code: 'not_found', status: 404, human: 'Данные не найдены' },
+      { code: 'csrf', status: 403, human: 'Нет доступа к этому разделу' },
+      { code: 'not_configured', status: 400, human: 'Не удалось выполнить запрос (код 400)' },
+      { code: 'session_decrypt_failed', status: 500, human: 'Сервер временно недоступен — попробуйте позже' },
+    ];
+    for (const { code, status, human } of cases) {
+      vi.stubGlobal('fetch', vi.fn(async () => Response.json({ error: code }, { status })));
+      const err = await failGet();
+      expect(err.message).toBe(human);
+      expect(err.message).not.toContain(code);
+    }
+  });
+
+  it('keeps a human Russian 400 message untouched', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => Response.json({ error: 'Подключение Telegram по QR не настроено на сервере' }, { status: 400 })),
+    );
+    const err = await failGet();
+    expect(err.status).toBe(400);
+    expect(err.message).toBe('Подключение Telegram по QR не настроено на сервере');
+  });
+
+  it('still reads retry_after from a body whose error field is a machine code', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => Response.json({ error: 'internal_error', retry_after: 30 }, { status: 500 })),
+    );
+    const err = await failGet();
+    expect(err.retryAfter).toBe(30);
+    expect(err.message).toBe('Сервер временно недоступен — попробуйте позже');
+  });
+
   it('maps a bodyless 429 to a human message and still reads Retry-After', async () => {
     vi.stubGlobal(
       'fetch',

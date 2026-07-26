@@ -92,6 +92,9 @@ async function bootRevokedSession(
 // The production case: the selected source is the managed CENTRAL channel, the caller owns it
 // (central_owner=true), and its collecting session was revoked → the same actionable reconnect signal
 // and focused Connect flow QR channels already get, with NO auto-start.
+// Health-подпись сайдбара НЕ проверяется: индикатор убран сознательно в #351 («Remove
+// redundant card and sidebar indicators»). Контракт этих тестов — actionable reconnect-CTA
+// на Обзоре и сфокусированный поток на /connect, а не бывшая подпись сайдбара.
 test('revoked central session (owner) opens the focused reconnect flow without auto-starting it', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop-1440', 'desktop connection-health contract');
   const state = await bootRevokedSession(page, 'central', 'once');
@@ -99,7 +102,6 @@ test('revoked central session (owner) opens the focused reconnect flow without a
   const reconnectLink = page.getByRole('link', { name: 'Переподключить Telegram →', exact: true });
   await expect(reconnectLink).toBeVisible();
   await expect(reconnectLink).toHaveAttribute('href', '/connect?source=telegram&tab=qr&action=reconnect');
-  await expect(page.getByText('нужно переподключить', { exact: true })).toBeVisible();
   const overviewShot = testInfo.outputPath('telegram-central-reauth-banner-dark.png');
   await page.screenshot({ path: overviewShot, fullPage: true });
   await testInfo.attach('telegram-central-reauth-banner-dark', { path: overviewShot, contentType: 'image/png' });
@@ -130,7 +132,6 @@ test('revoked QR session shows the same actionable reconnect CTA', async ({ page
   const reconnectLink = page.getByRole('link', { name: 'Переподключить Telegram →', exact: true });
   await expect(reconnectLink).toBeVisible();
   await expect(reconnectLink).toHaveAttribute('href', '/connect?source=telegram&tab=qr&action=reconnect');
-  await expect(page.getByText('нужно переподключить', { exact: true })).toBeVisible();
   expect(state.qrStarts()).toBe(0);
 });
 

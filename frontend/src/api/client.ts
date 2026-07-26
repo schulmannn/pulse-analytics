@@ -31,12 +31,33 @@ function humanHttpMessage(status: number): string {
   return `Не удалось выполнить запрос (код ${status})`;
 }
 
+// Часть ответов сервера несёт в `error` не текст для человека, а машинный код: он полезен в логах и
+// мониторинге, но показывать его пользователю нельзя («internal_error» вместо «Сервер временно
+// недоступен»). Явный список — то, что сервер реально отдаёт в HTTP-теле (app.js 404/500-хендлеры,
+// authService csrf, routes/tg not_configured, generic-фолбэк 'error'); плюс общая форма
+// snake_case-идентификатора, чтобы новый код с сервера не протёк в UI дословно. Русские
+// (и любые содержащие пробел/заглавные/кириллицу) сообщения этой проверкой НЕ затрагиваются.
+const MACHINE_ERROR_CODES = new Set([
+  'internal_error',
+  'not_found',
+  'not_configured',
+  'forbidden',
+  'csrf',
+  'error',
+]);
+const MACHINE_ERROR_SHAPE = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$/;
+
+function isMachineErrorCode(value: string): boolean {
+  return MACHINE_ERROR_CODES.has(value) || MACHINE_ERROR_SHAPE.test(value);
+}
+
 async function readApiError(res: Response): Promise<ApiError> {
   let message = humanHttpMessage(res.status);
   let retryAfter: number | undefined;
   try {
     const body = await res.json();
-    if (body && typeof body.error === 'string') message = body.error;
+    // Машинный код оставляем серверу (логи/мониторинг), пользователю — фолбэк по статусу.
+    if (body && typeof body.error === 'string' && !isMachineErrorCode(body.error)) message = body.error;
     const rawRetry = body && body.retry_after;
     const parsedRetry = rawRetry === '' || rawRetry == null ? NaN : Number(rawRetry);
     if (Number.isFinite(parsedRetry) && parsedRetry >= 0) retryAfter = parsedRetry;

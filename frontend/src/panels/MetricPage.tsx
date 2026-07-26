@@ -1190,7 +1190,7 @@ export function MetricPage() {
             «Сравнение» первым и с явной иерархией — итог окна доминирует, база и Δ вторичны;
             ниже — Разбивка и «О метрике» той же карточной иерархией. */}
         <aside id="tg-metric-inspector" className="space-y-4">
-          <RailSection title="Сравнение" mark="comparison">
+          <RailSection title="Сравнение" mark="comparison" variant="card">
             {/* Итог окна — доминанта карточки (hero переехал сюда после тихой шапки). */}
             <div className="text-2xs tracking-wide text-muted-foreground">Текущий период</div>
             <div className="mt-1 text-3xl font-medium leading-none tabular-nums text-foreground">{meta.total}</div>
@@ -1234,7 +1234,7 @@ export function MetricPage() {
           </RailSection>
 
           {field && (
-            <RailSection title="Разбивка" mark="breakdown">
+            <RailSection title="Разбивка" mark="breakdown" variant="card">
               <SegSelect
                 ariaLabel="Измерение разбивки"
                 value={dim}
@@ -1248,7 +1248,7 @@ export function MetricPage() {
             </RailSection>
           )}
 
-          <RailSection title="О метрике" mark="about">
+          <RailSection title="О метрике" mark="about" variant="card">
             <dl className="space-y-3 text-sm">
               {def.formula && <AboutRow label="Как считается" text={def.formula} />}
               {def.included && <AboutRow label="Что учитывается" text={def.included} />}
@@ -1340,8 +1340,6 @@ function ChartTypeIcon({ kind }: { kind: 'line' | 'bar' | 'rank' | 'pivot' }) {
   );
 }
 
-/** Analytical rail card — a titled rounded surface shared by Сравнение / Разбивка / О метрике, so
-    the rail reads as a stack of cards rather than disconnected hairline sections. */
 /** Colour-coded change badge for the comparison card — the one evaluated Δ that leans on tone
     (gain = verdant, loss = ember); direction also rides the ▲/▼ glyph for colour-blind safety. */
 function DeltaBadge({ value }: { value: number }) {

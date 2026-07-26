@@ -667,12 +667,13 @@ function MetrikaPanel() {
   const connected = freshName != null || (status.data?.connected ?? false);
   const counterName = freshName ?? status.data?.counter_name ?? status.data?.site ?? 'счётчик';
 
+  // ВСЕ семьи Метрики, а не три: разрезы кэшируются на 5 минут, и после смены счётчика
+  // четырнадцать неинвалидированных карточек продолжали бы показывать данные ПРЕДЫДУЩЕГО
+  // счётчика. Список живёт в qk.ymAll — новая семья попадает сюда сама.
   const invalidateYm = () =>
     Promise.all([
       qc.invalidateQueries({ queryKey: qk.channels }),
-      qc.invalidateQueries({ queryKey: qk.ymStatus.all }),
-      qc.invalidateQueries({ queryKey: qk.ymSummary.all }),
-      qc.invalidateQueries({ queryKey: qk.ymSources.all }),
+      ...qk.ymAll.map((key) => qc.invalidateQueries({ queryKey: key })),
     ]);
 
   const connect = async (counterId?: string) => {

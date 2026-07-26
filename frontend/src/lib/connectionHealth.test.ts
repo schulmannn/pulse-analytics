@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { overviewHealthBanner, sidebarHealth } from './connectionHealth';
+import { overviewHealthBanner } from './connectionHealth';
 import type { Freshness } from './freshness';
 
 const fresh: Freshness = { label: 'сегодня', stale: false };
@@ -128,52 +128,5 @@ describe('overviewHealthBanner — source=central, OWNER (managed session is the
 
   it('connected + fresh → no banner', () => {
     expect(overviewHealthBanner({ source: 'central', connectionState: 'connected', fresh, centralOwner: true })).toBeNull();
-  });
-});
-
-describe('sidebarHealth', () => {
-  it('prioritises actionable QR auth state over freshness', () => {
-    expect(sidebarHealth({ source: 'qr', connectionState: 'reauth_required', fresh })).toEqual({
-      tone: 'error',
-      label: 'нужно переподключить',
-    });
-  });
-
-  it('keeps transient QR degradation distinct from reauth', () => {
-    expect(sidebarHealth({ source: 'qr', connectionState: 'degraded', fresh })).toEqual({
-      tone: 'warn',
-      label: 'сбор временно недоступен',
-    });
-  });
-
-  it('falls back to the familiar freshness label', () => {
-    expect(sidebarHealth({ source: 'qr', connectionState: 'connected', fresh })).toEqual({
-      tone: 'ok',
-      label: 'обновлено сегодня',
-    });
-    expect(sidebarHealth({ source: 'collector', connectionState: null, fresh: stale })).toEqual({
-      tone: 'warn',
-      label: 'обновлено 4 дн. назад',
-    });
-  });
-
-  it('reserves the loading state when neither health nor freshness is known', () => {
-    expect(sidebarHealth({ source: 'qr', connectionState: null, fresh: null })).toBeNull();
-  });
-
-  it('owner central surfaces the managed repair labels; non-owner falls back to freshness', () => {
-    expect(sidebarHealth({ source: 'central', connectionState: 'reauth_required', fresh, centralOwner: true })).toEqual({
-      tone: 'error',
-      label: 'нужно переподключить',
-    });
-    expect(sidebarHealth({ source: 'central', connectionState: 'degraded', fresh, centralOwner: true })).toEqual({
-      tone: 'warn',
-      label: 'сбор временно недоступен',
-    });
-    // Non-owner central: no managed repair label — just the familiar freshness readout.
-    expect(sidebarHealth({ source: 'central', connectionState: 'reauth_required', fresh, centralOwner: false })).toEqual({
-      tone: 'ok',
-      label: 'обновлено сегодня',
-    });
   });
 });

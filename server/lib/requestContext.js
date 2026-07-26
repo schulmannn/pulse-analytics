@@ -26,4 +26,14 @@ function getRequestId() {
   return typeof id === 'string' && REQUEST_ID_RE.test(id) ? id : undefined;
 }
 
-module.exports = { runWithRequestId, getRequestId };
+// Отцепление fire-and-forget работы от request-store. Промис-цепочка, запущенная внутри
+// обработчика, наследует ALS-store — и фоновый сбор (минуты работы Telethon), стартовавший
+// ПОСЛЕ res.json, продолжал бы ходить в mtproto с x-request-id уже завершённого HTTP-запроса:
+// JSON-логи Python атрибутировали бы минуты работы суб-секундному запросу. als.exit(...) снимает
+// store для fn и всех её async-продолжений, поэтому такая работа выглядит как фоновая (как job),
+// а не как хвост запроса. Логи самого вызывающего кода (до отцепления) request_id сохраняют.
+function runDetached(fn) {
+  return als.exit(fn);
+}
+
+module.exports = { runWithRequestId, getRequestId, runDetached };
