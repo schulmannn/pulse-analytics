@@ -317,7 +317,8 @@ function createGdprService({ pool, enabled, transaction, exportPageSize }) {
 
   /* Экспорт персональных данных (GDPR portability) — один JSON-файл, СТРИМОМ (см. шапку модуля).
      Учётные данные не экспортируются НИКОГДА: pass_hash, token_version, tg_sessions.session_enc,
-     ig_accounts.access_token_enc и key_hash не попадают в SELECT'ы. Каналы — только owner_uid=uid:
+     ig_accounts.access_token_enc, ym_accounts.access_token_enc, tg_notify_bindings.link_token_hash
+     и key_hash не попадают в SELECT'ы. Каналы — только owner_uid=uid:
      шаренные воркспейс-каналы принадлежат другому владельцу (data minimization).
      Один выделенный клиент = ровно один коннект (как раньше): фан-аут через pool.query душил бы
      весь API на время экспорта. Клиент освобождается в finally — на успехе, ошибке И обрыве.
@@ -345,6 +346,12 @@ function createGdprService({ pool, enabled, transaction, exportPageSize }) {
       const prefsRow = (await q(`SELECT prefs, updated_at FROM user_prefs WHERE uid=$1`, [uid])).rows[0] || null;
       const tgSession = (await q(
         `SELECT tg_user_id, username, connected_at, updated_at FROM tg_sessions WHERE uid=$1`, [uid])).rows[0] || null;
+      // Привязка бота уведомлений (035) — singleton по uid, как tg-сессия: chat_id/tg_user_id/
+      // username это персональные данные, и стирание их каскадит, поэтому экспорт обязан их
+      // показывать. link_token_hash (и его срок) — bearer-хеш привязки, credential: НЕ экспортируем.
+      const tgNotifyBinding = (await q(
+        `SELECT chat_id, tg_user_id, username, bound_at, created_at, updated_at
+           FROM tg_notify_bindings WHERE uid=$1`, [uid])).rows[0] || null;
 
       // ── С этого момента полетели байты: 404/next(err) уже недоступны ──
       if (onReady) onReady();
@@ -372,6 +379,7 @@ function createGdprService({ pool, enabled, transaction, exportPageSize }) {
       await w.write(',');
       // Присутствие подключения — да; сама сессия — никогда (это credential, не данные).
       await w.write(`"telegram_session":${JSON.stringify(tgSession)},`);
+      await w.write(`"telegram_notify_binding":${JSON.stringify(tgNotifyBinding)},`);
       await w.write(`"channels":[`);
 
       // Каналы тоже id-keyset'ом: перечень не опирается на продуктовый кап ради memory-proof, а
@@ -410,6 +418,23 @@ function createGdprService({ pool, enabled, transaction, exportPageSize }) {
             `SELECT include_terms, exclude_terms, exclude_sources, match_mode, updated_at
                FROM channel_mention_settings WHERE channel_id=$1`, [ch.id])).rows[0] || null;
           await w.write(`,"mention_settings":${JSON.stringify(mentionSettings)}`);
+
+          // Личная подписка на уведомления об упоминаниях (035/036) — singleton по (channel, uid),
+          // поэтому буферизуется, как и остальные одиночные строки. Скоуп по uid обязателен: у
+          // одного канала подписки нескольких участников, чужая — не данные экспортируемого.
+          const mentionNotify = (await q(
+            `SELECT enabled, send_days, send_hour, last_run_at, last_notified_at, last_error,
+                    created_at, updated_at
+               FROM mention_notify_subscriptions WHERE channel_id=$1 AND uid=$2`, [ch.id, uid])).rows[0] || null;
+          await w.write(`,"mention_notify_subscription":${JSON.stringify(mentionNotify)}`);
+
+          // Идентичность подключённого счётчика Метрики (033) — singleton по каналу. Симметрия со
+          // стиранием: строка каскадит вместе с каналом, значит обязана быть и в экспорте.
+          // access_token_enc — credential, в SELECT его нет по построению (как у ig_accounts).
+          const ym = (await q(
+            `SELECT counter_id, counter_name, site, counter_created_day, connected_at, updated_at
+               FROM ym_accounts WHERE channel_id=$1`, [ch.id])).rows[0] || null;
+          await w.write(`,"yandex_metrika":${JSON.stringify(ym)}`);
 
           const ig = (await q(`SELECT ig_user_id, username, scopes, token_expires_at, connected_at, updated_at
                      FROM ig_accounts WHERE channel_id=$1`, [ch.id])).rows[0] || null;
