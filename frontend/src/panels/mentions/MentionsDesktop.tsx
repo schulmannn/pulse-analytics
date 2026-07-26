@@ -716,7 +716,7 @@ function MentionsTable({
                         target="_blank"
                         rel="noopener noreferrer"
                         title="Открыть в Telegram"
-                        className="inline-flex size-7 items-center justify-center rounded-full text-primary transition-colors hover:bg-primary/10"
+                        className="inline-flex size-7 items-center justify-center rounded-full text-primary transition-colors hover:bg-primary/10 hover:text-accent-foreground"
                         aria-label="Открыть упоминание в Telegram"
                       >
                         <Icon name="external" className="size-4" />

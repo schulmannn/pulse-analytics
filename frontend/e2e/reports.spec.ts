@@ -151,8 +151,6 @@ async function bootReports(page: Page, seed: MockReport[]): Promise<BootState> {
   });
 
   await page.addInitScript(() => {
-    localStorage.setItem('pulse_token', 'e2e-token');
-    localStorage.setItem('pulse_token_exp', String(Date.now() + 60 * 60 * 1000));
     localStorage.setItem('pulse_channel', '1');
     if (!localStorage.getItem('pulse_theme')) localStorage.setItem('pulse_theme', 'dark');
   });

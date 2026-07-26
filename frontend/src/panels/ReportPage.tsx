@@ -153,11 +153,13 @@ function ReportDocumentBody({
 
   const [renaming, setRenaming] = useState(false);
   const cancelRename = useRef(false);
+  const renameInputRef = useRef<HTMLInputElement>(null);
   // After a rename commits/cancels the input unmounts — return focus to the reappearing
   // pencil button (guarded so the initial mount, where renaming starts false, is unaffected).
   const pencilRef = useRef<HTMLButtonElement>(null);
   const wasRenaming = useRef(false);
   useEffect(() => {
+    if (renaming) renameInputRef.current?.focus();
     if (wasRenaming.current && !renaming) pencilRef.current?.focus();
     wasRenaming.current = renaming;
   }, [renaming]);
@@ -259,7 +261,7 @@ function ReportDocumentBody({
   const generated = fmt.day(new Date());
 
   const chipBase = 'rounded-full border px-3 py-1 text-xs font-medium transition-colors';
-  const chipActive = 'border-primary/40 bg-primary/10 text-primary';
+  const chipActive = 'border-primary/40 bg-primary/10 text-accent-foreground';
   const chipIdle = 'border-border text-muted-foreground hover:text-foreground';
 
   // ── Block edit handlers ──
@@ -511,7 +513,7 @@ function ReportDocumentBody({
         <div className="text-xs text-muted-foreground">Отчёт · Telegram · сгенерирован {generated}</div>
         {renaming ? (
           <input
-            autoFocus
+            ref={renameInputRef}
             defaultValue={report.name}
             maxLength={120}
             aria-label="Название отчёта"

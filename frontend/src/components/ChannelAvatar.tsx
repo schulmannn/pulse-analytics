@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { cn } from '@/lib/utils';
 
 // The MTProto photo endpoint serves the single configured ('central') channel, so it's only
@@ -21,21 +21,33 @@ interface ChannelAvatarProps {
  * Channel identity glyph. For the 'central' channel it shows the real Telegram profile photo;
  * on any load error — or for collector channels with no live session — it falls back to the
  * initial on a brand-tinted squircle (the previous look). Graceful: if the MTProto service is
- * down or the channel has no photo, the <img> onError quietly swaps in the initial.
+ * down or the channel has no photo, the image load listener quietly swaps in the initial.
  */
 export function ChannelAvatar({ source, initial, tintClassName, className }: ChannelAvatarProps) {
   const canPhoto = source === 'central';
   const [failed, setFailed] = useState(false);
+  const imageRef = useRef<HTMLImageElement>(null);
   // Reset the error gate when switching channels so a new 'central' channel retries the photo.
   useEffect(() => setFailed(false), [source]);
+  // `error` is a media lifecycle event, not user interaction. Register it on the DOM node instead
+  // of making the passive <img> look interactive to accessibility tooling. The `complete` check
+  // covers a cached failure that finished before the layout effect ran.
+  useLayoutEffect(() => {
+    const image = imageRef.current;
+    if (!image) return;
+    const handleError = () => setFailed(true);
+    image.addEventListener('error', handleError);
+    if (image.complete && image.naturalWidth === 0) handleError();
+    return () => image.removeEventListener('error', handleError);
+  }, [canPhoto, failed]);
 
   if (canPhoto && !failed) {
     return (
       <img
+        ref={imageRef}
         src={PHOTO_URL}
         alt=""
         referrerPolicy="no-referrer"
-        onError={() => setFailed(true)}
         className={cn('shrink-0 bg-muted object-cover', className)}
       />
     );

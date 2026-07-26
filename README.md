@@ -10,7 +10,7 @@ Atlavue — дашборд аналитики Telegram и Instagram для ав�
 ## Архитектура
 
 ```text
-frontend/            React 18 + Vite + TypeScript strict, TanStack Query, Zod, Tailwind
+frontend/            React 19 + Vite + TypeScript strict, TanStack Query, Zod, Tailwind
 server/              Node.js/Express: config -> app -> composition -> main
 server/migrations/   forward-only SQL-миграции, применяются перед запуском web
 mtproto/service.py   приватный FastAPI/Telethon-сервис
@@ -49,6 +49,7 @@ Telegram поддерживает две модели подключения:
 |---|---|---|
 | `APP_URL` | web | публичный HTTPS-origin, в production — `https://atlavue.app` |
 | `SESSION_SECRET` | web | подпись пользовательских сессий; обязательна в production |
+| `SESSION_ABSOLUTE_TTL_DAYS` | web | абсолютный срок cookie-сессии, 7–365 дней; по умолчанию 30 |
 | `DATABASE_URL` | web | Postgres; в production обязательна, кроме явного `ALLOW_DBLESS=true` |
 | `PGPOOL_MAX` | web | размер основного пула Postgres (live HTTP/auth/tenant), по умолчанию `10` (одна web-реплика, ADR-002) |
 | `PGPOOL_BACKGROUND_MAX` | web | размер отдельного малого пула для фонового сбора/отчётов/maintenance, по умолчанию `2` (те же fail-fast deadlines) |
@@ -126,6 +127,7 @@ python -m py_compile mtproto/service.py collector/pulse_collector.py
 
 ```bash
 npm run test:e2e:smoke --prefix frontend
+npm run test:e2e:phone --prefix frontend
 ```
 
 CI поднимает Postgres для backend integration tests и Vite с детерминированными fixtures для

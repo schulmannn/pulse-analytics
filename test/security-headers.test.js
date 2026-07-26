@@ -1,5 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const {
   APP_ALLOWED_DOMAINS,
   appCspHeader,
@@ -50,12 +52,12 @@ test('production app CSP is strict and documents the allowed external domains', 
   assert.strictEqual(csp.get('frame-ancestors'), "'none'");
   assert.strictEqual(csp.get('img-src'), "'self' data: https:");
   assert.strictEqual(csp.get('font-src'), APP_ALLOWED_DOMAINS.font.join(' '));
+  assert.match(csp.get('font-src'), /(?:^| )'self'(?: |$)/);
   assert.strictEqual(csp.get('script-src'), `'self' ${APP_ALLOWED_DOMAINS.script.join(' ')}`);
   assert.strictEqual(csp.get('connect-src'), `'self' ${APP_ALLOWED_DOMAINS.connect.join(' ')}`);
   assert.strictEqual(csp.get('frame-src'), APP_ALLOWED_DOMAINS.frame.join(' '));
   assert.match(csp.get('style-src'), /'self'/);
   assert.match(csp.get('style-src'), /'unsafe-inline'/);
-  assert.match(csp.get('style-src'), /https:\/\/fonts\.googleapis\.com/);
   assert.match(csp.get('style-src'), /https:\/\/accounts\.google\.com/);
   assert.strictEqual(
     csp.get('style-src'),
@@ -63,6 +65,7 @@ test('production app CSP is strict and documents the allowed external domains', 
   );
 
   assert.doesNotMatch(appCspHeader, /\*/);
+  assert.doesNotMatch(appCspHeader, /fonts\.googleapis\.com|fonts\.gstatic\.com/);
   assert.doesNotMatch(csp.get('script-src'), /'unsafe-inline'|'unsafe-eval'/);
   // apis.google.com (старый gapi-хост) фронту не нужен, а как JSONP-хост он пригоден для
   // обхода CSP — регрессия-гард: script-src разрешает Google ТОЛЬКО через accounts.google.com.
@@ -103,10 +106,26 @@ test('legacy nonce shell keeps inline scripts nonce-bound under the same securit
   setHtmlSecurityHeaders(request({ 'x-forwarded-proto': 'https' }), res, csp);
 
   assert.strictEqual(parsed.get('script-src'), "'self' 'nonce-test-nonce'");
+  assert.strictEqual(parsed.get('style-src'), "'self' 'unsafe-inline'");
+  assert.strictEqual(parsed.get('font-src'), "'self'");
   assert.strictEqual(parsed.get('frame-ancestors'), "'none'");
   assert.doesNotMatch(parsed.get('script-src'), /'unsafe-inline'|'unsafe-eval'/);
   assert.strictEqual(res.get('content-security-policy'), csp);
   assert.strictEqual(res.get('x-frame-options'), 'DENY');
   assert.strictEqual(res.get('permissions-policy'), permissionsPolicy);
   assert.strictEqual(res.get('strict-transport-security'), 'max-age=31536000; includeSubDomains');
+});
+
+test('modern and legacy HTML have no external font dependency', () => {
+  const root = path.join(__dirname, '..');
+  const modernHtml = fs.readFileSync(path.join(root, 'frontend/index.html'), 'utf8');
+  const legacyHtml = fs.readFileSync(path.join(root, 'public/index.html'), 'utf8');
+  const modernStyles = fs.readFileSync(path.join(root, 'frontend/src/index.css'), 'utf8');
+
+  for (const html of [modernHtml, legacyHtml]) {
+    assert.doesNotMatch(html, /fonts\.googleapis\.com|fonts\.gstatic\.com/);
+  }
+  assert.match(modernStyles, /geist-cyrillic-wght-normal\.woff2/);
+  assert.match(modernStyles, /geist-latin-wght-normal\.woff2/);
+  assert.doesNotMatch(modernStyles, /geist-(?:cyrillic-ext|latin-ext|vietnamese)-wght-normal\.woff2/);
 });

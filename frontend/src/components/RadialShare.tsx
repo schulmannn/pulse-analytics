@@ -1,4 +1,4 @@
-import { useId, useState } from 'react';
+import { useCallback, useId, useRef, useState } from 'react';
 import { fmt } from '@/lib/format';
 
 /**
@@ -73,6 +73,29 @@ export function RadialShare({
 }) {
   const titleId = useId();
   const [hover, setHover] = useState<string | null>(null);
+  const detachSvgListeners = useRef<(() => void) | null>(null);
+  // The arcs are passive parts of one named graphic. Pointer hover only mirrors a value already
+  // present in the persistent legend, so event delegation belongs on the DOM node rather than
+  // turning every decorative path into a fake focusable control.
+  const bindSvg = useCallback((node: SVGSVGElement | null) => {
+    detachSvgListeners.current?.();
+    detachSvgListeners.current = null;
+    if (!node) return;
+    const handleMove = (event: PointerEvent) => {
+      const target = event.target instanceof Element
+        ? event.target.closest<SVGPathElement>('[data-radial-segment]')
+        : null;
+      const key = target?.dataset.radialSegment ?? null;
+      setHover((current) => (current === key ? current : key));
+    };
+    const clearHover = () => setHover(null);
+    node.addEventListener('pointermove', handleMove);
+    node.addEventListener('pointerleave', clearHover);
+    detachSvgListeners.current = () => {
+      node.removeEventListener('pointermove', handleMove);
+      node.removeEventListener('pointerleave', clearHover);
+    };
+  }, []);
 
   // Граница компонента не пропускает отрицательные/NaN/Infinity в SVG-геометрию. Ноль честно
   // означает отсутствие сегмента; невалидный `total` не превращает path в `NaN`, а возвращает
@@ -127,6 +150,7 @@ export function RadialShare({
     <div className="flex h-full min-h-0 flex-col">
       <div className="relative min-h-0 flex-1">
         <svg
+          ref={bindSvg}
           viewBox={`0 0 ${VB} ${CY + 14}`}
           className="h-full w-full"
           role="img"
@@ -137,13 +161,11 @@ export function RadialShare({
           {arcs.map((a) => (
             <path
               key={a.key}
+              data-radial-segment={a.key}
               d={a.d}
               fill={a.color}
               opacity={hover && hover !== a.key ? 0.4 : 1}
               className="transition-opacity dur-base ease-house"
-              onMouseEnter={() => setHover(a.key)}
-              onMouseLeave={() => setHover((h) => (h === a.key ? null : h))}
-              aria-hidden="true"
               focusable="false"
             />
           ))}

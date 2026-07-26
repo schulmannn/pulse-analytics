@@ -240,6 +240,7 @@ function MsChannelPicker({
 }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const panelId = useId();
   const label = selected.length === 0 ? 'Все каналы' : `Каналы: ${selected.length}`;
 
@@ -249,7 +250,10 @@ function MsChannelPicker({
       if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false);
+      if (e.key === 'Escape') {
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
     };
     document.addEventListener('pointerdown', onDown);
     document.addEventListener('keydown', onKey);
@@ -267,8 +271,8 @@ function MsChannelPicker({
   return (
     <div ref={wrapRef} className="relative">
       <button
+        ref={triggerRef}
         type="button"
-        aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={panelId}
         onClick={() => setOpen((v) => !v)}
@@ -281,12 +285,11 @@ function MsChannelPicker({
         </svg>
       </button>
       {open && (
-        <div
+        <fieldset
           id={panelId}
-          role="group"
-          aria-label="Каналы продаж"
-          className={`absolute left-0 top-full mt-1 max-h-64 w-64 overflow-y-auto rounded-xl border border-border bg-popover p-1.5 shadow-[0_12px_32px_-16px_rgba(0,0,0,0.6)] ${inModal ? 'z-modal-popover' : 'z-popover'}`}
+          className={`absolute left-0 top-full m-0 mt-1 max-h-64 min-w-0 w-64 overflow-y-auto rounded-xl border border-border bg-popover p-1.5 shadow-[0_12px_32px_-16px_rgba(0,0,0,0.6)] ${inModal ? 'z-modal-popover' : 'z-popover'}`}
         >
+          <legend className="sr-only">Каналы продаж</legend>
           <div className="flex items-center justify-between px-1.5 pb-1.5">
             <span className="text-2xs text-muted-foreground">{selected.length} из {MAX_SELECTED_CHANNELS}</span>
             {selected.length > 0 && (
@@ -307,7 +310,7 @@ function MsChannelPicker({
               <span className="min-w-0 truncate">{o.name}</span>
             </label>
           ))}
-        </div>
+        </fieldset>
       )}
     </div>
   );
@@ -515,6 +518,12 @@ function MsMultiLine({
   // when the metric/period/selection changes, never on hover (separate state) or a container resize.
   const motionKey = series.map((s) => s.values.join(',')).join('|');
   const ariaSummary = `${METRIC_LABEL[metric]} по каналам: ${series.map((item) => item.name).join(', ')}`;
+  const activeIndex = n > 0 ? Math.max(0, Math.min(n - 1, hovered ?? n - 1)) : 0;
+  const ariaValueText = n > 0
+    ? `${labels[activeIndex]}. ${series
+        .map((item) => `${item.name}: ${fmtMetric(metric, item.values[activeIndex])}`)
+        .join('; ')}`
+    : 'Нет данных';
   return (
     <div>
       <div className={expanded ? 'relative pl-12' : undefined}>
@@ -527,8 +536,13 @@ function MsMultiLine({
         )}
         <div
           ref={plotRef}
-          role="img"
+          role="slider"
           aria-label={ariaSummary}
+          aria-orientation="horizontal"
+          aria-valuemin={0}
+          aria-valuemax={Math.max(n - 1, 0)}
+          aria-valuenow={activeIndex}
+          aria-valuetext={ariaValueText}
           tabIndex={0}
           className="relative rounded-sm outline-hidden focus-visible:ring-2 focus-visible:ring-primary/60"
           onPointerMove={(event) => hoverAt(event.clientX)}
@@ -544,8 +558,21 @@ function MsMultiLine({
             setHovered(null);
           }}
           onKeyDown={(event) => {
-            if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+            if (
+              event.key !== 'ArrowLeft' &&
+              event.key !== 'ArrowRight' &&
+              event.key !== 'Home' &&
+              event.key !== 'End'
+            ) return;
             event.preventDefault();
+            if (event.key === 'Home') {
+              setHovered(0);
+              return;
+            }
+            if (event.key === 'End') {
+              setHovered(Math.max(n - 1, 0));
+              return;
+            }
             const step = event.key === 'ArrowLeft' ? -1 : 1;
             setHovered((current) => Math.max(0, Math.min(n - 1, (current ?? n - 1) + step)));
           }}

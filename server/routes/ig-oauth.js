@@ -119,7 +119,8 @@ function registerIgOauthRoutes({
       `Max-Age=${maxAge}`,
     ];
     if (isHttps(req)) attrs.push('Secure');
-    res.setHeader('Set-Cookie', attrs.join('; '));
+    // Preserve a sliding pulse_session Set-Cookie already added by requireAuth.
+    res.append('Set-Cookie', attrs.join('; '));
   }
 
   function rememberState(payload) {

@@ -21,6 +21,7 @@ import {
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { WidgetGroup } from '@/components/widgets/WidgetGroup';
 import { Section } from '@/components/instagram/shared';
 import {
@@ -166,7 +167,7 @@ interface TableViewportGeometry {
   maxWidth: number;
 }
 
-export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) {
+export function IgContentDesktop({ ig }: { ig: IgData }) {
   const [params, setParams] = useSearchParams();
   const paramsRef = useRef(params);
   const { channelId, campaignId, campaignPostsQ, posts, formatItems } = useIgScopedPosts(ig);
@@ -397,8 +398,7 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
 
   const toolbar = (
     <>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        {tabs}
+      <div className="flex flex-wrap items-center justify-end gap-3">
         <Button
           type="button"
           variant="outline"
@@ -539,35 +539,45 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
   );
 
   const secondaryBlock = (
+    <Tabs
+      value={secondary}
+      onValueChange={(next) => setSecondary(next as IgSecondaryView)}
+      asChild
+    >
     <section className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-2xs text-muted-foreground">Разборы</span>
-        <div className="flex flex-wrap gap-1" role="tablist" aria-label="Дополнительные разборы контента">
+        <TabsList
+          aria-label="Дополнительные разборы контента"
+          className="flex h-auto min-h-0 flex-wrap justify-start gap-1 border-0 bg-transparent p-0"
+        >
           {IG_SECONDARY_VIEWS.map((key) => (
-            <button
+            <TabsTrigger
               key={key}
-              type="button"
-              role="tab"
-              aria-selected={secondary === key}
-              onClick={() => setSecondary(key)}
+              value={key}
               className={cn(
                 'btn-pill px-3 py-1 text-xs font-medium transition-colors',
-                secondary === key ? 'bg-primary/15 text-foreground' : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
+                'bg-transparent text-muted-foreground hover:bg-muted/50 hover:text-foreground data-[state=active]:bg-primary/15 data-[state=active]:text-foreground',
               )}
             >
               {SECONDARY_LABEL[key]}
-            </button>
+            </TabsTrigger>
           ))}
-        </div>
+        </TabsList>
       </div>
-      <IgSecondaryBody
-        view={secondary}
-        ig={ig}
-        posts={scope}
-        formatItems={formatItems}
-        campaignId={campaignId}
-      />
+      {IG_SECONDARY_VIEWS.map((key) => (
+        <TabsContent key={key} value={key} className="mt-0">
+          <IgSecondaryBody
+            view={key}
+            ig={ig}
+            posts={scope}
+            formatItems={formatItems}
+            campaignId={campaignId}
+          />
+        </TabsContent>
+      ))}
     </section>
+    </Tabs>
   );
   const campaignDataBlocked = campaignId != null && (campaignPostsQ.isPending || campaignPostsQ.isError);
 
@@ -605,7 +615,9 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
         >
           <SortButton label="Дата" active={filters.sort === 'date'} order={filters.order} onClick={() => toggleSort('date')} />
         </th>
-        <th aria-hidden="true" className="sticky right-0 ig-sticky-action-head w-10 bg-surface-table px-2"></th>
+        <th scope="col" className="sticky right-0 ig-sticky-action-head w-10 bg-surface-table px-2">
+          <span className="sr-only">Действия</span>
+        </th>
       </tr>
     </thead>
   );
@@ -753,11 +765,12 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
                         : 'hover:bg-muted/40',
                   )}
                 >
-                  <td className="pl-4 pr-2 sm:pl-5" onClick={(e) => e.stopPropagation()}>
+                  <td className="pl-4 pr-2 sm:pl-5">
                     {post.id != null && (
                       <Checkbox
                         aria-label="Выбрать публикацию"
                         checked={selected.has(post.id)}
+                        onClick={(event) => event.stopPropagation()}
                         onCheckedChange={() => toggleSelect(post.id!)}
                         data-testid="ig-post-select"
                         className={IG_SELECT_CHECKBOX_CLASS}
@@ -1115,6 +1128,7 @@ function MedianCell({
 function IgPostThumb({ post }: { post: IgPost }) {
   const [brokenSrc, setBrokenSrc] = useState<string | null>(null);
   const [loadedSrc, setLoadedSrc] = useState<string | null>(null);
+  const imageRef = useRef<HTMLImageElement>(null);
   const isVideo = post.media_type === 'VIDEO' || post.media_product_type === 'REELS';
   const originalCover = post.thumbnail_url || (!isVideo ? post.media_url : null) || null;
   const proxyFailed = post.table_thumbnail_url != null && brokenSrc === post.table_thumbnail_url;
@@ -1122,6 +1136,23 @@ function IgPostThumb({ post }: { post: IgPost }) {
   const broken = cover != null && brokenSrc === cover;
   const loaded = cover != null && loadedSrc === cover;
   const label = classifyIgFormat(post) === 'reels' ? 'Reels' : classifyIgFormat(post) === 'video' ? 'Видео' : classifyIgFormat(post) === 'carousel' ? 'Альбом' : 'Фото';
+  useEffect(() => {
+    const image = imageRef.current;
+    if (!image || !cover || broken) return;
+    const handleLoad = () => setLoadedSrc(cover);
+    const handleError = () => setBrokenSrc(cover);
+    image.addEventListener('load', handleLoad);
+    image.addEventListener('error', handleError);
+    // Cached images may complete before the passive effect attaches.
+    if (image.complete) {
+      if (image.naturalWidth > 0) handleLoad();
+      else handleError();
+    }
+    return () => {
+      image.removeEventListener('load', handleLoad);
+      image.removeEventListener('error', handleError);
+    };
+  }, [cover, broken]);
 
   return (
     <div className="relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border/40 bg-muted">
@@ -1130,6 +1161,7 @@ function IgPostThumb({ post }: { post: IgPost }) {
       )}
       {cover && !broken ? (
         <img
+          ref={imageRef}
           loading="lazy"
           decoding="async"
           fetchPriority="low"
@@ -1139,8 +1171,6 @@ function IgPostThumb({ post }: { post: IgPost }) {
           src={cover}
           alt=""
           referrerPolicy="no-referrer"
-          onLoad={() => setLoadedSrc(cover)}
-          onError={() => setBrokenSrc(cover)}
           className={cn('absolute inset-0 h-full w-full object-cover', loaded ? 'opacity-100' : 'opacity-0')}
         />
       ) : null}

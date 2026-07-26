@@ -48,7 +48,7 @@ describe('DateRangePicker — calendar geometry', () => {
   });
 });
 
-describe('DateRangePicker — grid a11y contract', () => {
+describe('DateRangePicker — calendar a11y contract', () => {
   afterEach(() => vi.useRealTimers());
 
   const render = () => {
@@ -59,12 +59,15 @@ describe('DateRangePicker — grid a11y contract', () => {
     );
   };
 
-  it('renders the month as a labelled grid of rows and cells, not a flat list of buttons', () => {
+  it('renders the month as a labelled native table, not a flat list of buttons', () => {
     const html = render();
-    expect(html).toContain('role="grid"');
-    expect(html).toContain('role="row"');
-    expect(html).toContain('role="gridcell"');
-    expect(html).toContain('role="columnheader"');
+    expect(html).toContain('<table aria-labelledby=');
+    expect(html).toContain('<thead');
+    expect(html).toContain('<tbody');
+    expect(html).toContain('<tr');
+    expect(html).toContain('<td');
+    expect(html).toContain('<th scope="col"');
+    expect(html).not.toContain('role="grid"');
     // Заголовки столбцов озвучиваются полным днём недели, а не «Пн».
     expect(html).toContain('aria-label="Понедельник"');
   });
@@ -97,6 +100,7 @@ describe('DateRangePicker — grid a11y contract', () => {
 
   it('labels the preset row so it is not four loose buttons', () => {
     const html = render();
-    expect(html).toContain('aria-label="Быстрый выбор периода"');
+    expect(html).toContain('<fieldset');
+    expect(html).toContain('<legend class="sr-only">Быстрый выбор периода</legend>');
   });
 });

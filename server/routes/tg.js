@@ -504,8 +504,7 @@ function registerTgRoutes({
   });
 
   // ── Public media proxies (thumb / channel photo) ─────────────────────────────
-  // Deliberately unauthenticated: they back plain <img src> tags, which can't send
-  // the x-session-token header. Tradeoff accepted because the central channel is
+  // Deliberately unauthenticated: they back plain <img src> tags. Tradeoff accepted because the central channel is
   // public anyway (the proxy only reveals what t.me already shows); revisit with
   // signed URLs if private channels ever land. Beyond the global /api limiter
   // (per-IP for anonymous traffic), a dedicated modest per-IP limiter keeps an

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { PERIOD_WORD, SIZE_COL_SPAN, SIZE_DEFER_RENDER, SIZE_HEIGHT } from './constants';
 import { useChartSectionModel } from './useChartSectionModel';
 import { WidgetBody } from './WidgetBody';
@@ -61,6 +61,39 @@ export function ChartSection(props: ChartSectionProps) {
   const { group, reorder, dragging, effectiveSize } = model.layout;
   const { prefs, updatePrefs, pinned } = model.preferences;
   const allowExpand = !props.noExpand;
+  const cardRef = useRef<HTMLDivElement>(null);
+  const cardPressRef = model.refs.cardPressRef;
+  const openExpand = model.expansion.openExpand;
+
+  // The whole-card tap is a pointer convenience around the real, labelled expand button rendered
+  // by WidgetHeader. Keep the passive card a <div> (it contains menus and other controls, so it
+  // cannot validly become one giant button) and register the pointer gesture on its DOM node.
+  useEffect(() => {
+    const card = cardRef.current;
+    if (!card || reorder || props.noExpand) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      cardPressRef.current = { x: event.clientX, y: event.clientY };
+    };
+    const handleClick = (event: MouseEvent) => {
+      const target = event.target;
+      if (
+        target instanceof Element &&
+        target.closest('button, a, input, select, label, [role="dialog"], [data-widget-action]')
+      ) {
+        return;
+      }
+      const press = cardPressRef.current;
+      cardPressRef.current = null;
+      if (press && Math.hypot(event.clientX - press.x, event.clientY - press.y) > 5) return;
+      openExpand();
+    };
+    card.addEventListener('pointerdown', handlePointerDown);
+    card.addEventListener('click', handleClick);
+    return () => {
+      card.removeEventListener('pointerdown', handlePointerDown);
+      card.removeEventListener('click', handleClick);
+    };
+  }, [cardPressRef, openExpand, props.noExpand, reorder]);
 
   return (
     <section
@@ -100,6 +133,7 @@ export function ChartSection(props: ChartSectionProps) {
           контекста (true). */}
       <WidgetInViewContext.Provider value={inView}>
       <div
+        ref={cardRef}
         className={`${
           props.strip
             ? 'group/strip relative flex flex-col'
@@ -115,22 +149,6 @@ export function ChartSection(props: ChartSectionProps) {
         data-widget-accented={model.layout.activeColor ? '' : undefined}
         data-drill-to={props.drillTo || undefined}
         data-widget-tinted={model.layout.activeTinted && model.layout.activeColor ? '' : undefined}
-        onPointerDown={
-          reorder || props.noExpand
-            ? undefined
-            : (event) => (model.refs.cardPressRef.current = { x: event.clientX, y: event.clientY })
-        }
-        onClick={
-          reorder || props.noExpand
-            ? undefined
-            : (event) => {
-                if ((event.target as HTMLElement).closest('button, a, input, select, label, [role="dialog"]')) return;
-                const press = model.refs.cardPressRef.current;
-                model.refs.cardPressRef.current = null;
-                if (press && Math.hypot(event.clientX - press.x, event.clientY - press.y) > 5) return;
-                model.expansion.openExpand();
-              }
-        }
       >
         <WidgetHeader
           label={label}

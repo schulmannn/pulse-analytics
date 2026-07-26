@@ -1,7 +1,6 @@
 import { Component } from 'react';
 import type { ErrorInfo, ReactNode } from 'react';
 import { Cartograph } from '@/components/Cartograph';
-import { Button } from '@/components/ui/button';
 import { isChunkLoadError } from '@/lib/lazyWithReload';
 import { buildWidgetErrorReport, nextTraceId } from '@/lib/widgetErrors';
 import { reportCrashToServer } from '@/lib/crashReporting';
@@ -69,9 +68,13 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
               Код ошибки: <span className="font-mono">{this.state.traceId}</span>
             </p>
           )}
-          <Button type="button" onClick={() => window.location.reload()} className="mt-6">
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="btn-pill mt-6 bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40"
+          >
             Обновить
-          </Button>
+          </button>
         </div>
       </div>
     );

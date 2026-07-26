@@ -1,8 +1,5 @@
 import type { Locator, Page } from '@playwright/test';
 
-// The only authenticated endpoint demo fixtures do NOT cover — stub it so the authed shell renders
-// offline. Shape matches MeSchema (all fields optional + passthrough), so this parses fine.
-const DEMO_ME = { uid: 999, email: 'demo@pulse.local', role: 'user', avatar: null };
 const DAY_MS = 86_400_000;
 
 const igDays = Array.from({ length: 60 }, (_, index) =>
@@ -432,9 +429,9 @@ function demoMsPayload(url: URL, opts: { max?: boolean } = {}): unknown | undefi
 }
 
 /**
- * Boot the app straight into the authenticated DEMO dashboard: stub /api/auth/me and set the demo
- * flag before load, so the whole Telegram dashboard renders from deterministic client-side fixtures —
- * no backend, no real credentials. Waits for the shell + first widget card, then a short settle so
+ * Boot the app straight into the DEMO dashboard. AuthGate recognises the persisted flag and must
+ * never request /api/auth/me; the Telegram dashboard renders from deterministic client fixtures —
+ * no backend, no credentials. Waits for the shell + first widget card, then a short settle so
  * ResizeObserver-driven chart heights are final before we measure them.
  * `opts.theme` pins the pulse_theme preference before load (default: system → the Playwright
  * environment's light) — the contrast gate scans both palettes explicitly.
@@ -450,13 +447,12 @@ export async function bootDemo(
   await page.route(/^https?:\/\/[^/]+\/api\//, (r) => {
     const url = new URL(r.request().url());
     const path = url.pathname;
-    const isMe = path === '/api/auth/me';
     const igPayload = demoIgPayload(path);
     const msPayload = demoMsPayload(url, { max: opts.msMax });
     return r.fulfill({
-      status: isMe || igPayload !== undefined || msPayload !== undefined ? 200 : 404,
+      status: igPayload !== undefined || msPayload !== undefined ? 200 : 404,
       contentType: 'application/json',
-      body: JSON.stringify(isMe ? DEMO_ME : igPayload ?? msPayload ?? { error: 'not_available_in_demo' }),
+      body: JSON.stringify(igPayload ?? msPayload ?? { error: 'not_available_in_demo' }),
     });
   });
   await page.addInitScript(

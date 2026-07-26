@@ -7,7 +7,7 @@ import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/E
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
 import { SegmentedControl } from '@/components/SegmentedControl';
-import { SegSelect } from '@/panels/MetricPage';
+import { SegSelect } from '@/components/metric/SegSelect';
 import { PeriodChips } from '@/components/PeriodChips';
 import { PillSelect } from '@/components/PillSelect';
 import { SourceIdentity } from '@/components/SourceIdentity';

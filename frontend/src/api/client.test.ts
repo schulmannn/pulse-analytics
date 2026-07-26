@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { ApiError, apiGet, apiSend } from './client';
 
+const WriteResponseSchema = z.object({ ok: z.boolean().optional() }).passthrough();
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -16,7 +18,9 @@ describe('ApiError retry metadata', () => {
       headers: { 'Content-Type': 'application/json', 'Retry-After': '60' },
     })));
 
-    await expect(apiSend('POST', '/api/tg/qr/start')).rejects.toMatchObject({
+    await expect(
+      apiSend('POST', '/api/tg/qr/start', undefined, WriteResponseSchema),
+    ).rejects.toMatchObject({
       name: 'ApiError',
       status: 503,
       retryAfter: 60,
@@ -31,11 +35,56 @@ describe('ApiError retry metadata', () => {
       headers: { 'Content-Type': 'application/json' },
     })));
 
-    await expect(apiSend('POST', '/api/tg/qr/start')).rejects.toMatchObject({
+    await expect(
+      apiSend('POST', '/api/tg/qr/start', undefined, WriteResponseSchema),
+    ).rejects.toMatchObject({
       name: 'ApiError',
       status: 503,
       retryAfter: undefined,
     });
+  });
+});
+
+describe('apiSend response contracts', () => {
+  it('returns the schema-narrowed successful response', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => Response.json({ ok: true, ignored: 'server extension' })),
+    );
+
+    await expect(
+      apiSend('POST', '/api/example', { value: 1 }, z.object({ ok: z.literal(true) })),
+    ).resolves.toEqual({ ok: true });
+  });
+
+  it('turns a successful response with schema drift into a non-retryable ApiError', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => Response.json({ ok: 'yes' })),
+    );
+
+    await expect(
+      apiSend('POST', '/api/example', undefined, z.object({ ok: z.boolean() })),
+    ).rejects.toMatchObject({
+      name: 'ApiError',
+      status: 0,
+      network: undefined,
+      message: 'Формат данных не совпадает с ожидаемым',
+    });
+  });
+
+  it('validates a 204 as null instead of bypassing the call-site schema', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(null, { status: 204 })),
+    );
+
+    await expect(
+      apiSend('DELETE', '/api/example', undefined, z.null()),
+    ).resolves.toBeNull();
+    await expect(
+      apiSend('DELETE', '/api/example', undefined, z.object({ ok: z.boolean() })),
+    ).rejects.toMatchObject({ name: 'ApiError', status: 0 });
   });
 });
 

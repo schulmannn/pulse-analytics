@@ -4,19 +4,31 @@ import { test, expect, type Page } from '@playwright/test';
 // intercepted (no backend, no real Google script). config → google_client_id:null keeps the Google
 // button inert, so nothing loads from accounts.google.com and the card renders offline.
 
-type AuthRoutes = { login?: { status: number; body: unknown }; forgot?: { status: number; body: unknown } };
+type AuthRoutes = {
+  login?: { status: number; body: unknown };
+  forgot?: { status: number; body: unknown };
+  me?: { status: number; body: unknown };
+  migrate?: { status: number; body: unknown };
+  onRequest?: (pathname: string, headers: Record<string, string>) => void;
+};
 
 async function mockAuth(page: Page, routes: AuthRoutes = {}): Promise<void> {
   await page.route(/^https?:\/\/[^/]+\/api\//, (r) => {
     const { pathname } = new URL(r.request().url());
+    routes.onRequest?.(pathname, r.request().headers());
+    if (pathname === '/api/auth/migrate-cookie') {
+      const { status = 200, body = { ok: true } } = routes.migrate ?? {};
+      return r.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
+    }
     if (pathname === '/api/config') {
       return r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ google_client_id: null }) });
     }
     if (pathname === '/api/auth/me') {
-      return r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ uid: 999, email: 'demo@pulse.local', role: 'user', avatar: null }) });
+      const { status = 200, body = { uid: 999, email: 'demo@pulse.local', role: 'user', avatar: null } } = routes.me ?? {};
+      return r.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
     }
     if (pathname === '/api/auth/login') {
-      const { status = 200, body = { token: 'tkn', expiresAt: null } } = routes.login ?? {};
+      const { status = 200, body = { ok: true, user: { email: 'demo@pulse.local', role: 'user' } } } = routes.login ?? {};
       return r.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
     }
     if (pathname === '/api/auth/forgot') {
@@ -75,6 +87,41 @@ test('successful login redirects away from /login', async ({ page }) => {
   await page.getByRole('button', { name: 'Войти', exact: true }).click();
 
   await expect(page).not.toHaveURL(/\/login$/);
+});
+
+test('logged-out root stays on the public Landing instead of redirecting to /login', async ({ page }) => {
+  await mockAuth(page, {
+    me: { status: 401, body: { error: 'Сессия истекла, войди снова' } },
+  });
+  await page.goto('/');
+
+  await expect(page.getByRole('heading', { name: 'Atlavue' })).toBeVisible();
+  await expect(page).toHaveURL(/\/$/);
+});
+
+test('legacy token migrates before the first auth probe and is purged', async ({ page }) => {
+  const calls: Array<{ pathname: string; token?: string }> = [];
+  await mockAuth(page, {
+    onRequest: (pathname, headers) => {
+      calls.push({ pathname, token: headers['x-session-token'] });
+    },
+  });
+  await page.addInitScript(() => {
+    localStorage.setItem('pulse_token', 'legacy-e2e-token');
+    localStorage.setItem('pulse_token_exp', String(Date.now() + 60_000));
+  });
+  await page.goto('/');
+
+  await expect.poll(() => calls.some((call) => call.pathname === '/api/auth/me')).toBe(true);
+  const migrateIndex = calls.findIndex((call) => call.pathname === '/api/auth/migrate-cookie');
+  const meIndex = calls.findIndex((call) => call.pathname === '/api/auth/me');
+  expect(migrateIndex).toBeGreaterThanOrEqual(0);
+  expect(migrateIndex).toBeLessThan(meIndex);
+  expect(calls[migrateIndex]?.token).toBe('legacy-e2e-token');
+  await expect.poll(() => page.evaluate(() => ({
+    token: localStorage.getItem('pulse_token'),
+    exp: localStorage.getItem('pulse_token_exp'),
+  }))).toEqual({ token: null, exp: null });
 });
 
 test('forgot flow toggles in place, submits and restores the login form', async ({ page }) => {

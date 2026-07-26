@@ -280,6 +280,9 @@ let pushTimer: number | null = null;
 const PREFS_MAX = 32000;
 
 const PrefsBlobSchema = z.object({ prefs: z.unknown().optional().nullable() }).passthrough();
+const PrefsWriteSchema = z
+  .object({ ok: z.boolean(), stored: z.boolean().optional() })
+  .passthrough();
 
 function localBlob() {
   return {
@@ -308,7 +311,7 @@ function schedulePush() {
     // If the whole blob would exceed the server cap, drop the builder configs so dashboard LAYOUT
     // keeps syncing (the too-large builder set stays device-local) instead of a 413 killing ALL sync.
     if (JSON.stringify(prefs).length > PREFS_MAX) delete prefs.widgetConfigs;
-    void apiSend('PUT', '/api/prefs', { prefs }).catch(() => {
+    void apiSend('PUT', '/api/prefs', { prefs }, PrefsWriteSchema).catch(() => {
       /* offline / DB off — customisation stays device-local; the next mutation retries */
     });
   }, 1500);

@@ -303,10 +303,11 @@ function InteractivePostsTable({
                         )}
                       >
                         {canEdit && (
-                          <td className="py-3 pl-0 pr-2" onClick={(e) => e.stopPropagation()}>
+                          <td className="py-3 pl-0 pr-2">
                             <Checkbox
                               aria-label="Выбрать публикацию"
                               checked={selected.has(k)}
+                              onClick={(event) => event.stopPropagation()}
                               onCheckedChange={() => toggle(p)}
                               data-testid="campaign-post-select"
                             />
@@ -321,10 +322,13 @@ function InteractivePostsTable({
                           {p.published_at ? fmt.date(p.published_at) : '—'}
                         </td>
                         {canEdit && (
-                          <td className="px-3 py-3 text-right last:pr-0" onClick={(e) => e.stopPropagation()}>
+                          <td className="px-3 py-3 text-right last:pr-0">
                             <button
                               type="button"
-                              onClick={() => onRemovePost(p)}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                onRemovePost(p);
+                              }}
                               disabled={removePending}
                               className="text-xs font-medium text-muted-foreground transition-colors hover:text-destructive disabled:opacity-50"
                             >

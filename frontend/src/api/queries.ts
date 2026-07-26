@@ -69,7 +69,6 @@ import {
   VelocitySchema,
 } from '@/api/schemas';
 import type { CampaignPostInput, CampaignStatus, MentionRules, ReportConfig, TgFull } from '@/api/schemas';
-import { clearSessionToken, setSessionToken } from '@/lib/session';
 import { isDemoMode } from '@/lib/demo';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { effectiveLimit, usePeriod } from '@/lib/period';
@@ -113,21 +112,12 @@ export function useChangePassword() {
   });
 }
 
-function sessionTtl(expiresAt?: string | null): number | undefined {
-  if (!expiresAt) return undefined;
-  const ttlMs = Date.parse(expiresAt) - Date.now();
-  return Number.isFinite(ttlMs) && ttlMs > 0 ? ttlMs : undefined;
-}
-
 export function useLogin() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: { email: string; password: string }) =>
       apiSend('POST', '/api/auth/login', body, LoginResponseSchema),
-    onSuccess: (data) => {
-      setSessionToken(data.token, sessionTtl(data.expiresAt));
-      return qc.invalidateQueries();
-    },
+    onSuccess: () => qc.invalidateQueries(),
   });
 }
 
@@ -157,10 +147,7 @@ export function useGoogleLogin() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (credential: string) => apiSend('POST', '/api/auth/google', { credential }, LoginResponseSchema),
-    onSuccess: (data) => {
-      setSessionToken(data.token, sessionTtl(data.expiresAt));
-      return qc.invalidateQueries();
-    },
+    onSuccess: () => qc.invalidateQueries(),
   });
 }
 
@@ -192,18 +179,13 @@ export function useReset() {
 export function useLogout() {
   const qc = useQueryClient();
   const { setChannelId } = useSelectedChannel();
-  const clearLocalSession = () => {
-    clearSessionToken();
-    setChannelId(null);
-  };
   return useMutation({
     mutationFn: () => apiSend('POST', '/api/auth/logout', undefined, AuthOkSchema),
     onSuccess: () => {
-      clearLocalSession();
-      return qc.invalidateQueries();
+      setChannelId(null);
+      // Keep this mutation alive until its per-call onSuccess navigation fires.
+      qc.getQueryCache().clear();
     },
-    onError: clearLocalSession,
-    onSettled: () => qc.clear(),
   });
 }
 
@@ -1665,8 +1647,8 @@ export function useAdminDeleteUser() {
 /**
  * GDPR F4 (self-serve): немедленный hard-delete собственного аккаунта. `confirm` — email
  * аккаунта (подтверждение намерения; пароль не годится — Google-аккаунты живут без него).
- * После успеха сессия мертва и на сервере (users-строки больше нет) — чистим локально и
- * сбрасываем весь кэш; редирект — на вызывающей стороне.
+ * После успеха сервер удаляет пользователя и очищает HttpOnly-cookie; сбрасываем
+ * выбранный канал/кэш, редирект остаётся на вызывающей стороне.
  */
 export function useDeleteAccount() {
   const qc = useQueryClient();
@@ -1674,9 +1656,8 @@ export function useDeleteAccount() {
   return useMutation({
     mutationFn: (confirm: string) => apiSend('DELETE', '/api/account', { confirm }, OkSchema),
     onSuccess: () => {
-      clearSessionToken();
       setChannelId(null);
-      qc.clear();
+      qc.getQueryCache().clear();
     },
   });
 }

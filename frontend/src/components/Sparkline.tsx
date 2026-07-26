@@ -1,5 +1,4 @@
-import { useId, useMemo, useState } from 'react';
-import type { MouseEvent } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { seriesMotionKey } from '@/lib/chartMotion';
 import type { MorphPoint } from '@/lib/chartMorph';
 import { SparklineSeries } from '@/components/SparklineSeries';
@@ -72,10 +71,32 @@ export function Sparkline({
   // Strip colons from useId — they're valid in ids but break SVG url(#…) refs in some browsers.
   const gradientId = `sl${useId().replace(/:/g, '')}`;
   const [hover, setHover] = useState<number | null>(null);
+  const hoverSurfaceRef = useRef<HTMLDivElement>(null);
   // Target morph geometry, memoised on the VALUES reference: a hover rerender keeps the same `values`
   // ref (hover is local state — the parent doesn't re-render), so the morph layer sees a stable
   // `points` and never restarts; a period/filter swap hands down a new array → new geometry → morph.
   const points = useMemo(() => computeSparkPoints(values ?? []), [values]);
+
+  // Pointer scrubbing is supplementary to the SVG's detailed accessible name, not an activation
+  // action. Keep the surface passive and listen for its coordinates on the DOM node.
+  useEffect(() => {
+    const surface = hoverSurfaceRef.current;
+    if (!surface || !interactive || values.length < 2) return;
+    const handleMove = (event: globalThis.MouseEvent) => {
+      const rect = surface.getBoundingClientRect();
+      if (rect.width === 0) return;
+      const ratio = (event.clientX - rect.left) / rect.width;
+      setHover(Math.max(0, Math.min(values.length - 1, Math.round(ratio * (values.length - 1)))));
+    };
+    const clearHover = () => setHover(null);
+    surface.addEventListener('mousemove', handleMove);
+    surface.addEventListener('mouseleave', clearHover);
+    return () => {
+      surface.removeEventListener('mousemove', handleMove);
+      surface.removeEventListener('mouseleave', clearHover);
+    };
+  }, [interactive, values.length]);
+
   if (!values || values.length < 2) return null;
 
   // Stable DATA signature (see index.css «Chart motion») — a change (period / filter swap, longer /
@@ -95,13 +116,6 @@ export function Sparkline({
   const maxIdx = values.indexOf(max);
   const lastIdx = n - 1;
   const active = hover;
-
-  const onMove = (e: MouseEvent<HTMLDivElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    if (rect.width === 0) return;
-    const ratio = (e.clientX - rect.left) / rect.width;
-    setHover(Math.max(0, Math.min(n - 1, Math.round(ratio * (n - 1)))));
-  };
 
   // Read-out text: idle caption, or date · value · Δ-vs-previous-point while hovering.
   let readout = caption ?? '';
@@ -140,9 +154,8 @@ export function Sparkline({
     // took the full height (h-full) and the caption overflowed below the box onto whatever followed.
     <div className={cn('flex flex-col', className)}>
       <div
+        ref={hoverSurfaceRef}
         className="relative min-h-0 w-full flex-1"
-        onMouseMove={interactive ? onMove : undefined}
-        onMouseLeave={interactive ? () => setHover(null) : undefined}
       >
         {/* Декоративная искра рядом с числом действительно ничего не добавляет скринридеру и
             остаётся aria-hidden. Но `interactive` — уже не украшение: у неё есть hover-читалка со
@@ -163,6 +176,7 @@ export function Sparkline({
             : { 'aria-hidden': true as const })}
           data-chart-kind="sparkline"
         >
+          <title>График тренда</title>
           {area && (
             <defs>
               <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">

@@ -1,5 +1,4 @@
-import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { MouseEvent as ReactMouseEvent } from 'react';
+import { useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { columnIndex } from '@/lib/chartHover';
 import { axisLabelIndexSet } from '@/lib/chartLabels';
 import { observeSize } from '@/lib/observeSize';
@@ -26,7 +25,9 @@ interface Hover {
     height an ancestor dictates — the fixed widget tile or the expand overlay — via
     ExpandedChartHeightContext (like BarChart), else the caller's `height`, else 120px. */
 export function DivergingBars({ values, labels, titles, height }: DivergingBarsProps) {
+  const titleId = useId();
   const containerRef = useRef<HTMLDivElement>(null);
+  const svgRef = useRef<SVGSVGElement>(null);
   const [hover, setHover] = useState<Hover | null>(null);
   // Measure the render width so the viewBox is 1:1 with CSS pixels — a fixed 600-wide viewBox
   // scaled to fit stretched the zero-line + labels at inconsistent sizes.
@@ -71,7 +72,8 @@ export function DivergingBars({ values, labels, titles, height }: DivergingBarsP
     const total = ctxHeight ?? height ?? 120;
     const h = Math.max(total - labelPad, 1);
     const mid = h / 2;
-    const maxAbs = Math.max(1, ...values.map((v) => Math.abs(v)));
+    const normalized = values.map((value) => (Number.isFinite(value) ? value : 0));
+    const maxAbs = Math.max(1, ...normalized.map((value) => Math.abs(value)));
 
     const W = Math.max(width, 1);
     const step = W / values.length;
@@ -80,16 +82,17 @@ export function DivergingBars({ values, labels, titles, height }: DivergingBarsP
     const labelIndexes = axisLabelIndexSet(values.length, W, { minLabelPx: expanded ? 68 : 78, maxLabels: expanded ? 12 : 7 });
 
     // Per-bar boxes — the cached rect layer below and the hover highlight both draw from these.
-    const bars = values.map((v, i) => {
-      const bh = Math.max(1, (Math.abs(v) / maxAbs) * (mid - 4));
+    const bars = normalized.map((value, i) => {
+      const valid = Number.isFinite(values[i]);
+      const bh = valid ? Math.max(1, (Math.abs(value) / maxAbs) * (mid - 4)) : 0;
       return {
         x: i * step + gap / 2,
-        y: v >= 0 ? mid - bh : mid,
+        y: value >= 0 ? mid - bh : mid,
         w: barWidth,
         h: bh,
         fill: 'hsl(var(--chart-role-primary))',
         // Down bars: same ink, one luminance step quieter — position already says the direction.
-        op: v >= 0 ? 1 : 0.6,
+        op: valid ? (value >= 0 ? 1 : 0.6) : 0,
       };
     });
 
@@ -101,9 +104,8 @@ export function DivergingBars({ values, labels, titles, height }: DivergingBarsP
       </>
     );
 
-    const labelsLayer = hasLabels ? (
-      <>
-        {values.map((_, i) => {
+    const labelsLayer = hasLabels
+      ? values.map((_, i) => {
           const show = labels?.[i] && labelIndexes.has(i);
           if (!show) return null;
           return (
@@ -118,42 +120,68 @@ export function DivergingBars({ values, labels, titles, height }: DivergingBarsP
               {labels?.[i]}
             </text>
           );
-        })}
-      </>
-    ) : null;
+        })
+      : null;
 
     return { W, h, mid, step, bars, barsLayer, labelsLayer, labelPad };
   }, [values, labels, width, ctxHeight, height, expanded]);
 
-  if (!values || values.length === 0 || !plot) {
+  // Pointer reading is supplementary to the graphic's full text summary. Listen on the passive
+  // SVG node and keep it out of the keyboard order; there is no activation action to expose.
+  useEffect(() => {
+    const svg = svgRef.current;
+    const container = containerRef.current;
+    if (!svg || !container || !plot || values.length === 0) return;
+    const handleMove = (event: globalThis.MouseEvent) => {
+      const svgRect = svg.getBoundingClientRect();
+      if (svgRect.width === 0) return;
+      const xView = ((event.clientX - svgRect.left) / svgRect.width) * plot.W;
+      const i = columnIndex(xView, values.length, 0, plot.step);
+      setHover((prev) => (prev && prev.i === i ? prev : { i }));
+    };
+    const clearHover = () => setHover(null);
+    svg.addEventListener('mousemove', handleMove);
+    container.addEventListener('mouseleave', clearHover);
+    return () => {
+      svg.removeEventListener('mousemove', handleMove);
+      container.removeEventListener('mouseleave', clearHover);
+    };
+  }, [plot, values.length]);
+
+  const hasFiniteValue = values?.some((value) => Number.isFinite(value)) ?? false;
+  if (!values || values.length === 0 || !hasFiniteValue || !plot) {
     return <EmptyState compact size="chart" title="Нет данных" />;
   }
 
-  const { W, h, mid, step, bars, labelPad } = plot;
+  const { W, h, mid, bars, labelPad } = plot;
   const n = values.length;
-  const tipText = (i: number) => titles?.[i] ?? `${values[i]}`;
-
-  // ONE hit surface: the svg itself (the old per-bar rects carried a misleading pointer cursor —
-  // there is no click action here, so the crosshair matches the other charts). Тултип ЯКОРИТСЯ
-  // к вершине столбца, а не следует за курсором — канон всех остальных графиков (проход №3);
-  // viewBox 1:1 с CSS-пикселями, поэтому координаты бара валидны и как контейнерные.
-  const onSvgMove = (e: ReactMouseEvent<SVGSVGElement>) => {
-    const svgRect = e.currentTarget.getBoundingClientRect();
-    if (svgRect.width === 0) return;
-    const xView = ((e.clientX - svgRect.left) / svgRect.width) * W;
-    const i = columnIndex(xView, n, 0, step);
-    setHover((prev) => (prev && prev.i === i ? prev : { i }));
-  };
+  const tipText = (i: number) =>
+    titles?.[i] ?? (Number.isFinite(values[i]) ? `${values[i]}` : 'Нет данных');
+  const finiteValues = values.filter(Number.isFinite);
+  const minimum = finiteValues.length > 0 ? Math.min(...finiteValues) : null;
+  const maximum = finiteValues.length > 0 ? Math.max(...finiteValues) : null;
+  const latestIndex = values.length - 1;
+  const latestName = labels?.[latestIndex] ?? `точка ${values.length}`;
+  const latestDetail = titles?.[latestIndex];
+  const latestValue = Number.isFinite(values[latestIndex]) ? `${values[latestIndex]}` : 'нет данных';
+  const accessibleSummary = [
+    `Дельта по ${n} точкам.`,
+    minimum == null ? 'Числовых значений нет.' : `Минимум ${minimum}; максимум ${maximum}.`,
+    `Последняя — ${latestName}: ${latestValue}${latestDetail ? ` (${latestDetail})` : ''}.`,
+  ].join(' ');
 
   return (
-    <div ref={containerRef} className="relative w-full" onMouseLeave={() => setHover(null)}>
+    <div ref={containerRef} className="relative w-full">
       <svg
+        ref={svgRef}
+        role="img"
+        aria-labelledby={titleId}
         className="block w-full cursor-crosshair"
         height={h + labelPad}
         viewBox={`0 0 ${W} ${h + labelPad}`}
         preserveAspectRatio="none"
-        onMouseMove={onSvgMove}
       >
+        <title id={titleId}>{accessibleSummary}</title>
         <line x1={0} y1={mid} x2={W} y2={mid} stroke="hsl(var(--border))" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
 
         {/* Cached bar rects; hovering dims the whole group and the overlay below re-draws the

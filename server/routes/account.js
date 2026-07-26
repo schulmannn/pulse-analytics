@@ -17,7 +17,17 @@ const rateLimit = require('express-rate-limit');
  * app and injected. Every admin/account write stays behind requireAuth (+ requireSuper where it
  * was) and the same self-lockout / superuser guards as before.
  */
-function registerAccountRoutes({ app, requireAuth, requireSuper, db, audit, sendEmail, emailShell, GOOGLE_CLIENT_ID }) {
+function registerAccountRoutes({
+  app,
+  requireAuth,
+  requireSuper,
+  db,
+  audit,
+  sendEmail,
+  emailShell,
+  GOOGLE_CLIENT_ID,
+  clearSessionCookie = () => {},
+}) {
   // Public runtime config for the SPA (no secrets). Currently just the Google client id so the login
   // UI can decide whether to show the "Sign in with Google" button.
   app.get('/api/config', (req, res) => {
@@ -165,6 +175,7 @@ function registerAccountRoutes({ app, requireAuth, requireSuper, db, audit, send
         'остаточные копии в резервных бэкапах существуют ещё до 30 дней.</p>')).catch(() => {});
       const ok = await db.deleteUserAccount(req.user.uid);
       if (!ok) return res.status(404).json({ error: 'Пользователь не найден' });
+      clearSessionCookie(req, res);
       res.json({ ok: true });
     } catch (e) { next(e); }
   });

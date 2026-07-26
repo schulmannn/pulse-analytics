@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react';
+import type { FocusEvent, KeyboardEvent } from 'react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { endOfLocalDay, shiftLocalDays, startOfLocalDay } from '@/lib/period';
@@ -9,7 +10,7 @@ import { endOfLocalDay, shiftLocalDays, startOfLocalDay } from '@/lib/period';
  * a row of quick presets ("средство поиска" — fast selection), and a mono read-out of the range.
  * Days are Monday-first (ru). Endpoints render filled; the in-between span gets a blue tint.
  *
- * A11y — the month is a real `role="grid"` (WAI-ARIA date-grid pattern), not 31 loose buttons:
+ * A11y — the month is a real labelled table, not a visual grid of 31 loose buttons:
  *   • ONE tab stop. A roving tabindex keeps exactly one day focusable; Tab enters and leaves the
  *     whole month instead of walking it cell by cell (it used to cost up to 31 presses to reach
  *     «Применить»).
@@ -22,8 +23,9 @@ import { endOfLocalDay, shiftLocalDays, startOfLocalDay } from '@/lib/period';
  *   • Future days use `aria-disabled`, NOT the native `disabled`: a natively disabled cell is
  *     unfocusable, so arrow navigation would hit a silent hole at the end of the month. This way
  *     the cell stays reachable and announces «недоступно»; the click/hover guards moved into JS.
- *   • Selection is announced, not merely tinted — `aria-selected` on the cells, `aria-current="date"`
- *     on today, and a polite status line carrying the pick state («Начало: … Выберите конец»).
+ *   • Selection is announced, not merely tinted — `aria-pressed` on date buttons,
+ *     `aria-current="date"` on today, and a polite status line carrying the pick state
+ *     («Начало: … Выберите конец»).
  */
 
 const WD: { short: string; full: string }[] = [
@@ -102,7 +104,7 @@ export function DateRangePicker({ value, onApply, onReset }: Props) {
   // Каретка сетки (roving tabindex). Стартует с того же основания, что и `view`, поэтому всегда
   // лежит внутри показанного месяца — иначе ни одна ячейка не получила бы tabIndex=0.
   const [focusedTs, setFocusedTs] = useState(() => startOfLocalDay(value?.from ?? Date.now()));
-  const gridRef = useRef<HTMLDivElement>(null);
+  const gridRef = useRef<HTMLTableElement>(null);
   // Переводить фокус в DOM нужно ТОЛЬКО после клавиатурного шага. Без флага эффект воровал бы
   // фокус на монтировании и при кликах по стрелкам месяца.
   const pendingFocus = useRef(false);
@@ -123,6 +125,16 @@ export function DateRangePicker({ value, onApply, onReset }: Props) {
     pendingFocus.current = false;
     gridRef.current?.querySelector<HTMLButtonElement>(`[data-day="${focusedTs}"]`)?.focus();
   }, [focusedTs]);
+
+  // Pointer hover is only a preview; the table itself is passive semantic structure. A native
+  // boundary listener clears that preview without assigning an interactive role to the table.
+  useEffect(() => {
+    const grid = gridRef.current;
+    if (!grid) return;
+    const clearHover = () => setHover(null);
+    grid.addEventListener('mouseleave', clearHover);
+    return () => grid.removeEventListener('mouseleave', clearHover);
+  }, []);
 
   const pickDay = (ts: number) => {
     if (from == null || to != null) {
@@ -214,9 +226,33 @@ export function DateRangePicker({ value, onApply, onReset }: Props) {
         ? `Начало: ${spokenDate(from)}. Выберите конец периода.`
         : `Период выбран: с ${spokenDate(from)} по ${spokenDate(to)}.`;
 
+  const handleDayBlur = (event: FocusEvent<HTMLButtonElement>) => {
+    const table = event.currentTarget.closest('table');
+    // Фокус ушёл из календаря целиком → снимаем предпросмотр.
+    if (!table?.contains(event.relatedTarget as Node | null)) setHover(null);
+  };
+
+  const handleDayKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
+    let next: number | null = null;
+    switch (event.key) {
+      case 'ArrowLeft': next = shiftLocalDays(focusedTs, -1); break;
+      case 'ArrowRight': next = shiftLocalDays(focusedTs, 1); break;
+      case 'ArrowUp': next = shiftLocalDays(focusedTs, -7); break;
+      case 'ArrowDown': next = shiftLocalDays(focusedTs, 7); break;
+      case 'Home': next = shiftLocalDays(focusedTs, -weekdayIndex(focusedTs)); break;
+      case 'End': next = shiftLocalDays(focusedTs, 6 - weekdayIndex(focusedTs)); break;
+      case 'PageUp': next = shiftMonths(focusedTs, event.shiftKey ? -12 : -1); break;
+      case 'PageDown': next = shiftMonths(focusedTs, event.shiftKey ? 12 : 1); break;
+      default: return;
+    }
+    event.preventDefault();
+    moveFocus(next);
+  };
+
   return (
     <div className="w-[300px]">
-      <div role="group" aria-label="Быстрый выбор периода" className="flex flex-wrap gap-1.5 pb-3">
+      <fieldset className="m-0 flex min-w-0 flex-wrap gap-1.5 border-0 p-0 pb-3">
+        <legend className="sr-only">Быстрый выбор периода</legend>
         {presets.map((p) => (
           <button
             key={p.label}
@@ -227,7 +263,7 @@ export function DateRangePicker({ value, onApply, onReset }: Props) {
             {p.label}
           </button>
         ))}
-      </div>
+      </fieldset>
 
       <div className="flex items-center justify-between pb-2">
         <button
@@ -254,99 +290,84 @@ export function DateRangePicker({ value, onApply, onReset }: Props) {
         </button>
       </div>
 
-      <div
+      <table
         ref={gridRef}
-        role="grid"
         aria-labelledby={captionId}
-        onMouseLeave={() => setHover(null)}
-        onBlur={(event) => {
-          // Фокус ушёл из сетки целиком → снимаем предпросмотр (мышиный аналог — onMouseLeave).
-          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setHover(null);
-        }}
-        onKeyDown={(event) => {
-          let next: number | null = null;
-          switch (event.key) {
-            case 'ArrowLeft': next = shiftLocalDays(focusedTs, -1); break;
-            case 'ArrowRight': next = shiftLocalDays(focusedTs, 1); break;
-            case 'ArrowUp': next = shiftLocalDays(focusedTs, -7); break;
-            case 'ArrowDown': next = shiftLocalDays(focusedTs, 7); break;
-            case 'Home': next = shiftLocalDays(focusedTs, -weekdayIndex(focusedTs)); break;
-            case 'End': next = shiftLocalDays(focusedTs, 6 - weekdayIndex(focusedTs)); break;
-            case 'PageUp': next = shiftMonths(focusedTs, event.shiftKey ? -12 : -1); break;
-            case 'PageDown': next = shiftMonths(focusedTs, event.shiftKey ? 12 : 1); break;
-            default: return;
-          }
-          event.preventDefault();
-          moveFocus(next);
-        }}
+        className="block w-full border-collapse"
       >
-        <div role="row" className="grid grid-cols-7 gap-0.5 pb-1 text-center text-2xs text-muted-foreground">
-          {WD.map((w) => (
-            <div key={w.short} role="columnheader" aria-label={w.full}>
-              {w.short}
-            </div>
+        <thead className="block">
+          <tr className="grid grid-cols-7 gap-0.5 pb-1 text-center text-2xs text-muted-foreground">
+            {WD.map((w) => (
+              <th key={w.short} scope="col" aria-label={w.full} className="font-normal">
+                {w.short}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody className="block">
+          {weeks.map((week, wi) => (
+            // eslint-disable-next-line react/no-array-index-key -- недели позиционны внутри месяца
+            <tr key={wi} className="grid grid-cols-7 gap-0.5">
+              {week.map((ts, di) => {
+                if (ts == null) return <td key={di} className="p-0" />;
+                const isEdge = ts === from || ts === to;
+                const isToday = ts === todayStart;
+                // Будущий день не выбрать: диапазон в будущем давал пустые графики без объяснения (аудит).
+                const isFuture = ts > todayStart;
+                const selected = isEdge || inCommitted(ts);
+                const stateLabel =
+                  isFuture ? ', недоступно'
+                  : ts === from ? ', начало периода'
+                  : ts === to ? ', конец периода'
+                  : inCommitted(ts) ? ', в выбранном периоде'
+                  : '';
+                return (
+                  <td key={di} className="p-0">
+                    <button
+                      type="button"
+                      data-day={ts}
+                      // Roving tabindex: фокусируема ровно одна дата месяца.
+                      tabIndex={ts === focusedTs ? 0 : -1}
+                      aria-disabled={isFuture || undefined}
+                      aria-current={isToday ? 'date' : undefined}
+                      aria-pressed={selected}
+                      aria-label={`${spokenDate(ts)}${stateLabel}`}
+                      onClick={() => {
+                        if (isFuture) return; // aria-disabled не блокирует клик — гасим здесь
+                        setFocusedTs(ts);
+                        pickDay(ts);
+                      }}
+                      onBlur={handleDayBlur}
+                      onKeyDown={handleDayKeyDown}
+                      onFocus={() => {
+                        if (!isFuture) setHover(ts);
+                      }}
+                      onMouseEnter={() => {
+                        if (!isFuture) setHover(ts);
+                      }}
+                      className={cn(
+                        'flex h-8 w-full items-center justify-center rounded text-xs tabular-nums transition-colors',
+                        isEdge
+                          ? 'bg-primary font-medium text-primary-foreground'
+                          : inPreview(ts)
+                            ? 'bg-accent text-foreground'
+                            : 'text-foreground hover:bg-muted',
+                        // Никакого pointer-events-none: дата обязана оставаться фокусируемой, иначе
+                        // стрелка упрётся в дыру в конце месяца. Гасим только курсор и подсветку.
+                        isFuture && 'cursor-default opacity-35 hover:bg-transparent',
+                        isToday && !isEdge && 'ring-1 ring-inset ring-primary/40',
+                        'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40',
+                      )}
+                    >
+                      {new Date(ts).getDate()}
+                    </button>
+                  </td>
+                );
+              })}
+            </tr>
           ))}
-        </div>
-
-        {weeks.map((week, wi) => (
-          // eslint-disable-next-line react/no-array-index-key -- недели позиционны внутри месяца
-          <div key={wi} role="row" className="grid grid-cols-7 gap-0.5">
-            {week.map((ts, di) => {
-              if (ts == null) return <div key={di} role="gridcell" />;
-              const isEdge = ts === from || ts === to;
-              const isToday = ts === todayStart;
-              // Будущий день не выбрать: диапазон в будущем давал пустые графики без объяснения (аудит).
-              const isFuture = ts > todayStart;
-              const selected = isEdge || inCommitted(ts);
-              const stateLabel =
-                isFuture ? ', недоступно'
-                : ts === from ? ', начало периода'
-                : ts === to ? ', конец периода'
-                : inCommitted(ts) ? ', в выбранном периоде'
-                : '';
-              return (
-                <div key={di} role="gridcell" aria-selected={selected}>
-                  <button
-                    type="button"
-                    data-day={ts}
-                    // Roving tabindex: фокусируема ровно одна ячейка месяца.
-                    tabIndex={ts === focusedTs ? 0 : -1}
-                    aria-disabled={isFuture || undefined}
-                    aria-current={isToday ? 'date' : undefined}
-                    aria-label={`${spokenDate(ts)}${stateLabel}`}
-                    onClick={() => {
-                      if (isFuture) return; // aria-disabled не блокирует клик — гасим здесь
-                      setFocusedTs(ts);
-                      pickDay(ts);
-                    }}
-                    onFocus={() => {
-                      if (!isFuture) setHover(ts);
-                    }}
-                    onMouseEnter={() => {
-                      if (!isFuture) setHover(ts);
-                    }}
-                    className={cn(
-                      'flex h-8 w-full items-center justify-center rounded text-xs tabular-nums transition-colors',
-                      isEdge
-                        ? 'bg-primary font-medium text-primary-foreground'
-                        : inPreview(ts)
-                          ? 'bg-accent text-foreground'
-                          : 'text-foreground hover:bg-muted',
-                      // Никакого pointer-events-none: ячейка обязана оставаться фокусируемой, иначе
-                      // стрелка упрётся в дыру в конце месяца. Гасим только курсор и подсветку.
-                      isFuture && 'cursor-default opacity-35 hover:bg-transparent',
-                      isToday && !isEdge && 'ring-1 ring-inset ring-primary/40',
-                      'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40',
-                    )}
-                  >
-                    {new Date(ts).getDate()}
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        ))}
-      </div>
+        </tbody>
+      </table>
 
       {/* Визуальный read-out скрыт от скринридера — «→» и «…» читаются мусором; смысл несёт
           статус-строка ниже, единственный источник объявления состояния выбора. */}

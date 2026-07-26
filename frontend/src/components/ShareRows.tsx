@@ -57,21 +57,34 @@ export function ShareTrack({
   const defaultLabel = `Доля ${finitePct.toFixed(1)}%${
     finitePct > 100 ? ', визуальная шкала ограничена 100%' : ''
   }`;
+  const fill = (
+    <div
+      className="h-full rounded-full transition-[width] dur-base ease-house"
+      style={{
+        width: `${widthPct}%`,
+        backgroundColor: color ?? `hsl(var(--chart-role-primary) / ${muted ? '0.4' : '0.75'})`,
+      }}
+    />
+  );
+  if (ariaLabel === null) {
+    return (
+      <div
+        className={`${height} min-w-0 flex-1 overflow-hidden rounded-full bg-muted/70`}
+        aria-hidden="true"
+        data-share-percent={finitePct}
+      >
+        {fill}
+      </div>
+    );
+  }
   return (
     <div
       className={`${height} min-w-0 flex-1 overflow-hidden rounded-full bg-muted/70`}
-      role={ariaLabel === null ? undefined : 'img'}
-      aria-label={ariaLabel === null ? undefined : (ariaLabel ?? defaultLabel)}
-      aria-hidden={ariaLabel === null ? true : undefined}
+      role="img"
+      aria-label={ariaLabel ?? defaultLabel}
       data-share-percent={finitePct}
     >
-      <div
-        className="h-full rounded-full transition-[width] dur-base ease-house"
-        style={{
-          width: `${widthPct}%`,
-          backgroundColor: color ?? `hsl(var(--chart-role-primary) / ${muted ? '0.4' : '0.75'})`,
-        }}
-      />
+      {fill}
     </div>
   );
 }
@@ -181,11 +194,12 @@ export function ShareRows({
               <span className="col-start-2 row-start-1 flex min-w-0 flex-wrap items-baseline justify-end gap-x-1 text-right text-xs tabular-nums sm:col-start-3">
                 <span className="font-medium text-foreground">{format(r.value)}</span>
                 {r.note != null && <span className="text-muted-foreground"> · {r.note}</span>}
-                <span className="text-muted-foreground" aria-label={`Доля ${pctText(pct)}`}>
+                <span role="img" className="text-muted-foreground" aria-label={`Доля ${pctText(pct)}`}>
                   · {pctText(pct)}
                 </span>
                 {cumulative && pct != null && (
                   <span
+                    role="img"
                     className="text-2xs text-muted-foreground"
                     aria-label={`Накопленная доля ${pctText(running)}`}
                   >
@@ -211,7 +225,7 @@ export function ShareRows({
               Ещё {format(tailValue)} {tailWord}
               {safeTotal != null && <> из {format(safeTotal)}</>}
               {' · '}
-              <span aria-label={`Доля ${pctText(pctOf(tailValue))}`}>{pctText(pctOf(tailValue))}</span>
+              <span role="img" aria-label={`Доля ${pctText(pctOf(tailValue))}`}>{pctText(pctOf(tailValue))}</span>
             </span>
           </li>
         )}

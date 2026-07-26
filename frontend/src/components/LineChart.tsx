@@ -11,6 +11,11 @@ import { axisLabelIndexes } from '@/lib/chartLabels';
 import { ChartTooltip, type TooltipRow, type TooltipState } from '@/components/ChartTooltip';
 import { ChartExpandedContext, ChartRefLinesContext, ExpandedChartHeightContext, WidgetTargetContext } from '@/components/ExpandableChart';
 import { observeSize } from '@/lib/observeSize';
+import {
+  activateChartControl,
+  chartControlAriaLabel,
+  nextChartControlIndex,
+} from '@/lib/chartOverlayControl';
 
 interface LineChartProps {
   /** Значения серии; null = день без данных (сбор пропущен) — рисуется РАЗРЫВОМ линии, а не
@@ -143,8 +148,12 @@ export function LineChart({
   appearance = 'default',
 }: LineChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const svgRef = useRef<SVGSVGElement>(null);
   // Press position (client px) for the drag guard — see onSvgClick below.
   const pressRef = useRef<{ x: number; y: number } | null>(null);
+  // Native-button focus follows pointerdown. Preserve that fresh press through focus, but let a
+  // later keyboard focus discard coordinates left by an interrupted pointer gesture.
+  const pointerDownRef = useRef(false);
   const [hover, setHover] = useState<Hover | null>(null);
   // The comparison series can be toggled off via its legend chip (steep #9) — a decluttering
   // reading aid. Hidden, it also drops out of the y-domain below so the current series
@@ -198,7 +207,11 @@ export function LineChart({
   const hasHover = hover !== null;
   useEffect(() => {
     if (!hasHover) return;
-    const clear = () => setHover(null);
+    const clear = () => {
+      pointerDownRef.current = false;
+      pressRef.current = null;
+      setHover(null);
+    };
     window.addEventListener('scroll', clear, true);
     window.addEventListener('blur', clear);
     return () => {
@@ -540,6 +553,36 @@ export function LineChart({
     };
   }, [values, labels, activeGhost, hasGhostLegend, target, refLines, yMin, yMax, width, ctxHeight, height, expanded, showAxes, markExtremes, showPoints, anomalyIdx, gradientId, comparisonGradientId, rhea, comparison, richStyle]);
 
+  // Hover-only lines remain one passive named graphic. Pointer scrubbing is supplementary to its
+  // accessible summary and is registered on the DOM node. A drillable line instead uses the real
+  // overlay button rendered below, which provides focus, arrow selection and Enter/Space parity.
+  useEffect(() => {
+    const container = containerRef.current;
+    const svg = svgRef.current;
+    if (!container || !svg || !plot || values.length === 0) return;
+    const clear = () => {
+      pointerDownRef.current = false;
+      pressRef.current = null;
+      setHover(null);
+    };
+    const handleMove = (event: globalThis.MouseEvent) => {
+      const rect = svg.getBoundingClientRect();
+      if (rect.width === 0) return;
+      const xView = ((event.clientX - rect.left) / rect.width) * plot.W;
+      const i = nearestPointIndex(xView, values.length, plot.gutterW, plot.step);
+      if (i == null) return;
+      setHover((prev) => (prev && prev.i === i ? prev : { i }));
+    };
+    if (!onPointClick) svg.addEventListener('mousemove', handleMove);
+    container.addEventListener('mouseleave', clear);
+    container.addEventListener('pointerleave', clear);
+    return () => {
+      if (!onPointClick) svg.removeEventListener('mousemove', handleMove);
+      container.removeEventListener('mouseleave', clear);
+      container.removeEventListener('pointerleave', clear);
+    };
+  }, [onPointClick, plot, values.length]);
+
   // Пустое состояние считается по РЕАЛЬНЫМ точкам (plot = null при < 2 non-null): серия из
   // одних null-дней — честное «нет данных», а не нулевая линия.
   if (!plot) {
@@ -615,37 +658,56 @@ export function LineChart({
     return { x: p.x, y: py, text: tipText(i, v) };
   };
 
-  // ONE hit surface: the svg itself. The pointer x maps to the nearest point in O(1); moving
-  // within a point's zone keeps the same state object, so those mousemoves don't re-render.
-  const indexFromEvent = (e: ReactMouseEvent<SVGSVGElement>): number | null => {
-    const rect = e.currentTarget.getBoundingClientRect();
+  // One surface maps pointer x to the nearest point in O(1); moving inside the same point's zone
+  // keeps the state object stable. For a drillable line that surface is the semantic overlay button.
+  const indexFromClientX = (clientX: number, surface: Element): number | null => {
+    const rect = surface.getBoundingClientRect();
     if (rect.width === 0) return null;
-    const xView = ((e.clientX - rect.left) / rect.width) * W;
+    const xView = ((clientX - rect.left) / rect.width) * W;
     return nearestPointIndex(xView, n, gutterW, step);
   };
-  const onSvgMove = (e: ReactMouseEvent<SVGSVGElement>) => {
-    const i = indexFromEvent(e);
+  const onSurfaceMove = (e: ReactMouseEvent<HTMLButtonElement>) => {
+    const i = indexFromClientX(e.clientX, e.currentTarget);
     if (i == null) return;
     setHover((prev) => (prev && prev.i === i ? prev : { i }));
   };
   // Drill only on a genuine click, not a press-drag-release scrub (the browser retargets a
   // cross-point click to the svg — without this guard a drag-to-read gesture would navigate). A
   // click with no recorded press (keyboard / AT) passes through.
-  const onSvgClick = onPointClick
-    ? (e: ReactMouseEvent<SVGSVGElement>) => {
+  const lastRealIndex = values.reduce<number>(
+    (latest, value, index) => (value == null ? latest : index),
+    0,
+  );
+  const fallbackControlIndex =
+    pinnedIndex != null && pinnedIndex >= 0 && pinnedIndex < n ? pinnedIndex : lastRealIndex;
+  const controlIndex = hover?.i ?? fallbackControlIndex;
+  const onSurfaceClick = onPointClick
+    ? (e: ReactMouseEvent<HTMLButtonElement>) => {
         const press = pressRef.current;
         pressRef.current = null;
-        if (press && Math.hypot(e.clientX - press.x, e.clientY - press.y) > 5) return;
-        const i = indexFromEvent(e);
-        if (i != null) {
-          // The chart OWNS this click (point drill / pin) — don't let it bubble into the host
-          // card's whole-card expand, which would double-act on one tap.
-          e.stopPropagation();
-          onPointClick(i);
-        }
+        pointerDownRef.current = false;
+        // Resolve keyboard/AT FIRST: a cancelled old pointer gesture must never suppress a
+        // detail=0 click produced by Enter, Space or assistive technology.
+        activateChartControl(
+          {
+            detail: e.detail,
+            controlIndex,
+            pointerIndex: e.detail === 0 ? null : indexFromClientX(e.clientX, e.currentTarget),
+            press,
+            clientX: e.clientX,
+            clientY: e.clientY,
+          },
+          (i) => {
+            // The chart OWNS this click (point drill / pin) — don't let it bubble into the host
+            // card's whole-card expand, which would double-act on one tap.
+            e.stopPropagation();
+            onPointClick(i);
+          },
+        );
       }
     : undefined;
   const clearHover = () => {
+    pointerDownRef.current = false;
     pressRef.current = null;
     setHover(null);
   };
@@ -662,13 +724,9 @@ export function LineChart({
       : [];
 
   return (
-    <div
-      ref={containerRef}
-      className="relative w-full"
-      onMouseLeave={clearHover}
-      onPointerLeave={clearHover}
-    >
+    <div ref={containerRef} className="relative w-full">
       <svg
+        ref={svgRef}
         data-chart-kind="line"
         data-chart-expanded={expanded ? '' : undefined}
         data-chart-appearance={appearance}
@@ -680,15 +738,13 @@ export function LineChart({
         preserveAspectRatio="none"
         // A named graphic for AT (PieChart idiom): role="img" stops screen readers from announcing
         // the raw axis <text> ticks as loose numbers, and the label carries the data a mouse user
-        // reads from hover (per-point keyboard access is a separate roadmap item). Math.max over
-        // the SERIES — the in-scope `max` is the padded nice-scale top, not the data max.
+        // reads from hover. Drillable charts add a focusable arrow-key surface immediately after
+        // this SVG. Math.max over the SERIES — the in-scope `max` is the padded nice-scale top.
         // Только реальные значения: null-дыра не участвует ни в max, ни в «последнем».
         role="img"
         aria-label={`График: ${values.length} точек, макс ${fmt.short(Math.max(...realValues))}, последнее ${fmt.short(realValues[realValues.length - 1])}`}
-        onMouseMove={onSvgMove}
-        onMouseDown={onPointClick ? (e) => (pressRef.current = { x: e.clientX, y: e.clientY }) : undefined}
-        onClick={onSvgClick}
       >
+        <title>Линейный график</title>
         {/* Only the data layer animates. Axes, labels and all interaction overlays stay anchored. */}
         {plot.staticUnder}
         <MorphingSeries
@@ -785,6 +841,45 @@ export function LineChart({
           </>
         )}
       </svg>
+      {onPointClick && (
+        <button
+          type="button"
+          aria-label={chartControlAriaLabel({
+            index: controlIndex,
+            label: hoverTitles?.[controlIndex] ?? labels?.[controlIndex],
+            fallbackNoun: 'точка',
+            value: values[controlIndex] == null ? 'данных нет' : formatValue(values[controlIndex]),
+          })}
+          aria-keyshortcuts="ArrowLeft ArrowRight Home End"
+          className="absolute inset-x-0 top-0 z-10 block w-full cursor-pointer rounded bg-transparent p-0 text-left hover:bg-transparent focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/50"
+          style={{ height: h }}
+          onMouseMove={onSurfaceMove}
+          onPointerDown={(event) => {
+            pointerDownRef.current = true;
+            pressRef.current = { x: event.clientX, y: event.clientY };
+          }}
+          onPointerUp={() => {
+            // Keep coordinates through the following click; only the active-pointer flag ends here.
+            pointerDownRef.current = false;
+          }}
+          onPointerCancel={() => {
+            pointerDownRef.current = false;
+            pressRef.current = null;
+          }}
+          onClick={onSurfaceClick}
+          onFocus={() => {
+            if (!pointerDownRef.current) pressRef.current = null;
+            setHover((current) => current ?? { i: fallbackControlIndex });
+          }}
+          onBlur={clearHover}
+          onKeyDown={(event) => {
+            const next = nextChartControlIndex(event.key, controlIndex, n);
+            if (next == null) return;
+            event.preventDefault();
+            setHover({ i: next });
+          }}
+        />
+      )}
 
       {/* Minimal x labels (axis-free cards): first / mid / last under the svg. Axes mode
           draws the real in-svg x-axis above instead. Метки ровные: бывшая акцент-пилюля

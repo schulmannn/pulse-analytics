@@ -1,13 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+import { useEffect, useMemo, useState } from 'react';
 import { useAddCampaignPosts, useCampaigns, useCreateCampaign } from '@/api/queries';
 import type { Campaign, CampaignAddResult, CampaignPostInput } from '@/api/schemas';
 import { CampaignColorDot, CampaignStatusChip, canEditCampaign } from '@/components/campaigns/shared';
 import { EmptyState } from '@/components/EmptyState';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
 import { fmt } from '@/lib/format';
-import { useFocusTrap } from '@/lib/useFocusTrap';
 import { cn } from '@/lib/utils';
 
 /**
@@ -41,27 +40,10 @@ export function AddToCampaignDialog({
   const mutationError = (add.error ?? create.error) as Error | null;
 
   useEffect(() => {
-    if (selectedId == null && writable.length > 0) setSelectedId(writable[0]!.id);
+    const firstWritable = writable[0];
+    if (selectedId == null && firstWritable) setSelectedId(firstWritable.id);
     if (writable.length === 0 && !isPending) setCreateMode(true);
   }, [selectedId, writable, isPending]);
-
-  const panelRef = useRef<HTMLDivElement>(null);
-  useFocusTrap(panelRef);
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.stopPropagation();
-        onClose();
-      }
-    };
-    document.addEventListener('keydown', onKey, true);
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.removeEventListener('keydown', onKey, true);
-      document.body.style.overflow = prev;
-    };
-  }, [onClose]);
 
   const submit = async () => {
     let campaign: Campaign | null = null;
@@ -83,25 +65,14 @@ export function AddToCampaignDialog({
     }
   };
 
-  return createPortal(
-    <div
-      className="fixed inset-0 z-modal flex items-start justify-center overflow-y-auto bg-background/70 p-4 backdrop-blur-xs backdrop-grayscale sm:p-8"
-      role="dialog"
-      aria-modal="true"
-      aria-label="Добавить публикации в кампанию"
-      onClick={onClose}
-    >
-      <div
-        ref={panelRef}
-        tabIndex={-1}
-        className="my-auto w-full max-w-md rounded-xl border border-border bg-card p-5 focus:outline-hidden"
-        onClick={(e) => e.stopPropagation()}
-      >
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-w-md">
         {result ? (
           <div data-testid="add-to-campaign-result">
-            <h2 className="text-sm font-medium text-foreground">
+            <DialogTitle>
               Кампания «{result.campaign.name}»
-            </h2>
+            </DialogTitle>
             <ul className="mt-3 space-y-1 text-sm text-muted-foreground">
               <li>
                 Добавлено: <span className="font-medium text-foreground">{fmt.num(result.res.added)}</span>
@@ -117,9 +88,9 @@ export function AddToCampaignDialog({
           </div>
         ) : (
           <>
-            <h2 className="text-sm font-medium text-foreground">
+            <DialogTitle>
               Добавить в кампанию · {fmt.num(items.length)} публ.
-            </h2>
+            </DialogTitle>
 
             {isPending ? (
               <div className="mt-4 space-y-2">
@@ -217,8 +188,7 @@ export function AddToCampaignDialog({
             )}
           </>
         )}
-      </div>
-    </div>,
-    document.body,
+      </DialogContent>
+    </Dialog>
   );
 }

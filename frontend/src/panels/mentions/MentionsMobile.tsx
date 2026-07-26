@@ -62,9 +62,11 @@ export function MentionsMobile() {
         </p>
         {liveError && <p className="mb-4 text-sm text-destructive">{liveError}</p>}
         <button
+          type="button"
+          data-mobile-touch-target=""
           onClick={refresh}
           disabled={refreshing}
-          className="btn-pill bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+          className="btn-pill inline-flex min-h-11 items-center bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50 sm:min-h-0"
         >
           {refreshing ? 'Поиск…' : 'Загрузить упоминания'}
         </button>
@@ -97,9 +99,11 @@ export function MentionsMobile() {
           Сохранённый архив Telegram. Ручное обновление запускает живой поиск и расходует дневную квоту.
         </p>
         <button
+          type="button"
+          data-mobile-touch-target=""
           onClick={refresh}
           disabled={refreshing}
-          className="btn-pill shrink-0 border border-border bg-background px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-hover-row disabled:opacity-50"
+          className="btn-pill inline-flex min-h-11 shrink-0 items-center border border-border bg-background px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-hover-row disabled:opacity-50 sm:min-h-0"
         >
           {refreshing ? 'Обновление…' : 'Обновить'}
         </button>

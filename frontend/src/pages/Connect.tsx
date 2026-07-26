@@ -22,6 +22,37 @@ import { Progress } from '@/components/ui/progress';
  */
 
 const INGEST_URL = `${window.location.origin}/api/collector/ingest`;
+const MutationOkSchema = z.object({ ok: z.boolean() }).passthrough();
+const MsConnectSchema = z
+  .object({
+    ok: z.literal(true),
+    channel_id: z.coerce.number(),
+    org_name: z.string().nullable().optional(),
+  })
+  .passthrough();
+const MsBackfillStartSchema = z
+  .object({ ok: z.literal(true), status: z.literal('running') })
+  .passthrough();
+const YmConnectSchema = z
+  .object({
+    ok: z.boolean(),
+    choice_required: z.boolean().optional(),
+    counters: z
+      .array(
+        z
+          .object({
+            id: z.coerce.string(),
+            name: z.string().nullable(),
+            site: z.string().nullable(),
+          })
+          .passthrough(),
+      )
+      .optional(),
+    channel_id: z.coerce.number().optional(),
+    counter_name: z.string().nullable().optional(),
+    site: z.string().nullable().optional(),
+  })
+  .passthrough();
 
 type ServiceId = 'telegram' | 'instagram' | 'moysklad' | 'metrika' | 'threads' | 'youtube' | 'tiktok' | 'x' | 'vk' | 'facebook';
 type ServiceKind = 'telegram' | 'instagram' | 'moysklad' | 'metrika' | 'soon';
@@ -114,24 +145,8 @@ export function Connect() {
   };
   const connectedCount = SERVICES.filter((s) => stateOf(s) === 'connected').length;
 
-  // Arrow keys rotate the selection around the ring (GTA-wheel muscle memory, keyboard-friendly).
-  const ringRef = useRef<HTMLDivElement>(null);
-  const rotate = useCallback((dir: 1 | -1) => {
-    setSelected((cur) => {
-      const i = SERVICES.findIndex((s) => s.id === cur);
-      return SERVICES[(i + dir + SERVICES.length) % SERVICES.length].id;
-    });
-  }, []);
-  useEffect(() => {
-    const el = ringRef.current;
-    if (!el) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { e.preventDefault(); rotate(1); }
-      else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { e.preventDefault(); rotate(-1); }
-    };
-    el.addEventListener('keydown', onKey);
-    return () => el.removeEventListener('keydown', onKey);
-  }, [rotate]);
+  // Native radios provide the expected arrow-key selection contract without a custom group handler.
+  const ringRef = useRef<HTMLFieldSetElement>(null);
 
   // Ring radius (px) for the radiate-from-center entrance — feeds --ring-r so each node's start
   // offset (--dx/--dy) points back to the exact hub centre at any container size.
@@ -200,14 +215,12 @@ export function Connect() {
         {/* Orbit */}
         <div className="relative flex justify-center">
           <Starfield />
-          <div
+          <fieldset
             ref={ringRef}
-            role="radiogroup"
-            aria-label="Источники данных"
-            tabIndex={0}
             style={{ '--ring-r': `${ringR}px` } as CSSProperties}
-            className="relative aspect-square w-[min(420px,86vw)] rounded-full outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-4 focus-visible:ring-offset-background"
+            className="relative m-0 aspect-square min-w-0 w-[min(420px,86vw)] rounded-full border-0 p-0"
           >
+            <legend className="sr-only">Источники данных</legend>
             {/* rings */}
             <div className="absolute inset-0 rounded-full border border-border" aria-hidden="true" />
             <div className="absolute inset-[9%] rounded-full border border-dashed border-border opacity-60" aria-hidden="true" />
@@ -231,22 +244,32 @@ export function Connect() {
               const st = stateOf(s);
               const isSel = s.id === selected;
               return (
-                <div key={s.id} className="absolute" style={{ left: `${left}%`, top: `${top}%`, transform: 'translate(-50%,-50%)' }}>
-                  <div
-                    className="connect-orb"
+                <label
+                  key={s.id}
+                  data-mobile-touch-target=""
+                  className="absolute block size-12 cursor-pointer sm:size-14"
+                  style={{ left: `${left}%`, top: `${top}%`, transform: 'translate(-50%,-50%)' }}
+                >
+                  <input
+                    type="radio"
+                    name="connect-source"
+                    value={s.id}
+                    checked={isSel}
+                    onChange={() => setSelected(s.id)}
+                    aria-label={`${s.name}${st === 'connected' ? ' — подключён' : st === 'soon' ? ' — скоро' : ' — доступно'}`}
+                    className="peer sr-only"
+                  />
+                  <span
+                    aria-hidden="true"
+                    className="connect-orb absolute inset-0 rounded-full peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-focus-visible:ring-offset-4 peer-focus-visible:ring-offset-background"
                     style={{
                       '--i': i,
                       '--dx': `calc(var(--ring-r, 176px) * ${(-Math.sin(theta)).toFixed(4)})`,
                       '--dy': `calc(var(--ring-r, 176px) * ${Math.cos(theta).toFixed(4)})`,
                     } as CSSProperties}
                   >
-                    <button
+                    <span
                       data-dot
-                      type="button"
-                      role="radio"
-                      aria-checked={isSel}
-                      aria-label={`${s.name}${st === 'connected' ? ' — подключён' : st === 'soon' ? ' — скоро' : ' — доступно'}`}
-                      onClick={() => setSelected(s.id)}
                       className={cn(
                         // Enumerated + dur-track: the dock magnification below writes `transform`
                         // on every pointermove, so this transition exists to smooth THAT — `all`
@@ -255,19 +278,19 @@ export function Connect() {
                         st === 'connected' && 'border-primary/60 text-primary',
                         st === 'available' && 'border-border text-muted-foreground hover:border-muted-foreground hover:text-foreground',
                         st === 'soon' && 'border-dashed border-border text-muted-foreground opacity-60 hover:opacity-100',
-                        isSel && 'border-primary bg-primary/10 text-primary',
+                        isSel && 'border-primary bg-primary/10 text-accent-foreground',
                       )}
                     >
                       <Glyph id={s.id} className="size-6" />
                       {st === 'connected' && (
                         <span aria-hidden="true" className="absolute -right-0.5 -top-0.5 size-3 rounded-full border-2 border-card bg-verdant" />
                       )}
-                    </button>
-                  </div>
-                </div>
+                    </span>
+                  </span>
+                </label>
               );
             })}
-          </div>
+          </fieldset>
         </div>
 
         {/* Panel */}
@@ -428,7 +451,7 @@ function MsBackfillBlock() {
     kickBaseRef.current = st?.status ?? null;
     setKick(true);
     try {
-      await apiSend('POST', '/api/ms/backfill');
+      await apiSend('POST', '/api/ms/backfill', undefined, MsBackfillStartSchema);
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
         // Прогон уже идёт (другая вкладка/повторный клик) — не ошибка: поллинг покажет прогресс.
@@ -490,8 +513,9 @@ function MsBackfillBlock() {
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <button
             type="button"
+            data-mobile-touch-target=""
             onClick={() => void startBackfill()}
-            className="btn-pill border border-border px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+            className="btn-pill inline-flex min-h-11 items-center border border-border px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted sm:min-h-0"
           >
             Обновить историю заказов
           </button>
@@ -508,8 +532,9 @@ function MsBackfillBlock() {
     <div className="space-y-2">
       <button
         type="button"
+        data-mobile-touch-target=""
         onClick={() => void startBackfill()}
-        className="btn-pill border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+        className="btn-pill inline-flex min-h-11 items-center border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted sm:min-h-0"
       >
         Загрузить историю заказов
       </button>
@@ -566,7 +591,7 @@ function MoySkladPanel() {
     try {
       // Токен уходит только на НАШ бэкенд (шифруется AES-256-GCM до записи) — в браузере,
       // логах и git он не живёт; в МойСклад ходит сервер.
-      const res = (await apiSend('POST', '/api/ms/connect', { token: value })) as { org_name?: string };
+      const res = await apiSend('POST', '/api/ms/connect', { token: value }, MsConnectSchema);
       setFreshOrg(res?.org_name || 'организация');
       setToken('');
       toast('МойСклад подключён');
@@ -583,7 +608,7 @@ function MoySkladPanel() {
     setBusy(true);
     setError(null);
     try {
-      await apiSend('DELETE', '/api/ms/account');
+      await apiSend('DELETE', '/api/ms/account', undefined, MutationOkSchema);
       setFreshOrg(null);
       toast('МойСклад отключён');
       await invalidateMs();
@@ -614,9 +639,10 @@ function MoySkladPanel() {
             </Button>
             <button
               type="button"
+              data-mobile-touch-target=""
               onClick={() => void disconnect()}
               disabled={busy}
-              className="btn-pill border border-border px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-destructive disabled:opacity-50"
+              className="btn-pill inline-flex min-h-11 items-center border border-border px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-destructive disabled:opacity-50 sm:min-h-0"
             >
               Отключить
             </button>
@@ -632,6 +658,7 @@ function MoySkladPanel() {
           <form onSubmit={submit} className="flex items-center gap-2">
             <label htmlFor="moysklad-api-token" className="sr-only">Токен API МойСклада</label>
             <input
+              data-mobile-touch-target=""
               id="moysklad-api-token"
               type="password"
               value={token}
@@ -640,7 +667,7 @@ function MoySkladPanel() {
               autoComplete="off"
               aria-invalid={error ? true : undefined}
               aria-describedby={error ? 'moysklad-api-token-help moysklad-api-token-error' : 'moysklad-api-token-help'}
-              className="h-9 min-w-0 flex-1 rounded border border-border bg-background px-3 text-sm text-foreground outline-hidden placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
+              className="h-11 min-w-0 flex-1 rounded border border-border bg-background px-3 text-sm text-foreground outline-hidden placeholder:text-muted-foreground focus:ring-1 focus:ring-primary sm:h-9"
             />
             <Button type="submit" disabled={!token.trim() || busy} className="shrink-0">
               {busy ? 'Проверяем…' : 'Подключить'}
@@ -688,12 +715,12 @@ function MetrikaPanel() {
     try {
       // Токен уходит только на НАШ бэкенд (шифруется AES-256-GCM до записи) — в браузере,
       // логах и git он не живёт; в Яндекс ходит сервер.
-      const res = (await apiSend('POST', '/api/ym/connect', counterId ? { token: value, counter_id: counterId } : { token: value })) as {
-        choice_required?: boolean;
-        counters?: Array<{ id: string; name: string | null; site: string | null }>;
-        counter_name?: string | null;
-        site?: string | null;
-      };
+      const res = await apiSend(
+        'POST',
+        '/api/ym/connect',
+        counterId ? { token: value, counter_id: counterId } : { token: value },
+        YmConnectSchema,
+      );
       if (res?.choice_required) {
         setCounters(Array.isArray(res.counters) ? res.counters : []);
         return;
@@ -720,7 +747,7 @@ function MetrikaPanel() {
     setBusy(true);
     setError(null);
     try {
-      await apiSend('DELETE', '/api/ym/account');
+      await apiSend('DELETE', '/api/ym/account', undefined, MutationOkSchema);
       setFreshName(null);
       toast('Метрика отключена');
       await invalidateYm();
@@ -750,9 +777,10 @@ function MetrikaPanel() {
             </Button>
             <button
               type="button"
+              data-mobile-touch-target=""
               onClick={() => void disconnect()}
               disabled={busy}
-              className="btn-pill border border-border px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-destructive disabled:opacity-50"
+              className="btn-pill inline-flex min-h-11 items-center border border-border px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-destructive disabled:opacity-50 sm:min-h-0"
             >
               Отключить
             </button>
@@ -769,6 +797,7 @@ function MetrikaPanel() {
           <form onSubmit={submit} className="flex items-center gap-2">
             <label htmlFor="yandex-metrika-token" className="sr-only">OAuth-токен Яндекса</label>
             <input
+              data-mobile-touch-target=""
               id="yandex-metrika-token"
               type="password"
               value={token}
@@ -780,7 +809,7 @@ function MetrikaPanel() {
               autoComplete="off"
               aria-invalid={error ? true : undefined}
               aria-describedby={error ? 'yandex-metrika-token-help yandex-metrika-token-error' : 'yandex-metrika-token-help'}
-              className="h-9 min-w-0 flex-1 rounded border border-border bg-background px-3 text-sm text-foreground outline-hidden placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
+              className="h-11 min-w-0 flex-1 rounded border border-border bg-background px-3 text-sm text-foreground outline-hidden placeholder:text-muted-foreground focus:ring-1 focus:ring-primary sm:h-9"
             />
             <Button type="submit" disabled={!token.trim() || busy} className="shrink-0">
               {busy ? 'Проверяем…' : 'Подключить'}
@@ -797,9 +826,10 @@ function MetrikaPanel() {
                 <button
                   key={c.id}
                   type="button"
+                  data-mobile-touch-target=""
                   disabled={busy}
                   onClick={() => void connect(c.id)}
-                  className="flex w-full items-baseline justify-between gap-3 rounded-lg border border-border px-3 py-2 text-left text-sm transition-colors hover:border-primary/60 hover:bg-muted disabled:pointer-events-none disabled:opacity-50"
+                  className="flex min-h-11 w-full items-center justify-between gap-3 rounded-lg border border-border px-3 py-2 text-left text-sm transition-colors hover:border-primary/60 hover:bg-muted disabled:pointer-events-none disabled:opacity-50 sm:min-h-0 sm:items-baseline"
                 >
                   <span className="min-w-0 truncate font-medium text-foreground">{c.name ?? c.site ?? `Счётчик ${c.id}`}</span>
                   <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{c.site ?? c.id}</span>
@@ -859,9 +889,10 @@ function InstagramPanel() {
             )}
             <button
               type="button"
+              data-mobile-touch-target=""
               onClick={() => disconnect.mutate(undefined, { onSuccess: () => toast('Instagram отключён') })}
               disabled={disconnect.isPending}
-              className="btn-pill border border-border px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-destructive disabled:opacity-50"
+              className="btn-pill inline-flex min-h-11 items-center border border-border px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-destructive disabled:opacity-50 sm:min-h-0"
             >
               {disconnect.isPending ? 'Отключение…' : 'Отключить'}
             </button>
@@ -1251,9 +1282,10 @@ function TgTab({ active, onClick, children }: { active: boolean; onClick: () => 
   return (
     <button
       type="button"
+      data-mobile-touch-target=""
       onClick={onClick}
       aria-pressed={active}
-      className={cn('relative px-3 py-2 text-sm font-medium transition-colors', active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground')}
+      className={cn('relative min-h-11 px-3 py-2 text-sm font-medium transition-colors sm:min-h-0', active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground')}
     >
       {children}
       {active && <span aria-hidden="true" className="absolute inset-x-0 -bottom-px h-0.5 bg-primary" />}
@@ -1285,6 +1317,7 @@ function TgScanning({
           У аккаунта включена двухфакторная защита. Введите облачный пароль Telegram:
         </label>
         <input
+          data-mobile-touch-target=""
           id="telegram-cloud-password"
           type="password"
           value={password}
@@ -1294,7 +1327,7 @@ function TgScanning({
           autoComplete="off"
           aria-invalid={err ? true : undefined}
           aria-describedby={err ? 'telegram-cloud-password-error' : undefined}
-          className="mt-3 w-full rounded border border-border bg-background px-3 py-2 text-sm text-foreground outline-hidden focus:ring-1 focus:ring-primary"
+          className="mt-3 min-h-11 w-full rounded border border-border bg-background px-3 py-2 text-sm text-foreground outline-hidden focus:ring-1 focus:ring-primary sm:min-h-0"
         />
         {err && <p id="telegram-cloud-password-error" role="alert" className="mt-2 text-xs font-medium text-destructive">{err}</p>}
         <Button type="button" onClick={onSubmit} disabled={busy || !password} className="mt-3">
@@ -1429,7 +1462,7 @@ function TgConnected({ username, channels, onDisconnect, busy }: { username: str
               const disabled = added || !eligible;
               return (
                 <li key={c.id}>
-                  <label className={cn('flex items-center gap-2.5 rounded px-2 py-1.5 text-sm transition-colors',
+                  <label data-mobile-touch-target="" className={cn('flex min-h-11 items-center gap-2.5 rounded px-2 py-1.5 text-sm transition-colors sm:min-h-0',
                     disabled ? 'cursor-default text-muted-foreground' : 'cursor-pointer text-foreground hover:bg-muted/40')}>
                     <input
                       type="checkbox"
@@ -1472,9 +1505,10 @@ function TgConnected({ username, channels, onDisconnect, busy }: { username: str
       </p>
       <button
         type="button"
+        data-mobile-touch-target=""
         onClick={onDisconnect}
         disabled={busy}
-        className="btn-pill mt-4 border border-border px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-destructive disabled:opacity-50"
+        className="btn-pill mt-4 inline-flex min-h-11 items-center border border-border px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-destructive disabled:opacity-50 sm:min-h-0"
       >
         {busy ? 'Отключение…' : 'Отключить'}
       </button>
@@ -1567,11 +1601,12 @@ function CollectorGuide({ channelName }: { channelName: string | null }) {
             <li key={label} className={cn('flex items-center gap-1', n < WIZARD_STEPS.length && 'flex-1')}>
               <button
                 type="button"
+                data-mobile-touch-target=""
                 onClick={() => reachable && setStep(n)}
                 disabled={!reachable}
                 aria-current={active ? 'step' : undefined}
                 className={cn(
-                  'flex items-center gap-1.5 rounded-full py-0.5 pl-0.5 pr-2 text-2xs font-medium transition-colors',
+                  'flex min-h-11 min-w-11 items-center gap-1.5 rounded-full py-0.5 pl-0.5 pr-2 text-2xs font-medium transition-colors sm:min-h-0 sm:min-w-0',
                   active ? 'text-foreground' : 'text-muted-foreground',
                   reachable && !active && 'hover:text-foreground',
                   !reachable && 'pointer-events-none',
@@ -1580,7 +1615,7 @@ function CollectorGuide({ channelName }: { channelName: string | null }) {
                 <span
                   className={cn(
                     'flex size-5 shrink-0 items-center justify-center rounded-full text-2xs font-medium',
-                    active ? 'bg-primary text-primary-foreground' : done ? 'bg-primary/15 text-primary' : 'bg-muted text-muted-foreground',
+                    active ? 'bg-primary text-primary-foreground' : done ? 'bg-primary/15 text-accent-foreground' : 'bg-muted text-muted-foreground',
                   )}
                 >
                   {done ? (
@@ -1634,8 +1669,9 @@ function CollectorGuide({ channelName }: { channelName: string | null }) {
                       <code className="min-w-0 flex-1 truncate rounded bg-muted px-2 py-1.5 font-mono text-xs">{oneTimeKey}</code>
                       <button
                         type="button"
+                        data-mobile-touch-target=""
                         onClick={() => copyKey(oneTimeKey)}
-                        className="btn-pill shrink-0 border border-border px-3 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                        className="btn-pill inline-flex min-h-11 shrink-0 items-center border border-border px-3 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground sm:min-h-0"
                       >
                         {copied ? 'Скопировано' : 'Копировать'}
                       </button>
@@ -1724,9 +1760,10 @@ python collector/pulse_collector.py run      # дальше каждые 6 ч`}<
       <div className="mt-3 flex items-center justify-between">
         <button
           type="button"
+          data-mobile-touch-target=""
           onClick={() => step > 1 && setStep(step - 1)}
           disabled={step === 1}
-          className="btn-pill border border-border px-3.5 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+          className="btn-pill inline-flex min-h-11 items-center border border-border px-3.5 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50 sm:min-h-0"
         >
           Назад
         </button>
@@ -1764,8 +1801,9 @@ function SoonPanel({ name, glyph, note }: { name: string; glyph: ServiceId; note
       <p className="mt-4 text-sm leading-relaxed text-muted-foreground">{note}</p>
       <button
         type="button"
+        data-mobile-touch-target=""
         disabled
-        className="btn-pill mt-5 border border-border px-4 py-2 text-sm font-medium text-muted-foreground opacity-60"
+        className="btn-pill mt-5 inline-flex min-h-11 items-center border border-border px-4 py-2 text-sm font-medium text-muted-foreground opacity-60 sm:min-h-0"
       >
         В дорожной карте
       </button>

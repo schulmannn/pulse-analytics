@@ -29,9 +29,11 @@ function createAuthService({ config, db }) {
   }
 
   const ADMIN_EMAIL = config.auth.adminEmail;
-  // Idle window: an active user is kept signed in by a sliding re-issue (see requireAuth) so this is
-  // the MAX time between requests before a re-login is required, not a hard cap on a live session.
-  const SESSION_TTL = 7 * 24 * 60 * 60 * 1000;
+  // Sliding idle window plus an absolute cap. Password login/Google/password-change
+  // starts a new absolute window; ordinary activity can only slide inside it.
+  const SESSION_TTL = config.auth.sessionTtlMs || 7 * 24 * 60 * 60 * 1000;
+  const SESSION_ABSOLUTE_TTL =
+    config.auth.sessionAbsoluteTtlMs || 30 * 24 * 60 * 60 * 1000;
   const auth = createAuth({ secret: AUTH_SECRET });
   const signSession = auth.signSession;
   const parseToken = auth.parseToken;
@@ -71,12 +73,10 @@ function createAuthService({ config, db }) {
     } catch (e) { console.error('[db] adopt owner channel failed:', e.message); }
   }
 
-  // Ставит/обновляет сессионную cookie тем же токеном, что уходит в JSON/заголовке
-  // (cookie-auth фаза 1: меняется только транспорт, не формат токена). Secure — от
-  // req.secure: trust proxy уже настроен, за Railway это true, на локальном http — нет.
-  // append (не set), чтобы не затереть чужой Set-Cookie на том же ответе.
-  function setSessionCookie(req, res, token) {
-    res.append('Set-Cookie', serializeSessionCookie(token, { secure: req.secure, maxAgeMs: SESSION_TTL }));
+  // Secure — от req.secure: trust proxy уже настроен, за Railway это true, на
+  // локальном http — нет. append не затирает другую cookie того же ответа.
+  function setSessionCookie(req, res, token, maxAgeMs = SESSION_TTL) {
+    res.append('Set-Cookie', serializeSessionCookie(token, { secure: req.secure, maxAgeMs }));
   }
 
   // Сброс cookie (logout): пустое значение + Max-Age=0 с теми же атрибутами.
@@ -88,27 +88,23 @@ function createAuthService({ config, db }) {
   // changes / disable take effect immediately, not only on next login). Every valid
   // session carries a numeric uid (parseToken rejects anything else), so req.user
   // always maps to a real users row.
-  // Транспорт (фаза 1 cookie-auth): заголовок X-Session-Token ПРИОРИТЕТНЕЕ — cookie
-  // 'pulse_session' читается только когда заголовка нет (битый header с валидной cookie
-  // всё равно 401 — заголовок объявил намерение и проиграл). Токен один и тот же.
+  // Обычный API принимает сессию только из HttpOnly-cookie. X-Session-Token
+  // разрешён исключительно одноразовому migrateSessionCookie ниже.
   async function requireAuth(req, res, next) {
-    const headerToken = req.headers['x-session-token'];
-    const viaCookie = !headerToken;
+    const cookieToken = readCookie(req.headers.cookie, SESSION_COOKIE);
     // Cookie-транспорт отвергает КРОСС-САЙТОВЫЕ запросы целиком (включая GET: SameSite=Lax
     // пропускает cookie на top-level навигациях, а у нас есть квотные GET — searchPosts
     // ~10/день, живые МС-отчёты). Sec-Fetch-Site шлют все современные браузеры; без
-    // заголовка (старый Safari, curl) поведение прежнее — мутации всё равно ловит
-    // Origin-гейт ниже. Header-путь не гейтится: кастомный заголовок кросс-сайтово недоступен.
-    const crossSite = viaCookie && req.headers['sec-fetch-site'] === 'cross-site';
-    const sess = crossSite
-      ? null
-      : parseToken(viaCookie ? readCookie(req.headers.cookie, SESSION_COOKIE) : headerToken);
-    if (!sess) return res.status(401).json({ error: 'Сессия истекла, войди снова' });
-    // CSRF-гейт: мутацию, аутентифицированную через cookie (браузер шлёт её сам, в т.ч.
-    // с чужого сайта), пускаем только при доказанном same-origin — Origin (или, без него,
-    // Referer) равен origin запроса. Header-аутентифицированные запросы не трогаем:
-    // кастомный заголовок недоступен кросс-сайтовой форме и сам по себе CSRF-барьер.
-    if (viaCookie && MUTATION_METHODS.has(req.method) && !isCsrfSafe({
+    // заголовка (старый Safari, curl) мутации всё равно ловит Origin-гейт ниже.
+    const crossSite = req.headers['sec-fetch-site'] === 'cross-site';
+    const sess = crossSite ? null : parseToken(cookieToken);
+    if (!sess) {
+      if (cookieToken && !crossSite) clearSessionCookie(req, res);
+      return res.status(401).json({ error: 'Сессия истекла, войди снова' });
+    }
+    // CSRF-гейт: cookie браузер шлёт сам, поэтому мутация требует явного
+    // same-origin Origin (или Referer для клиентов без Origin).
+    if (MUTATION_METHODS.has(req.method) && !isCsrfSafe({
       origin: req.headers.origin,
       referer: req.headers.referer,
       requestOrigin: `${req.protocol}://${req.get('host')}`,
@@ -118,25 +114,74 @@ function createAuthService({ config, db }) {
     req.session = sess;
     try {
       const u = await db.getUserById(sess.uid);
-      if (!u || u.status !== 'active') return res.status(401).json({ error: 'Аккаунт неактивен — войди снова' });
+      if (!u || u.status !== 'active') {
+        clearSessionCookie(req, res);
+        return res.status(401).json({ error: 'Аккаунт неактивен — войди снова' });
+      }
       if (sess.tokenVersion !== u.token_version) {
+        clearSessionCookie(req, res);
         return res.status(401).json({ error: 'Сессия отозвана — войди снова' });
       }
       req.user = { uid: u.id, role: u.role, email: u.email };
-      // Sliding session: once the token is past its half-life, hand back a fresh one on the response so
-      // an ACTIVE user is never logged out mid-work; the client persists it (see api/client.ts). Idle
-      // longer than SESSION_TTL still lets the token die (parseToken rejects an expired exp), so this is
-      // a sliding idle window, not an immortal session. token_version revocation is unaffected — a fresh
-      // token carries the current version, so a bumped version still invalidates it on the next request.
+      // Sliding idle window, capped by maxExp. Browser JavaScript never sees the
+      // refreshed token: only Set-Cookie rotates it.
       const now = Date.now();
       if (isSessionStale(sess.exp, now, SESSION_TTL)) {
-        const fresh = signSession({ uid: u.id, role: u.role, exp: now + SESSION_TTL, tokenVersion: u.token_version });
-        res.set('X-Session-Refresh', fresh);
-        setSessionCookie(req, res, fresh); // cookie-транспорт скользит вместе с header-путём
+        const exp = Math.min(now + SESSION_TTL, sess.maxExp);
+        const fresh = signSession({
+          uid: u.id,
+          role: u.role,
+          exp,
+          maxExp: sess.maxExp,
+          tokenVersion: u.token_version,
+        });
+        setSessionCookie(req, res, fresh, exp - now);
         res.set('Cache-Control', 'no-store'); // a response carrying a token must never be shared-cached
       }
       next();
     } catch (e) { next(e); }
+  }
+
+  // One-release bridge for browsers that still carry the pre-cookie session in
+  // localStorage. This is the sole X-Session-Token consumer. It requires explicit
+  // same-origin proof, validates current account/token_version, mints a NEW
+  // bounded cookie, and returns no token to JavaScript.
+  async function migrateSessionCookie(req, res, next) {
+    if (!isCsrfSafe({
+      origin: req.headers.origin,
+      referer: req.headers.referer,
+      requestOrigin: `${req.protocol}://${req.get('host')}`,
+    }) || req.headers['sec-fetch-site'] === 'cross-site') {
+      return res.status(403).json({ error: 'csrf' });
+    }
+    const sess = parseToken(req.headers['x-session-token']);
+    if (!sess) return res.status(401).json({ error: 'Сессия истекла, войди снова' });
+    try {
+      const u = await db.getUserById(sess.uid);
+      if (!u || u.status !== 'active' || sess.tokenVersion !== u.token_version) {
+        return res.status(401).json({ error: 'Сессия истекла, войди снова' });
+      }
+      const now = Date.now();
+      // Rollout-era tokens have no max: give them one fresh 7-day bounded
+      // window. A max-aware token can never widen its existing deadline.
+      const maxExp = sess.legacyAbsolute
+        ? now + SESSION_TTL
+        : Math.min(sess.maxExp, now + SESSION_ABSOLUTE_TTL);
+      const exp = Math.min(now + SESSION_TTL, maxExp);
+      if (exp <= now) return res.status(401).json({ error: 'Сессия истекла, войди снова' });
+      const fresh = signSession({
+        uid: u.id,
+        role: u.role,
+        exp,
+        maxExp,
+        tokenVersion: u.token_version,
+      });
+      setSessionCookie(req, res, fresh, exp - now);
+      res.set('Cache-Control', 'no-store');
+      return res.json({ ok: true });
+    } catch (e) {
+      return next(e);
+    }
   }
 
   function requireSuper(req, res, next) {
@@ -145,11 +190,11 @@ function createAuthService({ config, db }) {
   }
 
   return {
-    AUTH_SECRET, ADMIN_EMAIL, SESSION_TTL, GOOGLE_CLIENT_ID,
+    AUTH_SECRET, ADMIN_EMAIL, SESSION_TTL, SESSION_ABSOLUTE_TTL, GOOGLE_CLIENT_ID,
     signSession, parseToken,
     VERIFY_TTL, RESET_TTL, sha256, newToken, DUMMY_HASH,
     bootstrapAdmin, claimOwnerChannel,
-    requireAuth, requireSuper,
+    requireAuth, requireSuper, migrateSessionCookie,
     setSessionCookie, clearSessionCookie,
   };
 }

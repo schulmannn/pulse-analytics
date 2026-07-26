@@ -71,62 +71,64 @@ export function InspectorHandle({
 
   return (
     <div
-      role="separator"
-      aria-orientation="vertical"
-      aria-label="Ширина панели инспектора"
-      aria-controls={controlsId}
-      aria-valuemin={MIN_W}
-      aria-valuemax={MAX_W}
-      aria-valuenow={effective}
-      aria-valuetext={`${effective} пикселей`}
-      tabIndex={0}
-      data-testid="inspector-handle"
-      onPointerDown={(event) => {
-        if (event.button !== 0) return;
-        // preventDefault гасил и перевод фокуса — после перетаскивания мышью ручка оставалась
-        // без фокуса, и продолжить стрелками было нельзя. Ставим фокус явно.
-        event.preventDefault();
-        event.currentTarget.focus();
-        event.currentTarget.setPointerCapture(event.pointerId);
-        dragRef.current = { startX: event.clientX, startW: settled };
-        setDragW(settled);
-      }}
-      onPointerMove={(event) => {
-        const drag = dragRef.current;
-        if (!drag) return;
-        // Ручка стоит слева от панели: движение ВЛЕВО делает панель шире.
-        const next = clampW(drag.startW + (drag.startX - event.clientX));
-        applyRootWidth(next);
-        setDragW(next);
-      }}
-      onPointerUp={(event) => {
-        const drag = dragRef.current;
-        dragRef.current = null;
-        setDragW(null);
-        if (!drag) return;
-        commit(clampW(drag.startW + (drag.startX - event.clientX)));
-      }}
-      onPointerCancel={() => {
-        dragRef.current = null;
-        setDragW(null);
-        applyRootWidth(width);
-      }}
-      onDoubleClick={() => commit(null)}
-      onKeyDown={(event) => {
-        if (event.key === 'ArrowLeft') commit(clampW(effective + STEP));
-        else if (event.key === 'ArrowRight') commit(clampW(effective - STEP));
-        else if (event.key === 'Home') commit(MAX_W);
-        else if (event.key === 'End') commit(MIN_W);
-        else if (event.key === 'Enter') commit(null);
-        else return;
-        event.preventDefault();
-      }}
-      className="group absolute inset-y-0 z-10 hidden w-3 cursor-col-resize touch-none items-center justify-center focus-visible:outline-hidden lg:flex"
+      className="absolute inset-y-0 z-10 hidden w-3 items-center justify-center lg:flex"
       style={{ right: `calc(var(--inspector-w, ${defaultWidth}px) + 8px)` }}
     >
+      <hr
+        aria-orientation="vertical"
+        aria-label="Ширина панели инспектора"
+        aria-controls={controlsId}
+        aria-valuemin={MIN_W}
+        aria-valuemax={MAX_W}
+        aria-valuenow={effective}
+        aria-valuetext={`${effective} пикселей`}
+        tabIndex={0}
+        data-testid="inspector-handle"
+        onPointerDown={(event) => {
+          if (event.button !== 0) return;
+          // preventDefault гасил и перевод фокуса — после перетаскивания мышью ручка оставалась
+          // без фокуса, и продолжить стрелками было нельзя. Ставим фокус явно.
+          event.preventDefault();
+          event.currentTarget.focus();
+          event.currentTarget.setPointerCapture(event.pointerId);
+          dragRef.current = { startX: event.clientX, startW: settled };
+          setDragW(settled);
+        }}
+        onPointerMove={(event) => {
+          const drag = dragRef.current;
+          if (!drag) return;
+          // Ручка стоит слева от панели: движение ВЛЕВО делает панель шире.
+          const next = clampW(drag.startW + (drag.startX - event.clientX));
+          applyRootWidth(next);
+          setDragW(next);
+        }}
+        onPointerUp={(event) => {
+          const drag = dragRef.current;
+          dragRef.current = null;
+          setDragW(null);
+          if (!drag) return;
+          commit(clampW(drag.startW + (drag.startX - event.clientX)));
+        }}
+        onPointerCancel={() => {
+          dragRef.current = null;
+          setDragW(null);
+          applyRootWidth(width);
+        }}
+        onDoubleClick={() => commit(null)}
+        onKeyDown={(event) => {
+          if (event.key === 'ArrowLeft') commit(clampW(effective + STEP));
+          else if (event.key === 'ArrowRight') commit(clampW(effective - STEP));
+          else if (event.key === 'Home') commit(MAX_W);
+          else if (event.key === 'End') commit(MIN_W);
+          else if (event.key === 'Enter') commit(null);
+          else return;
+          event.preventDefault();
+        }}
+        className="peer absolute inset-0 m-0 h-full w-full cursor-col-resize touch-none border-0 bg-transparent focus-visible:outline-hidden"
+      />
       <span
         aria-hidden="true"
-        className="h-full w-px bg-transparent transition-colors group-hover:bg-border group-focus-visible:bg-primary/60 group-active:bg-primary/60"
+        className="pointer-events-none h-full w-px bg-transparent transition-colors peer-hover:bg-border peer-focus-visible:bg-primary/60 peer-active:bg-primary/60"
       />
     </div>
   );

@@ -158,6 +158,18 @@ for (const [themeName, tokens] of [
     const mark = pass ? 'ok  ' : hard ? 'FAIL' : 'warn';
     console.log(`  ${mark}  ${r.toFixed(2).padStart(5)} (need ${target})  ${label}${kind === 'border' ? ' [decorative]' : ''}`);
   }
+
+  // Selected chips use a 10% primary wash over the page canvas. `primary` itself is intentionally
+  // the brighter link/accent token and misses AA on that tinted field in the light palette, so
+  // selected-state labels must use the deeper `accent-foreground` token. Keep the composite in the
+  // token gate: axe catches rendered examples, while this check protects every shared chip recipe.
+  const primaryTint = over(hslToRgb(tokens.primary), hslToRgb(tokens.background), 0.1);
+  const selectedChipRatio = ratio(hslToRgb(tokens['accent-foreground']), primaryTint);
+  const selectedChipPass = selectedChipRatio >= 4.5;
+  if (!selectedChipPass) failures++;
+  console.log(
+    `  ${selectedChipPass ? 'ok  ' : 'FAIL'}  ${selectedChipRatio.toFixed(2).padStart(5)} (need 4.5)  selected chip text on primary 10% tint`,
+  );
 }
 
 // Dark widget-accent surfaces: an accented card's hero number and line share the accent token,

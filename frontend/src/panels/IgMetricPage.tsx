@@ -1,10 +1,6 @@
-import { Suspense, lazy, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { InspectorHandle } from '@/components/InspectorHandle';
-import { Link, useParams } from 'react-router-dom';
-import { isMsMetricKey } from '@/panels/sklad/msMetricKeys';
-import { isYmMetricKey } from '@/panels/metrika/ymMetricKeys';
-import { isTgExtraMetricKey } from '@/panels/tgMetricKeys';
-import { isMentionsMetricKey } from '@/panels/mentions/mentionsMetricKeys';
+import { Link } from 'react-router-dom';
 import { useIgData } from '@/lib/useIgData';
 import type { IgData } from '@/lib/useIgData';
 import { usePeriod, type PeriodDays } from '@/lib/period';
@@ -34,11 +30,10 @@ import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { Skeleton } from '@/components/ui/skeleton';
 import { PinnedDayPanel } from '@/components/PinnedDayPanel';
-import { MetricPage, SegSelect } from '@/panels/MetricPage';
+import { SegSelect } from '@/components/metric/SegSelect';
 import { isIgChartMetricKey } from '@/panels/igMetricKeys';
 import { useIgScopedPosts } from '@/panels/instagram/igContentScope';
 import { useExplorerChartHeight } from '@/lib/useExplorerChartHeight';
-import { lazyWithReload } from '@/lib/lazyWithReload';
 import type { ReactNode } from 'react';
 import { AboutRow, ComparisonDeltaRow, MetricBackLink, MetricDescriptor, WindowBarShell, RailSection } from '@/components/metric/shared';
 
@@ -168,83 +163,6 @@ const ER_DEF = {
   formula: 'Взаимодействия ÷ охват × 100% за выбранный период.',
   source: 'Производная от Instagram insights (total_interactions, reach) — агрегаты за период.',
 };
-
-export function isIgMetricKey(raw: string | undefined): boolean {
-  return raw != null && (raw in DAILY_DEFS || raw in AGG_DEFS || raw === 'ig-er' || isIgChartMetricKey(raw));
-}
-
-/** МойСклад metric/report pages live in their own lazy chunk: a TG/IG user opening a TG/IG metric
-    page must never download the MS panel bundle (it's only pulled when an `ms-*` key opens here). */
-const MsMetricPageLazy = lazy(lazyWithReload(() => import('@/panels/sklad/MsMetricPage').then((m) => ({ default: m.MsMetricPage }))));
-
-/** «Яндекс.Метрика» metric/report pages share МойСклад's lazy-chunk discipline: a TG/IG viewer who
-    opens a TG/IG metric page must never download the YM panel bundle (it is only pulled when a
-    `ym-*` key opens here). */
-const YmMetricPageLazy = lazy(lazyWithReload(() => import('@/panels/metrika/YmMetricPage').then((m) => ({ default: m.YmMetricPage }))));
-
-/** Telegram «extra chart» pages (activity heatmap / views velocity) share the lazy-chunk discipline:
-    they are only pulled when a `tg-*` extra key opens, never for a numeric TG drill (views/er/…). */
-const TgMetricPageLazy = lazy(lazyWithReload(() => import('@/panels/TgMetricPage').then((m) => ({ default: m.TgMetricPage }))));
-
-/** Mentions chart pages live in their own lazy chunk and reuse the same metric-route shell. */
-const MentionsMetricPageLazy = lazy(lazyWithReload(() => import('@/panels/mentions/MentionsMetricPage').then((m) => ({ default: m.MentionsMetricPage }))));
-
-/** /metrics/:key dispatcher: numeric TG keys → the steep explorer, tg-* extra keys → the TG chart
-    pages, mentions-* keys → the Mentions pages, ig-* keys → the IG page, ms-* keys → the
-    МойСклад page, ym-* keys → the Метрика page.
-    MetricPage itself redirects unknown keys home, so the fallthrough stays safe. YM/MS/IG/tg-extra
-    and Mentions are each matched before the numeric-TG fallthrough so their lazy branch wins. */
-export function MetricRoute() {
-  const { key } = useParams<{ key: string }>();
-  if (isYmMetricKey(key)) {
-    return (
-      <Suspense fallback={<MetricRouteFallback />}>
-        <YmMetricPageLazy metricKey={key} />
-      </Suspense>
-    );
-  }
-  if (isTgExtraMetricKey(key)) {
-    return (
-      <Suspense fallback={<MetricRouteFallback />}>
-        <TgMetricPageLazy metricKey={key} />
-      </Suspense>
-    );
-  }
-  if (isMentionsMetricKey(key)) {
-    return (
-      <Suspense fallback={<MetricRouteFallback />}>
-        <MentionsMetricPageLazy metricKey={key} />
-      </Suspense>
-    );
-  }
-  if (isMsMetricKey(key)) {
-    return (
-      <Suspense fallback={<MetricRouteFallback />}>
-        <MsMetricPageLazy metricKey={key} />
-      </Suspense>
-    );
-  }
-  if (isIgMetricKey(key)) return <IgMetricPage metricKey={key!} />;
-  return <MetricPage />;
-}
-
-/** Layout-matching scaffold for the lazy MS page (breadcrumb + hero + two-column shell). */
-function MetricRouteFallback() {
-  return (
-    <div className="space-y-5">
-      <Skeleton className="h-3 w-24" />
-      <Skeleton className="h-8 w-48" />
-      <div className="grid grid-cols-1 gap-6 xl:gap-8 lg:grid-cols-[minmax(0,1fr)_300px]">
-        <Skeleton className="h-[420px] w-full" />
-        <div className="space-y-4">
-          <Skeleton className="h-3 w-24" />
-          <Skeleton className="h-4 w-full" />
-          <Skeleton className="h-4 w-full" />
-        </div>
-      </div>
-    </div>
-  );
-}
 
 const WINDOW_PILLS = [
   { days: 7, label: '7д' },

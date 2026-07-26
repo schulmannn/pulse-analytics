@@ -4,10 +4,10 @@ const crypto = require('crypto');
 
 function registerAuthRoutes({
   app, express, db, requireAuth, authLimiter, asyncHandler,
-  hashPassword, verifyPassword, DUMMY_HASH, signSession, SESSION_TTL,
+  hashPassword, verifyPassword, DUMMY_HASH, signSession, SESSION_TTL, SESSION_ABSOLUTE_TTL,
   GOOGLE_CLIENT_ID, fetchWithTimeout, log, audit, appBase, sha256, newToken,
   VERIFY_TTL, RESET_TTL, sendEmail, emailShell, emailBtn, escHtml,
-  aiEnabledFor, setSessionCookie, clearSessionCookie,
+  aiEnabledFor, setSessionCookie, clearSessionCookie, migrateSessionCookie,
 }) {
   const verifyEmailHtml = (link) => emailShell('Подтверди email',
     `<p>Активируй аккаунт в Atlavue:</p>${emailBtn(link, 'Подтвердить email')}<p style="color:#64748d;font-size:13px">Ссылка действует 24 часа. Если это были не вы — проигнорируйте письмо.</p>`);
@@ -19,6 +19,10 @@ function registerAuthRoutes({
   // ════════════════════════════════════════════════════════════════
   //  AUTH ROUTES
   // ════════════════════════════════════════════════════════════════
+
+  // Temporary one-release transport bridge. No other route accepts
+  // X-Session-Token; modern and /legacy clients purge the old keys afterwards.
+  app.post('/api/auth/migrate-cookie', authLimiter, migrateSessionCookie);
 
   // Registration (self-serve, Sprint 1B): create an 'unverified' account and email
   // a verification link. Anti-enumeration — always the same generic response; an
@@ -55,7 +59,6 @@ function registerAuthRoutes({
     const password = String((req.body && req.body.password) || '');
     if (!email || !password) return res.status(400).json({ error: 'Укажи email и пароль' });
     if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
-    const expires = Date.now() + SESSION_TTL;
     try {
       const u = await db.getUserByEmail(email);
       const ok = u ? await verifyPassword(password, u.pass_hash) : await verifyPassword(password, DUMMY_HASH);  // constant-cost
@@ -63,14 +66,19 @@ function registerAuthRoutes({
       if (u.status === 'unverified') return res.status(403).json({ error: 'Подтверди email — ссылка пришла при регистрации', code: 'unverified' });
       if (u.status === 'pending')    return res.status(403).json({ error: 'Аккаунт ждёт одобрения администратором' });
       if (u.status !== 'active')     return res.status(403).json({ error: 'Аккаунт отключён' });
-      const token = signSession({ uid: u.id, role: u.role, exp: expires, tokenVersion: u.token_version });
+      const now = Date.now();
+      const expires = now + SESSION_TTL;
+      const token = signSession({
+        uid: u.id,
+        role: u.role,
+        exp: expires,
+        maxExp: now + SESSION_ABSOLUTE_TTL,
+        tokenVersion: u.token_version,
+      });
       req.user = { uid: u.id, role: u.role, email: u.email };
       audit(req, 'auth.login', {}).catch(() => {});
-      // Cookie-auth фаза 1: тот же токен дополнительно уезжает HttpOnly-cookie;
-      // JSON-ответ не меняется — header-клиенты (SPA/legacy) живут как раньше.
       setSessionCookie(req, res, token);
-      return res.json({ token,
-        expiresAt: new Date(expires).toISOString(), user: { email: u.email, role: u.role } });
+      return res.json({ ok: true, user: { email: u.email, role: u.role } });
     } catch (e) { return next(e); }
   });
 
@@ -115,12 +123,19 @@ function registerAuthRoutes({
         await db.setUserStatus(u.id, 'active');
         u = await db.getUserById(u.id);
       }
-      const expires = Date.now() + SESSION_TTL;
-      const token = signSession({ uid: u.id, role: u.role, exp: expires, tokenVersion: u.token_version });
+      const now = Date.now();
+      const expires = now + SESSION_TTL;
+      const token = signSession({
+        uid: u.id,
+        role: u.role,
+        exp: expires,
+        maxExp: now + SESSION_ABSOLUTE_TTL,
+        tokenVersion: u.token_version,
+      });
       req.user = { uid: u.id, role: u.role, email: u.email };
       audit(req, 'auth.google', {}).catch(() => {});
-      setSessionCookie(req, res, token); // как в /api/auth/login — cookie дублирует токен
-      return res.json({ token, expiresAt: new Date(expires).toISOString(), user: { email: u.email, role: u.role } });
+      setSessionCookie(req, res, token);
+      return res.json({ ok: true, user: { email: u.email, role: u.role } });
     } catch (e) {
       log('error', 'google_auth_error', { error: e.message });
       return res.status(500).json({ error: 'Ошибка входа через Google' });
@@ -240,6 +255,7 @@ function registerAuthRoutes({
       if (u && u.status === 'unverified') await db.setUserStatus(t.uid, 'active');
       req.user = { uid: t.uid };                      // attribute the audit event (route is unauthenticated)
       audit(req, 'auth.reset', {}).catch(() => {});
+      clearSessionCookie(req, res);
       res.json({ ok: true, message: 'Пароль обновлён — войди с новым паролем.' });
     } catch (e) { next(e); }
   });
@@ -270,6 +286,20 @@ function registerAuthRoutes({
       const u = await db.getUserByEmail(req.user.email);
       if (!u || !(await verifyPassword(cur, u.pass_hash))) return res.status(403).json({ error: 'Текущий пароль неверен' });
       await db.setUserPassword(u.id, await hashPassword(nextPass));
+      const refreshed = await db.getUserById(u.id);
+      if (!refreshed || refreshed.status !== 'active') {
+        clearSessionCookie(req, res);
+        return res.status(401).json({ error: 'Аккаунт неактивен — войди снова' });
+      }
+      const now = Date.now();
+      const token = signSession({
+        uid: refreshed.id,
+        role: refreshed.role,
+        exp: now + SESSION_TTL,
+        maxExp: now + SESSION_ABSOLUTE_TTL,
+        tokenVersion: refreshed.token_version,
+      });
+      setSessionCookie(req, res, token);
       audit(req, 'auth.password_changed', {}).catch(() => {});
       res.json({ ok: true });
     } catch (e) { next(e); }

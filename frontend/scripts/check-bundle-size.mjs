@@ -1,35 +1,45 @@
-// Initial-closure bundle gate. Run after `vite build`:
+// Route-closure bundle gate. Run after `vite build`:
 //   node scripts/check-bundle-size.mjs
 //
-// Гейт меряет ВСЮ initial closure, а не один entry-чанк: `dist/index.html` перечисляет ровно то,
-// что браузер тянет до первой интеракции — entry `<script src>`, каждый `<link rel="modulepreload">`
-// и каждый `<link rel="stylesheet">`. Прежняя версия смотрела ТОЛЬКО на `assets/index-*.js`
-// (~87 KB gzip) и не видела регрессий в остальных 16 ассетах — внешний аудит поймал расхождение
-// с реальными 336 KB gzip. Классические `<script src>` (наш прерисовочный theme-boot) тоже входят
-// в закрытие: браузер обязан их скачать и выполнить до первого кадра.
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+// `dist/index.html` is the real browser bootstrap (including classic scripts, CSS and local fonts).
+// Vite's manifest then extends that set with every transitive STATIC import for an addressed route.
+// Dynamic imports are added only when that route actually crosses the boundary. This catches both
+// size regressions and accidental graph re-merges (for example MetricRoute importing both generic
+// and Instagram explorers again).
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname, join, relative } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { gzipSync } from 'node:zlib';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const distDir = join(root, 'dist');
-const assetsDir = join(distDir, 'assets');
 const indexHtml = join(distDir, 'index.html');
+const manifestPath = join(distDir, '.vite', 'manifest.json');
+const KB = 1024;
 
-// ── Бюджеты ───────────────────────────────────────────────────────────────────────────────────
-// Исторический порог одного entry-чанка — оставлен без изменений (преемственность: на него
-// ссылаются комментарии о code splitting в App.tsx / panels/feed/feeds.tsx).
-const MAX_ENTRY_RAW_BYTES = 620_000;
-// BASELINE-ФИКСАЦИЯ, НЕ ЦЕЛЕВОЙ БЮДЖЕТ. Пороги ниже сняты с фактического билда origin/main
-// (initial JS 311.2 KB gzip, TOTAL 336.5 KB gzip) + ~5% запаса, чтобы гейт зафиксировал статус-кво
-// и ловил РОСТ, а не красил CI в день внедрения. Цель — ~220 KB gzip initial JS; путь к ней:
-// вынести из закрытия ChartWidget/SourceIdentity/markdown-ветку и подрезать ui-vendor. Каждый шаг
-// к цели ОБЯЗАН опускать эти числа — порог движется только вниз.
-const MAX_INITIAL_JS_GZIP_BYTES = 335_000;
-const MAX_INITIAL_TOTAL_GZIP_BYTES = 362_000;
+// Tight post-audit ceilings, all measured with gzip. Font subsets are also tracked separately:
+// code budgets stay comparable across routes, while the resource budget prevents fonts escaping.
+const BUDGETS = {
+  entryRaw: 50 * KB,
+  publicBootJs: 100 * KB,
+  publicBootCode: 130 * KB,
+  publicBootResources: 205 * KB,
+  landingCode: 150 * KB,
+  landingResources: 225 * KB,
+  authCode: 175 * KB,
+  protectedJs: 220 * KB,
+  protectedCode: 250 * KB,
+  overviewCode: 345 * KB,
+  metricDispatcherCode: 265 * KB,
+  genericMetricCode: 335 * KB,
+  instagramMetricCode: 340 * KB,
+  moySkladMetricCode: 340 * KB,
+  metrikaMetricCode: 320 * KB,
+  telegramMetricCode: 330 * KB,
+  mentionsMetricCode: 310 * KB,
+};
 
-const kb = (bytes) => (bytes / 1024).toFixed(1);
+const kb = (bytes) => (bytes / KB).toFixed(1);
 
 function fail(message) {
   console.error(message);
@@ -41,7 +51,6 @@ function attr(tag, name) {
   return match?.[2];
 }
 
-/** Локальный ассет из dist (внешние https://-ссылки — Google Fonts — не наш бюджет). */
 function localAsset(href) {
   if (!href || /^[a-z]+:/i.test(href) || href.startsWith('//')) return null;
   const rel = href.replace(/[?#].*$/, '').replace(/^\//, '');
@@ -49,34 +58,52 @@ function localAsset(href) {
   return existsSync(path) ? path : null;
 }
 
-/** Всё, что документ грузит до первого кадра: скрипты (module и классические) + стили. */
-function initialClosure(html) {
-  const js = [];
-  const css = [];
+/** All local font files referenced by bootstrap CSS (conservative: every unicode subset). */
+function cssFonts(stylesheet) {
+  const source = readFileSync(stylesheet, 'utf8');
+  const fonts = [];
   const seen = new Set();
-  const push = (list, path) => {
-    if (seen.has(path)) return;
-    seen.add(path);
-    list.push(path);
-  };
+  for (const match of source.matchAll(/url\(\s*(['"]?)(.*?)\1\s*\)/gi)) {
+    const href = match[2]?.replace(/[?#].*$/, '');
+    if (!href || /^[a-z]+:/i.test(href) || href.startsWith('//') || href.startsWith('#')) continue;
+    if (!/\.woff2?$/i.test(href)) continue;
+    const path = href.startsWith('/')
+      ? join(distDir, href.replace(/^\//, ''))
+      : resolve(dirname(stylesheet), href);
+    if (existsSync(path) && !seen.has(path)) {
+      seen.add(path);
+      fonts.push(path);
+    }
+  }
+  return fonts;
+}
 
+/** Browser bootstrap from HTML: module/classic scripts + modulepreloads + styles + local fonts. */
+function initialClosure(html) {
+  const js = new Set();
+  const css = new Set();
   for (const match of html.matchAll(/<script\b[^>]*>/gi)) {
     const path = localAsset(attr(match[0], 'src'));
-    if (path) push(js, path);
+    if (path) js.add(path);
   }
   for (const match of html.matchAll(/<link\b[^>]*>/gi)) {
     const tag = match[0];
     const rel = attr(tag, 'rel')?.toLowerCase();
     if (rel !== 'modulepreload' && rel !== 'stylesheet') continue;
     const path = localAsset(attr(tag, 'href'));
-    if (path) push(rel === 'stylesheet' ? css : js, path);
+    if (path) (rel === 'stylesheet' ? css : js).add(path);
   }
-  return { js, css };
+  return {
+    js,
+    css,
+    fonts: new Set([...css].flatMap(cssFonts)),
+  };
 }
 
 function measure(paths) {
-  return paths.map((path) => ({
+  return [...paths].map((path) => ({
     name: relative(distDir, path).replace(/\\/g, '/'),
+    path,
     raw: statSync(path).size,
     gzip: gzipSync(readFileSync(path)).length,
   }));
@@ -84,83 +111,284 @@ function measure(paths) {
 
 const sum = (rows, key) => rows.reduce((total, row) => total + row[key], 0);
 
-function htmlEntry(html) {
-  for (const match of html.matchAll(/<script\b[^>]*>/gi)) {
-    const tag = match[0];
-    if (attr(tag, 'type')?.toLowerCase() !== 'module') continue;
-
-    const src = attr(tag, 'src');
-    if (src && /(?:^|\/)assets\/index-[^/]+\.js$/.test(src)) {
-      return join(distDir, src.replace(/^\//, ''));
-    }
-  }
-  return null;
-}
-
-function fallbackEntry() {
-  if (!existsSync(assetsDir)) fail('dist/assets не найден. Запусти gate после build.');
-
-  const candidates = readdirSync(assetsDir)
-    .filter((name) => /^index-.*\.js$/.test(name))
-    .map((name) => join(assetsDir, name))
-    .sort((a, b) => statSync(b).size - statSync(a).size);
-
-  return candidates[0] ?? null;
-}
-
 if (!existsSync(indexHtml)) fail('dist/index.html не найден. Запусти gate после build.');
+if (!existsSync(manifestPath)) {
+  fail('dist/.vite/manifest.json не найден. Включи build.manifest и запусти build.');
+}
+
 const html = readFileSync(indexHtml, 'utf8');
+const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+const initial = initialClosure(html);
+if (initial.js.size === 0) {
+  fail('В dist/index.html не нашлось локального скрипта. Запусти gate после build.');
+}
 
-const { js, css } = initialClosure(html);
-if (js.length === 0) fail('В dist/index.html не нашлось ни одного локального скрипта. Запусти gate после build.');
+function assetPath(file) {
+  const path = join(distDir, file);
+  if (!existsSync(path)) fail(`Manifest ссылается на отсутствующий ассет: ${file}`);
+  return path;
+}
 
-const jsRows = measure(js);
-const cssRows = measure(css);
-const jsRaw = sum(jsRows, 'raw');
-const jsGzip = sum(jsRows, 'gzip');
-const cssRaw = sum(cssRows, 'raw');
-const cssGzip = sum(cssRows, 'gzip');
-const totalRaw = jsRaw + cssRaw;
-const totalGzip = jsGzip + cssGzip;
+function resolveManifestKey(ref) {
+  if (manifest[ref]) return ref;
+  const matches = Object.entries(manifest)
+    .filter(([, item]) => item.src === ref || item.name === ref)
+    .map(([key]) => key);
+  if (matches.length !== 1) {
+    fail(
+      matches.length === 0
+        ? `Manifest entry не найден: ${ref}`
+        : `Manifest entry неоднозначен: ${ref} → ${matches.join(', ')}`,
+    );
+  }
+  return matches[0];
+}
 
-const entry = htmlEntry(html) ?? fallbackEntry();
-if (!entry || !existsSync(entry)) fail('Entry chunk не найден в dist/assets. Запусти gate после build.');
-const entryRaw = statSync(entry).size;
-const entryGzip = gzipSync(readFileSync(entry)).length;
-const entryName = relative(root, entry).replace(/\\/g, '/');
+function staticManifestClosure(rootKeys) {
+  const keys = new Set();
+  const visit = (key) => {
+    if (keys.has(key)) return;
+    const item = manifest[key];
+    if (!item) fail(`Manifest import не найден: ${key}`);
+    keys.add(key);
+    for (const imported of item.imports ?? []) visit(imported);
+  };
+  for (const key of rootKeys) visit(key);
+  return keys;
+}
 
-// ТОП-5 закрытия — чтобы регрессия читалась сразу, без ручного пересчёта dist.
-const heaviest = [...jsRows, ...cssRows].sort((a, b) => b.gzip - a.gzip).slice(0, 5);
+/** Bootstrap plus static closure of the dynamic route entries actually crossed by this route. */
+function routeClosure(refs) {
+  const js = new Set(initial.js);
+  const css = new Set(initial.css);
+  const keys = staticManifestClosure(refs.map(resolveManifestKey));
+  for (const key of keys) {
+    const item = manifest[key];
+    js.add(assetPath(item.file));
+    for (const file of item.css ?? []) css.add(assetPath(file));
+  }
+  const jsRows = measure(js);
+  const cssRows = measure(css);
+  const jsGzip = sum(jsRows, 'gzip');
+  const cssGzip = sum(cssRows, 'gzip');
+  return {
+    jsRows,
+    cssRows,
+    jsGzip,
+    cssGzip,
+    codeGzip: jsGzip + cssGzip,
+  };
+}
 
+const routes = {
+  boot: routeClosure(['index.html']),
+  landing: routeClosure(['index.html', 'src/AuthGate.tsx', 'src/pages/Landing.tsx']),
+  auth: routeClosure(['index.html', 'src/pages/Auth.tsx']),
+  protected: routeClosure(['index.html', 'src/AuthGate.tsx', 'src/ProtectedApp.tsx']),
+  overview: routeClosure([
+    'index.html',
+    'src/AuthGate.tsx',
+    'src/ProtectedApp.tsx',
+    'Overview',
+  ]),
+  metricDispatcher: routeClosure([
+    'index.html',
+    'src/AuthGate.tsx',
+    'src/ProtectedApp.tsx',
+    'src/panels/MetricRoute.tsx',
+  ]),
+  genericMetric: routeClosure([
+    'index.html',
+    'src/AuthGate.tsx',
+    'src/ProtectedApp.tsx',
+    'src/panels/MetricRoute.tsx',
+    'src/panels/MetricPage.tsx',
+  ]),
+  instagramMetric: routeClosure([
+    'index.html',
+    'src/AuthGate.tsx',
+    'src/ProtectedApp.tsx',
+    'src/panels/MetricRoute.tsx',
+    'src/panels/IgMetricPage.tsx',
+  ]),
+  moySkladMetric: routeClosure([
+    'index.html',
+    'src/AuthGate.tsx',
+    'src/ProtectedApp.tsx',
+    'src/panels/MetricRoute.tsx',
+    'src/panels/sklad/MsMetricPage.tsx',
+  ]),
+  metrikaMetric: routeClosure([
+    'index.html',
+    'src/AuthGate.tsx',
+    'src/ProtectedApp.tsx',
+    'src/panels/MetricRoute.tsx',
+    'src/panels/metrika/YmMetricPage.tsx',
+  ]),
+  telegramMetric: routeClosure([
+    'index.html',
+    'src/AuthGate.tsx',
+    'src/ProtectedApp.tsx',
+    'src/panels/MetricRoute.tsx',
+    'src/panels/TgMetricPage.tsx',
+  ]),
+  mentionsMetric: routeClosure([
+    'index.html',
+    'src/AuthGate.tsx',
+    'src/ProtectedApp.tsx',
+    'src/panels/MetricRoute.tsx',
+    'src/panels/mentions/MentionsMetricPage.tsx',
+  ]),
+};
+
+const fontRows = measure(initial.fonts);
+const fontGzip = sum(fontRows, 'gzip');
+const bootResources = routes.boot.codeGzip + fontGzip;
+const landingResources = routes.landing.codeGzip + fontGzip;
+
+const entryKey = Object.keys(manifest).find((key) => manifest[key].isEntry);
+if (!entryKey) fail('Manifest entry chunk не найден.');
+const entryPath = assetPath(manifest[entryKey].file);
+const entryRaw = statSync(entryPath).size;
+const entryGzip = gzipSync(readFileSync(entryPath)).length;
+
+function printRoute(label, route, codeLimit, jsLimit) {
+  const limits = [
+    jsLimit ? `JS≤${kb(jsLimit)}KB` : null,
+    codeLimit ? `code≤${kb(codeLimit)}KB` : null,
+  ].filter(Boolean).join(' · ');
+  console.log(
+    `${label.padEnd(19)} ${route.jsRows.length} JS + ${route.cssRows.length} CSS · ` +
+      `${kb(route.jsGzip)}KB JS / ${kb(route.codeGzip)}KB code${limits ? ` · ${limits}` : ''}`,
+  );
+}
+
+printRoute('public boot', routes.boot, BUDGETS.publicBootCode, BUDGETS.publicBootJs);
 console.log(
-  `initial JS:    ${jsRows.length} файлов · ${kb(jsRaw)}KB raw / ${kb(jsGzip)}KB gzip · limit ${kb(MAX_INITIAL_JS_GZIP_BYTES)}KB gzip`,
+  `${'public resources'.padEnd(19)} ${kb(bootResources)}KB incl. ${fontRows.length} fonts ` +
+    `(${kb(fontGzip)}KB) · total≤${kb(BUDGETS.publicBootResources)}KB`,
 );
-console.log(`initial CSS:   ${cssRows.length} файлов · ${kb(cssRaw)}KB raw / ${kb(cssGzip)}KB gzip`);
+printRoute('landing', routes.landing, BUDGETS.landingCode);
 console.log(
-  `initial TOTAL: ${jsRows.length + cssRows.length} файлов · ${kb(totalRaw)}KB raw / ${kb(totalGzip)}KB gzip · limit ${kb(MAX_INITIAL_TOTAL_GZIP_BYTES)}KB gzip`,
+  `${'landing resources'.padEnd(19)} ${kb(landingResources)}KB incl. fonts · ` +
+    `total≤${kb(BUDGETS.landingResources)}KB`,
 );
-console.log(`entry chunk:   ${kb(entryRaw)}KB raw / ${kb(entryGzip)}KB gzip · limit ${kb(MAX_ENTRY_RAW_BYTES)}KB raw · ${entryName}`);
-console.log('топ-5 initial closure:');
+printRoute('auth', routes.auth, BUDGETS.authCode);
+printRoute('protected shell', routes.protected, BUDGETS.protectedCode, BUDGETS.protectedJs);
+printRoute('tg overview', routes.overview, BUDGETS.overviewCode);
+printRoute('metric dispatcher', routes.metricDispatcher, BUDGETS.metricDispatcherCode);
+printRoute('generic metric', routes.genericMetric, BUDGETS.genericMetricCode);
+printRoute('instagram metric', routes.instagramMetric, BUDGETS.instagramMetricCode);
+printRoute('moysklad metric', routes.moySkladMetric, BUDGETS.moySkladMetricCode);
+printRoute('metrika metric', routes.metrikaMetric, BUDGETS.metrikaMetricCode);
+printRoute('telegram metric', routes.telegramMetric, BUDGETS.telegramMetricCode);
+printRoute('mentions metric', routes.mentionsMetric, BUDGETS.mentionsMetricCode);
+console.log(
+  `entry chunk         ${kb(entryRaw)}KB raw / ${kb(entryGzip)}KB gzip · ` +
+    `raw≤${kb(BUDGETS.entryRaw)}KB · ${relative(root, entryPath).replace(/\\/g, '/')}`,
+);
+
+const heaviest = [
+  ...routes.boot.jsRows,
+  ...routes.boot.cssRows,
+  ...fontRows,
+].sort((a, b) => b.gzip - a.gzip).slice(0, 5);
+console.log('top-5 public resources:');
 for (const row of heaviest) {
-  console.log(`  ${kb(row.raw).padStart(7)}KB raw / ${kb(row.gzip).padStart(6)}KB gzip · ${row.name}`);
+  console.log(
+    `  ${kb(row.raw).padStart(7)}KB raw / ${kb(row.gzip).padStart(6)}KB gzip · ${row.name}`,
+  );
 }
 
 const problems = [];
-if (entryRaw > MAX_ENTRY_RAW_BYTES) {
-  problems.push(`entry chunk too large: ${kb(entryRaw)}KB raw · limit ${kb(MAX_ENTRY_RAW_BYTES)}KB (${entryName})`);
+const check = (actual, limit, label) => {
+  if (actual > limit) problems.push(`${label}: ${kb(actual)}KB · limit ${kb(limit)}KB`);
+};
+check(entryRaw, BUDGETS.entryRaw, 'entry raw too large');
+check(routes.boot.jsGzip, BUDGETS.publicBootJs, 'public boot JS too large');
+check(routes.boot.codeGzip, BUDGETS.publicBootCode, 'public boot code too large');
+check(bootResources, BUDGETS.publicBootResources, 'public boot resources too large');
+check(routes.landing.codeGzip, BUDGETS.landingCode, 'landing code too large');
+check(landingResources, BUDGETS.landingResources, 'landing resources too large');
+check(routes.auth.codeGzip, BUDGETS.authCode, 'auth route code too large');
+check(routes.protected.jsGzip, BUDGETS.protectedJs, 'protected shell JS too large');
+check(routes.protected.codeGzip, BUDGETS.protectedCode, 'protected shell code too large');
+check(routes.overview.codeGzip, BUDGETS.overviewCode, 'TG overview route code too large');
+check(
+  routes.metricDispatcher.codeGzip,
+  BUDGETS.metricDispatcherCode,
+  'metric dispatcher route code too large',
+);
+check(routes.genericMetric.codeGzip, BUDGETS.genericMetricCode, 'generic metric route code too large');
+check(
+  routes.instagramMetric.codeGzip,
+  BUDGETS.instagramMetricCode,
+  'Instagram metric route code too large',
+);
+check(
+  routes.moySkladMetric.codeGzip,
+  BUDGETS.moySkladMetricCode,
+  'MoySklad metric route code too large',
+);
+check(
+  routes.metrikaMetric.codeGzip,
+  BUDGETS.metrikaMetricCode,
+  'Metrika metric route code too large',
+);
+check(
+  routes.telegramMetric.codeGzip,
+  BUDGETS.telegramMetricCode,
+  'Telegram extra metric route code too large',
+);
+check(
+  routes.mentionsMetric.codeGzip,
+  BUDGETS.mentionsMetricCode,
+  'Mentions metric route code too large',
+);
+
+// Graph contracts: protected code waits behind a successful AuthGate decision; metric families
+// remain separate async entries and cannot silently re-aggregate.
+const authGateKey = resolveManifestKey('src/AuthGate.tsx');
+const protectedKey = resolveManifestKey('src/ProtectedApp.tsx');
+const landingKey = resolveManifestKey('src/pages/Landing.tsx');
+const authGateStatic = staticManifestClosure([authGateKey]);
+const authGateDynamic = new Set(manifest[authGateKey].dynamicImports ?? []);
+if (authGateStatic.has(protectedKey)) problems.push('ProtectedApp became a static AuthGate import');
+if (authGateStatic.has(landingKey)) problems.push('Landing became a static AuthGate import');
+if (!authGateDynamic.has(protectedKey)) problems.push('ProtectedApp is no longer an AuthGate dynamic import');
+if (!authGateDynamic.has(landingKey)) problems.push('Landing is no longer an AuthGate dynamic import');
+
+const metricRouteKey = resolveManifestKey('src/panels/MetricRoute.tsx');
+const metricStatic = staticManifestClosure([metricRouteKey]);
+const metricDynamic = new Set(manifest[metricRouteKey].dynamicImports ?? []);
+const metricFamilies = [
+  ['generic MetricPage', resolveManifestKey('src/panels/MetricPage.tsx')],
+  ['Instagram IgMetricPage', resolveManifestKey('src/panels/IgMetricPage.tsx')],
+  ['MoySklad MsMetricPage', resolveManifestKey('src/panels/sklad/MsMetricPage.tsx')],
+  ['Metrika YmMetricPage', resolveManifestKey('src/panels/metrika/YmMetricPage.tsx')],
+  ['Telegram TgMetricPage', resolveManifestKey('src/panels/TgMetricPage.tsx')],
+  [
+    'Mentions MentionsMetricPage',
+    resolveManifestKey('src/panels/mentions/MentionsMetricPage.tsx'),
+  ],
+];
+for (const [label, key] of metricFamilies) {
+  if (metricStatic.has(key)) problems.push(`${label} became a static MetricRoute import`);
+  if (!metricDynamic.has(key)) problems.push(`${label} is no longer a MetricRoute dynamic import`);
 }
-if (jsGzip > MAX_INITIAL_JS_GZIP_BYTES) {
-  problems.push(`initial JS too large: ${kb(jsGzip)}KB gzip · limit ${kb(MAX_INITIAL_JS_GZIP_BYTES)}KB`);
-}
-if (totalGzip > MAX_INITIAL_TOTAL_GZIP_BYTES) {
-  problems.push(`initial TOTAL too large: ${kb(totalGzip)}KB gzip · limit ${kb(MAX_INITIAL_TOTAL_GZIP_BYTES)}KB`);
+for (const [label, key] of metricFamilies) {
+  const familyStatic = staticManifestClosure([key]);
+  for (const [otherLabel, otherKey] of metricFamilies) {
+    if (key !== otherKey && familyStatic.has(otherKey)) {
+      problems.push(`${label} statically imports ${otherLabel}`);
+    }
+  }
 }
 
 if (problems.length > 0) {
   for (const problem of problems) console.error(problem);
-  console.error('hint: вынеси тяжёлый роут в ленивый чанк (как ig-cluster) или разбей импорт;');
-  console.error('hint: смотри топ-5 выше — регрессия почти всегда в одном из этих ассетов');
+  console.error('hint: inspect dist/.vite/manifest.json and the route summary above');
   process.exit(1);
 }
 
-console.log('bundle OK');
+console.log('bundle routes OK');

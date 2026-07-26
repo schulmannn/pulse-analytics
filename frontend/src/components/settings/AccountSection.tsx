@@ -163,11 +163,8 @@ export function AppearanceSection() {
 function ThemeControl() {
   const { mode, setMode } = useTheme();
   return (
-    <div
-      role="group"
-      aria-label="Тема интерфейса"
-      className="flex items-center gap-0.5 rounded-full border border-border p-0.5"
-    >
+    <fieldset className="m-0 flex min-w-0 items-center gap-0.5 rounded-full border border-border p-0.5">
+      <legend className="sr-only">Тема интерфейса</legend>
       {THEME_OPTIONS.map((option) => {
         const active = mode === option.value;
         return (
@@ -188,7 +185,7 @@ function ThemeControl() {
           </button>
         );
       })}
-    </div>
+    </fieldset>
   );
 }
 
@@ -242,7 +239,7 @@ export function SecuritySection() {
     <SettingsGroup>
       <SettingsRow
         title="Пароль"
-        description="Минимум 8 символов. После смены другие сессии остаются активными."
+        description="Минимум 8 символов. После смены другие сессии завершаются."
         footer={
           <form
             onSubmit={onSubmit}

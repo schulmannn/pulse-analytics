@@ -388,6 +388,31 @@ function HeatmapSurface({
 }) {
   const [tip, setTip] = useState<TooltipState>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
+  // Pointer hover is a visual enhancement on a passive chart. Native delegation keeps the
+  // heatmap's DOM semantics non-interactive while still clearing the tooltip over empty cells.
+  useEffect(() => {
+    const wrap = wrapRef.current;
+    if (!wrap) return;
+    const clear = () => setTip(null);
+    const move = (event: PointerEvent) => {
+      const target = event.target instanceof Element
+        ? event.target.closest<HTMLElement>('[data-heatmap-tip]')
+        : null;
+      const text = target && wrap.contains(target) ? target.dataset.heatmapTip : null;
+      if (!text) {
+        clear();
+        return;
+      }
+      const rect = wrap.getBoundingClientRect();
+      setTip({ x: event.clientX - rect.left, y: event.clientY - rect.top, text });
+    };
+    wrap.addEventListener('pointermove', move);
+    wrap.addEventListener('pointerleave', clear);
+    return () => {
+      wrap.removeEventListener('pointermove', move);
+      wrap.removeEventListener('pointerleave', clear);
+    };
+  }, []);
   // Тултип не должен зависать при прокрутке/потере фокуса — mouseleave при колесе не срабатывает
   // (канон BarChart/PieChart, дизайн-проход №3).
   const hasTip = tip !== null;
@@ -408,9 +433,12 @@ function HeatmapSurface({
   const hours = Array.from({ length: hourRange.to - hourRange.from + 1 }, (_, i) => hourRange.from + i);
   const cols = `30px repeat(${hours.length}, minmax(14px, 1fr))`;
   const labelStride = hours.length <= 8 ? 1 : hours.length <= 16 ? 2 : 3;
+  const ariaSummary = bestSlot
+    ? `Тепловая карта публикаций по дням и часам. Лучший слот: ${DAY_NAMES[bestSlot.weekday] ?? ''} ${bestSlot.hour}:00, ERV ${bestSlot.avgErv.toFixed(1)}%.`
+    : 'Тепловая карта публикаций по дням и часам. Недостаточно данных, чтобы определить лучший слот.';
 
   return (
-    <div ref={wrapRef} className="relative" onMouseLeave={() => setTip(null)}>
+    <div ref={wrapRef} role="img" aria-label={ariaSummary} className="relative">
       <div className="overflow-x-auto pb-2">
         <div className="min-w-[420px] space-y-[2px]">
           <div className="grid gap-[2px]" style={{ gridTemplateColumns: cols }}>
@@ -434,13 +462,7 @@ function HeatmapSurface({
                 {hours.map((hr) => {
                   const cell = currentRow[hr];
                   if (!cell || cell.n === 0) {
-                    return (
-                      <div
-                        key={hr}
-                        className="h-4 rounded-sm bg-muted/40"
-                        onMouseMove={() => setTip(null)}
-                      />
-                    );
+                    return <div key={hr} className="h-4 rounded-sm bg-muted/40" />;
                   }
                   const avgErv = cell.ervSum / cell.n;
                   const opacity = maxErv > 0 ? Math.max(0.18, avgErv / maxErv) : 0;
@@ -450,13 +472,10 @@ function HeatmapSurface({
                     <div
                       key={hr}
                       className={`relative h-4 cursor-crosshair rounded-sm${isBest ? ' border-2 border-verdant' : ''}`}
+                      data-heatmap-tip={titleText}
                       style={{
                         backgroundColor: 'hsl(var(--brand-iris))',
                         opacity,
-                      }}
-                      onMouseMove={(event) => {
-                        const rect = wrapRef.current?.getBoundingClientRect();
-                        if (rect) setTip({ x: event.clientX - rect.left, y: event.clientY - rect.top, text: titleText });
                       }}
                     />
                   );

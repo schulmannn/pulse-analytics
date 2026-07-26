@@ -1,11 +1,17 @@
-import { useMemo } from 'react';
+import { Suspense, lazy, useMemo } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { useChannels, useHistory, useTgFull } from '@/api/queries';
 import { latestDataMs } from '@/lib/freshness';
 import { ChannelRecencyProvider, PagePeriodProvider, usePagePeriod } from '@/lib/period';
 import { PeriodChips } from '@/components/PeriodChips';
-import { Overview } from '@/panels/Overview';
 import { parseContentPeriod } from '@/lib/contentFilters';
+import { lazyWithReload } from '@/lib/lazyWithReload';
+
+const Overview = lazy(
+  lazyWithReload(() =>
+    import('@/panels/Overview').then((module) => ({ default: module.Overview })),
+  ),
+);
 
 /**
  * TG feed SHELL — the network-wide chrome for the four focused TG pages (Обзор · Аналитика ·
@@ -28,7 +34,14 @@ export function TgSectionLayout() {
   const recency = useMemo(() => latestDataMs(tgFull?.posts, history), [tgFull, history]);
 
   const noChannels = channelsData !== undefined && (channelsData.channels?.length ?? 0) === 0;
-  if (noChannels) return <Overview />; // GetStarted onboarding (Overview self-gates it)
+  if (noChannels) {
+    // Overview self-gates to GetStarted; keep its chart stack out of the protected shell closure.
+    return (
+      <Suspense fallback={<div className="min-h-[70vh]" />}>
+        <Overview />
+      </Suspense>
+    );
+  }
 
   // PagePeriodProvider persists the authoritative header period across TG page navigation
   // (Обзор ↔ Аналитика); every feed card resolves to this same window.

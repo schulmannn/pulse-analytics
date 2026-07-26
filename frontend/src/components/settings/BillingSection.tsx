@@ -94,7 +94,7 @@ function PlanCard({ plan, active }: { plan: PlanDef; active: boolean }) {
       <div className="flex items-center justify-between gap-2">
         <span className="text-sm font-medium text-foreground">{PLAN_LABEL[plan.id]}</span>
         {active && (
-          <span className="rounded bg-primary/10 px-1.5 py-0.5 text-2xs font-medium text-primary">
+          <span className="rounded bg-primary/10 px-1.5 py-0.5 text-2xs font-medium text-accent-foreground">
             Текущий
           </span>
         )}

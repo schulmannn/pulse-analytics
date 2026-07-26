@@ -26,6 +26,7 @@ import { CampaignFilterControl } from '@/components/campaigns/CampaignFilterCont
 import { PillSelect } from '@/components/PillSelect';
 import { SearchField } from '@/components/SearchField';
 import { Button } from '@/components/ui/button';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { lazyWithReload } from '@/lib/lazyWithReload';
 import {
   CONTENT_SORT_COLUMNS,
@@ -69,32 +70,37 @@ export function Posts() {
     );
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap gap-1" role="tablist" aria-label="Раздел контента">
+    <Tabs
+      value={view}
+      onValueChange={(next) => setView(next as 'posts' | 'campaigns')}
+      className="space-y-6"
+    >
+      <TabsList
+        aria-label="Раздел контента"
+        className="flex h-auto min-h-0 flex-wrap justify-start gap-1 border-0 bg-transparent p-0"
+      >
         {([['posts', 'Публикации'], ['campaigns', 'Кампании']] as const).map(([key, label]) => (
-          <button
+          <TabsTrigger
             key={key}
-            type="button"
-            role="tab"
-            aria-selected={view === key}
-            onClick={() => setView(key)}
+            value={key}
             className={cn(
               'btn-pill px-3 py-1 text-xs font-medium transition-colors',
-              view === key ? 'bg-primary/15 text-foreground' : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
+              'bg-transparent text-muted-foreground hover:bg-muted/50 hover:text-foreground data-[state=active]:bg-primary/15 data-[state=active]:text-foreground',
             )}
           >
             {label}
-          </button>
+          </TabsTrigger>
         ))}
-      </div>
-      {view === 'campaigns' ? (
+      </TabsList>
+      <TabsContent value="campaigns" className="mt-0">
         <Suspense fallback={<div className="py-8"><Skeleton className="h-40 w-full" /></div>}>
           <CampaignsView />
         </Suspense>
-      ) : (
+      </TabsContent>
+      <TabsContent value="posts" className="mt-0">
         <PostsContent />
-      )}
-    </div>
+      </TabsContent>
+    </Tabs>
   );
 }
 
@@ -502,12 +508,14 @@ function PostsTable({ allPosts, loadedCount }: { allPosts: NormalizedPost[]; loa
                   onClick={isClickable ? () => setOpenId(post.id) : undefined}
                   className={`group transition-colors hover:bg-hover-row ${isClickable ? 'cursor-pointer' : ''}`}
                 >
-                  {/* Чекбокс не должен открывать модалку — гасим всплытие на ячейке. */}
-                  <td className="py-2.5 pl-0 pr-2" onClick={(e) => e.stopPropagation()}>
+                  {/* Чекбокс не должен открывать модалку — гасим его собственный click, оставляя
+                      табличную ячейку неинтерактивной. */}
+                  <td className="py-2.5 pl-0 pr-2">
                     {post.id != null && (
                       <Checkbox
                         aria-label="Выбрать публикацию"
                         checked={selected.has(post.id)}
+                        onClick={(event) => event.stopPropagation()}
                         onCheckedChange={() => toggleSelect(post.id!)}
                         data-testid="post-select"
                       />
@@ -742,6 +750,16 @@ function PostThumb({
   icon?: boolean;
 }) {
   const [broken, setBroken] = useState(false);
+  const imageRef = useRef<HTMLImageElement>(null);
+  useEffect(() => {
+    const image = imageRef.current;
+    if (!image || broken) return;
+    const handleError = () => setBroken(true);
+    image.addEventListener('error', handleError);
+    // Cached failures can settle before the passive effect attaches.
+    if (image.complete && image.naturalWidth === 0) handleError();
+    return () => image.removeEventListener('error', handleError);
+  }, [thumb, broken]);
   const label =
     mediaType === 'video' ? 'Видео' : mediaType === 'photo' ? (albumSize > 1 ? `${albumSize} фото` : 'Фото') : 'Текст';
   return (
@@ -751,11 +769,11 @@ function PostThumb({
     >
       {thumb && !broken ? (
         <img
+          ref={imageRef}
           loading="lazy"
           src={thumb}
           alt=""
           referrerPolicy="no-referrer"
-          onError={() => setBroken(true)}
           className="h-full w-full object-cover"
         />
       ) : icon ? (

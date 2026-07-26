@@ -74,6 +74,10 @@ function loadConfig(env = process.env) {
     auth: Object.freeze({
       sessionSecret: env.SESSION_SECRET || '',
       sessionTtlMs: 7 * 24 * 60 * 60 * 1000,
+      // Sliding idle refresh is bounded by an absolute lifetime. A successful
+      // password re-authentication starts a new absolute window.
+      sessionAbsoluteTtlMs:
+        Number(env.SESSION_ABSOLUTE_TTL_DAYS || 30) * 24 * 60 * 60 * 1000,
       adminEmail: normalizeEmail(env.ADMIN_EMAIL),
       adminPassword: env.ADMIN_PASSWORD || '',
       googleClientId: env.GOOGLE_CLIENT_ID || '',
@@ -231,6 +235,15 @@ function validateConfig(config) {
 
   if (prod && !config.auth.sessionSecret) {
     add('auth.sessionSecret', 'SESSION_SECRET обязателен в production (подписывает сессии дашборда).');
+  }
+  if (!Number.isInteger(config.auth.sessionAbsoluteTtlMs)
+      || config.auth.sessionAbsoluteTtlMs % (24 * 60 * 60 * 1000) !== 0
+      || config.auth.sessionAbsoluteTtlMs < config.auth.sessionTtlMs
+      || config.auth.sessionAbsoluteTtlMs > 365 * 24 * 60 * 60 * 1000) {
+    add(
+      'auth.sessionAbsoluteTtlMs',
+      'SESSION_ABSOLUTE_TTL_DAYS должен быть целым числом в диапазоне 7..365.',
+    );
   }
   if (prod && !config.database.url && !config.database.allowDbLess) {
     add('database.url', 'DATABASE_URL обязателен в production, если не задан ALLOW_DBLESS=true.');

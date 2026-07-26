@@ -70,7 +70,7 @@ function UserRowCard({ user, availableRoles, availableStatuses, isMe }: UserRowC
               {user.email || <span className="italic text-muted-foreground">без email</span>}
             </span>
             {isMe && (
-              <span className="select-none rounded bg-primary/10 px-1.5 py-0.5 text-2xs font-medium text-primary">(вы)</span>
+              <span className="select-none rounded bg-primary/10 px-1.5 py-0.5 text-2xs font-medium text-accent-foreground">(вы)</span>
             )}
           </div>
           <div className="font-mono text-xs text-muted-foreground">

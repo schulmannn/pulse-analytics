@@ -1,6 +1,6 @@
 # Память проекта Atlavue
 
-Обновлено: 2026-07-25.
+Обновлено: 2026-07-26.
 
 Это единственный живой документ о текущем состоянии продукта, принятых решениях и ближайшей
 очереди. История изменений остаётся в git и PR: сюда не переносятся завершённые аудиты, спринты и
@@ -54,11 +54,25 @@ managed-first. Живой поиск упоминаний также работ�
   ключи с exact account-id в третьем сегменте `ig:<kind>:<accountId>`, а production cache обязан
   поддерживать `keys()`/`delete()`; сохранение/удаление integration и аудит не должны ложно завершаться 500.
 - GDPR-экспорт (F5) отдаётся **одним JSON-файлом стримом**, а не буферизуется: все неограниченные
-  наборы (архивы каналов, `workspaces`, `reports`, перечень `channels`) тянутся **keyset-страницами** фиксированного
-  размера (no OFFSET, no SQL-side unbounded JSON-агрегат) через **один** выделенный коннект, с
+  наборы (архивы каналов, `workspaces`, memberships, campaigns, AI-чаты, audit trail, `reports`,
+  перечень `channels` и metadata API-ключей) тянутся **keyset-страницами** фиксированного размера
+  (no OFFSET, no SQL-side unbounded JSON-агрегат) через **один** выделенный коннект, с
   backpressure (`drain`) и тихим прерыванием на обрыве клиента; аудит `account.exported` пишется
   **только на полностью дописанном** ответе. Буферизуются лишь singleton-строки
-  account/prefs/tg-session. Пиковая память ответа = одна страница, а не весь архив.
+  account/prefs/integration identity/tg-session и bounded current snapshot. Пиковая память ответа =
+  одна страница, а не весь архив. История IG/MS/YM и raw snapshots экспортируются независимо от
+  наличия текущего integration-account; `channel_photo` вырезается из current snapshot.
+- Portability-проекции не являются DB dump: encrypted sessions/tokens, password/email/API-key
+  hashes, request/IP identifiers, чужой roster и copied content shared-кампаний не экспортируются.
+  User-created campaigns требуют текущего workspace access, campaign-post export содержит только
+  собственные membership-операции. Operational ledgers/cursors (`ingest_receipts`,
+  `collector_status`, backfill states, jobs), public media cache, global legacy `ig_tags` и
+  непривязанные к uid bug/crash telemetry осознанно исключены. При erasure audit metadata,
+  `ip_hash` и `request_id` обнуляются до `users` DELETE, а orphan-source sweep учитывает все FK,
+  включая живые MS/YM connections соседних tenants. Перед переводом foreign-owned канала из
+  удаляемого workspace в legacy `workspace_id=NULL` узко удаляются его campaign memberships этого
+  же dying workspace; иначе composite FK `campaign_posts(channel_id, workspace_id)` с NO ACTION
+  блокирует весь erasure. Все эти шаги живут в одной транзакции.
 - Managed Telegram-сессии всегда записываются активным `TG_SESSION_KEY`; во время ротации разрешено до трёх
   read-only ключей в `TG_SESSION_KEY_PREVIOUS`. Успешное fallback-чтение лениво перешифровывает только ciphertext
   под тем же `session_version`, поэтому конкурентное переподключение не может быть затёрто. Instagram-ключи
@@ -507,23 +521,24 @@ Google OAuth origins, Railway-service для recovery worker.
   изменением схемы обязателен проверенный native dump; последний pre-025 custom dump сохранён в persistent
   Postgres volume. Восстановление описано в `ops/BACKUP_RESTORE.md`.
 - Frontend bundle ограничен CI-гейтом: новые зависимости добавляются только при доказанной пользе.
-- В отложенной светлой теме active-period chip пока даёт контраст 4.22:1 вместо 4.5:1; в мобильной
-  ветке period controls имеют высоту 24–28px вместо целевых 32px. Оба долга зафиксированы тестами и
-  не исправляются внутри завершённой desktop dark-программы. Тест размера тач-целей помечен
-  `test.fixme` в `e2e/mobile-nav.spec.ts` — он остаётся определением готовности mobile-этапа и не
-  красит CI; гейт горизонтального скролла на тех же ширинах ЖИВОЙ (его появление — регрессия, а не
-  отложенный выбор). Зацепка на будущее: `WidgetPeriodPills` объявляет `min-h-8` (32px) и
-  комментарий про «≥32px mobile hit area», а меряется 24px — вероятно перебитый стиль, а не решение
-  дизайна; начинать mobile-этап стоит отсюда.
-- **Lint-гейт a11y частичный.** `biome.json` перечисляет все 38 a11y-правил поимённо: 24 правила с
-  нулём нарушений подняты до `error` (регрессия по ним валит `npm run lint` и CI), 14 правил с
-  открытым долгом остаются `warn` и НЕ гейтятся. Открыто 129 находок: `noNoninteractiveElement-
-  Interactions` 40, `useSemanticElements` 22, `noStaticElementInteractions` 19, `useKeyWithClick-
-  Events` 19, `noSvgWithoutTitle` 6, `useFocusableInteractive` 6, `noLabelWithoutControl` 4,
-  `noAutofocus` 4, `useButtonType` 3, `noAriaHiddenOnFocusable` 2, по 1 — `useAriaPropsForRole`,
-  `useAriaPropsSupportedByRole`, `noNoninteractiveElementToInteractiveRole`, `noNoninteractive-
-  Tabindex`. Правило переводится в `error` только после того, как его счётчик доведён до нуля.
-  Вне a11y гейт по-прежнему пуст: остальные 1124 находки (complexity/style/suspicious/correctness,
+- Cookie-auth migration bridge имеет явный критерий удаления: через **7 дней после первого
+  production deploy этой версии** (максимальный TTL старого browser token) удалить
+  `/api/auth/migrate-cookie`, localStorage reader/purge и единственный `X-Session-Token` header из
+  `frontend/src/lib/session.ts` и legacy shell. В том же изменении обновить
+  `test/auth_transport_static.test.js`: grep/static-инвариант должен требовать уже ноль consumer-ов,
+  а не разрешать migration-only исключение. Календарную дату фиксировать только после фактического
+  deploy.
+- Active/selected chips на `bg-primary/10` используют `text-accent-foreground`: светлая тема даёт
+  4.53:1, а composite-пара и запрет старого `text-primary` recipe гейтятся design-token scripts.
+  Основные phone-контролы (tabs, period segments и меню виджета) имеют минимум 44×44 CSS px ниже `sm`;
+  `e2e/mobile-nav.spec.ts` гейтит их и отсутствие горизонтального скролла на 360/390/430, а отдельный
+  обязательный `e2e-phone` CI job добавляет representative phone axe/focus scan. Это не означает,
+  что все frozen mobile verticals уже сведены с desktop — их продуктовая parity остаётся отдельной
+  поэтапной работой.
+- **Lint-гейт a11y полный.** `biome.json` перечисляет все 38 a11y-правил поимённо и держит каждое
+  в `error`: прежние 14 warning-only категорий и 129 исходных находок сведены к нулю без blanket
+  suppressions. Регрессия semantic/keyboard/focus/label/SVG-контрактов валит `npm run lint` и CI.
+  Вне a11y гейт по-прежнему пуст: оставшиеся находки (complexity/style/suspicious/correctness,
   в т.ч. `useExhaustiveDependencies` 22 и `noUnusedFunctionParameters` 33) имеют severity `warn`,
   а `npm run lint` фильтрует `--diagnostic-level=error` — это отдельный незакрытый долг.
 
@@ -548,6 +563,11 @@ Google OAuth origins, Railway-service для recovery worker.
 - **Интерактивная `Sparkline` не `aria-hidden`.** Есть hover-читалка со значениями → есть
   `role="img"` с подписью (как у `LineChart`). Декоративная искра рядом с числом остаётся скрытой —
   в этом различии смысл.
+- **Drillable `LineChart`/`BarChart` имеют один native overlay-button.** ArrowLeft/Right и
+  Home/End меняют выбранную точку и accessible name, Enter/Space/AT активируют именно выбранный
+  индекс. Pointer scrub больше 5px не drill'ит; `pointercancel`, leave, blur/scroll и новый
+  keyboard focus очищают stale press-state, чтобы прерванный жест не блокировал следующий click.
+  Hover-only графики остаются одним пассивным именованным SVG, без лишнего tab stop.
 - **Полноэкранный разворот виджета Главной — маршрут `/widgets/:id`, а не модалка.** Сегментные
   контролы живут на самой странице; закрытие — обычный Back.
 - **`013` занят дважды** (`013_crash_signatures.sql`, `013_ig_followers_total.sql`). Раннер

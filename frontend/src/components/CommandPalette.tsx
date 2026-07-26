@@ -2,11 +2,13 @@ import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useChannels, useLogout, useMe } from '@/api/queries';
+import { accountExitLabel, runAccountExit } from '@/lib/accountExit';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { setCommandPaletteOpen, toggleCommandPalette, useCommandPaletteOpen } from '@/lib/command-palette';
 import { DRILL_KEYS } from '@/lib/kpiDerive';
 import { NetworkGlyph } from '@/lib/networks';
 import { setActiveNetwork } from '@/lib/networkStore';
+import { useDemo } from '@/lib/demo-context';
 import {
   buildIgMetricCommands,
   buildNetworkRouteCommands,
@@ -110,6 +112,7 @@ function PaletteDialog({ close }: { close: () => void }) {
   const me = useMe();
   const channelsQuery = useChannels();
   const logout = useLogout();
+  const { demo, exitDemo } = useDemo();
   const { setChannelId } = useSelectedChannel();
 
   const iconFor = (name: IconName) => <Icon name={name} className="h-4 w-4 shrink-0" />;
@@ -183,19 +186,24 @@ function PaletteDialog({ close }: { close: () => void }) {
 
   const logoutCommand: PaletteCommand = {
     id: 'logout',
-    label: 'Выйти',
-    search: 'выйти выход logout',
+    label: accountExitLabel(demo, logout.isPending),
+    search: demo ? 'выйти из демо выход demo' : 'выйти выход logout',
     icon: (
       <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="h-4 w-4 shrink-0" aria-hidden="true">
         <path d="M6 3H3.5v10H6M10 5l3 3-3 3M13 8H6.5" strokeLinecap="round" strokeLinejoin="round" />
       </svg>
     ),
     run: () => {
-      // Navigate synchronously: PaletteDialog unmounts right after run(), and React Query drops
-      // mutate-level callbacks (like an onSettled navigate) when their observer unmounts before
-      // the response. Local session state is cleared by useLogout's own config either way.
-      logout.mutate();
-      navigate('/login', { replace: true });
+      runAccountExit({
+        demo,
+        exitDemo,
+        // HttpOnly cookie can only be cleared by a successful server response. Keep the
+        // authenticated surface on network failure instead of creating a login bounce.
+        logout: () =>
+          logout.mutate(undefined, {
+            onSuccess: () => navigate('/login', { replace: true }),
+          }),
+      });
     },
   };
 

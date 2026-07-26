@@ -1,14 +1,6 @@
-import { useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import type { ReactNode } from 'react';
-import {
-  motion,
-  useTransform,
-  useReducedMotion,
-  useMotionValue,
-  animate,
-  cubicBezier,
-} from 'framer-motion';
+import type { CSSProperties, ReactNode } from 'react';
 import { AtlavueMark } from '@/components/AtlavueMark';
 
 /**
@@ -25,11 +17,33 @@ import { AtlavueMark } from '@/components/AtlavueMark';
 
 const MAXW = 'mx-auto w-full max-w-[1200px] px-6 sm:px-10';
 
-const EASE = cubicBezier(0.22, 1, 0.36, 1);
-
 // shared sparkline geometry (static fragment + animated hero share one path)
 const SPARK_LINE =
   'M0,44 L18,40 L36,42 L54,33 L72,35 L90,27 L108,29 L126,20 L144,22 L162,12 L180,15 L200,6';
+
+type LandingMotionStyle = CSSProperties & Record<`--lp-${string}`, string>;
+
+function motionStyle(values: Record<string, string | number>): LandingMotionStyle {
+  return Object.fromEntries(
+    Object.entries(values).map(([key, value]) => [`--lp-${key}`, String(value)]),
+  ) as LandingMotionStyle;
+}
+
+function useReducedMotionPreference() {
+  const [reduce, setReduce] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+  );
+
+  useEffect(() => {
+    const query = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const update = () => setReduce(query.matches);
+    update();
+    query.addEventListener('change', update);
+    return () => query.removeEventListener('change', update);
+  }, []);
+
+  return reduce;
+}
 
 // ── tiny inline icons (stroke = currentColor) ──────────────────────────────
 function Check({ className }: { className?: string }) {
@@ -118,8 +132,6 @@ function PostRow({ n, title, views, er, delta, up }: { n: number; title: string;
 // ── animated hero: a dashboard that assembles itself on load + floating UI ───
 // (autoplay on mount; not scroll-driven)
 
-const SPRING = { type: 'spring', stiffness: 240, damping: 22, mass: 0.9 } as const;
-
 // soft warm aurora behind the hero (steep-style): peach + pink + a touch of blue
 function HeroAurora() {
   return (
@@ -141,28 +153,33 @@ function HeroAurora() {
 }
 
 function KpiTile({
-  label, value, delta, up, fx, fy, frot, delay, reduce,
+  label, value, delta, up, fx, fy, frot, delay,
 }: {
   label: string; value: string; delta: string; up?: boolean;
-  fx: number; fy: number; frot: number; delay: number; reduce: boolean;
+  fx: number; fy: number; frot: number; delay: number;
 }) {
   return (
-    <motion.div
-      initial={reduce ? false : { opacity: 0, x: fx, y: fy, rotate: frot, scale: 0.8 }}
-      animate={{ opacity: 1, x: 0, y: 0, rotate: 0, scale: 1 }}
-      transition={{ ...SPRING, delay: reduce ? 0 : delay }}
-      className="rounded-lg border border-border bg-card px-2.5 py-2 will-change-transform"
+    <div
+      className="landing-enter rounded-lg border border-border bg-card px-2.5 py-2 will-change-transform"
+      style={motionStyle({
+        x: `${fx}px`,
+        y: `${fy}px`,
+        rotate: `${frot}deg`,
+        scale: '0.8',
+        delay: `${delay}s`,
+        duration: '0.72s',
+      })}
     >
       <div className="text-[9px] text-ink3">{label}</div>
       <div className="mt-1 flex items-baseline gap-1">
         <span className="text-[15px] font-medium tabular-nums text-foreground">{value}</span>
         <span className={`text-[9px] tabular-nums ${up ? 'text-verdant' : 'text-ember'}`}>{delta}</span>
       </div>
-    </motion.div>
+    </div>
   );
 }
 
-function HeroSparkline({ reduce }: { reduce: boolean }) {
+function HeroSparkline() {
   return (
     <svg viewBox="0 0 200 52" preserveAspectRatio="none" className="h-[52px] w-full" aria-hidden="true">
       <defs>
@@ -171,20 +188,25 @@ function HeroSparkline({ reduce }: { reduce: boolean }) {
           <stop offset="100%" stopColor="hsl(var(--primary))" stopOpacity="0" />
         </linearGradient>
       </defs>
-      <motion.path
-        d={`${SPARK_LINE} L200,52 L0,52 Z`} fill="url(#lp-spark-h)"
-        initial={reduce ? false : { opacity: 0 }} animate={{ opacity: 1 }}
-        transition={{ delay: 0.9, duration: 0.6 }}
+      <path
+        className="landing-spark-area"
+        d={`${SPARK_LINE} L200,52 L0,52 Z`}
+        fill="url(#lp-spark-h)"
       />
-      <motion.path
-        d={SPARK_LINE} fill="none" stroke="hsl(var(--foreground))" strokeWidth="1.5"
-        initial={reduce ? false : { pathLength: 0 }} animate={{ pathLength: 1 }}
-        transition={{ delay: 0.55, duration: 1.0, ease: EASE }}
+      <path
+        className="landing-spark-line"
+        d={SPARK_LINE}
+        fill="none"
+        pathLength={1}
+        stroke="hsl(var(--foreground))"
+        strokeWidth="1.5"
       />
-      <motion.circle
-        cx="200" cy="6" r="3" fill="hsl(var(--primary))"
-        initial={reduce ? false : { opacity: 0 }} animate={{ opacity: 1 }}
-        transition={{ delay: 1.5, duration: 0.3 }}
+      <circle
+        className="landing-spark-dot"
+        cx="200"
+        cy="6"
+        r="3"
+        fill="hsl(var(--primary))"
       />
     </svg>
   );
@@ -193,38 +215,49 @@ function HeroSparkline({ reduce }: { reduce: boolean }) {
 const RISK_LINE = 'Охват растёт на 8%, а подписчиков стало меньше на 108.';
 
 function DashboardMock({ reduce }: { reduce: boolean }) {
-  const views = useMotionValue(reduce ? 48210 : 0);
-  const viewsText = useTransform(views, (v) => Math.round(v).toLocaleString('ru-RU'));
-  const typeProg = useMotionValue(reduce ? 1 : 0);
-  const typed = useTransform(typeProg, (v) => RISK_LINE.slice(0, Math.round(RISK_LINE.length * v)));
+  const [viewsText, setViewsText] = useState(() => (reduce ? 48_210 : 0).toLocaleString('ru-RU'));
+  const [typed, setTyped] = useState(() => (reduce ? RISK_LINE : ''));
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: одноразовая intro-анимация; motion values стабильны, reduce гардится внутри
   useEffect(() => {
-    if (reduce) return;
-    const c1 = animate(views, 48210, { delay: 0.35, duration: 1.4, ease: EASE });
-    const c2 = animate(typeProg, 1, { delay: 1.6, duration: 1.25, ease: 'linear' });
-    return () => { c1.stop(); c2.stop(); };
-  }, []);
+    if (reduce) {
+      setViewsText((48_210).toLocaleString('ru-RU'));
+      setTyped(RISK_LINE);
+      return;
+    }
 
-  const fade = (delay: number) => ({
-    initial: reduce ? false : { opacity: 0, y: 8 },
-    animate: { opacity: 1, y: 0 },
-    transition: { delay: reduce ? 0 : delay, duration: 0.5, ease: EASE },
+    setViewsText('0');
+    setTyped('');
+    const startedAt = performance.now();
+    let frame = 0;
+    const tick = (now: number) => {
+      const elapsed = now - startedAt;
+      const viewsProgress = Math.min(1, Math.max(0, (elapsed - 350) / 1_400));
+      const easedViews = 1 - ((1 - viewsProgress) ** 3);
+      setViewsText(Math.round(48_210 * easedViews).toLocaleString('ru-RU'));
+
+      const typeProgress = Math.min(1, Math.max(0, (elapsed - 1_600) / 1_250));
+      setTyped(RISK_LINE.slice(0, Math.round(RISK_LINE.length * typeProgress)));
+      if (typeProgress < 1) frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [reduce]);
+
+  const fadeStyle = (delay: number) => motionStyle({
+    y: '8px',
+    delay: `${delay}s`,
+    duration: '0.5s',
   });
 
   return (
-    <motion.div
-      initial={reduce ? false : { opacity: 0 }}
-      animate={{ opacity: 1 }}
-      transition={{ duration: 0.4 }}
-      className="flex w-full text-foreground"
+    <div
+      className="landing-enter flex w-full text-foreground"
+      style={motionStyle({ duration: '0.4s' })}
     >
       {/* sidebar */}
-      <motion.div
-        initial={reduce ? false : { opacity: 0, x: -16 }}
-        animate={{ opacity: 1, x: 0 }}
-        transition={{ delay: reduce ? 0 : 0.15, duration: 0.5, ease: EASE }}
-        className="hidden w-[132px] shrink-0 flex-col gap-3 border-r border-border bg-background p-3 sm:flex"
+      <div
+        className="landing-enter hidden w-[132px] shrink-0 flex-col gap-3 border-r border-border bg-background p-3 sm:flex"
+        style={motionStyle({ x: '-16px', delay: '0.15s', duration: '0.5s' })}
       >
         <div className="flex items-center gap-1.5">
           <AtlavueMark className="h-3.5 w-3.5 text-primary" />
@@ -248,7 +281,7 @@ function DashboardMock({ reduce }: { reduce: boolean }) {
           <MiniNav label="Контент" />
           <MiniNav label="Упоминания" />
         </div>
-      </motion.div>
+      </div>
 
       {/* main */}
       <div className="min-w-0 flex-1 bg-card p-4">
@@ -267,84 +300,83 @@ function DashboardMock({ reduce }: { reduce: boolean }) {
           <div className="text-[9px] text-ink3">Просмотры · 30 дней</div>
           <div className="mt-1 flex items-end justify-between gap-3">
             <div className="flex items-baseline gap-2">
-              <motion.span className="text-[34px] font-medium leading-none tabular-nums">{viewsText}</motion.span>
-              <motion.span
-                initial={reduce ? false : { opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }}
-                transition={{ delay: reduce ? 0 : 1.5, duration: 0.4, ease: EASE }}
-                className="rounded bg-green-tint px-1.5 py-0.5 text-[9px] font-medium tabular-nums text-verdant"
-              >↑ 8.4%</motion.span>
+              <span className="text-[34px] font-medium leading-none tabular-nums">{viewsText}</span>
+              <span
+                className="landing-enter rounded bg-green-tint px-1.5 py-0.5 text-[9px] font-medium tabular-nums text-verdant"
+                style={motionStyle({ scale: '0.8', delay: '1.5s', duration: '0.4s' })}
+              >↑ 8.4%</span>
             </div>
-            <div className="w-[46%]"><HeroSparkline reduce={reduce} /></div>
+            <div className="w-[46%]"><HeroSparkline /></div>
           </div>
           <div className="mt-1 text-[8px] text-ink3">к прошлому периоду · ≈2 835 на пост</div>
         </div>
 
         {/* KPI tiles pop in from different angles */}
         <div className="mt-3 grid grid-cols-4 gap-2 border-t border-border pt-3">
-          <KpiTile reduce={reduce} label="Подписчики" value="4 781" delta="−108" fx={-90} fy={-30} frot={-7} delay={0.55} />
-          <KpiTile reduce={reduce} label="Ср. охват" value="2 835" delta="+4%" up fx={40} fy={-80} frot={6} delay={0.68} />
-          <KpiTile reduce={reduce} label="Реакции" value="1 204" delta="+58" up fx={-30} fy={80} frot={5} delay={0.81} />
-          <KpiTile reduce={reduce} label="Вовлечённость" value="6.7%" delta="+0.4" up fx={90} fy={36} frot={-6} delay={0.94} />
+          <KpiTile label="Подписчики" value="4 781" delta="−108" fx={-90} fy={-30} frot={-7} delay={0.55} />
+          <KpiTile label="Ср. охват" value="2 835" delta="+4%" up fx={40} fy={-80} frot={6} delay={0.68} />
+          <KpiTile label="Реакции" value="1 204" delta="+58" up fx={-30} fy={80} frot={5} delay={0.81} />
+          <KpiTile label="Вовлечённость" value="6.7%" delta="+0.4" up fx={90} fy={36} frot={-6} delay={0.94} />
         </div>
 
         <div className="mt-3 border-t border-border pt-2">
           <div className="pb-1 text-[9px] text-ink3">Лучшие публикации</div>
-          <motion.div {...fade(1.05)}><PostRow n={1} title="Как мы выбираем темы для канала" views="12 480" er="9.1%" delta="+24%" up /></motion.div>
-          <motion.div {...fade(1.15)}><PostRow n={2} title="Большой гайд по продуктивности" views="8 902" er="7.4%" delta="−6%" /></motion.div>
-          <motion.div {...fade(1.25)}><PostRow n={3} title="Подкаст: итоги сезона и планы" views="7 415" er="6.2%" delta="+11%" up /></motion.div>
+          <div className="landing-enter" style={fadeStyle(1.05)}><PostRow n={1} title="Как мы выбираем темы для канала" views="12 480" er="9.1%" delta="+24%" up /></div>
+          <div className="landing-enter" style={fadeStyle(1.15)}><PostRow n={2} title="Большой гайд по продуктивности" views="8 902" er="7.4%" delta="−6%" /></div>
+          <div className="landing-enter" style={fadeStyle(1.25)}><PostRow n={3} title="Подкаст: итоги сезона и планы" views="7 415" er="6.2%" delta="+11%" up /></div>
         </div>
 
         {/* self-typing insight */}
-        <motion.div {...fade(1.5)} className="mt-3 flex items-start gap-2 border-t border-border pt-2.5">
+        <div className="landing-enter mt-3 flex items-start gap-2 border-t border-border pt-2.5" style={fadeStyle(1.5)}>
           <span className="mt-0.5 rounded bg-amber-tint px-1 py-0.5 text-[8px] font-medium text-status-warn">Риск</span>
           <p className="text-[10px] leading-snug text-ink2">
-            <motion.span>{typed}</motion.span>
-            {!reduce && <span className="ml-px inline-block animate-pulse text-primary">▍</span>}
+            <span>{typed}</span>
+            {!reduce && typed.length < RISK_LINE.length && <span className="ml-px inline-block animate-pulse text-primary">▍</span>}
           </p>
-        </motion.div>
+        </div>
       </div>
-    </motion.div>
+    </div>
   );
 }
 
-function HeroCopy({ reduce }: { reduce: boolean }) {
-  const container = { hidden: {}, show: { transition: { staggerChildren: 0.08, delayChildren: 0.05 } } };
-  const item = {
-    hidden: { opacity: 0, y: 16 },
-    show: { opacity: 1, y: 0, transition: { duration: 0.6, ease: EASE } },
-  };
+function HeroCopy({ onEnterDemo }: { onEnterDemo: () => void }) {
+  const itemStyle = (delay: number) => motionStyle({
+    y: '16px',
+    delay: `${delay}s`,
+    duration: '0.6s',
+  });
   return (
-    <motion.div variants={container} initial={reduce ? false : 'hidden'} animate="show">
-      <motion.div variants={item} className="text-[13px] font-medium text-primary">Telegram + Instagram</motion.div>
-      <motion.h1 variants={item} className="mt-4 text-[clamp(54px,8vw,76px)] font-medium leading-[0.95] tracking-tight text-foreground">Atlavue</motion.h1>
-      <motion.p variants={item} className="mt-5 max-w-[22em] text-[clamp(18px,1.6vw,22px)] leading-snug text-ink2">
+    <div>
+      <div className="landing-enter text-[13px] font-medium text-primary" style={itemStyle(0.05)}>Telegram + Instagram</div>
+      <h1 className="landing-enter mt-4 text-[clamp(54px,8vw,76px)] font-medium leading-[0.95] tracking-tight text-foreground" style={itemStyle(0.13)}>Atlavue</h1>
+      <p className="landing-enter mt-5 max-w-[22em] text-[clamp(18px,1.6vw,22px)] leading-snug text-ink2" style={itemStyle(0.21)}>
         Аналитика Telegram и Instagram без лишнего шума
-      </motion.p>
-      <motion.div variants={item} className="mt-8 flex flex-wrap items-center gap-3">
+      </p>
+      <div className="landing-enter mt-8 flex flex-wrap items-center gap-3" style={itemStyle(0.29)}>
         <Link to="/register" className="btn-pill bg-primary px-5 py-3 text-[15px] font-medium text-primary-foreground transition-colors hover:bg-primary/90">
           Создать аккаунт
         </Link>
-        <Link to="/login" className="btn-pill border border-border bg-card px-5 py-3 text-[15px] font-medium text-foreground transition-colors hover:bg-muted">
+        <button type="button" onClick={onEnterDemo} className="btn-pill border border-border bg-card px-5 py-3 text-[15px] font-medium text-foreground transition-colors hover:bg-muted">
           Посмотреть демо
-        </Link>
-      </motion.div>
-      <motion.p variants={item} className="mt-5 text-[13px] text-ink3">Демо доступно без регистрации · данные собираются локально</motion.p>
-    </motion.div>
+        </button>
+      </div>
+      <p className="landing-enter mt-5 text-[13px] text-ink3" style={itemStyle(0.37)}>Демо доступно без регистрации · данные собираются локально</p>
+    </div>
   );
 }
 
-function Hero() {
-  const reduce = useReducedMotion() ?? false;
+function Hero({ onEnterDemo }: { onEnterDemo: () => void }) {
+  const reduce = useReducedMotionPreference();
   return (
     <section className="relative border-b border-border">
       <HeroAurora />
       <div className={`${MAXW} relative z-1 grid items-center gap-12 py-16 md:grid-cols-[minmax(0,420px)_1fr] md:py-24`}>
-        <HeroCopy reduce={reduce} />
+        <HeroCopy onEnterDemo={onEnterDemo} />
         <div className="relative hidden md:block">
           <div className="overflow-hidden rounded-xl border border-border bg-card shadow-[0_30px_70px_-40px_rgba(20,24,40,0.28)]">
             <DashboardMock reduce={reduce} />
           </div>
-          <FloatingCards reduce={reduce} />
+          <FloatingCards />
         </div>
       </div>
     </section>
@@ -353,26 +385,29 @@ function Hero() {
 
 // ── floating peripheral UI: pops in from an angle, then gently bobs ──────────
 function FloatBob({
-  children, className, fromX, fromY, delay, bob, reduce,
+  children, className, fromX, fromY, delay, bob,
 }: {
   children: ReactNode; className: string; fromX: number; fromY: number;
-  delay: number; bob: number; reduce: boolean;
+  delay: number; bob: number;
 }) {
   return (
-    <motion.div
-      className={`absolute z-20 ${className}`}
-      initial={reduce ? false : { opacity: 0, x: fromX, y: fromY, scale: 0.85 }}
-      animate={{ opacity: 1, x: 0, y: 0, scale: 1 }}
-      transition={{ ...SPRING, delay: reduce ? 0 : delay }}
+    <div
+      className={`landing-enter absolute z-20 ${className}`}
+      style={motionStyle({
+        x: `${fromX}px`,
+        y: `${fromY}px`,
+        scale: '0.85',
+        delay: `${delay}s`,
+        duration: '0.72s',
+      })}
     >
-      <motion.div
-        className="will-change-transform backface-hidden"
-        animate={reduce ? undefined : { y: [0, -6, 0] }}
-        transition={reduce ? undefined : { duration: bob, repeat: Infinity, ease: 'easeInOut', delay }}
+      <div
+        className="landing-bob will-change-transform backface-hidden"
+        style={motionStyle({ delay: `${delay}s`, bob: `${bob}s` })}
       >
         {children}
-      </motion.div>
-    </motion.div>
+      </div>
+    </div>
   );
 }
 
@@ -384,10 +419,10 @@ function FloatCard({ children }: { children: ReactNode }) {
   );
 }
 
-function FloatingCards({ reduce }: { reduce: boolean }) {
+function FloatingCards() {
   return (
     <>
-      <FloatBob reduce={reduce} className="-left-10 -top-3" fromX={-50} fromY={-40} delay={0.8} bob={4.5}>
+      <FloatBob className="-left-10 -top-3" fromX={-50} fromY={-40} delay={0.8} bob={4.5}>
         <FloatCard>
           <div className="text-[10px] text-ink3">Новые подписчики</div>
           <div className="mt-0.5 flex items-baseline gap-1.5">
@@ -397,7 +432,7 @@ function FloatingCards({ reduce }: { reduce: boolean }) {
         </FloatCard>
       </FloatBob>
 
-      <FloatBob reduce={reduce} className="-right-12 top-[38%]" fromX={56} fromY={-10} delay={1.0} bob={5.2}>
+      <FloatBob className="-right-12 top-[38%]" fromX={56} fromY={-10} delay={1.0} bob={5.2}>
         <FloatCard>
           <div className="flex items-center gap-2.5">
             <svg width="34" height="34" viewBox="0 0 36 36" aria-hidden="true">
@@ -415,7 +450,7 @@ function FloatingCards({ reduce }: { reduce: boolean }) {
         </FloatCard>
       </FloatBob>
 
-      <FloatBob reduce={reduce} className="-bottom-7 left-10" fromX={-24} fromY={52} delay={1.2} bob={4.8}>
+      <FloatBob className="-bottom-7 left-10" fromX={-24} fromY={52} delay={1.2} bob={4.8}>
         <FloatCard>
           <div className="flex items-center gap-2">
             <span className="flex h-6 w-6 items-center justify-center rounded-full bg-green-tint text-verdant">
@@ -434,17 +469,36 @@ function FloatingCards({ reduce }: { reduce: boolean }) {
 
 // ── scroll-reveal wrapper for the sections below the hero ────────────────────
 function Reveal({ children, className, delay = 0 }: { children: ReactNode; className?: string; delay?: number }) {
-  const reduce = useReducedMotion() ?? false;
+  const reduce = useReducedMotionPreference();
+  const ref = useRef<HTMLDivElement>(null);
+  const [visible, setVisible] = useState(reduce);
+
+  useEffect(() => {
+    if (reduce || !ref.current || !('IntersectionObserver' in window)) {
+      setVisible(true);
+      return;
+    }
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (!entry?.isIntersecting) return;
+        setVisible(true);
+        observer.disconnect();
+      },
+      { rootMargin: '0px 0px -80px' },
+    );
+    observer.observe(ref.current);
+    return () => observer.disconnect();
+  }, [reduce]);
+
   return (
-    <motion.div
-      className={className}
-      initial={reduce ? false : { opacity: 0, y: 24 }}
-      whileInView={{ opacity: 1, y: 0 }}
-      viewport={{ once: true, margin: '-80px' }}
-      transition={{ duration: 0.6, ease: EASE, delay }}
+    <div
+      ref={ref}
+      className={`landing-reveal ${className ?? ''}`}
+      data-visible={visible}
+      style={motionStyle({ delay: `${delay}s` })}
     >
       {children}
-    </motion.div>
+    </div>
   );
 }
 
@@ -610,7 +664,7 @@ function Feature({
   );
 }
 
-function CtaBand() {
+function CtaBand({ onEnterDemo }: { onEnterDemo: () => void }) {
   return (
     <section className="bg-blue-tint">
       <Reveal className={`${MAXW} flex flex-col items-center py-20 text-center`}>
@@ -620,9 +674,9 @@ function CtaBand() {
           <Link to="/register" className="btn-pill bg-primary px-5 py-3 text-[15px] font-medium text-primary-foreground transition-colors hover:bg-primary/90">
             Создать аккаунт
           </Link>
-          <Link to="/login" className="btn-pill border border-border bg-card px-5 py-3 text-[15px] font-medium text-foreground transition-colors hover:bg-muted">
+          <button type="button" onClick={onEnterDemo} className="btn-pill border border-border bg-card px-5 py-3 text-[15px] font-medium text-foreground transition-colors hover:bg-muted">
             Посмотреть демо
-          </Link>
+          </button>
         </div>
       </Reveal>
     </section>
@@ -648,11 +702,11 @@ function Footer() {
   );
 }
 
-export function Landing() {
+export function Landing({ onEnterDemo }: { onEnterDemo: () => void }) {
   return (
     <div className="force-light min-h-screen overflow-x-hidden bg-background text-foreground">
       <Header />
-      <Hero />
+      <Hero onEnterDemo={onEnterDemo} />
       <Pillars />
       <div id="features">
         <Feature
@@ -678,7 +732,7 @@ export function Landing() {
           fragment={<HealthFragment />}
         />
       </div>
-      <CtaBand />
+      <CtaBand onEnterDemo={onEnterDemo} />
       <Footer />
     </div>
   );

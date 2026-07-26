@@ -8,6 +8,11 @@ import { axisLabelIndexSet } from '@/lib/chartLabels';
 import { ChartTooltip, type TooltipRow, type TooltipState } from '@/components/ChartTooltip';
 import { axisLabel, niceScale } from '@/components/LineChart';
 import { seriesMotionKey } from '@/lib/chartMotion';
+import {
+  activateChartControl,
+  chartControlAriaLabel,
+  nextChartControlIndex,
+} from '@/lib/chartOverlayControl';
 import { ChartExpandedContext, ChartRefLinesContext, ExpandedChartHeightContext, WidgetTargetContext } from '@/components/ExpandableChart';
 
 interface BarChartProps {
@@ -93,10 +98,14 @@ export function BarChart({
   appearance = 'default',
 }: BarChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const svgRef = useRef<SVGSVGElement>(null);
   // Press position (client px) for the drag guard: the svg-level onClick would otherwise drill on
   // a press-drag-release scrub (the browser retargets a cross-child click to the svg). null = no
   // press recorded, so a keyboard/AT-synthesized click still passes through.
   const pressRef = useRef<{ x: number; y: number } | null>(null);
+  // Focus follows pointerdown on a native button. Keep that focus event from erasing the fresh
+  // press coordinates, while still letting a later keyboard focus discard interrupted stale data.
+  const pointerDownRef = useRef(false);
   const [hover, setHover] = useState<Hover | null>(null);
   // The comparison overlay can be toggled off via its legend chip (steep #9) — hidden, it also
   // drops out of the bar y-domain so the bars rescale to the current series.
@@ -137,7 +146,11 @@ export function BarChart({
   const hasHover = hover !== null;
   useEffect(() => {
     if (!hasHover) return;
-    const clear = () => setHover(null);
+    const clear = () => {
+      pointerDownRef.current = false;
+      pressRef.current = null;
+      setHover(null);
+    };
     window.addEventListener('scroll', clear, true);
     window.addEventListener('blur', clear);
     return () => {
@@ -364,6 +377,36 @@ export function BarChart({
     return { chartWidth, chartHeight, graphHeight, offsetX, itemWidth, bars, ghostBars, columnTops, stacked, barTop, barCenterX, underLayer, barsLayer, overLayer };
   }, [values, labels, activeGhost, hasGhost, target, refLines, width, ctxHeight, height, expanded, comparisonStyle]);
 
+  // Hover-only charts have no activation semantics: the SVG stays one passive named graphic and
+  // pointer scrubbing is registered on its DOM node. Drillable charts use the real overlay button
+  // rendered below, so that same gesture also has a keyboard/focus equivalent.
+  useEffect(() => {
+    const container = containerRef.current;
+    const svg = svgRef.current;
+    if (!container || !svg || !plot || values.length === 0) return;
+    const clear = () => {
+      pointerDownRef.current = false;
+      pressRef.current = null;
+      setHover(null);
+    };
+    const handleMove = (event: globalThis.MouseEvent) => {
+      const rect = svg.getBoundingClientRect();
+      if (rect.width === 0) return;
+      const xView = ((event.clientX - rect.left) / rect.width) * plot.chartWidth;
+      const i = columnIndex(xView, values.length, plot.offsetX, plot.itemWidth);
+      if (i == null) return;
+      setHover((prev) => (prev && prev.i === i ? prev : { i }));
+    };
+    if (!onPointClick) svg.addEventListener('mousemove', handleMove);
+    container.addEventListener('mouseleave', clear);
+    container.addEventListener('pointerleave', clear);
+    return () => {
+      if (!onPointClick) svg.removeEventListener('mousemove', handleMove);
+      container.removeEventListener('mouseleave', clear);
+      container.removeEventListener('pointerleave', clear);
+    };
+  }, [onPointClick, plot, values.length]);
+
   if (!values || values.length === 0 || !plot) {
     return <EmptyState compact size="chart" title="Нет данных за период" />;
   }
@@ -411,48 +454,59 @@ export function BarChart({
     return { x, y, text: tipText(i) };
   };
 
-  // ONE hit surface: the svg itself. The pointer x maps to its column in O(1); moving within a
-  // column keeps the same state object, so those mousemoves don't re-render.
-  const indexFromEvent = (e: ReactMouseEvent<SVGSVGElement>): number | null => {
-    const rect = e.currentTarget.getBoundingClientRect();
+  // One surface maps pointer x to a column in O(1); moving inside the same column keeps the state
+  // object stable. For a drillable chart that surface is the semantic overlay button.
+  const indexFromClientX = (clientX: number, surface: Element): number | null => {
+    const rect = surface.getBoundingClientRect();
     if (rect.width === 0) return null;
-    const xView = ((e.clientX - rect.left) / rect.width) * chartWidth;
+    const xView = ((clientX - rect.left) / rect.width) * chartWidth;
     return columnIndex(xView, n, offsetX, itemWidth);
   };
-  const onSvgMove = (e: ReactMouseEvent<SVGSVGElement>) => {
-    const i = indexFromEvent(e);
+  const onSurfaceMove = (e: ReactMouseEvent<HTMLButtonElement>) => {
+    const i = indexFromClientX(e.clientX, e.currentTarget);
     if (i == null) return;
     setHover((prev) => (prev && prev.i === i ? prev : { i }));
   };
   // Drill only on a genuine click, not a scrub: a press that travelled >5px before release is a
   // drag-to-read gesture, not a tap. A click with no recorded press (keyboard / AT) passes through.
-  const onSvgClick = onPointClick
-    ? (e: ReactMouseEvent<SVGSVGElement>) => {
+  const fallbackControlIndex =
+    pinnedIndex != null && pinnedIndex >= 0 && pinnedIndex < n ? pinnedIndex : n - 1;
+  const controlIndex = hover?.i ?? fallbackControlIndex;
+  const onSurfaceClick = onPointClick
+    ? (e: ReactMouseEvent<HTMLButtonElement>) => {
         const press = pressRef.current;
         pressRef.current = null;
-        if (press && Math.hypot(e.clientX - press.x, e.clientY - press.y) > 5) return;
-        const i = indexFromEvent(e);
-        if (i != null) {
-          // The chart OWNS this click (point drill / pin) — keep it out of the host card's
-          // whole-card expand.
-          e.stopPropagation();
-          onPointClick(i);
-        }
+        pointerDownRef.current = false;
+        // Resolve keyboard/AT FIRST: a cancelled old pointer gesture must never suppress a
+        // detail=0 click produced by Enter, Space or assistive technology.
+        activateChartControl(
+          {
+            detail: e.detail,
+            controlIndex,
+            pointerIndex: e.detail === 0 ? null : indexFromClientX(e.clientX, e.currentTarget),
+            press,
+            clientX: e.clientX,
+            clientY: e.clientY,
+          },
+          (i) => {
+            // The chart OWNS this click (point drill / pin) — keep it out of the host card's
+            // whole-card expand.
+            e.stopPropagation();
+            onPointClick(i);
+          },
+        );
       }
     : undefined;
   const clearHover = () => {
+    pointerDownRef.current = false;
     pressRef.current = null;
     setHover(null);
   };
 
   return (
-    <div
-      ref={containerRef}
-      className="relative w-full"
-      onMouseLeave={clearHover}
-      onPointerLeave={clearHover}
-    >
+    <div ref={containerRef} className="relative w-full">
       <svg
+        ref={svgRef}
         data-chart-kind="bar"
         data-chart-expanded={expanded ? '' : undefined}
         data-chart-appearance={appearance}
@@ -464,10 +518,8 @@ export function BarChart({
         // Named graphic for AT (PieChart idiom) — see LineChart.tsx: series max, not the scale top.
         role="img"
         aria-label={`Столбчатая диаграмма: ${values.length} столбцов, макс ${fmt.short(ariaMax)}`}
-        onMouseMove={onSvgMove}
-        onMouseDown={onPointClick ? (e) => (pressRef.current = { x: e.clientX, y: e.clientY }) : undefined}
-        onClick={onSvgClick}
       >
+        <title>Столбчатая диаграмма</title>
         {plot.underLayer}
 
         {/* Cached bar rects; hovering dims the whole group and the highlight below re-draws the
@@ -551,6 +603,45 @@ export function BarChart({
           </g>
         )}
       </svg>
+      {onPointClick && (
+        <button
+          type="button"
+          aria-label={chartControlAriaLabel({
+            index: controlIndex,
+            label: labels?.[controlIndex],
+            fallbackNoun: 'столбец',
+            value: formatValue(values[controlIndex]),
+          })}
+          aria-keyshortcuts="ArrowLeft ArrowRight Home End"
+          className="absolute inset-x-0 top-0 z-10 block w-full cursor-pointer rounded bg-transparent p-0 text-left hover:bg-transparent focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/50"
+          style={{ height: chartHeight }}
+          onMouseMove={onSurfaceMove}
+          onPointerDown={(event) => {
+            pointerDownRef.current = true;
+            pressRef.current = { x: event.clientX, y: event.clientY };
+          }}
+          onPointerUp={() => {
+            // Keep coordinates through the following click; only the active-pointer flag ends here.
+            pointerDownRef.current = false;
+          }}
+          onPointerCancel={() => {
+            pointerDownRef.current = false;
+            pressRef.current = null;
+          }}
+          onClick={onSurfaceClick}
+          onFocus={() => {
+            if (!pointerDownRef.current) pressRef.current = null;
+            setHover((current) => current ?? { i: fallbackControlIndex });
+          }}
+          onBlur={clearHover}
+          onKeyDown={(event) => {
+            const next = nextChartControlIndex(event.key, controlIndex, n);
+            if (next == null) return;
+            event.preventDefault();
+            setHover({ i: next });
+          }}
+        />
+      )}
       {/* Comparison legend — names both series whenever a ghost is present; the comparison chip is a
           toggle (steep #9): click to hide/show the overlay. Where a page-level compare control already
           owns the on/off (legendToggle=false, the metric page) the chip is a static label instead. */}

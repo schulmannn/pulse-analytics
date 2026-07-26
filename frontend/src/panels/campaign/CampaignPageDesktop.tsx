@@ -203,7 +203,7 @@ function TimelineExplorer({
 
   const segmented =
     modes.length > 1 ? (
-      <div className="inline-flex items-center gap-1 rounded-full border border-border p-0.5" role="group" aria-label="Режим графика">
+      <fieldset className="inline-flex items-center gap-1 rounded-full border border-border p-0.5" aria-label="Режим графика">
         {modes.map((m) => {
           const on = m.key === active.key;
           return (
@@ -224,7 +224,7 @@ function TimelineExplorer({
             </button>
           );
         })}
-      </div>
+      </fieldset>
     ) : null;
 
   return (

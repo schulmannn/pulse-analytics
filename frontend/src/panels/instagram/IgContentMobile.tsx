@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useState } from 'react';
 import type { IgData } from '@/lib/useIgData';
 import type { CampaignPostInput } from '@/api/schemas';
 import { useIgTags } from '@/api/queries';
@@ -24,7 +24,7 @@ import { useIgScopedPosts, toCampaignItems } from '@/panels/instagram/igContentS
 // Mobile — the pre-redesign stacked block layout, preserved (task 6: no rewrite)
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function IgContentMobile({ ig, tabs }: { ig: IgData; tabs: ReactNode }) {
+export function IgContentMobile({ ig }: { ig: IgData }) {
   const tags = useIgTags();
   const { channelId, campaignId, campaignPostsQ, posts, formatItems } = useIgScopedPosts(ig);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -46,7 +46,6 @@ export function IgContentMobile({ ig, tabs }: { ig: IgData; tabs: ReactNode }) {
   return (
     <div className="space-y-10">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        {tabs}
         <div className="flex flex-wrap items-center gap-3">
           <CampaignFilterControl />
           {campaignId != null && campaignPostsQ.data && (
@@ -59,16 +58,18 @@ export function IgContentMobile({ ig, tabs }: { ig: IgData; tabs: ReactNode }) {
               <span className="text-xs tabular-nums text-muted-foreground">Выбрано: {fmt.num(selected.size)}</span>
               <button
                 type="button"
+                data-mobile-touch-target=""
                 onClick={() => setAddItems(selectedItems)}
-                className="btn-pill bg-primary px-3.5 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90"
+                className="btn-pill inline-flex min-h-11 items-center bg-primary px-3.5 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 sm:min-h-0"
                 data-testid="add-to-campaign"
               >
                 Добавить в кампанию
               </button>
               <button
                 type="button"
+                data-mobile-touch-target=""
                 onClick={() => setSelected(new Set())}
-                className="btn-pill px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+                className="btn-pill inline-flex min-h-11 items-center px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground sm:min-h-0"
               >
                 Снять выбор
               </button>
@@ -86,8 +87,9 @@ export function IgContentMobile({ ig, tabs }: { ig: IgData; tabs: ReactNode }) {
           action={
             <button
               type="button"
+              data-mobile-touch-target=""
               onClick={() => exportIgPosts(posts)}
-              className="btn-pill border border-border bg-background px-3.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              className="btn-pill inline-flex min-h-11 items-center border border-border bg-background px-3.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground sm:min-h-0"
             >
               Экспорт постов
             </button>

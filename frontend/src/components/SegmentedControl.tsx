@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { CSSProperties, ReactNode } from 'react';
+import type { CSSProperties, KeyboardEvent, ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 
 /** One mutually-exclusive option of a {@link SegmentedControl}. */
@@ -103,6 +103,17 @@ export function SegmentedControl<T extends string>({
       ?.focus();
   };
 
+  const handleKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
+    switch (event.key) {
+      case 'ArrowLeft': moveCaret(focusIndex - 1); break;
+      case 'ArrowRight': moveCaret(focusIndex + 1); break;
+      case 'Home': moveCaret(0); break;
+      case 'End': moveCaret(count - 1); break;
+      default: return;
+    }
+    event.preventDefault();
+  };
+
   // No options → nothing mutually-exclusive to pick, and the glider width `100% / count` would
   // divide by zero. Render nothing rather than an empty, malformed track.
   if (count === 0) return null;
@@ -128,16 +139,6 @@ export function SegmentedControl<T extends string>({
       role="toolbar"
       aria-orientation="horizontal"
       aria-label={groupless ? undefined : ariaLabel}
-      onKeyDown={(event) => {
-        switch (event.key) {
-          case 'ArrowLeft': moveCaret(focusIndex - 1); break;
-          case 'ArrowRight': moveCaret(focusIndex + 1); break;
-          case 'Home': moveCaret(0); break;
-          case 'End': moveCaret(count - 1); break;
-          default: return;
-        }
-        event.preventDefault();
-      }}
       className={cn('relative inline-grid rounded-full border border-border p-0.5', className)}
       style={{ gridTemplateColumns: `repeat(${count}, minmax(0, 1fr))` }}
     >
@@ -153,6 +154,7 @@ export function SegmentedControl<T extends string>({
           <button
             key={opt.value}
             type="button"
+            data-mobile-touch-target=""
             data-segment-index={index}
             aria-pressed={active}
             aria-label={opt.ariaLabel}
@@ -162,12 +164,13 @@ export function SegmentedControl<T extends string>({
             aria-disabled={opt.disabled || undefined}
             tabIndex={index === focusIndex ? 0 : -1}
             onFocus={() => setCaret(index)}
+            onKeyDown={handleKeyDown}
             onClick={() => {
               if (opt.disabled) return;
               onChange(opt.value);
             }}
             className={cn(
-              'relative z-10 inline-flex items-center justify-center rounded-full font-medium transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40',
+              'relative z-10 inline-flex min-h-11 min-w-11 items-center justify-center rounded-full font-medium transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40 sm:min-h-0 sm:min-w-0',
               sizePad,
               opt.disabled
                 ? 'cursor-default opacity-40'

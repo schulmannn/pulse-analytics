@@ -3,8 +3,9 @@
 // через JSONP-эндпоинты (?callback=) — не возвращать без реальной необходимости.
 const APP_ALLOWED_DOMAINS = Object.freeze({
   script: Object.freeze(['https://accounts.google.com']),
-  style: Object.freeze(['https://fonts.googleapis.com', 'https://accounts.google.com']),
-  font: Object.freeze(['https://fonts.gstatic.com']),
+  // GIS injects its own stylesheet; fonts are bundled locally and need no Google Fonts origin.
+  style: Object.freeze(['https://accounts.google.com']),
+  font: Object.freeze(["'self'"]),
   connect: Object.freeze(['https://accounts.google.com']),
   frame: Object.freeze(['https://accounts.google.com']),
 });
@@ -30,7 +31,7 @@ const baseCspDirectives = [
 const legacyCspHeader = (nonce) => [
   ...baseCspDirectives,
   `script-src 'self' 'nonce-${nonce}'`,
-  `style-src 'self' 'unsafe-inline' ${APP_ALLOWED_DOMAINS.style.join(' ')}`,
+  "style-src 'self' 'unsafe-inline'",
   `font-src ${APP_ALLOWED_DOMAINS.font.join(' ')}`,
   "img-src 'self' data: https:",
   "connect-src 'self'",

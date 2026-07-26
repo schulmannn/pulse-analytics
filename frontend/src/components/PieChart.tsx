@@ -76,6 +76,9 @@ function arcPath(cx: number, cy: number, rOuter: number, rInner: number, from: n
  */
 export function PieChart({ values, labels, titles, colors, height = 200 }: PieChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const donutRef = useRef<HTMLDivElement>(null);
+  const svgRef = useRef<SVGSVGElement>(null);
+  const legendRef = useRef<HTMLUListElement>(null);
   const [hover, setHover] = useState<Hover | null>(null);
   const [width, setWidth] = useState(600);
   const expanded = useContext(ChartExpandedContext);
@@ -105,6 +108,44 @@ export function PieChart({ values, labels, titles, colors, height = 200 }: PieCh
 
   const positive = (values ?? []).map((v) => (Number.isFinite(v) && v > 0 ? v : 0));
   const total = positive.reduce((s, v) => s + v, 0);
+
+  // Slice/legend hover only changes emphasis and a duplicate readout; the persistent legend already
+  // exposes every shown value. Delegate pointer events without making passive paths/list rows into
+  // controls or adding them to the keyboard order.
+  useEffect(() => {
+    const donut = donutRef.current;
+    const svg = svgRef.current;
+    const legend = legendRef.current;
+    if (!donut || !svg || !legend) return;
+    const indexFromTarget = (target: EventTarget | null, attribute: string) => {
+      if (!(target instanceof Element)) return null;
+      const item = target.closest<HTMLElement>(`[${attribute}]`);
+      const raw = item?.getAttribute(attribute);
+      if (raw == null) return null;
+      const index = Number(raw);
+      return Number.isInteger(index) ? index : null;
+    };
+    const handleSliceMove = (event: globalThis.MouseEvent) => {
+      const i = indexFromTarget(event.target, 'data-pie-index');
+      if (i == null) return;
+      setHover((prev) => (prev && prev.i === i ? prev : { i }));
+    };
+    const handleLegendMove = (event: globalThis.MouseEvent) => {
+      const i = indexFromTarget(event.target, 'data-pie-legend-index');
+      setHover((prev) => (i == null ? null : prev && prev.i === i ? prev : { i }));
+    };
+    const clearHover = () => setHover(null);
+    svg.addEventListener('mousemove', handleSliceMove);
+    legend.addEventListener('mousemove', handleLegendMove);
+    donut.addEventListener('mouseleave', clearHover);
+    legend.addEventListener('mouseleave', clearHover);
+    return () => {
+      svg.removeEventListener('mousemove', handleSliceMove);
+      legend.removeEventListener('mousemove', handleLegendMove);
+      donut.removeEventListener('mouseleave', clearHover);
+      legend.removeEventListener('mouseleave', clearHover);
+    };
+  }, [total]);
 
   if (!values || values.length === 0 || total <= 0) {
     return <EmptyState compact size="chart" title="Нет данных за период" />;
@@ -191,12 +232,12 @@ export function PieChart({ values, labels, titles, colors, height = 200 }: PieCh
     <div ref={containerRef} className="relative w-full">
       <div className={containerCls}>
         <div
+          ref={donutRef}
           className="relative shrink-0"
           style={{ width: donutWidth, maxWidth: size }}
-          onMouseLeave={() => setHover(null)}
-          onPointerLeave={() => setHover(null)}
         >
           <svg
+            ref={svgRef}
             className="block w-full"
             height={size}
             viewBox={`0 0 ${size} ${size}`}
@@ -206,13 +247,13 @@ export function PieChart({ values, labels, titles, colors, height = 200 }: PieCh
             {arcs.map((a, i) => (
               <path
                 key={i}
+                data-pie-index={i}
                 d={arcPath(cx, cy, rOuter, rInner, a.from, a.to)}
                 fill={a.color}
                 stroke="hsl(var(--card))"
                 strokeWidth="1.5"
                 className="cursor-crosshair transition-opacity"
                 opacity={hover ? (hover.i === i ? 1 : 0.55) : 0.9}
-                onMouseMove={() => setHover((prev) => (prev && prev.i === i ? prev : { i }))}
               />
             ))}
             {/* Total in the hole — a quiet anchor, not a headline. */}
@@ -251,13 +292,12 @@ export function PieChart({ values, labels, titles, colors, height = 200 }: PieCh
 
         {/* Legend: hairline rows (colour dot + label + value·%), reusing the ValueLedger idiom.
             Inline it flows under the ring; in the overlay it sits beside it. */}
-        <ul className={legendCls}>
+        <ul ref={legendRef} className={legendCls}>
           {legendRows.map((a, i) => (
             <li
               key={i}
+              data-pie-legend-index={i}
               className="flex items-baseline justify-between gap-3 border-b border-border py-1.5 last:border-b-0"
-              onMouseEnter={() => setHover({ i })}
-              onMouseLeave={() => setHover(null)}
             >
               <span className="flex min-w-0 items-center gap-1.5 truncate text-xs text-muted-foreground">
                 <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: a.color }} aria-hidden="true" />

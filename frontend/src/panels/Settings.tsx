@@ -8,7 +8,7 @@ import {
   DialogDescription,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   SettingsIcon,
   type SettingsIconName,
@@ -190,20 +190,31 @@ export function Settings() {
             </div>
 
             <div className="flex-1 overflow-y-auto px-4 py-5 md:px-8 md:py-6">
-              <div className="mx-auto w-full max-w-[640px] space-y-10">
-                {section === 'account' && <ProfileSection />}
-                {section === 'appearance' && <AppearanceSection />}
-                {section === 'security' && <SecuritySection />}
-                {section === 'billing' && <BillingSection />}
-                {section === 'team' && (
-                  <TeamSection onOpenBilling={() => setSection('billing')} />
-                )}
-                {section === 'data' && (
-                  <DataSection onOpenChannels={() => setSection('channels')} />
-                )}
-                {section === 'channels' && <ChannelsSection />}
-                {section === 'instagram' && <InstagramSection />}
-              </div>
+              {SECTIONS.map((item) => (
+                <TabsContent
+                  key={item.key}
+                  value={item.key}
+                  forceMount
+                  className="mt-0 data-[state=inactive]:hidden"
+                >
+                  {section === item.key && (
+                    <div className="mx-auto w-full max-w-[640px] space-y-10">
+                      {item.key === 'account' && <ProfileSection />}
+                      {item.key === 'appearance' && <AppearanceSection />}
+                      {item.key === 'security' && <SecuritySection />}
+                      {item.key === 'billing' && <BillingSection />}
+                      {item.key === 'team' && (
+                        <TeamSection onOpenBilling={() => setSection('billing')} />
+                      )}
+                      {item.key === 'data' && (
+                        <DataSection onOpenChannels={() => setSection('channels')} />
+                      )}
+                      {item.key === 'channels' && <ChannelsSection />}
+                      {item.key === 'instagram' && <InstagramSection />}
+                    </div>
+                  )}
+                </TabsContent>
+              ))}
             </div>
           </div>
         </Tabs>

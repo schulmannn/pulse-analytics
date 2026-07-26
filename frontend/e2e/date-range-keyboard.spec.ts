@@ -6,7 +6,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const stepDays = (from: number, to: number) => Math.round((to - from) / DAY_MS);
 
 /**
- * Календарь «Своего периода» как WAI-ARIA date grid: одна точка входа вместо 31 tab-stop'а,
+ * Календарь «Своего периода» как нативная таблица месяца: одна точка входа вместо 31 tab-stop'а,
  * двумерная навигация стрелками, разделение каретки и выбора. Всё desktop — мобильная ветка
  * датапикера не менялась.
  */
@@ -20,7 +20,7 @@ test.describe('DateRangePicker — клавиатура', () => {
   const openPastMonth = async (page: import('@playwright/test').Page) => {
     await bootDemo(page, '/');
     await page.getByRole('group', { name: 'Период' }).getByRole('button', { name: 'Свой период' }).click();
-    await expect(page.getByRole('grid')).toBeVisible();
+    await expect(page.getByRole('table').filter({ has: page.locator('[data-day]') })).toBeVisible();
     await page.getByRole('button', { name: 'Предыдущий месяц' }).click();
   };
 
@@ -111,7 +111,7 @@ test.describe('DateRangePicker — клавиатура', () => {
   test('будущие дни достижимы стрелками и объявлены недоступными, а не выпилены из обхода', async ({ page }) => {
     await bootDemo(page, '/');
     await page.getByRole('group', { name: 'Период' }).getByRole('button', { name: 'Свой период' }).click();
-    await expect(page.getByRole('grid')).toBeVisible();
+    await expect(page.getByRole('table').filter({ has: page.locator('[data-day]') })).toBeVisible();
 
     // Текущий месяц: «Следующий месяц» упирается в потолок — будущих данных не существует.
     await expect(page.getByRole('button', { name: 'Следующий месяц' })).toBeDisabled();

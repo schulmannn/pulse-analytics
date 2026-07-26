@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { InspectorHandle } from '@/components/InspectorHandle';
 import { Link, Navigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
+import { z } from 'zod';
 import { useAnnotations, useChannels, useHistory, useTgFull } from '@/api/queries';
 import { apiSend } from '@/api/client';
 import { qk } from '@/api/queryKeys';
@@ -23,6 +24,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { ErrorState } from '@/components/ErrorState';
 import { DeltaPill } from '@/components/DeltaPill';
 import { SegmentedControl } from '@/components/SegmentedControl';
+import { SegSelect } from '@/components/metric/SegSelect';
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
 import { DivergingBars } from '@/components/DivergingBars';
@@ -45,6 +47,10 @@ import { AboutRow, MetricBackLink, MetricDescriptor, RailSection } from '@/compo
 
 /** Короткий день недели для тултипов дневной гранулы («чт, 2 июл») — артефакт v2. */
 const WEEKDAY_FMT = new Intl.DateTimeFormat('ru-RU', { weekday: 'short' });
+const AnnotationMutationSchema = z
+  .object({ id: z.number(), day: z.string(), label: z.string() })
+  .passthrough();
+const AnnotationDeleteSchema = z.object({ ok: z.boolean() }).passthrough();
 
 // ── View state (all in the URL so links restore the exact view, like steep) ──────────────
 type ChartType = 'line' | 'bar' | 'rank' | 'pivot';
@@ -672,7 +678,12 @@ export function MetricPage() {
     setAnnBusy(true);
     setAnnError(null);
     try {
-      await apiSend('POST', `/api/channels/${channelId}/annotations`, { day: dayKey, label });
+      await apiSend(
+        'POST',
+        `/api/channels/${channelId}/annotations`,
+        { day: dayKey, label },
+        AnnotationMutationSchema,
+      );
       setAnnLabel('');
       await queryClient.invalidateQueries({ queryKey: qk.annotations(channelId) });
     } catch {
@@ -686,7 +697,12 @@ export function MetricPage() {
     setAnnBusy(true);
     setAnnError(null);
     try {
-      await apiSend('DELETE', `/api/channels/${channelId}/annotations/${annId}`);
+      await apiSend(
+        'DELETE',
+        `/api/channels/${channelId}/annotations/${annId}`,
+        undefined,
+        AnnotationDeleteSchema,
+      );
       await queryClient.invalidateQueries({ queryKey: qk.annotations(channelId) });
     } catch {
       setAnnError('Не удалось удалить событие.');
@@ -873,8 +889,8 @@ export function MetricPage() {
           </ChartWidget>
 
           {/* Тайм-бар — футер карточки графика (артефакт v2): гранулярность слева, пресеты окна,
-              свой диапазон и пейджер окон одной строкой под канвасом. Контролы держат единую
-              высоту (h-7) и радиусы, поэтому читаются одной панелью. Пикер открывается вниз. */}
+              свой диапазон и пейджер окон одной строкой под канвасом. На телефоне контролы
+              держат 44px touch-target, на sm+ — компактную высоту 28px. Пикер открывается вниз. */}
           <div
             data-metric-toolbar
             className="mt-3 flex flex-wrap items-center gap-2 border-t border-border pt-3 dark:border-white/6 print:hidden"
@@ -909,7 +925,8 @@ export function MetricPage() {
               <PopoverTrigger asChild>
                 <button
                   type="button"
-                  className={`inline-flex h-7 items-center rounded-full border px-3 text-xs font-medium transition-colors ${
+                  data-mobile-touch-target=""
+                  className={`inline-flex h-11 items-center rounded-full border px-3 text-xs font-medium transition-colors sm:h-7 ${
                     range ? 'border-primary/40 text-primary' : 'border-border text-muted-foreground hover:text-foreground'
                   }`}
                 >
@@ -933,31 +950,34 @@ export function MetricPage() {
             {range && (
               <button
                 type="button"
+                data-mobile-touch-target=""
                 onClick={() => setRange(null)}
                 title="Сбросить произвольный период"
-                className="inline-flex h-7 items-center gap-1 rounded-full border border-primary/40 bg-primary/10 px-3 text-xs font-medium text-primary"
+                className="inline-flex h-11 items-center gap-1 rounded-full border border-primary/40 bg-primary/10 px-3 text-xs font-medium text-accent-foreground sm:h-7"
               >
                 {fmt.day(range.from)} – {fmt.day(range.to)} <span aria-hidden="true">×</span>
               </button>
             )}
             {/* Пейджер окон — единой пилюлей с бордером (как одна двухкнопочная деталь тулбара). */}
-            <div className="inline-flex h-7 items-center rounded-full border border-border">
+            <div className="inline-flex h-11 items-center rounded-full border border-border sm:h-7">
               <button
                 type="button"
+                data-mobile-touch-target=""
                 onClick={() => shiftWindow(-1)}
                 disabled={winFrom == null}
                 aria-label="Предыдущее окно"
-                className="inline-flex h-full items-center rounded-l-full px-2 text-sm text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+                className="inline-flex h-full min-w-11 items-center justify-center rounded-l-full px-2 text-sm text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none disabled:opacity-40 sm:min-w-0"
               >
                 ‹
               </button>
               <span aria-hidden="true" className="h-4 w-px bg-border" />
               <button
                 type="button"
+                data-mobile-touch-target=""
                 onClick={() => shiftWindow(1)}
                 disabled={!range}
                 aria-label="Следующее окно"
-                className="inline-flex h-full items-center rounded-r-full px-2 text-sm text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+                className="inline-flex h-full min-w-11 items-center justify-center rounded-r-full px-2 text-sm text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none disabled:opacity-40 sm:min-w-0"
               >
                 ›
               </button>
@@ -1014,11 +1034,12 @@ export function MetricPage() {
                             <span className="min-w-0 flex-1 truncate text-foreground">{a.label}</span>
                             <button
                               type="button"
+                              data-mobile-touch-target=""
                               aria-label={`Удалить событие «${a.label}»`}
                               title="Удалить событие"
                               disabled={annBusy}
                               onClick={() => void removeAnnotation(a.id)}
-                              className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-destructive disabled:opacity-40"
+                              className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-destructive disabled:opacity-40 sm:h-6 sm:w-6"
                             >
                               <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
                                 <path d="M6 6l12 12M18 6 6 18" strokeLinecap="round" />
@@ -1036,16 +1057,18 @@ export function MetricPage() {
                       }}
                     >
                       <input
+                        data-mobile-touch-target=""
                         value={annLabel}
                         onChange={(e) => setAnnLabel(e.target.value)}
                         maxLength={80}
                         placeholder="Отметить событие дня — реклама, пост-хит…"
-                        className="h-9 min-w-0 flex-1 rounded-lg border border-border bg-card px-3 text-xs text-foreground outline-hidden placeholder:text-muted-foreground focus:ring-2 focus:ring-primary/40"
+                        className="h-11 min-w-0 flex-1 rounded-lg border border-border bg-card px-3 text-xs text-foreground outline-hidden placeholder:text-muted-foreground focus:ring-2 focus:ring-primary/40 sm:h-9"
                       />
                       <button
                         type="submit"
+                        data-mobile-touch-target=""
                         disabled={!annLabel.trim() || annBusy}
-                        className="btn-pill inline-flex h-9 shrink-0 items-center justify-center border border-border px-3 text-xs font-medium text-foreground transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-40"
+                        className="btn-pill inline-flex h-11 shrink-0 items-center justify-center border border-border px-3 text-xs font-medium text-foreground transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-40 sm:h-9"
                       >
                         ⚑ Отметить
                       </button>
@@ -1122,7 +1145,7 @@ export function MetricPage() {
                                   i === 0
                                     ? 'bg-primary text-primary-foreground'
                                     : i < 3
-                                      ? 'bg-primary/10 text-primary'
+                                      ? 'bg-primary/10 text-accent-foreground'
                                       : 'text-muted-foreground',
                                 )}
                               >
@@ -1274,32 +1297,6 @@ export function MetricPage() {
         />
       )}
     </div>
-  );
-}
-
-/** Bounded segmented control for the rail selects (dimension / comparison baseline) — a thin,
-    full-width wrapper over the shared {@link SegmentedControl} so the rail matches every other
-    segmented group by construction. */
-export function SegSelect<T extends string>({
-  value,
-  onChange,
-  options,
-  ariaLabel,
-}: {
-  value: T;
-  onChange: (next: T) => void;
-  options: { value: T; label: string }[];
-  ariaLabel: string;
-}) {
-  return (
-    <SegmentedControl
-      ariaLabel={ariaLabel}
-      className="mb-3 w-full"
-      segmentClassName="px-2"
-      value={value}
-      onChange={onChange}
-      options={options.map((opt) => ({ value: opt.value, content: opt.label }))}
-    />
   );
 }
 

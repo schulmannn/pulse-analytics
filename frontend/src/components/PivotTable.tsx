@@ -41,9 +41,11 @@ export function PivotTable({ columns, rows, valueFmt }: PivotTableProps) {
         <thead>
           <tr className="border-b border-border dark:border-white/6">
             <th
-              aria-hidden="true"
+              scope="col"
               className="sticky left-0 z-10 w-28 bg-card px-3 py-2"
-            />
+            >
+              <span className="sr-only">Показатель</span>
+            </th>
             {columns.map((c) => (
               <th scope="col" key={c.key} className="px-1.5 py-2 text-right text-2xs font-medium tabular-nums text-muted-foreground">
                 {c.label}

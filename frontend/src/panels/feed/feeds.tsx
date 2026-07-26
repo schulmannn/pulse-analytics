@@ -6,7 +6,6 @@ import { PagePeriodProvider } from '@/lib/period';
 import { Skeleton } from '@/components/ui/skeleton';
 import { FeedBlock } from '@/panels/feed/useFeed';
 import { TgSectionLayout, TgPagePeriodControl } from '@/panels/TgFeed';
-import { Overview } from '@/panels/Overview';
 import { SourceIdentity } from '@/components/SourceIdentity';
 import { lazyWithReload } from '@/lib/lazyWithReload';
 
@@ -65,10 +64,10 @@ const IgContentPage = lazyFrom(igLoad, 'IgContentPage');
 const IgAudiencePage = lazyFrom(igLoad, 'IgAudiencePage');
 const IgPeriodControl = lazyFrom(igLoad, 'IgPeriodControl');
 
-// TG bodies split into their own chunks (bundle-size gate): Обзор stays eager (the entry route),
-// but Аналитика/Контент/Упоминания are heavier and off the first paint — each lazies into its own
-// chunk, so the entry bundle no longer carries the tabs/table/mentions code. FeedSectionPage
-// already wraps every Body in <Suspense>, so no extra scaffolding is needed here.
+// TG bodies split into their own chunks (bundle-size gate). Even Обзор is async: the protected
+// shell becomes interactive without parsing its chart stack, while FeedSectionPage immediately
+// starts the matched body behind a layout-stable skeleton. Other sections stay isolated too.
+const Overview = lazyFrom(() => import('@/panels/Overview'), 'Overview');
 const Analytics = lazyFrom(() => import('@/panels/AnalyticsTabs'), 'Analytics');
 const Posts = lazyFrom(() => import('@/panels/Posts'), 'Posts');
 const Mentions = lazyFrom(() => import('@/panels/Mentions'), 'Mentions');

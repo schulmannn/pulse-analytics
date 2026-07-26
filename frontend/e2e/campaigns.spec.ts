@@ -8,7 +8,7 @@ import { selectPill } from './helpers';
  * архивировать кампанию.
  *
  * Демо-режим здесь НЕ используется: client.ts блокирует в нём все записи, поэтому
- * поднимаем «авторизованную» сессию (pulse_token) и мокируем ВЕСЬ /api/* одним
+ * мокируем ВЕСЬ /api/* одним
  * stateful-роутом — кампании живут в замыкании теста, как настоящая БД.
  */
 
@@ -215,8 +215,6 @@ async function bootCampaigns(page: Page) {
   });
 
   await page.addInitScript(() => {
-    localStorage.setItem('pulse_token', 'e2e-token');
-    localStorage.setItem('pulse_token_exp', String(Date.now() + 60 * 60 * 1000));
     localStorage.setItem('pulse_channel', '1');
     localStorage.setItem('pulse_theme', 'dark');
   });

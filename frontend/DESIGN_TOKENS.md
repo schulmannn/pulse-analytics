@@ -22,7 +22,7 @@ semantic token.
 | Canvas / ink | `--background` `--foreground` | warm paper `#faf9f6` / ink `#1a1a17` |
 | Panel surface | `--card` `--popover` | `#fff` panels used **sparingly** — sections are hairline-delimited |
 | Secondary/tertiary ink | `--muted-foreground` `--ink2` `--ink3` | text hierarchy by shade, not weight |
-| Accent (single hue) | `--primary` `--accent` `--accent-foreground` | `--accent-foreground` is AA-calibrated for ink on the blue tints |
+| Accent (single hue) | `--primary` `--accent` `--accent-foreground` | `--primary` is link/action ink on neutral surfaces; selected chips with `bg-primary/10` use the deeper `--accent-foreground`, AA-gated on that composite tint |
 | Deltas | `--brand-verdant` (up) `--brand-ember` / `-strong` (down) | reserved for CHART roles (DivergingBars) and status surfaces; the ↑/↓ delta chips and card stats read **muted** (steep: direction lives in the arrow/sign, nothing screams) |
 | Status | `--status-warn` | risk / demo / stale collector |
 | Hairline | `--border` `--input` | decorative separators (the *only* borders in the system) |
@@ -92,8 +92,11 @@ Keep ≲4 steps on a single screen.
 `text-base` 16 (card titles) · `text-lg` 18 (sub-heading, sparingly) · `text-2xl` 24 (page/modal
 titles) · `text-3xl` 30 (secondary metric) · `text-hero` 44 (primary KPI hero).
 
-Fonts: `font-sans` = Inter (everything); `font-mono` = Roboto Mono (scoped to timestamps / collector
-version / API status only).
+Fonts: `font-sans` = bundled `Geist Variable` from `@fontsource-variable/geist` (the whole modern
+app); `font-mono` = the local system monospace stack, scoped to timestamps / collector version / API
+status only. No screen depends on Google Fonts: the legacy shell uses system sans/serif stacks, and
+production CSP keeps `font-src 'self'` only. The two explicit `@font-face` rules ship only the
+RU/Cyrillic and Latin subsets; extended scripts intentionally fall back to the system stack.
 
 ## Radius
 
@@ -115,12 +118,12 @@ arbitrary values: `foreground / 0.06` (hover wash), `ink3 / 0.25` (edit-mode car
 ## Icon buttons
 
 Header affordances (expand / menu / remove) share **one** quiet circular shape: `rounded-full` + hover
-surface, sized `h-8 w-8` (32px touch target) on mobile and the quieter `h-7 w-7` (28px) at ≥sm where a
+surface, sized `h-11 w-11` (44px touch target) on mobile and the quieter `h-7 w-7` (28px) at ≥sm where a
 cursor is precise. See the `iconBtn` string in `ChartWidget.tsx`.
 
-**Touch targets.** On mobile every primary control clears **32px** — icon buttons and the per-widget
+**Touch targets.** On mobile every primary control clears **44px** — icon buttons, shared tabs and the per-widget
 period filter pills grow their hit area below `sm` (the compact desktop look returns at ≥sm). Gated by
-`e2e/mobile-nav.spec.ts` at 360 / 390 / 430px (also asserts no horizontal page scroll). Inline text
+the mandatory phone CI job through `e2e/mobile-nav.spec.ts` at 360 / 390 / 430px (also asserts no horizontal page scroll). Inline text
 links / ⓘ keep their text size — their tap area is the text and the same action has a full-size path in
 the detail overlay.
 
@@ -171,8 +174,8 @@ Rules:
   `z-modal-popover`; a tooltip (`z-tooltip`) stays legible even over a dialog. A page menu must never
   out-rank a dialog.
 - **Sticky < nav**: a scrolled sticky header slides *under* the fixed rail, never over it.
-- Escape / outside-click dismissal is owned per-overlay (`useFocusTrap` + capture-phase Escape in
-  `DetailShell`); the z-scale governs paint order only, not closing.
+- Escape / outside-click dismissal is owned by the shared Radix Dialog layer (including advanced
+  `DialogSurface` sheets); the z-scale governs paint order only, not closing.
 
 ## Motion
 
@@ -263,8 +266,8 @@ for default/rhea/comparison alike.
 **Reduced motion.** A global safety net in `index.css` collapses every animation/transition to 0.01ms
 under `prefers-reduced-motion: reduce`, so token-driven rules never need a per-rule guard. Infinite
 loops (reorder jiggle, starfield twinkle) and readability-critical reveals additionally carry explicit
-`animation: none`. JS motion gates in-component: framer uses `useReducedMotion`, while
-`MorphingSeries` checks the media query and renders the final path without scheduling RAF work.
+`animation: none`. JS motion gates in-component: the landing's count/typewriter loop and
+`MorphingSeries` both check the media query and render the final state without scheduling RAF work.
 
 **Desktop sidebar.** The persistent column remains layout-pushing in both modes (`240px` expanded,
 `64px` rail). Both directions share **one edge-led beat** — `--motion-reveal` on the width, the
@@ -285,14 +288,14 @@ carrying the Russian label and discrete `Ctrl`/`B` key chips.
 
 **Bespoke (not canon).** Illustration loops keep their own timings on purpose and are allow-listed by
 the lint: cartograph (error/404/empty), the `/connect` orbital hub + starfield, and the reorder jiggle.
-Framer on the public landing is its own system (`EASE` constant + per-variant durations).
+The public landing's CSS-native entrance/draw/bob choreography is its own system.
 
 **Overlays & mobile sheets.** Dialogs are borders-only (no shadow): a `bg-background/70` backdrop fades
 in (`.detail-backdrop-in`, `--motion-press`) while the panel appears. On mobile the card **detail**
 (`DetailShell` `panel`) drops its inset to a full-height, edge-to-edge sheet (`p-0 sm:p-4`,
 `rounded-none sm:rounded`), and the **source switcher** opens as a bottom sheet that slides up
-(`.sheet-in`, `--motion-reveal`) — both portal-rendered above the bottom nav, focus-trapped
-(`useFocusTrap`), Escape/backdrop-dismissable, and bottom-padded with `env(safe-area-inset-bottom)` so
+(`.sheet-in`, `--motion-reveal`) — both portal-rendered above the bottom nav, focus-managed
+by the shared Radix Dialog layer, Escape/backdrop-dismissable, and bottom-padded with `env(safe-area-inset-bottom)` so
 the last row clears the home indicator (the fixed bottom nav uses the same pad). Gated by
 `e2e/mobile-nav.spec.ts`.
 
@@ -316,7 +319,7 @@ Run from `frontend/`:
   ahead of the suite). Hard-fails on an inlined house easing, magic `text-[Npx]`, arbitrary
   `duration-[…]/ease-[…]/delay-[…]`, off-ladder `duration-300`/`ease-out`, `transition-all`,
   arbitrary `z-[N]`, or a transition on a layout-triggering property. The public marketing landing
-  (`pages/Landing.tsx`, its own framer system) and `pages/Legal.tsx` (long-form prose) are exempt
+  (`pages/Landing.tsx`, its own CSS-native motion system) and `pages/Legal.tsx` (long-form prose) are exempt
   from the **type-scale** rule only — the motion rules apply everywhere. Migrating those two
   surfaces onto the scale is a separate, deliberate task.
 

@@ -1,4 +1,5 @@
 import { msPeriodKey, type MsPeriod } from '@/lib/msPeriod';
+import { ME_QUERY_KEY } from '@/api/authQueryKey';
 
 /**
  * Фабрика query-ключей для семей, которые ТРОГАЮТ мутации (invalidateQueries /
@@ -60,7 +61,7 @@ const ymFamilies = {
 
 export const qk = {
   // ── Профиль / сессия ──
-  me: ['me'] as const,
+  me: ME_QUERY_KEY,
 
   // ── Упоминания (per-channel) ──
   mentions: (channelId: number | null) => ['mentions', channelId] as const,

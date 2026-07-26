@@ -3,6 +3,7 @@ import type { IgData } from '@/lib/useIgData';
 import { CampaignsView } from '@/components/campaigns/CampaignsView';
 import { useMediaQuery } from '@/lib/useMediaQuery';
 import { cn } from '@/lib/utils';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { IgContentDesktop } from '@/panels/instagram/IgContentDesktop';
 import { IgContentMobile } from '@/panels/instagram/IgContentMobile';
 
@@ -27,34 +28,35 @@ export function IgContent({ ig }: { ig: IgData }) {
       { replace: true },
     );
 
-  const tabs = (
-    <div className="flex flex-wrap gap-1" role="tablist" aria-label="Раздел контента">
+  return (
+    <Tabs
+      value={view}
+      onValueChange={(next) => setView(next as 'posts' | 'campaigns')}
+      className="space-y-6"
+    >
+      <TabsList
+        aria-label="Раздел контента"
+        className="flex h-auto min-h-0 flex-wrap justify-start gap-1 border-0 bg-transparent p-0"
+      >
       {([['posts', 'Публикации'], ['campaigns', 'Кампании']] as const).map(([key, label]) => (
-        <button
+        <TabsTrigger
           key={key}
-          type="button"
-          role="tab"
-          aria-selected={view === key}
-          onClick={() => setView(key)}
+          value={key}
           className={cn(
             'btn-pill px-3 py-1 text-xs font-medium transition-colors',
-            view === key ? 'bg-primary/15 text-foreground' : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
+            'bg-transparent text-muted-foreground hover:bg-muted/50 hover:text-foreground data-[state=active]:bg-primary/15 data-[state=active]:text-foreground',
           )}
         >
           {label}
-        </button>
+        </TabsTrigger>
       ))}
-    </div>
-  );
-
-  if (view === 'campaigns') {
-    return (
-      <div className="space-y-6">
-        {tabs}
+      </TabsList>
+      <TabsContent value="campaigns" className="mt-0">
         <CampaignsView />
-      </div>
-    );
-  }
-
-  return isDesktop ? <IgContentDesktop ig={ig} tabs={tabs} /> : <IgContentMobile ig={ig} tabs={tabs} />;
+      </TabsContent>
+      <TabsContent value="posts" className="mt-0">
+        {isDesktop ? <IgContentDesktop ig={ig} /> : <IgContentMobile ig={ig} />}
+      </TabsContent>
+    </Tabs>
+  );
 }

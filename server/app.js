@@ -48,10 +48,11 @@ function createApp(deps) {
   const {
     config, db, log,
     fetchWithTimeout,
-    requireAuth, requireSuper, setSessionCookie, clearSessionCookie,
+    requireAuth, requireSuper, migrateSessionCookie, setSessionCookie, clearSessionCookie,
     resolveChannel, audit, getDbReady, getDraining,
     limiter, authLimiter, mediaLimiter,
-    hashPassword, verifyPassword, DUMMY_HASH, signSession, SESSION_TTL, GOOGLE_CLIENT_ID,
+    hashPassword, verifyPassword, DUMMY_HASH, signSession, SESSION_TTL,
+    SESSION_ABSOLUTE_TTL, GOOGLE_CLIENT_ID,
     appBase, sha256, newToken, VERIFY_TTL, RESET_TTL, sendEmail, emailShell, emailBtn, escHtml,
     igFetch, refreshIgIfNeeded, igConfigured, igCrypto, igMock, msCrypto, msFetch, msBackfill,
     ymCrypto, ymFetch, nearestOf,
@@ -105,7 +106,7 @@ function createApp(deps) {
   // (no 'unsafe-inline') means an injected <script> or inline event handler can't
   // execute — closes the snapshot self-XSS class (defence-in-depth on top of the
   // server-side escape/Number coercion). Inline styles stay allowed (style
-  // injection isn't code execution); only Google Fonts is external.
+  // injection isn't code execution); the legacy shell has no external font/style dependency.
   const APP_HTML_PATH = path.join(__dirname, '../public/index.html');
   let APP_HTML = '';
   try { APP_HTML = fs.readFileSync(APP_HTML_PATH, 'utf8'); }
@@ -141,6 +142,7 @@ function createApp(deps) {
     DUMMY_HASH,
     signSession,
     SESSION_TTL,
+    SESSION_ABSOLUTE_TTL,
     GOOGLE_CLIENT_ID,
     fetchWithTimeout,
     log,
@@ -156,14 +158,24 @@ function createApp(deps) {
     escHtml,
     // /api/auth/me отдаёт ai.enabled — фронт гейтит AI-поверхности одним bootstrap-запросом.
     aiEnabledFor: (user) => aiChatService.enabledFor(user),
-    // Cookie-auth фаза 1: login/google ставят HttpOnly-cookie, logout чистит.
+    migrateSessionCookie,
     setSessionCookie,
     clearSessionCookie,
   });
 
   // Account/admin/prefs/config routes are isolated in routes/account.js (accountLimiter travels with
   // them). Shared helpers (requireSuper, sendEmail/emailShell, audit, GOOGLE_CLIENT_ID) are injected.
-  registerAccountRoutes({ app, requireAuth, requireSuper, db, audit, sendEmail, emailShell, GOOGLE_CLIENT_ID });
+  registerAccountRoutes({
+    app,
+    requireAuth,
+    requireSuper,
+    db,
+    audit,
+    sendEmail,
+    emailShell,
+    GOOGLE_CLIENT_ID,
+    clearSessionCookie,
+  });
 
   // Instagram data routes + the per-request resolveIg middleware are isolated in routes/ig.js.
   // The shared IG data-access (singleflight igFetch + opportunistic refreshIgIfNeeded), the env

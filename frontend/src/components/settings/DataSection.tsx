@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { DataHealth } from '@/components/DataHealth';
 import { BTN_SECONDARY, SettingsGroup, SettingsIcon } from '@/components/settings/primitives';
-import { getSessionToken } from '@/lib/session';
+import { fetchAccountExport } from '@/lib/accountExport';
 
 /** «Данные» — the data-health ledger, GDPR-экспорт и row-link в раздел каналов. */
 export function DataSection({ onOpenChannels }: { onOpenChannels: () => void }) {
@@ -35,8 +35,8 @@ export function DataSection({ onOpenChannels }: { onOpenChannels: () => void }) 
 
 /**
  * GDPR F5: все данные аккаунта одним JSON-файлом (профиль, настройки, отчёты, каналы с полными
- * архивами; токены и сессии не покидают сервер). Скачивание — обычный fetch с сессионным
- * заголовком → blob-ссылка: react-query здесь не нужен, ответ не кэшируется.
+ * архивами; токены и сессии не покидают сервер). Скачивание — обычный same-origin
+ * cookie-auth fetch → blob-ссылка: react-query здесь не нужен, ответ не кэшируется.
  */
 function ExportRow() {
   const [busy, setBusy] = useState(false);
@@ -46,20 +46,7 @@ function ExportRow() {
     setBusy(true);
     setErr(null);
     try {
-      const token = getSessionToken();
-      const res = await fetch('/api/account/export', {
-        credentials: 'same-origin',
-        headers: token ? { 'X-Session-Token': token } : undefined,
-      });
-      if (!res.ok) {
-        let message = 'Не удалось выгрузить данные';
-        try {
-          const body = await res.json();
-          if (body && typeof body.error === 'string') message = body.error;
-        } catch { /* не-JSON ответ — оставляем общий текст */ }
-        throw new Error(message);
-      }
-      const blob = await res.blob();
+      const blob = await fetchAccountExport();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;

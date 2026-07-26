@@ -118,9 +118,8 @@ export function KpiHero({
   value: string;
   delta?: MetricDelta | null;
   series?: Point[];
-  /** Route of the metric's explorer page (/metrics/ig-*). The ↗ Link is the semantic
-      (keyboard/AT) path; the whole chart block is a mouse convenience — the same drill
-      contract as widget cards, so the hero chart is never a dead end. */
+  /** Route of the metric's explorer page (/metrics/ig-*). The chart surface becomes one real Link
+      (keyboard, touch and pointer share the same drill contract), so the hero is never a dead end. */
   drillTo?: string;
 }) {
   const navigate = useNavigate();
@@ -143,22 +142,19 @@ export function KpiHero({
     <ChartCardBody hero label={label} value={value} delta={delta} onValueClick={drillTo ? () => navigate(drillTo) : undefined} drillLabel={label}>
       {chart &&
         (drillTo ? (
-          <div className="relative h-full">
-            <Link
-              to={drillTo}
-              aria-label={`Разбор: ${label}`}
-              title="Подробный разбор"
-              className="absolute right-1 top-1 z-10 rounded-full border border-transparent p-1 text-muted-foreground transition-colors hover:border-border hover:bg-background hover:text-foreground"
-            >
+          <Link
+            to={drillTo}
+            aria-label={`Разбор: ${label}`}
+            title="Подробный разбор"
+            className="group/chart-link relative block h-full rounded focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40"
+          >
+            <span className="absolute right-1 top-1 z-10 rounded-full border border-transparent p-1 text-muted-foreground transition-colors group-hover/chart-link:border-border group-hover/chart-link:bg-background group-hover/chart-link:text-foreground">
               <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
                 <path d="M7 17 17 7M9 7h8v8" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
-            </Link>
-            {/* Mouse convenience only (no button role — the ↗ Link above is the semantic path). */}
-            <div className="h-full cursor-pointer" onClick={() => navigate(drillTo)}>
-              {chart}
-            </div>
-          </div>
+            </span>
+            <div className="h-full cursor-pointer">{chart}</div>
+          </Link>
         ) : (
           <div className="h-full">{chart}</div>
         ))}

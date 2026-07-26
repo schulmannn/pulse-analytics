@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useChannels, useTgFull } from '@/api/queries';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { normalizeTgPosts, type NormalizedPost } from '@/lib/posts';
@@ -316,9 +316,18 @@ function CardStat({ label, value }: { label: string; value: string }) {
  */
 function TopPostCard({ post, rank, onOpen }: { post: NormalizedPost; rank: number; onOpen: () => void }) {
   const [failed, setFailed] = useState(false);
+  const imageRef = useRef<HTMLImageElement>(null);
   const isVideo = post.mediaType === 'video';
   const cover = !failed ? post.thumb : null;
   const title = post.caption ? markdownToPlainText(post.caption) : '';
+  useEffect(() => {
+    const image = imageRef.current;
+    if (!image || !cover) return;
+    const handleError = () => setFailed(true);
+    image.addEventListener('error', handleError);
+    if (image.complete && image.naturalWidth === 0) handleError();
+    return () => image.removeEventListener('error', handleError);
+  }, [cover]);
   return (
     <button
       type="button"
@@ -338,10 +347,10 @@ function TopPostCard({ post, rank, onOpen }: { post: NormalizedPost; rank: numbe
       >
         {cover ? (
           <img
+            ref={imageRef}
             src={cover}
             alt=""
             referrerPolicy="no-referrer"
-            onError={() => setFailed(true)}
             className="h-full w-full object-cover transition-transform group-hover:scale-[1.02]"
           />
         ) : (

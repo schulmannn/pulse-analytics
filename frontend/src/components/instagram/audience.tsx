@@ -71,8 +71,25 @@ export function BestTimeHeatmap({ online }: { online: IgOnline | undefined }) {
     );
   }
 
+  const showCellTip = (
+    cell: HTMLButtonElement,
+    w: number,
+    h: number,
+    value: number,
+    pointer?: { x: number; y: number },
+  ) => {
+    const wrapRect = wrapRef.current?.getBoundingClientRect();
+    if (!wrapRect) return;
+    const cellRect = cell.getBoundingClientRect();
+    setTip({
+      x: pointer?.x ?? cellRect.left - wrapRect.left + cellRect.width / 2,
+      y: pointer?.y ?? cellRect.top - wrapRect.top,
+      text: `${DAY_NAMES[w]} ${h}:00 · ${fmt.short(value)} онлайн`,
+    });
+  };
+
   return (
-    <div ref={wrapRef} className="relative" onMouseLeave={() => setTip(null)}>
+    <div ref={wrapRef} className="relative">
       <div className="overflow-x-auto pb-2">
         <div className="min-w-full space-y-[2px] lg:min-w-[440px]">
           <div className="grid gap-[2px]" style={{ gridTemplateColumns: '30px repeat(24, minmax(14px, 1fr))' }}>
@@ -90,18 +107,46 @@ export function BestTimeHeatmap({ online }: { online: IgOnline | undefined }) {
                 const v = grid[w][h];
                 const opacity = max > 0 ? Math.max(0.06, v / max) : 0;
                 const isBest = best.w === w && best.h === h;
+                const cellLabel = `${name}, ${h}:00 — ${fmt.short(v)} онлайн${
+                  isBest ? ', лучший слот' : ''
+                }`;
                 return (
-                  <div
+                  <button
                     key={h}
-                    className={`flex h-4 cursor-pointer items-center justify-center rounded-sm${isBest ? ' border-2 border-verdant' : ''}`}
+                    type="button"
+                    data-heatmap-cell={`${w}-${h}`}
+                    tabIndex={isBest ? 0 : -1}
+                    aria-label={cellLabel}
+                    aria-keyshortcuts="ArrowLeft ArrowRight ArrowUp ArrowDown"
+                    className={`flex h-4 cursor-pointer items-center justify-center rounded-sm p-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-primary${isBest ? ' border-2 border-verdant' : ' border-0'}`}
                     style={{
-                      backgroundColor: 'hsl(var(--brand-iris))',
-                      opacity,
+                      backgroundColor: `hsl(var(--brand-iris) / ${opacity})`,
                     }}
-                    aria-label={isBest ? `Лучший слот: ${name} ${h}:00` : undefined}
                     onMouseMove={(event) => {
                       const rect = wrapRef.current?.getBoundingClientRect();
-                      if (rect) setTip({ x: event.clientX - rect.left, y: event.clientY - rect.top, text: `${name} ${h}:00 · ${fmt.short(v)} онлайн` });
+                      if (rect) {
+                        showCellTip(event.currentTarget, w, h, v, {
+                          x: event.clientX - rect.left,
+                          y: event.clientY - rect.top,
+                        });
+                      }
+                    }}
+                    onMouseLeave={() => setTip(null)}
+                    onFocus={(event) => showCellTip(event.currentTarget, w, h, v)}
+                    onBlur={() => setTip(null)}
+                    onClick={(event) => showCellTip(event.currentTarget, w, h, v)}
+                    onKeyDown={(event) => {
+                      let nextW = w;
+                      let nextH = h;
+                      if (event.key === 'ArrowLeft') nextH = Math.max(0, h - 1);
+                      else if (event.key === 'ArrowRight') nextH = Math.min(23, h + 1);
+                      else if (event.key === 'ArrowUp') nextW = Math.max(0, w - 1);
+                      else if (event.key === 'ArrowDown') nextW = Math.min(DAY_NAMES.length - 1, w + 1);
+                      else return;
+                      event.preventDefault();
+                      wrapRef.current
+                        ?.querySelector<HTMLButtonElement>(`[data-heatmap-cell="${nextW}-${nextH}"]`)
+                        ?.focus();
                     }}
                   >
                     {isBest && (
@@ -109,7 +154,7 @@ export function BestTimeHeatmap({ online }: { online: IgOnline | undefined }) {
                         <path d="M5 13l4 4L19 7" />
                       </svg>
                     )}
-                  </div>
+                  </button>
                 );
               })}
             </div>

@@ -1,6 +1,5 @@
 import { useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { cn } from '@/lib/utils';
 import { fmt, pluralRu } from '@/lib/format';
 import { TgAnalytics } from '@/panels/TgAnalytics';
 import { useChannels, useTgFull, useTgGraphs } from '@/api/queries';
@@ -17,6 +16,7 @@ import { WidgetErrorBoundary } from '@/components/WidgetErrorBoundary';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { CampaignFilterControl } from '@/components/campaigns/CampaignFilterControl';
 import { useTgCampaignScope, type TgCampaignScope } from '@/lib/campaignFilter';
 import { Hashtags } from '@/panels/Hashtags';
@@ -61,46 +61,35 @@ export function Analytics() {
     );
   };
   return (
-    <div className="space-y-8">
+    <Tabs
+      value={tab}
+      onValueChange={(next) => setTab(next as AnalyticsTab)}
+      className="space-y-8"
+    >
       {/* Grouped tabs break the 20-chart wall into Динамика / Аудитория / Контент / Сравнение —
           each tab renders only its section family (progressive disclosure). The desktop-only export
           control sits alongside the tabs and covers the whole analytics window regardless of tab. */}
       {/* Пилюльные табы (steep-регистр): подчёркивание border-b-2 выбивалось из пилюльного
           языка сегментов; активный таб — тихая secondary-заливка, никакой синей линии. */}
       <div className="flex items-center justify-between gap-3">
-      <div role="tablist" aria-label="Разделы аналитики" className="flex gap-1 overflow-x-auto">
-        {ANALYTICS_TABS.map((t) => (
-          <button
-            key={t.key}
-            id={`analytics-tab-${t.key}`}
-            type="button"
-            role="tab"
-            aria-selected={tab === t.key}
-            tabIndex={tab === t.key ? 0 : -1}
-            onClick={() => setTab(t.key)}
-            // APG tabs: ролям tab обещаны стрелки — без них скринридер объявляет навигацию,
-            // которой нет (аудит). Roving tabindex + перенос фокуса на активированный таб.
-            onKeyDown={(e) => {
-              if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
-              e.preventDefault();
-              const i = ANALYTICS_TABS.findIndex((x) => x.key === tab);
-              const next = ANALYTICS_TABS[(i + (e.key === 'ArrowRight' ? 1 : ANALYTICS_TABS.length - 1)) % ANALYTICS_TABS.length]!;
-              setTab(next.key);
-              requestAnimationFrame(() => document.getElementById(`analytics-tab-${next.key}`)?.focus());
-            }}
-            className={cn(
-              'shrink-0 rounded-full px-3 py-1.5 text-sm font-medium transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40',
-              tab === t.key ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground',
-            )}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
+        <TabsList
+          aria-label="Разделы аналитики"
+          className="flex h-auto min-h-0 justify-start gap-1 overflow-x-auto border-0 bg-transparent p-0"
+        >
+          {ANALYTICS_TABS.map((t) => (
+            <TabsTrigger
+              key={t.key}
+              value={t.key}
+              className="shrink-0 bg-transparent px-3 py-1.5 text-sm font-medium text-muted-foreground hover:text-foreground data-[state=active]:bg-secondary data-[state=active]:text-foreground"
+            >
+              {t.label}
+            </TabsTrigger>
+          ))}
+        </TabsList>
         <TgAnalyticsExportButton />
       </div>
 
-      {tab === 'dynamics' && (
+      <TabsContent value="dynamics" className="mt-0">
         <div className="space-y-10">
           {/* TgAnalytics derives its breakdowns in its OWN render (above every ChartSection), so a
               panel-level boundary keeps the app shell alive if a top-level derive throws; its
@@ -122,9 +111,11 @@ export function Analytics() {
             </WidgetErrorBoundary>
           </WidgetGroup>
         </div>
-      )}
-      {tab === 'content' && <FormatsTab />}
-      {tab === 'audience' && (
+      </TabsContent>
+      <TabsContent value="content" className="mt-0">
+        <FormatsTab />
+      </TabsContent>
+      <TabsContent value="audience" className="mt-0">
         <div className="space-y-10">
           <WidgetErrorBoundary variant="inline" widgetId="analytics-tg-audience" label="Аналитика">
             <TgAnalytics group="audience" />
@@ -133,8 +124,8 @@ export function Analytics() {
             <HeatmapChartBlock />
           </WidgetErrorBoundary>
         </div>
-      )}
-      {tab === 'compare' && (
+      </TabsContent>
+      <TabsContent value="compare" className="mt-0">
         <WidgetGroup id="analytics-compare" className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-6">
           {/* Real widgets (аудит: не-виджетные блоки без ⋯) — hide/reorder like every card. */}
           <ChartSection id="tg-period-compare" title="Сравнение периодов" defaultSize="full" noExpand>
@@ -144,8 +135,8 @@ export function Analytics() {
             <Insights />
           </ChartSection>
         </WidgetGroup>
-      )}
-    </div>
+      </TabsContent>
+    </Tabs>
   );
 }
 
@@ -265,5 +256,4 @@ function FormatsBody({ scope }: { scope: TgCampaignScope }) {
     </div>
   );
 }
-
 

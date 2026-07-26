@@ -59,7 +59,7 @@ export function ContentOpportunity({
                     ? 'border-verdant/50 bg-verdant/15 text-verdant'
                     : item.confidence === 'low'
                       ? 'border-border bg-muted text-muted-foreground'
-                      : 'border-primary/40 bg-primary/10 text-primary',
+                      : 'border-primary/40 bg-primary/10 text-accent-foreground',
                 )}
                 aria-label={`${item.label}: ${Math.round(item.share * 100)}% публикаций, охват ${Math.round(item.reachIndex * 100)}% от среднего`}
               >

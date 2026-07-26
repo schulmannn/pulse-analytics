@@ -1,3 +1,4 @@
+import { useId } from 'react';
 import { useChannels } from '@/api/queries';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { WidgetBody } from '@/components/ConfigWidget';
@@ -5,6 +6,7 @@ import { PillSelect } from '@/components/PillSelect';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
+import { SwatchButton } from '@/components/ui/swatch-button';
 import { ChannelScope } from '@/lib/channel-context';
 import { ExpandedChartHeightContext } from '@/components/ExpandableChart';
 import { DEFAULT_WIDGET_DAYS } from '@/lib/period';
@@ -107,8 +109,8 @@ export function ConfigEditDialog({
       style: undefined,
     });
 
-  // Radix (ui/dialog) владеет порталом, focus-trap'ом, Escape, скролл-локом и возвратом фокуса —
-  // ручной контракт (useFocusTrap + capture-Escape + body.overflow) ушёл целиком.
+  // Radix (ui/dialog) владеет порталом, focus-trap'ом, Escape, скролл-локом и возвратом фокуса;
+  // прежний ручной focus/Escape/body-overflow контракт удалён.
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="grid max-w-3xl grid-cols-1 gap-5 sm:grid-cols-[minmax(0,1fr)_300px]">
@@ -145,7 +147,12 @@ export function ConfigEditDialog({
             <WidgetConfigControls config={config} spec={spec} onChange={onChange} />
           </div>
           <div className="mt-4 flex items-center justify-between border-t border-border pt-3">
-            <button type="button" onClick={reset} className="text-xs text-muted-foreground transition-colors hover:text-foreground">
+            <button
+              type="button"
+              data-mobile-touch-target=""
+              onClick={reset}
+              className="inline-flex min-h-11 items-center px-2 text-xs text-muted-foreground transition-colors hover:text-foreground sm:min-h-0"
+            >
               Сбросить
             </button>
             <Button type="button" onClick={onClose} size="sm" className="px-4 text-sm">
@@ -268,10 +275,11 @@ export function WidgetConfigControls({
       <label className="mt-4 block">
         <span className="text-2xs tracking-wide text-muted-foreground">Заголовок</span>
         <input
+          data-mobile-touch-target=""
           value={config.title ?? ''}
           placeholder={spec.label}
           onChange={(e) => onChange({ title: e.target.value || undefined })}
-          className="mt-1 w-full rounded border border-border bg-background px-3 py-2 text-sm text-foreground outline-hidden placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
+          className="mt-1 min-h-11 w-full rounded border border-border bg-background px-3 py-2 text-sm text-foreground outline-hidden placeholder:text-muted-foreground focus:ring-1 focus:ring-primary sm:min-h-0"
         />
       </label>
 
@@ -291,23 +299,21 @@ export function WidgetConfigControls({
       <div className="mt-4">
         <span className="text-2xs tracking-wide text-muted-foreground">Акцент</span>
         <div className="mt-2 flex items-center gap-2">
-          <button
-            type="button"
+          <SwatchButton
             aria-label="Стандартный акцент"
             aria-pressed={!config.style?.color}
             onClick={() => onChange({ style: { ...config.style, color: undefined } })}
-            className={`h-5 w-5 rounded-full transition-shadow ${!config.style?.color ? 'ring-2 ring-foreground/50 ring-offset-2 ring-offset-card' : ''}`}
-            style={{ backgroundColor: 'hsl(var(--primary))' }}
+            color="hsl(var(--primary))"
+            selected={!config.style?.color}
           />
           {SWATCHES.map((n) => (
-            <button
+            <SwatchButton
               key={n}
-              type="button"
               aria-label={`Акцент ${n}`}
               aria-pressed={config.style?.color === n}
               onClick={() => onChange({ style: { ...config.style, color: n } })}
-              className={`h-5 w-5 rounded-full transition-shadow ${config.style?.color === n ? 'ring-2 ring-foreground/50 ring-offset-2 ring-offset-card' : ''}`}
-              style={{ backgroundColor: `hsl(var(--chart-${n}-accent))` }}
+              color={`hsl(var(--chart-${n}-accent))`}
+              selected={config.style?.color === n}
             />
           ))}
         </div>
@@ -406,6 +412,7 @@ function TargetField({ config, onChange }: { config: WidgetConfig; onChange: (pa
       />
       {type === 'fixed' && (
         <input
+          data-mobile-touch-target=""
           type="number"
           inputMode="numeric"
           min={0}
@@ -416,7 +423,7 @@ function TargetField({ config, onChange }: { config: WidgetConfig; onChange: (pa
             const num = raw === '' ? undefined : Number(raw);
             onChange({ target: { type: 'fixed', value: num !== undefined && Number.isFinite(num) && num > 0 ? num : undefined } });
           }}
-          className="mt-2 w-full rounded border border-border bg-background px-3 py-2 text-sm tabular-nums text-foreground outline-hidden placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
+          className="mt-2 min-h-11 w-full rounded border border-border bg-background px-3 py-2 text-sm tabular-nums text-foreground outline-hidden placeholder:text-muted-foreground focus:ring-1 focus:ring-primary sm:min-h-0"
         />
       )}
       {type === 'dynamic' && (
@@ -466,21 +473,23 @@ function FilterBuilder({
             <div className="mb-1.5 flex items-center justify-between gap-2">
               <span className="text-2xs font-medium tracking-wide text-muted-foreground">{dim.label}</span>
               {selected.size > 0 && (
-                <div role="group" aria-label={`Режим фильтра «${dim.label}»`} className="flex overflow-hidden rounded-full border border-border">
+                <fieldset className="m-0 flex min-w-0 overflow-hidden rounded-full border border-border p-0">
+                  <legend className="sr-only">{`Режим фильтра «${dim.label}»`}</legend>
                   {(['in', 'not_in'] as FilterOp[]).map((o) => (
                     <button
                       key={o}
                       type="button"
+                      data-mobile-touch-target=""
                       aria-pressed={op === o}
                       onClick={() => setDim(dim.id, o, [...selected])}
-                      className={`px-1.5 py-0.5 text-2xs font-medium transition-colors ${
+                      className={`min-h-11 min-w-11 px-1.5 py-0.5 text-2xs font-medium transition-colors sm:min-h-0 sm:min-w-0 ${
                         op === o ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'
                       } border-r border-border last:border-r-0`}
                     >
                       {o === 'in' ? 'Вкл' : 'Искл'}
                     </button>
                   ))}
-                </div>
+                </fieldset>
               )}
             </div>
             <div className="flex flex-wrap gap-1.5">
@@ -490,10 +499,11 @@ function FilterBuilder({
                   <button
                     key={v}
                     type="button"
+                    data-mobile-touch-target=""
                     aria-pressed={on}
                     onClick={() => toggle(v)}
-                    className={`rounded-full border px-2 py-0.5 text-2xs font-medium transition-colors ${
-                      on ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:text-foreground'
+                    className={`min-h-11 min-w-11 rounded-full border px-2 py-0.5 text-2xs font-medium transition-colors sm:min-h-0 sm:min-w-0 ${
+                      on ? 'border-primary/40 bg-primary/10 text-accent-foreground' : 'border-border text-muted-foreground hover:text-foreground'
                     }`}
                   >
                     {v}
@@ -511,6 +521,7 @@ function FilterBuilder({
 /** «Источник» — pin the widget to a fixed channel (default: follow the switcher). IG-only sources
  *  are excluded (the catalogue is TG-data widgets until S11 wires IG resolution). */
 function SourceField({ config, onChange }: { config: WidgetConfig; onChange: (patch: Partial<WidgetConfig>) => void }) {
+  const sourceId = useId();
   const channels = useChannels();
   // Scope the source list to the METRIC's network so an Instagram metric never lists Telegram
   // channels (and vice-versa) — the same rule as the source switcher. Legacy composites carry no
@@ -537,10 +548,11 @@ function SourceField({ config, onChange }: { config: WidgetConfig; onChange: (pa
   const pinned = config.source ?? null;
   const stalePin = pinned != null && !list.some((c) => c.id === pinned);
   return (
-    <label className="mt-4 block">
+    <label htmlFor={sourceId} className="mt-4 block">
       <span className="text-2xs tracking-wide text-muted-foreground">Источник</span>
       <div className="mt-1">
         <PillSelect
+          id={sourceId}
           ariaLabel="Источник"
           className="w-full"
           value={String(config.source ?? '')}

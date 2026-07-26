@@ -25,16 +25,14 @@ export function WidgetPeriodPills({ days, onChange, hidden }: WidgetPeriodPillsP
 
   // Presets ride the shared sliding-glider primitive. When a custom range is active the glider
   // hides (value matches no preset) and the «Свой» indicator stands in — same custom-range display
-  // semantics as before. Segments keep a ≥32px mobile hit area (compact desktop look returns at sm),
+  // semantics as before. Segments keep a ≥44px mobile hit area (compact desktop look returns at sm),
   // and this component owns the single public group so its dynamic label stays the sole labelled one.
-  const touch = 'min-h-8 min-w-8 tabular-nums sm:min-h-0 sm:min-w-0';
+  const touch = 'min-h-11 min-w-11 tabular-nums sm:min-h-0 sm:min-w-0';
+  const groupLabel = pagePeriod ? 'Период страницы' : 'Период виджета';
 
   return (
-    <div
-      role="group"
-      aria-label={pagePeriod ? 'Период страницы' : 'Период виджета'}
-      className="mt-2 flex items-center gap-2 print:hidden"
-    >
+    <fieldset className="m-0 mt-2 flex min-w-0 items-center gap-2 border-0 p-0 print:hidden">
+      <legend className="sr-only">{groupLabel}</legend>
       {customRange && (
         <span
           className={`inline-flex ${touch} items-center justify-center rounded-full bg-secondary px-2.5 py-1 text-2xs font-medium text-foreground`}
@@ -51,6 +49,6 @@ export function WidgetPeriodPills({ days, onChange, hidden }: WidgetPeriodPillsP
         onChange={(next) => changePeriod(Number(next) as PeriodDays)}
         options={WIDGET_PERIODS.map((period) => ({ value: String(period.days), content: period.label }))}
       />
-    </div>
+    </fieldset>
   );
 }

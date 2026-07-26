@@ -193,7 +193,7 @@ export function CampaignDialog({
                   className={cn(
                     'flex-1 border-r border-border px-2 py-1.5 text-xs transition-colors last:border-r-0',
                     status === s
-                      ? 'bg-primary/10 font-medium text-primary'
+                      ? 'bg-primary/10 font-medium text-accent-foreground'
                       : 'text-muted-foreground hover:bg-muted/50',
                   )}
                 >

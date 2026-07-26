@@ -155,7 +155,7 @@ export function ChannelsSection() {
                           <span className="font-mono text-xs text-muted-foreground">@{channel.username}</span>
                         )}
                         {isCentral && (
-                          <span className="inline-flex select-none items-center rounded bg-primary/10 px-2 py-0.5 text-2xs font-medium tracking-wide text-primary">
+                          <span className="inline-flex select-none items-center rounded bg-primary/10 px-2 py-0.5 text-2xs font-medium tracking-wide text-accent-foreground">
                             central
                           </span>
                         )}

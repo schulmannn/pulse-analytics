@@ -88,8 +88,7 @@ export type Me = z.infer<typeof MeSchema>;
 
 export const LoginResponseSchema = z
   .object({
-    token: z.string(),
-    expiresAt: z.string().optional().nullable(),
+    ok: z.literal(true),
     user: z
       .object({
         email: z.string().optional().nullable(),

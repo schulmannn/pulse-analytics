@@ -6,13 +6,15 @@
 //   • the house easing cubic-bezier(0.2, 0.7, 0.3, 1) must be var(--ease-standard), never inlined
 //   • UI durations come from the --motion-* ladder. In .ts/.tsx that means the dur-* / ease-house
 //     utilities (index.css) — never a numeric `duration-300` or a bare `ease-out`. Raw ms/s live in
-//     index.css only: the :root ladder, the allow-listed bespoke illustration keyframes, and framer
-//     on the landing. (index.css itself is NOT scanned by the duration/easing-utility rules — it is
+//     index.css only: the :root ladder and the allow-listed bespoke illustration/landing keyframes.
+//     (index.css itself is NOT scanned by the duration/easing-utility rules — it is
 //     where the exceptions legitimately live; the house-easing rule still applies to it.)
 //   • never `transition-all` — it animates layout-triggering properties (width/height/padding) too,
 //     which drops frames on a busy main thread. Enumerate: transition-[width] / transition-colors.
 //   • the type scale is the Tailwind fontSize ladder — no magic text-[Npx]
 //   • no arbitrary Tailwind motion values (duration-[…] / ease-[…] / delay-[…]) — use the scale/tokens
+//   • selected chips painted with bg-primary/10 use text-accent-foreground, whose composite
+//     contrast is gated by contrast-tokens.mjs; text-primary is only for neutral surfaces
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, relative } from 'node:path';
@@ -29,8 +31,8 @@ function* walk(dir) {
   }
 }
 
-// Bespoke surfaces outside the product-UI canon: the public marketing landing is its own framer
-// system with hand-tuned display typography, and Legal is long-form prose. They are exempt from the
+// Bespoke surfaces outside the product-UI canon: the public marketing landing owns a CSS-native
+// motion system with hand-tuned display typography, and Legal is long-form prose. They are exempt from the
 // type-scale rule (restyling them is a separate task, not token governance) — but NOT from the motion
 // rules: the house easing stays canonical everywhere.
 const BESPOKE_TYPE = ['src/pages/Landing.tsx', 'src/pages/Legal.tsx'];
@@ -137,9 +139,19 @@ const rules = [
     hint: 'use the layering scale (z-sticky … z-tooltip) — see DESIGN_TOKENS «Layering»',
     // Arbitrary z-index (z-[999]) side-steps the ladder and reintroduces the tie-fights the scale
     // exists to prevent. Named/numeric utilities (z-modal, z-10) are fine; only bracketed values fail.
-    // The bespoke marketing landing owns its own hero stacking (framer system) — exempt like the type rule.
+    // The bespoke marketing landing owns its own CSS-native hero stacking — exempt like the type rule.
     test: (line) => /\bz-\[/.test(line),
     exempt: (rel) => rel === 'src/pages/Landing.tsx',
+  },
+  {
+    id: 'primary-tint-ink',
+    hint: 'use text-accent-foreground on bg-primary/10 (AA composite); reserve text-primary for neutral surfaces',
+    // The safe hover recipe may keep a base `text-primary` while switching BOTH the hover
+    // background and ink (`hover:bg-primary/10 hover:text-accent-foreground`) on the same line.
+    test: (line) =>
+      line.includes('bg-primary/10') &&
+      line.includes('text-primary') &&
+      !line.includes('text-accent-foreground'),
   },
 ];
 
@@ -163,4 +175,4 @@ if (violations > 0) {
   console.error(`\n${violations} design-token violation(s). Move the value into a token (see frontend/DESIGN_TOKENS.md).`);
   process.exit(1);
 }
-console.log('Design-token motion/type canon clean — no inlined easings, magic sizes or arbitrary motion utils.');
+console.log('Design-token canon clean — no inlined easings, magic sizes, arbitrary motion utils or low-contrast primary tint ink.');

@@ -153,15 +153,13 @@ jobs:
   # самым долгим job'ом, а не суммой, поэтому полный набор не удлиняет frontend-гейт — там остаётся
   # быстрый smoke на 3 файла как ранний сигнал.
   #
-  # Шардинг обязателен: playwright.config форсит workers=1 под CI, а desktop-1440 это 267 тестов.
+  # Шардинг обязателен: playwright.config форсит workers=1 под CI, а desktop-1440 suite постоянно
+  # растёт; не фиксируем число тестов в комментарии, чтобы документация не устаревала.
   # Шарды делят набор по тестам, каждый укладывается в разумный бюджет job'а.
   #
   # fail-fast: false — падение одного шарда НЕ отменяет остальные: за один прогон нужен полный
   # список падений, иначе починка превращается в серию «поправил → нашёл следующее». Сам job при
   # любом падении красный (обычный exit code Playwright), артефакты грузятся per-shard.
-  #
-  # Что гейт НЕ покрывает: тесты, помеченные `test.fixme` (размер мобильных тач-целей — отложенный
-  # долг, см. PROJECT_MEMORY). Они видны в отчёте как skipped и красными не делают.
   e2e:
     runs-on: ubuntu-latest
     strategy:
@@ -188,6 +186,35 @@ jobs:
         uses: actions/upload-artifact@v5
         with:
           name: playwright-e2e-shard${{ matrix.shard }}-${{ github.run_attempt }}
+          path: frontend/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # Compact mandatory phone gate. mobile-nav explicitly measures 360/390/430 widths in one
+  # Chromium project; a11y adds the representative 430px route/dialog scan. This keeps touch,
+  # horizontal-overflow and focus semantics blocking without tripling the full desktop suite.
+  e2e-phone:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Run mandatory 360/390/430 phone and a11y gate
+        run: npm run test:e2e:phone
+      - name: Upload Playwright phone failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: playwright-phone-${{ github.run_attempt }}
           path: frontend/test-results/
           if-no-files-found: ignore
           retention-days: 7

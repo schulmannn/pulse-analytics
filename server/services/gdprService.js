@@ -11,12 +11,12 @@
 // Экспорт СТРИМИТСЯ, а не буферизуется: архивы канала (daily/posts/mentions/velocity/…,
 // до 730 дн × N каналов) целиком в один JS-объект = OOM веб-процесса (Fable-finding). Поэтому
 // каждый архивный массив тянется keyset-страницами фиксированного размера и пишется в res
-// по мере готовности — память ограничена одной страницей, не всем архивом. `workspaces`, `reports`,
-// личные `mention_notify_subscriptions` и перечень `channels` тоже пагинируются keyset'ом: schema
-// разрешает будущие team-workspaces, у reports/подписок нет пер-юзер капа, а channels-цикл не
-// должен опираться на продуктовый кап ради memory-proof. Буферизуются только singleton
-// account/prefs/telegram_session. Размер страницы приходит из config через dep (services читают
-// только внедрённые зависимости, не окружение — check:boundaries).
+// по мере готовности — память ограничена одной страницей, не всем архивом. `workspaces`, memberships,
+// reports, campaigns, AI, audit events, личные `mention_notify_subscriptions` и перечень `channels`
+// тоже пагинируются keyset'ом: у этих наборов нет общего DB cap, а channels-цикл не должен опираться
+// на продуктовый кап ради memory-proof. Буферизуются только singleton account/prefs/integrations.
+// Размер страницы приходит из config через dep (services читают только внедрённые зависимости,
+// не окружение — check:boundaries).
 const EXPORT_PAGE_SIZE_DEFAULT = 1000;
 // Потолок keyset-страницы (defense-in-depth): даже если в сервис прилетит гигантский pageSize
 // (тестовый шов или ошибка вызывающего), одна страница не должна разрушить ограничение памяти.
@@ -90,9 +90,23 @@ const ARCHIVE_SPECS = {
     cols: 'return_id, moment, sum_kopecks, agent_id, agent_name, updated_at',
     keys: [{ col: 'return_id', cast: 'text' }], order: 'return_id ASC',
   },
+  msDaily: {
+    from: 'ms_daily', cols: '*', chanCol: 'channel_id',
+    keys: [{ col: 'day', cast: 'date' }], order: 'day ASC',
+  },
   ymDaily: {
     from: 'ym_daily', cols: '*', chanCol: 'channel_id',
     keys: [{ col: 'day', cast: 'date' }], order: 'day ASC',
+  },
+  rawSnapshots: {
+    from: 'raw_snapshots', cols: '*', chanCol: 'channel_id',
+    // Один канал фиксирован WHERE'ом; day/source/kind вместе остаются уникальным keyset'ом.
+    keys: [
+      { col: 'day', cast: 'date' },
+      { col: 'source', cast: 'text' },
+      { col: 'kind', cast: 'text' },
+    ],
+    order: 'day ASC, source ASC, kind ASC',
   },
   igDaily: {
     from: 'ig_daily', cols: '*', chanCol: 'channel_id',
@@ -224,9 +238,10 @@ function createGdprService({ pool, enabled, transaction, exportPageSize }) {
   const defaultPageSize = clampPageSize(exportPageSize, EXPORT_PAGE_SIZE_DEFAULT);
   /* Полное стирание аккаунта (GDPR erasure) — один DELETE FROM users: реляционную полноту даёт
      схема. Каскадом умирают user_prefs / tg_sessions / email_tokens / reports / workspaces
-     (+members) / channels(owner_uid), а от channels — все архивы (channel_daily / monthly /
-     posts / mentions / channel_mention_settings / velocity / ig_accounts / ig_daily / ig_media_daily / api_keys /
-     annotations / snapshots). audit_events.uid и chart_annotations.created_by → SET NULL
+     (+members/campaigns/posts) / ai_chats / ai_usage_daily / channels(owner_uid), а от channels —
+     все архивы и подключения (channel_daily / monthly / posts / mentions / velocity / raw_snapshots /
+     ig_* / ms_* / ym_* / api_keys / annotations / snapshots). audit_events.uid и
+     chart_annotations.created_by → SET NULL
      (журнал остаётся, но анонимный). Разделяемые external_sources НЕ трогаются — это identity
      публичного канала, не персональные данные.
      Pre-null: канал ДРУГОГО владельца, живущий в воркспейсе стираемого юзера (инвариант «канал
@@ -236,14 +251,30 @@ function createGdprService({ pool, enabled, transaction, exportPageSize }) {
   async function deleteUserAccount(uid) {
     if (!enabled || uid == null) return false;
     return transaction(async (client) => {
+      // У foreign-owned канала, ошибочно припаркованного в dying workspace, может быть
+      // campaign_posts composite-FK (channel_id, workspace_id) с default ON UPDATE NO ACTION.
+      // Следующий pre-null тогда заблокирован. Эти membership-строки всё равно исчезнут вместе с
+      // workspace/campaign через несколько запросов; удаляем узко только ссылки на такие каналы.
+      await client.query(
+        `DELETE FROM campaign_posts cp
+          USING channels c
+          WHERE cp.channel_id = c.id
+            AND cp.workspace_id = c.workspace_id
+            AND c.workspace_id IN (SELECT id FROM workspaces WHERE owner_uid = $1)
+            AND c.owner_uid IS DISTINCT FROM $1`,
+        [uid]);
       await client.query(
         `UPDATE channels SET workspace_id = NULL
           WHERE workspace_id IN (SELECT id FROM workspaces WHERE owner_uid = $1)
             AND owner_uid IS DISTINCT FROM $1`, [uid]);
-      // SET NULL анонимизирует только uid: исторические metadata несут прямые идентификаторы
-      // (tg.session.connected — личный @username, ig_oauth_connected, channel.created) — без
-      // зачистки «анонимный журнал» ложь (скептик-панель, erasure-completeness).
-      await client.query(`UPDATE audit_events SET metadata = '{}'::jsonb WHERE uid = $1`, [uid]);
+      // FK SET NULL анонимизирует только uid. Исторические metadata несут прямые идентификаторы,
+      // ip_hash — стабильный HMAC и request_id — коррелируемый идентификатор запроса; после erasure
+      // журнал вправду анонимный только если зачистить все три до удаления пользователя.
+      await client.query(
+        `UPDATE audit_events
+            SET metadata = '{}'::jsonb, ip_hash = NULL, request_id = NULL
+          WHERE uid = $1`,
+        [uid]);
       const { rowCount } = await client.query('DELETE FROM users WHERE id = $1', [uid]);
       // Осиротевшие external_sources: для приватного канала username/title (часто имя человека)
       // не «shared identity» — если после каскада на источник не ссылается НИКТО, стираем и его.
@@ -252,6 +283,8 @@ function createGdprService({ pool, enabled, transaction, exportPageSize }) {
         `DELETE FROM external_sources s
           WHERE NOT EXISTS (SELECT 1 FROM channels        t WHERE t.source_id = s.id)
             AND NOT EXISTS (SELECT 1 FROM ig_accounts     t WHERE t.source_id = s.id)
+            AND NOT EXISTS (SELECT 1 FROM ms_accounts     t WHERE t.source_id = s.id)
+            AND NOT EXISTS (SELECT 1 FROM ym_accounts     t WHERE t.source_id = s.id)
             AND NOT EXISTS (SELECT 1 FROM channel_daily   t WHERE t.source_id = s.id)
             AND NOT EXISTS (SELECT 1 FROM channel_monthly t WHERE t.source_id = s.id)
             AND NOT EXISTS (SELECT 1 FROM posts           t WHERE t.source_id = s.id)
@@ -351,10 +384,180 @@ function createGdprService({ pool, enabled, transaction, exportPageSize }) {
     await w.write(']');
   }
 
+  // Сообщения принадлежат юзеру через ai_chats, поэтому ownership проверяется JOIN'ом, а не
+  // доверенным chat_id. Глобальный message.id — уникальный детерминированный keyset.
+  async function streamAiMessages(w, q, uid, PAGE) {
+    await w.write('[');
+    let cursor = null;
+    let first = true;
+    for (;;) {
+      if (w.closed) throw new ExportAborted();
+      const sql = `SELECT m.id, m.chat_id, m.role, m.content, m.tool_trace, m.model,
+                          m.input_tokens, m.output_tokens, m.error, m.created_at
+                     FROM ai_chat_messages m
+                     JOIN ai_chats c ON c.id = m.chat_id
+                    WHERE c.user_id=$1`
+        + (cursor != null ? ' AND m.id > $2' : '')
+        + ` ORDER BY m.id ASC LIMIT $${cursor != null ? 3 : 2}`;
+      const params = cursor != null ? [uid, cursor, PAGE] : [uid, PAGE];
+      const { rows } = await q(sql, params);
+      if (rows.length === 0) break;
+      let buf = '';
+      for (const row of rows) {
+        buf += (first ? '' : ',') + JSON.stringify(row);
+        first = false;
+      }
+      await w.write(buf);
+      if (rows.length < PAGE) break;
+      cursor = rows[rows.length - 1].id;
+    }
+    await w.write(']');
+  }
+
+  // ai_usage_daily не имеет surrogate id: (user_id, day) — PK, а фиксированный user_id оставляет
+  // уникальный DATE-keyset. day::text сохраняет курсор без timezone-преобразования Node.
+  async function streamAiUsageDaily(w, q, uid, PAGE) {
+    await w.write('[');
+    let cursor = null;
+    let first = true;
+    for (;;) {
+      if (w.closed) throw new ExportAborted();
+      const sql = `SELECT day, messages, input_tokens, output_tokens, day::text AS __cursor
+                     FROM ai_usage_daily WHERE user_id=$1`
+        + (cursor != null ? ' AND day > $2::date' : '')
+        + ` ORDER BY day ASC LIMIT $${cursor != null ? 3 : 2}`;
+      const params = cursor != null ? [uid, cursor, PAGE] : [uid, PAGE];
+      const { rows } = await q(sql, params);
+      if (rows.length === 0) break;
+      let buf = '';
+      for (const row of rows) {
+        const { __cursor, ...portable } = row;
+        buf += (first ? '' : ',') + JSON.stringify(portable);
+        first = false;
+      }
+      await w.write(buf);
+      if (rows.length < PAGE) break;
+      cursor = rows[rows.length - 1].__cursor;
+    }
+    await w.write(']');
+  }
+
+  // Только СОБСТВЕННЫЕ membership-строки пользователя. Нельзя вкладывать весь roster в owned
+  // workspaces: uid/roles коллег — персональные данные коллег. kind нужен для переноса семантики
+  // personal/team; owner/name чужого workspace намеренно не раскрываются.
+  async function streamWorkspaceMemberships(w, q, uid, PAGE) {
+    await w.write('[');
+    let cursor = null;
+    let first = true;
+    for (;;) {
+      if (w.closed) throw new ExportAborted();
+      const sql = `SELECT m.workspace_id, m.role, m.created_at, w.kind AS workspace_kind
+                     FROM workspace_members m
+                     JOIN workspaces w ON w.id = m.workspace_id
+                    WHERE m.uid=$1`
+        + (cursor != null ? ' AND m.workspace_id > $2' : '')
+        + ` ORDER BY m.workspace_id ASC LIMIT $${cursor != null ? 3 : 2}`;
+      const params = cursor != null ? [uid, cursor, PAGE] : [uid, PAGE];
+      const { rows } = await q(sql, params);
+      if (rows.length === 0) break;
+      let buf = '';
+      for (const row of rows) {
+        buf += (first ? '' : ',') + JSON.stringify(row);
+        first = false;
+      }
+      await w.write(buf);
+      if (rows.length < PAGE) break;
+      cursor = rows[rows.length - 1].workspace_id;
+    }
+    await w.write(']');
+  }
+
+  // Кампания переносима только когда пользователь сам её создал И всё ещё читает workspace.
+  // Это не даёт старому created_by превратиться в обход текущей tenant-границы после исключения.
+  async function streamOwnedAccessibleCampaigns(w, q, uid, PAGE) {
+    await w.write('[');
+    let cursor = null;
+    let first = true;
+    for (;;) {
+      if (w.closed) throw new ExportAborted();
+      const sql = `SELECT c.id, c.workspace_id, c.name, c.description, c.color, c.status,
+                          c.start_date, c.end_date, c.created_at, c.updated_at
+                     FROM campaigns c
+                     JOIN workspaces w ON w.id = c.workspace_id
+                    WHERE c.created_by=$1
+                      AND (w.owner_uid=$1 OR EXISTS (
+                        SELECT 1 FROM workspace_members m
+                         WHERE m.workspace_id=c.workspace_id AND m.uid=$1
+                      ))`
+        + (cursor != null ? ' AND c.id > $2' : '')
+        + ` ORDER BY c.id ASC LIMIT $${cursor != null ? 3 : 2}`;
+      const params = cursor != null ? [uid, cursor, PAGE] : [uid, PAGE];
+      const { rows } = await q(sql, params);
+      if (rows.length === 0) break;
+      let buf = '';
+      for (const row of rows) {
+        buf += (first ? '' : ',') + JSON.stringify(row);
+        first = false;
+      }
+      await w.write(buf);
+      if (rows.length < PAGE) break;
+      cursor = rows[rows.length - 1].id;
+    }
+    await w.write(']');
+  }
+
+  // Только membership-строки, которые добавил сам пользователь, и только пока у него есть текущий
+  // доступ к workspace кампании. Caption/published_at/media_type могут быть контентом коллег или
+  // shared source — safe projection оставляет лишь identity собственной операции + added_at.
+  // Составной PK даёт bounded keyset.
+  async function streamOwnedAccessibleCampaignPosts(w, q, uid, PAGE) {
+    await w.write('[');
+    let cursor = null;
+    let first = true;
+    for (;;) {
+      if (w.closed) throw new ExportAborted();
+      const cursorAliases = `, cp.campaign_id::text AS __c0, cp.network::text AS __c1,
+                                cp.channel_id::text AS __c2, cp.post_ref::text AS __c3`;
+      const sql = `SELECT cp.campaign_id, cp.network, cp.channel_id, cp.post_ref, cp.added_at${cursorAliases}
+                     FROM campaign_posts cp
+                     JOIN campaigns c ON c.id = cp.campaign_id
+                     JOIN workspaces w ON w.id = c.workspace_id
+                    WHERE cp.added_by=$1
+                      AND (w.owner_uid=$1 OR EXISTS (
+                        SELECT 1 FROM workspace_members m
+                         WHERE m.workspace_id=c.workspace_id AND m.uid=$1
+                      ))`
+        + (cursor != null
+          ? ` AND (cp.campaign_id, cp.network, cp.channel_id, cp.post_ref)
+                    > ($2::integer, $3::text, $4::integer, $5::text)`
+          : '')
+        + ` ORDER BY cp.campaign_id ASC, cp.network ASC, cp.channel_id ASC, cp.post_ref ASC
+            LIMIT $${cursor != null ? 6 : 2}`;
+      const params = cursor != null ? [uid, ...cursor, PAGE] : [uid, PAGE];
+      const { rows } = await q(sql, params);
+      if (rows.length === 0) break;
+      let buf = '';
+      for (const row of rows) {
+        const portable = {};
+        for (const key of Object.keys(row)) {
+          if (!key.startsWith('__c')) portable[key] = row[key];
+        }
+        buf += (first ? '' : ',') + JSON.stringify(portable);
+        first = false;
+      }
+      await w.write(buf);
+      if (rows.length < PAGE) break;
+      const last = rows[rows.length - 1];
+      cursor = [last.__c0, last.__c1, last.__c2, last.__c3];
+    }
+    await w.write(']');
+  }
+
   /* Экспорт персональных данных (GDPR portability) — один JSON-файл, СТРИМОМ (см. шапку модуля).
      Учётные данные не экспортируются НИКОГДА: pass_hash, token_version, tg_sessions.session_enc,
-     ig_accounts.access_token_enc, ym_accounts.access_token_enc, tg_notify_bindings.link_token_hash
-     и key_hash не попадают в SELECT'ы. Каналы — только owner_uid=uid:
+     ig_accounts.access_token_enc, ms_accounts.access_token_enc, ym_accounts.access_token_enc,
+     tg_notify_bindings.link_token_hash и api_keys.key_hash не попадают в SELECT'ы. Каналы —
+     только owner_uid=uid:
      шаренные воркспейс-каналы принадлежат другому владельцу (data minimization).
      Один выделенный клиент = ровно один коннект (как раньше): фан-аут через pool.query душил бы
      весь API на время экспорта. Клиент освобождается в finally — на успехе, ошибке И обрыве.
@@ -381,7 +584,9 @@ function createGdprService({ pool, enabled, transaction, exportPageSize }) {
 
       const prefsRow = (await q(`SELECT prefs, updated_at FROM user_prefs WHERE uid=$1`, [uid])).rows[0] || null;
       const tgSession = (await q(
-        `SELECT tg_user_id, username, connected_at, updated_at FROM tg_sessions WHERE uid=$1`, [uid])).rows[0] || null;
+        `SELECT tg_user_id, username, connected_at, updated_at, connection_state,
+                last_attempt_at, last_success_at, last_error_code, last_error_at
+           FROM tg_sessions WHERE uid=$1`, [uid])).rows[0] || null;
       // Привязка бота уведомлений (035) — singleton по uid, как tg-сессия: chat_id/tg_user_id/
       // username это персональные данные, и стирание их каскадит, поэтому экспорт обязан их
       // показывать. link_token_hash (и его срок) — bearer-хеш привязки, credential: НЕ экспортируем.
@@ -400,18 +605,35 @@ function createGdprService({ pool, enabled, transaction, exportPageSize }) {
       await w.write(`"account":${JSON.stringify(account)},`);
       await w.write(`"prefs":${JSON.stringify(prefsRow ? prefsRow.prefs : null)},`);
       // Partial unique ограничивает только personal workspace; будущих team-workspaces у владельца
-      // schema разрешает несколько, поэтому весь набор тоже page'им. `members` остаётся прежним
-      // per-workspace json_agg: он ограничен общим числом пользователей, а не числом workspace.
+      // schema разрешает несколько, поэтому весь набор тоже page'им. Чужой roster сюда не входит:
+      // собственные membership-строки (включая shared workspaces) идут отдельным массивом ниже.
       await w.write('"workspaces":');
       await streamOwnedById(w, q, 'workspaces w', 'w.owner_uid',
-        `w.id, w.name, w.created_at,
-         (SELECT json_agg(json_build_object('uid', m.uid, 'role', m.role) ORDER BY m.uid)
-            FROM workspace_members m WHERE m.workspace_id = w.id) AS members`, uid, PAGE);
+        'w.id, w.name, w.kind, w.created_at', uid, PAGE);
+      await w.write(',"workspace_memberships":');
+      await streamWorkspaceMemberships(w, q, uid, PAGE);
       await w.write(',');
       // reports — id-keyset'ом (нет пер-юзер капа); форма/порядок строк прежние.
       await w.write(`"reports":`);
       await streamOwnedById(w, q, 'reports', 'uid',
         'id, name, config, schedule, created_at, updated_at, last_sent_at', uid, PAGE);
+      await w.write(',"campaigns":');
+      await streamOwnedAccessibleCampaigns(w, q, uid, PAGE);
+      await w.write(',"campaign_posts":');
+      await streamOwnedAccessibleCampaignPosts(w, q, uid, PAGE);
+      await w.write(',"audit_events":');
+      await streamOwnedById(w, q, 'audit_events', 'uid',
+        'id, channel_id, action, created_at', uid, PAGE);
+      await w.write(',');
+      // Личные AI-диалоги — отдельные нормализованные массивы: сохраняют chat_id-связь и легко
+      // переносятся, но ни один массив не собирается целиком в памяти.
+      await w.write('"ai_chats":');
+      await streamOwnedById(w, q, 'ai_chats', 'user_id',
+        'id, title, created_at, updated_at', uid, PAGE);
+      await w.write(',"ai_chat_messages":');
+      await streamAiMessages(w, q, uid, PAGE);
+      await w.write(',"ai_usage_daily":');
+      await streamAiUsageDaily(w, q, uid, PAGE);
       await w.write(',');
       // Присутствие подключения — да; сама сессия — никогда (это credential, не данные).
       await w.write(`"telegram_session":${JSON.stringify(tgSession)},`);
@@ -429,7 +651,7 @@ function createGdprService({ pool, enabled, transaction, exportPageSize }) {
       let firstChannel = true;
       for (;;) {
         if (w.closed) throw new ExportAborted();
-        const chSql = `SELECT id, username, title, source, tg_channel_id, created_at
+        const chSql = `SELECT id, workspace_id, username, title, status, source, tg_channel_id, created_at
                 FROM channels WHERE owner_uid=$1`
           + (chCursor != null ? ' AND id > $2' : '')
           + ` ORDER BY id ASC LIMIT $${chCursor != null ? 3 : 2}`;
@@ -440,8 +662,9 @@ function createGdprService({ pool, enabled, transaction, exportPageSize }) {
           if (!firstChannel) await w.write(',');
           firstChannel = false;
           await w.write(objectPrefix({
-            id: ch.id, username: ch.username, title: ch.title,
-            source: ch.source, tg_channel_id: ch.tg_channel_id, created_at: ch.created_at,
+            id: ch.id, workspace_id: ch.workspace_id, username: ch.username, title: ch.title,
+            status: ch.status, source: ch.source,
+            tg_channel_id: ch.tg_channel_id, created_at: ch.created_at,
           }));
 
           await w.write('"archive":{');
@@ -451,12 +674,24 @@ function createGdprService({ pool, enabled, transaction, exportPageSize }) {
           await w.write(',"mentions":'); await streamArchive(w, client, ARCHIVE_SPECS.mentions, ch.id, PAGE);
           await w.write(',"velocity":'); await streamArchive(w, client, ARCHIVE_SPECS.velocity, ch.id, PAGE);
           await w.write(',"annotations":'); await streamArchive(w, client, ARCHIVE_SPECS.annotations, ch.id, PAGE);
+          await w.write(',"ms_daily":'); await streamArchive(w, client, ARCHIVE_SPECS.msDaily, ch.id, PAGE);
           await w.write(',"ms_orders":'); await streamArchive(w, client, ARCHIVE_SPECS.msOrders, ch.id, PAGE);
           await w.write(',"ms_returns":'); await streamArchive(w, client, ARCHIVE_SPECS.msReturns, ch.id, PAGE);
           // Архив Метрики живёт после disconnect ym_accounts, поэтому входит в общий архив
           // независимо от текущего наличия singleton-подключения ниже.
           await w.write(',"ym_daily":'); await streamArchive(w, client, ARCHIVE_SPECS.ymDaily, ch.id, PAGE);
+          // Сырые provider-снимки — самостоятельный переносимый архив, а не часть текущего
+          // integration singleton. Скоуп только по owner-only channel_id.
+          await w.write(',"raw_snapshots":'); await streamArchive(w, client, ARCHIVE_SPECS.rawSnapshots, ch.id, PAGE);
           await w.write('}'); // /archive
+
+          // Текущий collector snapshot содержит тяжёлую data: URL фотографии канала. Фото уже
+          // публичная identity и не нужно для переносимости аналитики; вырезаем только этот ключ,
+          // остальные snapshot-поля сохраняем.
+          const snapshot = (await q(
+            `SELECT data - 'channel_photo' AS data, updated_at
+               FROM channel_snapshots WHERE channel_id=$1`, [ch.id])).rows[0] || null;
+          await w.write(`,"snapshot":${JSON.stringify(snapshot)}`);
 
           const mentionSettings = (await q(
             `SELECT include_terms, exclude_terms, exclude_sources, match_mode, updated_at
@@ -480,11 +715,41 @@ function createGdprService({ pool, enabled, transaction, exportPageSize }) {
                FROM ym_accounts WHERE channel_id=$1`, [ch.id])).rows[0] || null;
           await w.write(`,"yandex_metrika":${JSON.stringify(ym)}`);
 
+          // Safe metadata подключения МойСклада; access_token_enc не выбран. Архив ms_daily
+          // находится выше независимо от текущего подключения и переживает disconnect.
+          const ms = (await q(
+            `SELECT ms_account_id, org_name, connected_at, updated_at
+               FROM ms_accounts WHERE channel_id=$1`, [ch.id])).rows[0] || null;
+          await w.write(`,"moysklad":${JSON.stringify(ms)}`);
+
+          // API-key metadata переносимо, но key_hash — credential и не выбирается никогда.
+          await w.write(',"api_keys":');
+          await streamOwnedById(w, q, 'api_keys', 'channel_id',
+            'id, key_prefix, label, created_at, last_used_at, revoked_at', ch.id, PAGE);
+
           const ig = (await q(`SELECT ig_user_id, username, scopes, token_expires_at, connected_at, updated_at
                      FROM ig_accounts WHERE channel_id=$1`, [ch.id])).rows[0] || null;
-          if (ig) {
+          // Disconnect удаляет только ig_accounts; historical ig_daily/ig_media_daily остаются
+          // привязаны к каналу. Поэтому наличие архива проверяется отдельно от integration identity.
+          let hasInstagramArchive = Boolean(ig);
+          if (!hasInstagramArchive) {
+            hasInstagramArchive = Boolean((await q(
+              `SELECT EXISTS (
+                 SELECT 1 FROM ig_daily WHERE channel_id=$1
+                 UNION ALL
+                 SELECT 1 FROM ig_media_daily WHERE channel_id=$1
+               ) AS has_instagram_archive`, [ch.id])).rows[0]?.has_instagram_archive);
+          }
+          if (hasInstagramArchive) {
             await w.write(',"instagram":');
-            await w.write(objectPrefix(ig));
+            await w.write(objectPrefix(ig || {
+              ig_user_id: null,
+              username: null,
+              scopes: null,
+              token_expires_at: null,
+              connected_at: null,
+              updated_at: null,
+            }));
             await w.write('"daily":'); await streamArchive(w, client, ARCHIVE_SPECS.igDaily, ch.id, PAGE);
             await w.write(',"media_daily":'); await streamArchive(w, client, ARCHIVE_SPECS.igMedia, ch.id, PAGE);
             await w.write('}'); // /instagram

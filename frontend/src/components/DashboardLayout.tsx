@@ -130,10 +130,11 @@ function PlatformNav() {
             <button
               key={p.key}
               type="button"
+              data-mobile-touch-target=""
               onClick={() => navigate(p.home)}
               aria-current={active ? 'true' : undefined}
               className={cn(
-                'relative flex items-center justify-center gap-2 px-2 py-2 text-sm transition-colors',
+                'relative flex min-h-11 items-center justify-center gap-2 px-2 py-2 text-sm transition-colors',
                 active ? 'bg-muted/60 font-medium text-foreground' : 'bg-background text-muted-foreground hover:text-foreground',
               )}
             >

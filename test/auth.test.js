@@ -24,6 +24,8 @@ test('signed session preserves token version + exp and rejects tampering', () =>
     role: 'user',
     tokenVersion: 7,
     exp,
+    maxExp: exp,
+    legacyAbsolute: false,
   });
   assert.strictEqual(auth.parseToken(token.slice(0, -1) + 'x'), null);
 });
@@ -47,6 +49,56 @@ test('expired session is rejected', () => {
   const auth = createAuth({ secret: 'test-secret' });
   const token = auth.signSession({ uid: 1, role: 'user', exp: Date.now() - 1, tokenVersion: 0 });
   assert.strictEqual(auth.parseToken(token), null);
+});
+
+test('absolute session deadline is signed, enforced, and legacy tokens stay bounded by exp', () => {
+  const secret = 'test-secret';
+  const auth = createAuth({ secret });
+  const now = Date.now();
+  const maxExp = now + 120_000;
+  const token = auth.signSession({
+    uid: 1,
+    role: 'user',
+    exp: now + 60_000,
+    maxExp,
+    tokenVersion: 0,
+  });
+  assert.deepStrictEqual(auth.parseToken(token), {
+    uid: 1,
+    role: 'user',
+    tokenVersion: 0,
+    exp: now + 60_000,
+    maxExp,
+    legacyAbsolute: false,
+  });
+  assert.strictEqual(
+    auth.parseToken(auth.signSession({
+      uid: 1,
+      role: 'user',
+      exp: maxExp + 1,
+      maxExp,
+    })),
+    null,
+    'idle exp cannot outlive the absolute deadline',
+  );
+
+  // Pre-rollout signed payload: accepted until its original exp, but identified
+  // so the one-time bridge can mint exactly one bounded cookie window.
+  const body = Buffer.from(JSON.stringify({
+    uid: 1,
+    role: 'user',
+    exp: now + 60_000,
+    ver: 0,
+  })).toString('base64url');
+  const sig = crypto.createHmac('sha256', secret).update(body).digest('base64url');
+  assert.deepStrictEqual(auth.parseToken(`${body}.${sig}`), {
+    uid: 1,
+    role: 'user',
+    tokenVersion: 0,
+    exp: now + 60_000,
+    maxExp: now + 60_000,
+    legacyAbsolute: true,
+  });
 });
 
 // The shared team-password / break-glass login is gone: a session without a
@@ -99,7 +151,7 @@ test('verifyPassword is constant-cost / falsey against the anti-enumeration DUMM
   assert.strictEqual(await verifyPassword('anything', DUMMY_HASH), false);
 });
 
-// ── Cookie-транспорт сессии (фаза 1): чистые хелперы ─────────────────────────
+// ── Cookie-only transport: pure helpers ──────────────────────────────────────
 
 test('readCookie достаёт pulse_session из заголовка Cookie и терпит мусор', () => {
   assert.strictEqual(readCookie(`a=1; ${SESSION_COOKIE}=tok.sig; b=2`, SESSION_COOKIE), 'tok.sig');
