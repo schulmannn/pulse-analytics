@@ -68,7 +68,22 @@ function lazyFrom<M extends Record<K, ComponentType<any>>, K extends keyof M & s
   return lazy(lazyWithReload(() => load().then((m) => ({ default: m[name] }))));
 }
 
+/**
+ * Корневой boundary — НАД всеми маршрутами. Раньше он стоял только внутри protected-оболочки, и
+ * падение динамического импорта на публичном маршруте (/login, /register, /privacy) после
+ * единственной попытки перезагрузки из lazyWithReload давало белый экран. Вложенный boundary в
+ * ProtectedLayout остаётся на месте: он ловит ошибки внутри оболочки и рисует свой fallback, а сюда
+ * всплывает только то, что он поймать не смог (в т.ч. публичные маршруты).
+ */
 export default function App() {
+  return (
+    <ErrorBoundary>
+      <AppRoutes />
+    </ErrorBoundary>
+  );
+}
+
+function AppRoutes() {
   return (
     <Routes>
       <Route path="login" element={<AuthSuspense><LoginPage /></AuthSuspense>} />

@@ -2,6 +2,15 @@
 <html lang="ru">
   <head>
     <meta charset="UTF-8" />
+    <!-- Тема применяется ДО первого кадра (иначе тёмная тема мигает светлым на первом paint).
+         ВНЕШНИЙ файл, а не inline: у SPA строгий CSP `script-src 'self'` без nonce и без
+         'unsafe-inline' (server/lib/securityHeaders.js) — инлайновый скрипт был бы заблокирован.
+         Классический <script> (без type="module"/defer) — блокирующий, значит выполняется до paint.
+         МЕСТО ВАЖНО: сразу за <meta charset>. Vite в dev вставляет свою преамбулу ВЫШЕ charset и
+         отдаёт index.html без charset в Content-Type, поэтому поздний <meta charset> заставляет
+         Chromium перезапустить разбор документа — классический скрипт, стоящий ниже по <head>,
+         при этом молча не выполняется (проверено: тема не применялась). -->
+    <script src="/theme-boot.js"></script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
