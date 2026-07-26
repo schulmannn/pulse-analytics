@@ -92,6 +92,12 @@
   --color-chart-5: hsl(var(--chart-5));
   --color-chart-6: hsl(var(--chart-6));
 
+  --color-chart-seq-1: hsl(var(--chart-seq-1));
+  --color-chart-seq-2: hsl(var(--chart-seq-2));
+  --color-chart-seq-3: hsl(var(--chart-seq-3));
+  --color-chart-seq-4: hsl(var(--chart-seq-4));
+  --color-chart-seq-5: hsl(var(--chart-seq-5));
+
   --color-chart-role-primary: hsl(var(--chart-role-primary));
   --color-chart-role-comparison: hsl(var(--chart-role-comparison));
   --color-chart-role-positive: hsl(var(--chart-role-positive));
@@ -1594,6 +1600,18 @@
     --chart-5: 328 30% 50%;   /* muted dusty rose */
     --chart-6: 202 46% 47%;   /* muted sky (2nd blue) */
 
+    /* ПОСЛЕДОВАТЕЛЬНАЯ шкала одного тона (brand blue) — для состава ЦЕЛОГО, где сегменты
+       упорядочены по величине (RadialShare: устройства/пол/возраст). Категориальная палитра выше
+       кодирует «разные и несравнимые», а здесь порядок есть, и разные тона его прячут: одинаковая
+       заметность у 60% и у 3% читается как «примерно поровну». Шаг светлоты ровный, каждая
+       ступень держит non-text 3:1 к поверхности карточки (scripts/contrast-tokens). Различимость
+       соседних ступеней не единственный сигнал: у каждого сегмента есть подпись и доля в легенде. */
+    --chart-seq-1: 218 54% 30%;
+    --chart-seq-2: 218 50% 38%;
+    --chart-seq-3: 217 46% 46%;
+    --chart-seq-4: 216 42% 54%;
+    --chart-seq-5: 215 38% 61%;
+
     /* Accent-RESOLVED chart tokens — what a widget accent actually paints with. ChartWidget
        scopes --brand-iris to one of these (feeding --chart-role-primary, the tinted surface
        and the hero number), so an accented card takes its whole colour from ONE slot. Light
@@ -1693,6 +1711,14 @@
     --chart-4: 22 56% 64%;    /* muted terracotta */
     --chart-5: 327 38% 72%;   /* muted dusty rose */
     --chart-6: 202 50% 68%;   /* muted sky */
+
+    /* Та же последовательная шкала для тёмной темы — идёт сверху вниз от светлого, чтобы самый
+       крупный сегмент был самым заметным на тёмном холсте (в светлой теме наоборот). */
+    --chart-seq-1: 219 54% 76%;
+    --chart-seq-2: 219 48% 67%;
+    --chart-seq-3: 217 42% 58%;
+    --chart-seq-4: 215 38% 49%;
+    --chart-seq-5: 213 34% 41%;
 
     /* Widget-accent pastels (steep-measured): very light, low-chroma steps of the hues above.
        ONLY for the single-accent register — an accented card's surface, line, dot and hero
