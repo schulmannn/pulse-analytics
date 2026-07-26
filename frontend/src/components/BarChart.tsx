@@ -142,7 +142,7 @@ export function BarChart({
     window.addEventListener('blur', clear);
     return () => {
       window.removeEventListener('scroll', clear, true);
-      window.removeEventListener('blur-sm', clear);
+      window.removeEventListener('blur', clear);
     };
   }, [hasHover]);
 

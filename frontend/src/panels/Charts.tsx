@@ -398,7 +398,7 @@ function HeatmapSurface({
     window.addEventListener('blur', clear);
     return () => {
       window.removeEventListener('scroll', clear, true);
-      window.removeEventListener('blur-sm', clear);
+      window.removeEventListener('blur', clear);
     };
   }, [hasTip]);
   // Видимые часы (сжатый диапазон из HeatmapBody). Подпись — «6:00», не голое «6»: на сжатом

@@ -207,7 +207,7 @@ export function MentionRulesDialog({
 
           {ownSource && (
             <div className="flex items-center gap-2 border-t border-border pt-4 text-xs text-muted-foreground">
-              <span className="size-1.5 rounded-full bg-success" aria-hidden="true" />
+              <span className="size-1.5 rounded-full bg-verdant" aria-hidden="true" />
               Собственный канал {ownSource} исключается автоматически.
             </div>
           )}
