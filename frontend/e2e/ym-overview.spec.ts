@@ -403,6 +403,9 @@ test('Обзор Метрики: карточки метрик, источник
   await expect(page.getByText('Переходы из поисковых систем')).toBeVisible();
   await expect(page.getByText('Прямые заходы')).toBeVisible();
   await expect(page.getByText('Внутренние переходы')).toHaveCount(0);
+  // Хвост компакта: знаменатель (145) остался — он и есть честная часть строки; изменилась
+  // только форма (строка «Прочее» с собственной дорожкой вместо текста под списком).
+  await expect(page.getByText('Прочее · 1', { exact: true }).first()).toBeVisible();
   await expect(page.getByText(/Ещё 4 визитов из 145/)).toBeVisible();
 
   // Карточки-разрезы грузятся ПРОГРЕССИВНО (deferData): офскрин-карточка не шлёт свой запрос,
@@ -515,8 +518,13 @@ test('Обзор Метрики: карточки метрик, источник
   await expect(ageHeading).toBeVisible();
   await expect(page.getByText('25–34 года', { exact: true })).toBeVisible();
   await expect(page.getByText('age_25_34')).toHaveCount(0); // локализуем по id, не сырое имя
-  await expect(page.getByText('age_under_18')).toHaveCount(0); // пятая строка — в хвосте
-  await expect(page.getByText(/Ещё 15 визитов из 500/)).toBeVisible();
+  await expect(page.getByText('age_under_18')).toHaveCount(0); // локализуем по id, не сырое имя
+  // Компакт возраста — полукольцо: оно показывает ВСЕ группы (хвоста нет) плюс нераспознанный
+  // остаток, который Метрика скрывает при малой выборке. Прежний ассерт про свёрнутый хвост
+  // («Ещё 15 визитов из 500») к этой форме неприменим — сама доля 82% проверяется строкой ниже.
+  const ageCard = ageHeading.locator('xpath=ancestor::section[1]');
+  await expect(ageCard.getByText('До 18 лет', { exact: true })).toBeVisible();
+  await expect(ageCard.getByText('Не определено', { exact: true })).toBeVisible();
   await expect(
     page.getByText('Оценка Метрики (Crypta) · определено для 82% визитов. Часть данных скрыта при малой выборке.'),
   ).toBeVisible();

@@ -18,6 +18,8 @@ import {
   type YmBreakdownParams,
 } from '@/api/queries';
 import { ChartExpandedContext } from '@/components/ExpandableChart';
+import { RadialShare } from '@/components/RadialShare';
+import { ShareRows } from '@/components/ShareRows';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { TableSkeleton } from '@/components/ui/dataSkeleton';
@@ -125,51 +127,49 @@ export function YmBreakdownRows({
   tailWord,
   unitTotal = null,
   footnote = null,
+  radial = false,
 }: {
   rows: Array<{ key: string; label: string; value: number; note: string | null }>;
   /** Слово хвоста в родительном падеже множественного («визитов», «достижений», «просмотров»). */
   tailWord: string;
-  /** Итог ПОЛНОГО отчёта для «Ещё N … из M.»; null — хвост без «из M». */
+  /** Итог ПОЛНОГО отчёта — знаменатель долей. null → падаем на сумму показанных строк. */
   unitTotal?: number | null;
   /** Приглушённая сноска под списком (усечение целей, визиты без метки). */
   footnote?: string | null;
+  /** Компакт — полукольцо вместо списка (фиксированный малый набор категорий). */
+  radial?: boolean;
 }) {
   const expanded = useContext(ChartExpandedContext);
-  // Сервер уже сортирует по убыванию; пересортировка здесь — страховка стабильности вида.
-  const ranked = [...rows].sort((a, b) => b.value - a.value || a.key.localeCompare(b.key));
-  const top = expanded ? ranked : ranked.slice(0, 4);
-  const tail = expanded ? [] : ranked.slice(4);
-  const restValue = tail.reduce((acc, row) => acc + row.value, 0);
-  const max = Math.max(1, ...top.map((row) => Math.max(0, row.value)));
-  return (
-    <div className={expanded ? 'space-y-2 pt-1' : 'space-y-1.5'}>
-      {top.map((r) => (
-        <div key={r.key}>
-          <div className="flex items-baseline justify-between gap-3 text-xs">
-            <span className="min-w-0 truncate text-foreground">{r.label}</span>
-            <span className="shrink-0 tabular-nums text-muted-foreground">
-              <span className="font-medium text-foreground">{fmt.num(r.value)}</span>
-              {r.note != null && <>{' · '}{r.note}</>}
-            </span>
-          </div>
-          <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted">
-            <div
-              className="h-full rounded-full"
-              style={{
-                width: `${Math.max(4, Math.round((Math.max(0, r.value) / max) * 100))}%`,
-                backgroundColor: 'hsl(var(--chart-role-primary) / 0.75)',
-              }}
-            />
-          </div>
+  // Знаменатель — итог ПОЛНОГО отчёта, когда сервер его дал: доля должна считаться от всего
+  // трафика, а не от суммы показанных строк, иначе «45%» на компакте и на развороте — разные 45%.
+  const total = unitTotal ?? rows.reduce((acc, r) => acc + Math.max(0, r.value), 0);
+  // Полукольцо — только на компакте. Разворот остаётся полным списком: страница разреза для того
+  // и открывается, и «из чего состоит целое» там уже отвечает колонка накопленного процента.
+  if (radial && !expanded) {
+    return (
+      <div className="flex h-full min-h-0 flex-col">
+        <div className="min-h-0 flex-1">
+          <RadialShare
+            segments={rows.map((r) => ({ key: r.key, label: r.label, value: r.value }))}
+            total={total}
+            unitWord={tailWord}
+          />
         </div>
-      ))}
-      {restValue > 0 && (
-        <p className="text-2xs text-muted-foreground">
-          Ещё {fmt.num(restValue)} {tailWord}{unitTotal != null ? ` из ${fmt.num(unitTotal)}` : ''}.
-        </p>
-      )}
-      {footnote != null && <p className="text-2xs text-muted-foreground">{footnote}</p>}
-    </div>
+        {/* Сноска едет и с кольцом: «определено для 82% визитов» — утверждение о полноте данных,
+            а не украшение списка. Серый сегмент показывает ту же дыру, подпись её называет. */}
+        {footnote != null && <p className="pt-1 text-2xs text-muted-foreground">{footnote}</p>}
+      </div>
+    );
+  }
+  return (
+    <ShareRows
+      rows={rows}
+      total={total}
+      tailWord={tailWord}
+      expanded={expanded}
+      cumulative={expanded}
+      footnote={footnote}
+    />
   );
 }
 
@@ -187,6 +187,10 @@ export interface YmBuiltBreakdown {
   tailWord: string;
   unitTotal?: number | null;
   footnote?: string | null;
+  /** Компакт рисует составное полукольцо вместо списка. Только для ФИКСИРОВАННОГО малого набора
+      взаимоисключающих категорий БЕЗ построчной второй метрики: пол и возраст — да, устройства —
+      нет, у них с выбранной целью в строке едут достижения и CR, а сегмент их нести не может. */
+  radial?: boolean;
 }
 
 /** Структурный контракт результата useQuery — фабрике не нужен весь UseQueryResult. */
@@ -237,6 +241,7 @@ export function YmReportBody<T>({
       tailWord={built.tailWord}
       unitTotal={built.unitTotal ?? null}
       footnote={built.footnote ?? null}
+      radial={built.radial ?? false}
     />
   );
 }
@@ -559,6 +564,7 @@ export const YM_BREAKDOWNS: YmBreakdownDef[] = [
       })),
       tailWord: 'визитов',
       unitTotal: data.visits_total,
+      radial: true,
       footnote: demographicsFootnote(data),
     }),
   }),
@@ -586,6 +592,7 @@ export const YM_BREAKDOWNS: YmBreakdownDef[] = [
       })),
       tailWord: 'визитов',
       unitTotal: data.visits_total,
+      radial: true,
       footnote: demographicsFootnote(data),
     }),
   }),
