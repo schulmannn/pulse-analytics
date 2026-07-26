@@ -1,7 +1,13 @@
-import { Toolbar } from '@astryxdesign/core/Toolbar';
-import { MultiSelector } from '@astryxdesign/core/MultiSelector';
-import { SegmentedControl, SegmentedControlItem } from '@astryxdesign/core/SegmentedControl';
-import { Text as AxText } from '@astryxdesign/core/Text';
+import { ChevronDown } from 'lucide-react';
+import { SegmentedControl } from '@/components/SegmentedControl';
+import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 
 /** Row density shared by every data-workspace table. */
 export type WorkspaceDensity = 'compact' | 'balanced' | 'spacious';
@@ -18,10 +24,12 @@ export interface WorkspaceColumnOption {
 }
 
 /**
- * Reusable table view toolbar: optional-column visibility (Astryx MultiSelector) + row density
- * (Astryx SegmentedControl). Pure Astryx children keep the toolbar's roving-tabindex intact. The
- * component is presentation-only — the consumer owns which columns exist and what visibility/density
- * mean for its own rows.
+ * Reusable table view toolbar: optional-column visibility (shadcn DropdownMenu with checkbox items —
+ * the same multi-select grammar the Instagram «Колонки» control uses) + row density (the shared
+ * SegmentedControl). The band is a labelled `group`, not a `toolbar`: each control owns its own
+ * keyboard model (menu button; roving-tabindex segment track), so announcing one flat arrow-key
+ * surface over both would be a lie. Presentation-only — the consumer owns which columns exist and
+ * what visibility/density mean for its own rows.
  */
 export function WorkspaceViewToolbar({
   label = 'Вид таблицы',
@@ -33,7 +41,7 @@ export function WorkspaceViewToolbar({
   density,
   onDensityChange,
 }: {
-  /** Accessible toolbar label; also shown as the leading supporting caption. */
+  /** Accessible label for the band; also shown as the leading supporting caption. */
   label?: string;
   columns: WorkspaceColumnOption[];
   visibleColumns: string[];
@@ -43,45 +51,64 @@ export function WorkspaceViewToolbar({
   density: WorkspaceDensity;
   onDensityChange: (next: WorkspaceDensity) => void;
 }) {
+  const selected = columns.filter((c) => visibleColumns.includes(c.value));
+  const allSelected = selected.length === columns.length && columns.length > 0;
+  // Trigger reads as the previous badge summary did: first selected column, then «+N» for the rest.
+  const summary = selected.length === 0 ? columnsLabel : selected[0].label;
+  const extra = selected.length > 1 ? `+${selected.length - 1}` : null;
+
   return (
-    <Toolbar
-      label={label}
-      size="sm"
-      gap={2}
-      startContent={<AxText type="supporting" size="2xs">{label}</AxText>}
-      endContent={
-        <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-2">
-          <div className="flex items-center gap-1.5">
-            <AxText type="supporting" size="2xs">{columnsLabel}</AxText>
-            <MultiSelector
-              label={columnsLabel}
-              isLabelHidden
-              placeholder={columnsLabel}
-              size="sm"
-              options={columns}
-              value={visibleColumns}
-              onChange={onVisibleColumnsChange}
-              triggerDisplay="badges"
-              maxBadges={1}
-              hasSelectAll
-              selectAllLabel={selectAllLabel}
-            />
-          </div>
-          <div className="flex items-center gap-1.5">
-            <AxText type="supporting" size="2xs">Плотность</AxText>
-            <SegmentedControl
-              label="Плотность строк"
-              size="sm"
-              value={density}
-              onChange={(v) => onDensityChange(v as WorkspaceDensity)}
-            >
-              {WORKSPACE_DENSITY_OPTIONS.map((d) => (
-                <SegmentedControlItem key={d.value} value={d.value} label={d.label} />
+    <div role="group" aria-label={label} className="flex min-h-7 flex-wrap items-center justify-between gap-2 px-3 py-2">
+      <span className="text-xs leading-5 text-muted-foreground">{label}</span>
+      <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-2">
+        <div className="flex items-center gap-1.5">
+          <span className="text-xs leading-5 text-muted-foreground">{columnsLabel}</span>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button type="button" variant="outline" size="xs" aria-label={columnsLabel} className="gap-2">
+                <span className="truncate">{summary}</span>
+                {extra && <span className="tabular-nums text-muted-foreground">{extra}</span>}
+                <ChevronDown className="size-4 opacity-60" aria-hidden="true" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-52">
+              <DropdownMenuCheckboxItem
+                checked={allSelected}
+                onCheckedChange={(checked) =>
+                  onVisibleColumnsChange(checked ? columns.map((c) => c.value) : [])
+                }
+              >
+                {selectAllLabel}
+              </DropdownMenuCheckboxItem>
+              <DropdownMenuSeparator />
+              {columns.map((option) => (
+                <DropdownMenuCheckboxItem
+                  key={option.value}
+                  checked={visibleColumns.includes(option.value)}
+                  onCheckedChange={(checked) =>
+                    onVisibleColumnsChange(
+                      checked
+                        ? columns.filter((c) => c.value === option.value || visibleColumns.includes(c.value)).map((c) => c.value)
+                        : visibleColumns.filter((value) => value !== option.value),
+                    )
+                  }
+                >
+                  {option.label}
+                </DropdownMenuCheckboxItem>
               ))}
-            </SegmentedControl>
-          </div>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
-      }
-    />
+        <div className="flex items-center gap-1.5">
+          <span className="text-xs leading-5 text-muted-foreground">Плотность</span>
+          <SegmentedControl<WorkspaceDensity>
+            ariaLabel="Плотность строк"
+            value={density}
+            onChange={onDensityChange}
+            options={WORKSPACE_DENSITY_OPTIONS.map((d) => ({ value: d.value, content: d.label }))}
+          />
+        </div>
+      </div>
+    </div>
   );
 }
