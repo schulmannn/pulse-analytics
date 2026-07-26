@@ -120,7 +120,7 @@ export function YmOverview() {
   const metricCard = (
     id: string,
     title: string,
-    block: { total: number; series: Array<{ day: string; value: number }> },
+    block: { total: number | null; series: Array<{ day: string; value: number }> },
     caption: string,
   ) => {
     const sampled = lttbDownsample(block.series, 140, (p) => p.value);

@@ -657,6 +657,49 @@ test('summary «Всё» без читаемого токена: архив че
   assert.deepEqual(res.body.quality_series.robot_visits, [{ day: '2026-06-01', value: 1 }]);
 });
 
+test('summary «Всё» без архива и без живого отчёта: итоги — ПРОПУСК (null), а не «0 за всё время»', async () => {
+  const { routes } = buildYm({
+    ymFetch: async () => { throw new Error('upstream down'); },
+    db: { getYmDailyAllForActor: async () => [] },
+  });
+  const res = await invoke(routes, 'GET /api/ym/summary', { query: { days: '0' } });
+  assert.equal(res.statusCode, 200);
+  // Ключевой инвариант: сбора не было — значит мы НЕ ЗНАЕМ числа. «0 визитов за всё время»
+  // утверждало бы про счётчик то, чего мы не проверяли.
+  assert.equal(res.body.visits.total, null);
+  assert.equal(res.body.users.total, null);
+  assert.equal(res.body.pageviews.total, null);
+  assert.deepEqual(res.body.visits.series, [], 'серия честно пуста');
+  assert.equal(res.body.meta.exact_period_totals, false);
+  assert.equal(res.body.meta.all_time, true);
+  assert.equal(res.body.meta.archive_last_day, null);
+  // Качество давно следует тому же канону — пропуск, а не выдуманный ноль.
+  assert.equal(res.body.quality.bounce_rate, null);
+});
+
+test('summary «Всё»: РЕАЛЬНО пустой счётчик отдаёт честный 0 — живые totals отличают его от пропуска', async () => {
+  const { routes } = buildYm({
+    // Счётчик подключён и отвечает: за всю историю ровно ноль визитов. Это ЗНАНИЕ, а не пробел.
+    ymFetch: async () => ({ data: [], totals: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }),
+    db: { getYmDailyAllForActor: async () => [] },
+  });
+  const res = await invoke(routes, 'GET /api/ym/summary', { query: { days: '0' } });
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.visits.total, 0, 'живой отчёт ответил — 0 честный');
+  assert.equal(res.body.users.total, 0);
+  assert.equal(res.body.meta.exact_period_totals, true);
+});
+
+test('summary окно: пустое окно остаётся нулём — плотные дневные строки это ЗНАНИЕ, а не пропуск', async () => {
+  const { routes } = buildYm({ ymFetch: async () => ({ data: [], totals: [] }) });
+  const res = await invoke(routes, 'GET /api/ym/summary', { query: { days: '7' } });
+  assert.equal(res.statusCode, 200);
+  // Окно ходило в Метрику и получило ответ: семь дней по нулю. Это не пропуск сбора.
+  assert.equal(res.body.visits.total, 0);
+  assert.equal(res.body.visits.series.length, 7);
+  assert.equal(res.body.meta.all_time, false);
+});
+
 test('summary «Всё»: live-сбой не валит архив и negative-cache не долбит upstream повторно', async () => {
   let fetches = 0;
   const { routes } = buildYm({
