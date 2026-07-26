@@ -93,14 +93,23 @@ export function Connect() {
 
   const { data: channelsData } = useChannels();
   const igStatus = useIgOauthStatus();
+  // Орбита обязана говорить то же, что панель справа: у каждого не-«скоро» источника свой
+  // источник правды. Статусы МС/Метрики берём теми же хуками, что и MoySkladPanel/MetrikaPanel
+  // (ключи запросов общие — повторный вызов не даёт лишнего сетевого похода).
+  const msStatus = useMsStatus();
+  const ymStatus = useYmStatus();
 
   // IG counts as connected when a per-channel OAuth account is linked OR the global env account is
   // serving data (env_fallback) — both mean real Instagram numbers are flowing.
   const igConnected = (igStatus.data?.connected ?? false) || (igStatus.data?.env_fallback ?? false);
   const tgConnected = (channelsData?.channels?.length ?? 0) > 0;
+  const msConnected = msStatus.data?.connected ?? false;
+  const ymConnected = ymStatus.data?.connected ?? false;
   const stateOf = (s: Service): 'connected' | 'available' | 'soon' => {
     if (s.kind === 'soon') return 'soon';
     if (s.kind === 'instagram') return igConnected ? 'connected' : 'available';
+    if (s.kind === 'moysklad') return msConnected ? 'connected' : 'available';
+    if (s.kind === 'metrika') return ymConnected ? 'connected' : 'available';
     return tgConnected ? 'connected' : 'available';
   };
   const connectedCount = SERVICES.filter((s) => stateOf(s) === 'connected').length;

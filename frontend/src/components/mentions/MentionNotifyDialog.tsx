@@ -78,6 +78,18 @@ export function MentionNotifyDialog({ onClose }: { onClose: () => void }) {
   const ready = checklist.length > 0 && checklist.every((item) => item.ok);
   const enabled = !!data?.subscription.enabled;
 
+  // Deep-link живёт в самой мутации: window.open после await уходит из пользовательского жеста и
+  // регулярно гасится блокировщиком попапов, поэтому открытие — best-effort, а ссылку показываем
+  // рядом: её всегда можно открыть или скопировать руками.
+  const botUrl = link.data?.url ?? null;
+  const [copied, setCopied] = useState(false);
+  const copyBotUrl = (url: string) => {
+    navigator.clipboard.writeText(url).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
   const connectBot = async () => {
     const res = await link.mutateAsync().catch(() => null);
     if (!res) return;
@@ -159,7 +171,7 @@ export function MentionNotifyDialog({ onClose }: { onClose: () => void }) {
                       aria-hidden="true"
                       className={cn(
                         'mt-1 size-2 shrink-0 rounded-full',
-                        item.ok ? 'bg-success' : 'bg-muted-foreground/40',
+                        item.ok ? 'bg-verdant' : 'bg-muted-foreground/40',
                       )}
                     />
                     <span className={item.ok ? 'text-foreground' : 'text-muted-foreground'}>{item.label}</span>
@@ -183,8 +195,32 @@ export function MentionNotifyDialog({ onClose }: { onClose: () => void }) {
                   <Button type="button" onClick={() => void connectBot()} disabled={link.isPending}>
                     {link.isPending ? 'Готовим ссылку…' : 'Привязать бота'}
                   </Button>
+                  {botUrl && (
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs">
+                      <a
+                        href={botUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-medium text-primary underline decoration-primary/40 underline-offset-2 hover:decoration-primary"
+                      >
+                        Открыть чат с ботом
+                      </a>
+                      <button
+                        type="button"
+                        onClick={() => copyBotUrl(botUrl)}
+                        className="btn-pill border border-border px-3 py-1 font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                      >
+                        {copied ? 'Скопировано' : 'Копировать ссылку'}
+                      </button>
+                      <span role="status" className="sr-only">{copied ? 'Скопировано' : ''}</span>
+                    </div>
+                  )}
                   <p className="text-xs leading-5 text-muted-foreground">
-                    Откроется чат с ботом — нажмите в нём <b>Start</b>. Ссылка действует 15 минут.
+                    {botUrl ? (
+                      <>Если чат не открылся сам — откройте ссылку выше и нажмите в боте <b>Start</b>. Ссылка действует 15 минут.</>
+                    ) : (
+                      <>Откроется чат с ботом — нажмите в нём <b>Start</b>. Ссылка действует 15 минут.</>
+                    )}
                     {linkOpened && ' Ждём подтверждение из Telegram…'}
                   </p>
                 </div>
@@ -294,7 +330,7 @@ export function MentionNotifyDialog({ onClose }: { onClose: () => void }) {
                       {testRun.isPending ? 'Прогоняем…' : 'Прислать сейчас'}
                     </button>
                   </div>
-                  {testResult && <p role="status" className="text-xs text-success">{testResult}</p>}
+                  {testResult && <p role="status" className="text-xs text-verdant">{testResult}</p>}
                 </div>
               )}
 
