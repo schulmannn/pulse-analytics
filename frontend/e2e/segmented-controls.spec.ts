@@ -11,10 +11,13 @@ test('full-screen widget editor uses labelled sliding segments for chart setting
   if (await buildDefaults.isVisible()) await buildDefaults.click();
   await expandFirstWidget(page);
 
-  const dialog = page.getByRole('dialog', { name: /^Explorer/ });
-  await expect(dialog).toBeVisible();
+  // Разворот виджета Главной — полностраничный маршрут /widgets/:id, а не модалка: сегменты живут
+  // на самой странице. Ленивый чанк страницы ждём явно (тот же приём, что у MS-метрик).
+  await expect(page).toHaveURL(/\/widgets\//);
+  const editor = page.locator('main');
+  await expect(editor.getByRole('toolbar', { name: 'Период', exact: true })).toBeVisible({ timeout: 20_000 });
 
-  const period = dialog.getByRole('toolbar', { name: 'Период', exact: true });
+  const period = editor.getByRole('toolbar', { name: 'Период', exact: true });
   const periodIndicator = period.locator('[data-segmented-indicator]');
   await expect(period).toBeVisible();
   await expect(periodIndicator).toHaveCount(1);
@@ -23,13 +26,16 @@ test('full-screen widget editor uses labelled sliding segments for chart setting
   await expect(period.getByRole('button', { name: '7д', exact: true })).toHaveAttribute('aria-pressed', 'true');
   await expect.poll(() => periodIndicator.evaluate((node) => getComputedStyle(node).transform)).not.toBe(before);
 
-  const viz = dialog.getByRole('toolbar', { name: 'Визуализация', exact: true });
+  const viz = editor.getByRole('toolbar', { name: 'Визуализация', exact: true });
   await expect(viz).toBeVisible();
   await viz.getByRole('button', { name: 'Столбцы', exact: true }).click();
   await expect(viz.getByRole('button', { name: 'Столбцы', exact: true })).toHaveAttribute('aria-pressed', 'true');
 
-  await expect(dialog.getByRole('toolbar', { name: 'Грануляция', exact: true })).toBeVisible();
-  await expect(dialog.getByRole('toolbar', { name: 'Сравнение', exact: true })).toBeVisible();
-  await dialog.getByRole('button', { name: 'Закрыть', exact: true }).click();
-  await expect(dialog).toHaveCount(0);
+  await expect(editor.getByRole('toolbar', { name: 'Грануляция', exact: true })).toBeVisible();
+  await expect(editor.getByRole('toolbar', { name: 'Сравнение', exact: true })).toBeVisible();
+
+  // Возврат на доску: у полностраничного разворота это обычный Back, а не кнопка «Закрыть» модалки.
+  await page.goBack();
+  await expect(page).toHaveURL(/\/home$/);
+  await expect(page.locator('h3.widget-title').first()).toBeVisible();
 });
