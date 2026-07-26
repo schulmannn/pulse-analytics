@@ -3,6 +3,7 @@
 const { makeServeSnapshot } = require('../middleware/tenant');
 const { toPublicQrStatus } = require('../lib/tgSessionStatus');
 const { decodeBoundedJpegBase64 } = require('../lib/tgChannelPhoto');
+const { runDetached } = require('../lib/requestContext');
 
 const TG_BASE = 'https://api.telegram.org/bot';
 const MANAGED_POST_STATS_LOG_CODES = new Set([
@@ -155,8 +156,10 @@ function registerTgRoutes({
     const session_enc = tgCrypto.encrypt(data.session);
     await db.saveTgSession(req.user.uid, { tg_user_id: data.tg_user_id, username: data.username, session_enc });
     audit(req, 'tg.session.connected', { username: data.username || null }).catch(() => {});
-    refreshTrackedQrChannels(req.user).catch((e) =>
-      log('error', 'tg_qr_reconnect_refresh_failed', { uid: req.user.uid, error: e.message }));
+    // Отцеплено от request-store: дальше — минуты Telethon-работы, которые переживут этот ответ;
+    // внутри store они бы ушли в mtproto с x-request-id уже завершённого запроса (см. runDetached).
+    runDetached(() => refreshTrackedQrChannels(req.user).catch((e) =>
+      log('error', 'tg_qr_reconnect_refresh_failed', { uid: req.user.uid, error: e.message })));
     return {
       status: 'ok',
       username: data.username ?? null,
@@ -320,9 +323,11 @@ function registerTgRoutes({
 
       // Fill the just-added channels now, so the dashboard shows data within seconds instead of waiting
       // for the nightly cron. Fire-and-forget AFTER the response — collection latency never blocks it.
+      // runDetached: сбор идёт уже ПОСЛЕ ответа и длится минуты — вне request-store, иначе
+      // mtproto получал бы x-request-id закрытого запроса (см. lib/requestContext).
       if (created.length) {
-        collectQrChannelsNow(sess, created).catch((e) =>
-          log('error', 'tg_qr_collect_now_batch_failed', { error: e.message }));
+        runDetached(() => collectQrChannelsNow(sess, created).catch((e) =>
+          log('error', 'tg_qr_collect_now_batch_failed', { error: e.message })));
       }
     } catch (e) { next(e); }
   });

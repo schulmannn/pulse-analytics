@@ -36,11 +36,6 @@ export interface HealthInput {
   centralOwner?: boolean | null;
 }
 
-export interface SidebarHealth {
-  tone: 'ok' | 'warn' | 'error';
-  label: string;
-}
-
 // Deep links are exact by design — the /connect page reads these query params to preselect the
 // source, open the right tab, and (for reconnect) render the focused reconnect callout.
 const RECONNECT_LINK = { label: 'Переподключить Telegram →', to: '/connect?source=telegram&tab=qr&action=reconnect' };
@@ -110,21 +105,5 @@ export function overviewHealthBanner({ source, connectionState, fresh, centralOw
     tone: 'warn',
     message: `Данные устарели — последний сбор ${lastLabel}.`,
     cta: null,
-  };
-}
-
-/** Compact source health for the persistent desktop sidebar. */
-export function sidebarHealth({ source, connectionState, fresh, centralOwner }: HealthInput): SidebarHealth | null {
-  const managed = isManagedSource(source, centralOwner);
-  if (managed && connectionState === 'reauth_required') {
-    return { tone: 'error', label: 'нужно переподключить' };
-  }
-  if (managed && connectionState === 'degraded') {
-    return { tone: 'warn', label: 'сбор временно недоступен' };
-  }
-  if (!fresh) return null;
-  return {
-    tone: fresh.stale ? 'warn' : 'ok',
-    label: `обновлено ${fresh.label}`,
   };
 }
