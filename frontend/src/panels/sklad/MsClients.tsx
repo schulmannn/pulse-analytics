@@ -1,4 +1,5 @@
 import { useContext, useMemo, useState } from 'react';
+import { ShareTrack } from '@/components/ShareRows';
 import type { ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMsCohorts, useMsCustomers, useMsRfm, useMsTopCustomers } from '@/api/queries';
@@ -414,8 +415,8 @@ export function MsRfmBody({
                   · {share.toLocaleString('ru-RU', { maximumFractionDigits: 1 })}%
                 </span>
               </div>
-              <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden="true">
-                <div className="h-full rounded-full" style={{ width: `${Math.max(0, share)}%`, backgroundColor: meta.color }} />
+              <div className="mt-1 flex" aria-hidden="true">
+                <ShareTrack pct={share} color={meta.color} height="h-1.5" />
               </div>
               {(detailed || expanded) && segment.customers > 0 && (
                 <p className="mt-1 text-2xs text-muted-foreground">

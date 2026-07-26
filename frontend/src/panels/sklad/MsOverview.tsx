@@ -1,4 +1,5 @@
 import { useContext, useLayoutEffect, useRef, useState } from 'react';
+import { ShareTrack } from '@/components/ShareRows';
 import { Link } from 'react-router-dom';
 import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
 import { observeSize } from '@/lib/observeSize';
@@ -509,7 +510,11 @@ export function MsFunnelRows({
   const restOrders = tail.reduce((acc, row) => acc + row.orders, 0) + noState;
   const restSum = tail.reduce((acc, row) => acc + row.sum, 0) + noStateSum;
   const totalSum = rows.reduce((acc, row) => acc + row.sum, 0) + noStateSum;
-  const max = Math.max(1, ...top.map((row) => Math.max(0, selectedValue(row))));
+  // Знаменатель — целое по ВЫБРАННОЙ метрике (заказы или сумма), включая строки без статуса:
+  // доля статуса считается от всего окна, а не от показанной четвёрки.
+  const statusTotal =
+    rows.reduce((acc, row) => acc + Math.max(0, selectedValue(row)), 0)
+    + Math.max(0, metric === 'orders' ? noState : noStateSum);
   return (
     <div className={expanded ? 'space-y-2 pt-1' : 'space-y-1.5'}>
       {top.map((r) => (
@@ -529,14 +534,9 @@ export function MsFunnelRows({
               )}
             </span>
           </div>
-          <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted">
-            <div
-              className="h-full rounded-full"
-              style={{
-                width: `${Math.max(4, Math.round((Math.max(0, selectedValue(r)) / max) * 100))}%`,
-                backgroundColor: 'hsl(var(--chart-role-primary) / 0.75)',
-              }}
-            />
+          {/* Доля от ЦЕЛОГО окна, а не от крупнейшего статуса. */}
+          <div className="mt-1 flex">
+            <ShareTrack pct={statusTotal > 0 ? (Math.max(0, selectedValue(r)) / statusTotal) * 100 : 0} height="h-1.5" />
           </div>
         </div>
       ))}

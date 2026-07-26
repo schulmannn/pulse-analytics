@@ -25,12 +25,47 @@ import { fmt } from '@/lib/format';
  * это от всего трафика» не отвечался вовсе. `total` обязателен именно поэтому.
  */
 
+/**
+ * Сама полоса — один дом для «сколько это от целого». Вынесена отдельно, потому что строки в
+ * продукте бывают не только простыми: кликабельный фильтр упоминаний, RFM-сегмент со своим цветом
+ * и раскрывающейся сноской, канал продаж с дельтой. Загонять их в общий рендерер значило бы либо
+ * раздуть его до свалки пропов, либо потерять поведение — поэтому у них своя разметка, но полоса
+ * и её СМЫСЛ общие.
+ */
+export function ShareTrack({
+  pct,
+  color,
+  height = 'h-2',
+  muted = false,
+}: {
+  /** Доля ОТ ЦЕЛОГО в процентах (не от максимума — см. шапку файла). */
+  pct: number;
+  /** Полный `hsl(...)`; по умолчанию — роль основного графика. */
+  color?: string;
+  height?: string;
+  muted?: boolean;
+}) {
+  return (
+    <div className={`${height} min-w-0 flex-1 overflow-hidden rounded-full bg-muted/70`}>
+      <div
+        className="h-full rounded-full transition-[width] dur-base ease-house"
+        style={{
+          width: `${Math.max(1.5, Math.min(100, pct))}%`,
+          backgroundColor: color ?? `hsl(var(--chart-role-primary) / ${muted ? '0.4' : '0.75'})`,
+        }}
+      />
+    </div>
+  );
+}
+
 export interface ShareRow {
   key: string;
   label: string;
   value: number;
-  /** Приписка справа от значения («12.3% CR», «450k ₽») — уже отформатированная. */
-  note?: string | null;
+  /** Приписка справа от значения («12.3% CR», «450k ₽»). Узел — строке бывает нужен свой знак. */
+  note?: ReactNode;
+  /** Приписка ПОСЛЕ подписи (тип канала, сеть) — приглушённая. */
+  labelSuffix?: ReactNode;
   /** Точка-метка слева от подписи (палитра статусов МС). */
   dot?: string | null;
 }
@@ -107,18 +142,11 @@ export function ShareRows({
                   />
                 )}
                 <span className="truncate" title={r.label}>{r.label}</span>
+                {r.labelSuffix != null && (
+                  <span className="shrink-0 text-2xs text-muted-foreground">{r.labelSuffix}</span>
+                )}
               </span>
-              <div className="relative h-2 min-w-0 flex-1 overflow-hidden rounded-full bg-muted/70">
-                <div
-                  className="absolute inset-y-0 left-0 rounded-full transition-[width] dur-base ease-house"
-                  style={{
-                    width: `${Math.max(1.5, pct)}%`,
-                    backgroundColor: active
-                      ? 'hsl(var(--chart-role-primary))'
-                      : 'hsl(var(--chart-role-primary) / 0.75)',
-                  }}
-                />
-              </div>
+              <ShareTrack pct={pct} color={active ? 'hsl(var(--chart-role-primary))' : undefined} />
               {/* Значение снаружи справа (shadcn: position="right") — колонка чисел выровнена. */}
               <span className="shrink-0 text-xs tabular-nums">
                 <span className="font-medium text-foreground">{format(r.value)}</span>
@@ -160,12 +188,7 @@ export function ShareRows({
           className="flex w-full items-center gap-2.5 text-left text-2xs text-muted-foreground"
         >
           <span className="w-[42%] max-w-56 shrink-0 truncate">Прочее · {tail.length}</span>
-          <span className="h-2 min-w-0 flex-1 overflow-hidden rounded-full bg-muted/70">
-            <span
-              className="block h-full rounded-full bg-muted-foreground/30"
-              style={{ width: `${Math.max(1.5, pctOf(tailValue))}%` }}
-            />
-          </span>
+          <ShareTrack pct={pctOf(tailValue)} color="hsl(var(--muted-foreground) / 0.3)" />
           <span className="shrink-0 tabular-nums">
             Ещё {format(tailValue)} {tailWord} из {format(total)}
           </span>
