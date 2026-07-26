@@ -494,9 +494,39 @@ export async function selectPill(
   await option.click();
 }
 
-/** A card that owns the generic ?detail= overlay rather than drilling to a dedicated metric page. */
+const DETAIL_OVERLAY_WIDGET = 'Лучшие публикации';
+
+/**
+ * Кнопка «Развернуть» карточки, владеющей обобщённым ?detail=-оверлеем (а не уводящей на
+ * отдельную метрик-страницу). После #351 она `sr-only` — это цель ДЛЯ ФОКУСА и скринридера.
+ * Кликать по ней нельзя: она лежит под заголовком карточки, и клик перехватывает `<h3>`.
+ * Для открытия оверлея есть openDetailOverlay ниже.
+ */
 export function detailOverlayOpener(page: Page): Locator {
-  return page.getByRole('button', { name: 'Развернуть виджет «Лучшие публикации»' });
+  return page.getByRole('button', { name: `Развернуть виджет «${DETAIL_OVERLAY_WIDGET}»` });
+}
+
+/**
+ * Открыть оверлей МЫШЬЮ — кликом по заголовку карточки. Именно `<h3>` лежит поверх sr-only кнопки
+ * и принимает указатель, поэтому это и есть настоящая мышиная цель после #351.
+ *
+ * Кликать по всей `<section>` НЕЛЬЗЯ: у «Лучших публикаций» центр карточки занят самим постом, и
+ * клик открывает модалку поста вместо графика (проверено — приезжал не тот `role="dialog"`).
+ */
+export async function openDetailOverlay(page: Page): Promise<void> {
+  const title = page.getByRole('heading', { name: DETAIL_OVERLAY_WIDGET, exact: true });
+  await title.scrollIntoViewIfNeeded();
+  await title.click();
+}
+
+/**
+ * Открыть тот же оверлей С КЛАВИАТУРЫ — путь скринридера: фокус на sr-only кнопку и Enter. Только
+ * так проверяется возврат фокуса на опенер: после мышиного клика по заголовку фокусировать было
+ * нечего, и DetailShell честно возвращает фокус в `<body>`.
+ */
+export async function openDetailOverlayByKeyboard(page: Page): Promise<void> {
+  await detailOverlayOpener(page).focus();
+  await page.keyboard.press('Enter');
 }
 
 /**

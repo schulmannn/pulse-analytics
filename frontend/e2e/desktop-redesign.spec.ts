@@ -9,7 +9,8 @@ test('desktop analytics exports current and equal-previous windows for both netw
   let downloadPromise = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Экспорт метрик аналитики за выбранный период в CSV' }).click();
   const tgDownload = await downloadPromise;
-  expect(tgDownload.suggestedFilename()).toMatch(/^telegram-analytics-демо-канал-\d{4}-\d{2}-\d{2}_\d{4}-\d{2}-\d{2}\.csv$/u);
+  // Слаг транслитерирован: Chrome отбрасывает весь `download` с не-ASCII (см. slugify).
+  expect(tgDownload.suggestedFilename()).toMatch(/^telegram-analytics-demo-kanal-\d{4}-\d{2}-\d{2}_\d{4}-\d{2}-\d{2}\.csv$/);
   const tgPath = await tgDownload.path();
   if (!tgPath) throw new Error('Telegram analytics CSV has no local download path');
   const tgCsv = await readFile(tgPath, 'utf8');
