@@ -161,9 +161,14 @@ test.describe('desktop /home workspace (dark, 1440)', () => {
     const restWidth = (await board.boundingBox())!.width;
     await page.locator('button.edit-toggle').click();
     await expect(page.locator('button.edit-toggle')).toHaveAttribute('aria-pressed', 'true');
-    // Narrows immediately (no need to wait out a tween) and by the same amount.
+    // Narrows by the same amount as with motion. Ждём КАДР, а не твин: «мгновенность» уже
+    // доказана строкой выше (transition-duration ≈ 0), а стиль/лейаут борды долетают на следующем
+    // расчёте после коммита кнопки — одиночное чтение сразу после aria-pressed ловило ещё старую
+    // ширину. Соседний тест (с анимацией) поллит ровно по этой же причине.
+    await expect
+      .poll(async () => Math.round(restWidth - (await board.boundingBox())!.width))
+      .toBeGreaterThanOrEqual(90);
     const editWidth = (await board.boundingBox())!.width;
-    expect(restWidth - editWidth).toBeGreaterThanOrEqual(90);
     expect(restWidth - editWidth).toBeLessThanOrEqual(120);
   });
 
