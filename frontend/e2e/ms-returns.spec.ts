@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { bootDemo, overflowingCards } from './helpers';
+import { bootDemo, expandWidget, overflowingCards } from './helpers';
 
 test.beforeEach(async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop-1440', 'MoySklad analytics is desktop-first');
@@ -15,7 +15,7 @@ test('MoySklad returns compact card shows a real series and drills to a full cou
   await expect(card.getByText(/₽/).first()).toBeVisible();
   await expect(card.getByText('Возвраты считаются отдельно и из выручки не вычитаются.')).toBeVisible();
 
-  await card.getByRole('button', { name: 'Развернуть виджет «Возвраты»' }).click();
+  await expandWidget(card, 'Возвраты');
 
   await expect(page).toHaveURL(/\/metrics\/ms-returns$/);
   await expect(page.getByRole('heading', { name: 'Возвраты', level: 1 })).toBeVisible({ timeout: 20_000 });

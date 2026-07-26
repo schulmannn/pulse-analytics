@@ -507,16 +507,37 @@ export function detailOverlayOpener(page: Page): Locator {
 }
 
 /**
- * Открыть оверлей МЫШЬЮ — кликом по заголовку карточки. Именно `<h3>` лежит поверх sr-only кнопки
- * и принимает указатель, поэтому это и есть настоящая мышиная цель после #351.
+ * Развернуть виджет МЫШЬЮ — кликом по его заголовку. После #351 кнопка «Развернуть» стала
+ * `sr-only`: это бокс 1×1 под `<h3>`, и указатель до неё не доходит — заголовок его перехватывает.
+ * Значит настоящая мышиная цель это и есть `<h3>`. Куда приведёт клик, решает сам виджет: карточка
+ * с `drillTo` уходит на полностраничную метрику, остальные открывают оверлей.
  *
- * Кликать по всей `<section>` НЕЛЬЗЯ: у «Лучших публикаций» центр карточки занят самим постом, и
- * клик открывает модалку поста вместо графика (проверено — приезжал не тот `role="dialog"`).
+ * Кликать по всей `<section>` НЕЛЬЗЯ: у карточек со своим содержимым (например «Лучшие
+ * публикации») центр занят постом, и клик открывает модалку поста — приезжает не тот
+ * `role="dialog"`.
+ *
+ * `scope` сужает поиск, когда заголовок на странице не один (карточка + одноимённый заголовок
+ * страницы назначения).
  */
+export async function expandWidget(scope: Page | Locator, title: string | RegExp): Promise<void> {
+  const heading = scope
+    .getByRole('heading', { name: title, ...(typeof title === 'string' ? { exact: true } : {}) })
+    .first();
+  await heading.scrollIntoViewIfNeeded();
+  await heading.click();
+}
+
+/** Развернуть ПЕРВЫЙ виджет доски, когда тест не привязан к конкретной карточке. `.widget-title` —
+    класс заголовка именно карточки, поэтому h1/h2 самой страницы под выбор не попадают. */
+export async function expandFirstWidget(page: Page): Promise<void> {
+  const heading = page.locator('h3.widget-title').first();
+  await heading.scrollIntoViewIfNeeded();
+  await heading.click();
+}
+
+/** Развернуть каноническую карточку обобщённого ?detail=-оверлея. */
 export async function openDetailOverlay(page: Page): Promise<void> {
-  const title = page.getByRole('heading', { name: DETAIL_OVERLAY_WIDGET, exact: true });
-  await title.scrollIntoViewIfNeeded();
-  await title.click();
+  await expandWidget(page, DETAIL_OVERLAY_WIDGET);
 }
 
 /**

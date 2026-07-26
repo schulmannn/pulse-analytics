@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { bootDemo } from './helpers';
+import { bootDemo, expandFirstWidget } from './helpers';
 
 test.beforeEach(async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop-1440', 'desktop segmented controls');
@@ -9,7 +9,7 @@ test.beforeEach(async ({ page }, testInfo) => {
 test('full-screen widget editor uses labelled sliding segments for chart settings', async ({ page }) => {
   const buildDefaults = page.getByRole('button', { name: 'Собрать по умолчанию' });
   if (await buildDefaults.isVisible()) await buildDefaults.click();
-  await page.getByRole('button', { name: /^Развернуть виджет/ }).first().click();
+  await expandFirstWidget(page);
 
   const dialog = page.getByRole('dialog', { name: /^Explorer/ });
   await expect(dialog).toBeVisible();

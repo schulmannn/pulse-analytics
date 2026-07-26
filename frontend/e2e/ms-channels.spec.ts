@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { bootDemo } from './helpers';
+import { bootDemo, expandWidget } from './helpers';
 
 test.beforeEach(async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop-1440', 'MoySklad analytics is desktop-first');
@@ -58,7 +58,7 @@ test('MoySklad channels uses the flat feed shell and multi-channel explorer', as
 
   // «Развернуть» ведёт на полностраничную метрику /metrics/ms-channels (общий explorer с MS-контролами),
   // а не в модальный оверлей. Страница открывается со своим состоянием (агрегат по умолчанию).
-  await page.getByRole('button', { name: /Развернуть виджет «Выручка по каналам/ }).click();
+  await expandWidget(page, /^Выручка по каналам/);
   await expect(page).toHaveURL(/\/metrics\/ms-channels$/);
   // The MS metric page is a lazy chunk. Allow the cold Vite transform to finish when this suite
   // runs in parallel with the all-routes parity pass; the production bundle is already built.
@@ -105,7 +105,7 @@ test('MoySklad channel contribution compares an equal window in the canonical me
   await metric.getByRole('button', { name: 'Заказы' }).click();
   await expect(metric.getByRole('button', { name: 'Заказы' })).toHaveAttribute('aria-pressed', 'true');
 
-  await contribution.getByRole('button', { name: 'Развернуть виджет «Что изменило результат»' }).click();
+  await expandWidget(contribution, 'Что изменило результат');
   await expect(page).toHaveURL(/\/metrics\/ms-sales-channels$/);
   await expect(page.getByRole('heading', { name: 'Продажи по каналам', level: 1 })).toBeVisible({ timeout: 20_000 });
   await expect(page.getByRole('heading', { name: 'Что изменило результат', exact: true })).toBeVisible();
