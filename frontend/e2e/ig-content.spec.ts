@@ -216,7 +216,7 @@ test.describe('Instagram Контент 2.0 (desktop)', () => {
     expect(noPageOverflow).toBeTruthy();
     await testInfo.attach('ig-content-card-midwidth', { body: await page.screenshot({ fullPage: true }), contentType: 'image/png' });
 
-    // Открытое состояние строки помечается data-hook и раскрывает СОСЕДНИЙ Astryx-инспектор
+    // Открытое состояние строки помечается data-hook и раскрывает СОСЕДНИЙ инспектор
     // (не модалку). Полная модалка остаётся явным действием из инспектора.
     await rows.first().locator('[data-ig-content-open-trigger]').click();
     await expect(rows.first()).toHaveAttribute('data-ig-content-open', '');

@@ -1,9 +1,8 @@
-/* Astryx pilot (десктопный IG «Контент»): заранее фиксируем порядок слоёв, чтобы
-   route-level `data-workspace.css` не зависел от момента загрузки. Tailwind preflight идёт до
-   Astryx, иначе он обнуляет button/input внутри компонентов. Tailwind utilities остаются после Astryx и
-   продолжают выигрывать в legacy-разметке. `tailwind-theme.css` не импортируем: он бы
-   переопределил Atlavue-утилиты text-primary/bg-* во всём приложении. */
-@layer reset, theme, base, astryx-base, astryx-theme, components, utilities;
+/* Порядок слоёв объявлен один раз и заранее: Tailwind preflight (base) идёт до собственных
+   компонентных правил, а utilities остаются последними и продолжают выигрывать в legacy-разметке.
+   Слоёв стороннего дизайн-системного пилота здесь больше нет — приложение живёт на одной
+   дизайн-системе (см. DESIGN_TOKENS.md). */
+@layer reset, theme, base, components, utilities;
 
 @import 'tailwindcss/theme.css' layer(theme);
 @import 'tailwindcss/preflight.css' layer(base);

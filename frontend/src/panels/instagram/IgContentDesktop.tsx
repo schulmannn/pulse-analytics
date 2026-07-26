@@ -1,19 +1,19 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useSearchParams } from 'react-router-dom';
-// Astryx runtime primitives (scoped design-system rollout) — subpath imports for tree-shaking.
-import { Token } from '@astryxdesign/core/Token';
-import { MetadataList, MetadataListItem } from '@astryxdesign/core/MetadataList';
-import { Text as AxText } from '@astryxdesign/core/Text';
-import { Button as AxButton } from '@astryxdesign/core/Button';
-import { ChevronDown, ChevronRight } from 'lucide-react';
-import { WorkspaceInspector, WorkspaceSurface } from '@/components/data-workspace';
+import { ChevronDown, ChevronRight, X } from 'lucide-react';
+import {
+  WorkspaceInspector,
+  WorkspaceMetadataItem,
+  WorkspaceMetadataList,
+} from '@/components/data-workspace';
 import type { IgData } from '@/lib/useIgData';
 import type { IgPost, CampaignPostInput } from '@/api/schemas';
 import { useIgTags, useRemoveCampaignPosts } from '@/api/queries';
 import { ChartSection } from '@/components/ChartWidget';
 import { PillSelect } from '@/components/PillSelect';
 import { SearchField } from '@/components/SearchField';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -64,11 +64,10 @@ import { cn } from '@/lib/utils';
 import { useIgScopedPosts, toCampaignItems } from '@/panels/instagram/igContentScope';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Desktop — shadcn-style Publications table with a scoped Astryx inspector and active-filter
-// tokens. Column visibility stays local to the table; row density is intentionally fixed.
-// The surface remains wrapped in a scoped <Theme> for the Astryx primitives only;
-// all business behaviour (URL-backed filters, campaign scope, selection/bulk actions,
-// sort/median semantics, empty/loading/error) is preserved.
+// Desktop — shadcn-style Publications table with an adjacent inspector and removable active-filter
+// chips, all on the app's single design system. Column visibility stays local to the table; row
+// density is intentionally fixed. Business behaviour (URL-backed filters, campaign scope,
+// selection/bulk actions, sort/median semantics, empty/loading/error) is unchanged.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const SECONDARY_LABEL: Record<IgSecondaryView, string> = {
@@ -494,25 +493,22 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
           </DropdownMenu>
         </div>
       </div>
-      {/* Активные фильтры — снимаемые Astryx-токены; модель уже в URL (igContentFilters), токены
-          лишь визуализируют её и снимают по одному. */}
+      {/* Активные фильтры — снимаемые чипы на общем Badge; модель уже в URL (igContentFilters),
+          чипы лишь визуализируют её и снимают по одному. */}
       {hasContentFilters && (
         <div className="flex flex-wrap items-center gap-1.5" data-testid="ig-filter-chips">
           {filters.q.trim() !== '' && (
-            <Token
+            <RemovableFilterChip
               label={`Поиск: «${filters.q.trim()}»`}
-              size="sm"
-              color="blue"
-              description="Убрать поиск"
+              removeLabel="Убрать поиск"
               onRemove={() => update({ q: '' })}
             />
           )}
           {filters.format !== 'all' && (
-            <Token
+            <RemovableFilterChip
+              variant="secondary"
               label={`Формат: ${FORMAT_OPTIONS.find((option) => option.value === filters.format)?.label ?? filters.format}`}
-              size="sm"
-              color="gray"
-              description="Убрать фильтр формата"
+              removeLabel="Убрать фильтр формата"
               onRemove={() => update({ format: 'all' })}
             />
           )}
@@ -841,27 +837,25 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
 
   return (
     <div className="space-y-8">
-      <WorkspaceSurface>
-        <div
-          className={cn(
-            'grid gap-6 lg:items-start',
-            openPost && 'lg:grid-cols-[minmax(0,1fr)_minmax(320px,360px)]',
-          )}
-        >
-          <div className="min-w-0">{publicationsCard(cardBody)}</div>
-          {openPost && (
-            <IgPostInspector
-              post={openPost}
-              reachMedian={reachMedian}
-              campaignScoped={campaignId != null}
-              canCampaign={channelId != null}
-              onClose={() => setOpenId(null)}
-              onOpenFull={openFullDetail}
-              onAddToCampaign={inspectorAddToCampaign}
-            />
-          )}
-        </div>
-      </WorkspaceSurface>
+      <div
+        className={cn(
+          'grid gap-6 lg:items-start',
+          openPost && 'lg:grid-cols-[minmax(0,1fr)_minmax(320px,360px)]',
+        )}
+      >
+        <div className="min-w-0">{publicationsCard(cardBody)}</div>
+        {openPost && (
+          <IgPostInspector
+            post={openPost}
+            reachMedian={reachMedian}
+            campaignScoped={campaignId != null}
+            canCampaign={channelId != null}
+            onClose={() => setOpenId(null)}
+            onOpenFull={openFullDetail}
+            onAddToCampaign={inspectorAddToCampaign}
+          />
+        )}
+      </div>
 
       {!campaignDataBlocked && secondaryBlock}
       {detail}
@@ -873,10 +867,40 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
 }
 
 /**
+ * Снимаемый чип активного фильтра: тот же Badge, что несут NetworkBadge и статусы, плюс кнопка
+ * снятия с честным русским `aria-label` (Astryx-токен подписывал её английским «Remove …»).
+ */
+function RemovableFilterChip({
+  label,
+  removeLabel,
+  onRemove,
+  variant = 'default',
+}: {
+  label: string;
+  removeLabel: string;
+  onRemove: () => void;
+  variant?: 'default' | 'secondary';
+}) {
+  return (
+    <Badge variant={variant} className="max-w-full gap-1 pr-1">
+      <span className="truncate">{label}</span>
+      <button
+        type="button"
+        aria-label={removeLabel}
+        onClick={onRemove}
+        className="-mr-0.5 inline-flex size-4 shrink-0 items-center justify-center rounded-full opacity-70 transition-opacity hover:opacity-100 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40"
+      >
+        <X className="size-3" aria-hidden="true" />
+      </button>
+    </Badge>
+  );
+}
+
+/**
  * The adjacent desktop inspector — a focused, read-first summary of the row selected in the table,
- * built from Astryx LayoutPanel + MetadataList + Text + Token + Button. It never re-fetches or
- * duplicates business logic: it reads the already-loaded post and the period reach-median, and the
- * full IgPostDetailModal stays one explicit «Открыть подробнее» click away.
+ * built from the shared WorkspaceInspector + metadata `<dl>` + Badge + Button. It never re-fetches
+ * or duplicates business logic: it reads the already-loaded post and the period reach-median, and
+ * the full IgPostDetailModal stays one explicit «Открыть подробнее» click away.
  */
 function IgPostInspector({
   post,
@@ -904,20 +928,19 @@ function IgPostInspector({
       footer={
         <>
           {post.id != null && (
-            <AxButton
-              label="Открыть подробнее"
-              variant="primary"
-              size="sm"
+            <Button
+              type="button"
+              size="xs"
               onClick={() => onOpenFull(post.id!)}
-            />
+              className="bg-foreground text-surface-table hover:bg-foreground/90 focus-visible:ring-foreground/35"
+            >
+              Открыть подробнее
+            </Button>
           )}
           {!campaignScoped && canCampaign && post.id != null && (
-            <AxButton
-              label="Добавить в кампанию"
-              variant="secondary"
-              size="sm"
-              onClick={() => onAddToCampaign(post)}
-            />
+            <Button type="button" variant="outline" size="xs" onClick={() => onAddToCampaign(post)}>
+              Добавить в кампанию
+            </Button>
           )}
         </>
       }
@@ -925,26 +948,26 @@ function IgPostInspector({
       <div className="flex items-start gap-3">
         <IgPostThumb post={post} />
         <div className="min-w-0 flex-1 space-y-1">
-          <AxText type="label" maxLines={2}>
+          <span className="line-clamp-2 text-sm font-medium text-foreground">
             {post.caption || 'Без подписи'}
-          </AxText>
+          </span>
           <div className="flex flex-wrap items-center gap-1.5">
-            <Token label={igFormatLabel(post)} size="sm" color="gray" />
-            {post.timestamp && <AxText type="supporting" size="2xs">{fmt.date(post.timestamp)}</AxText>}
+            <Badge variant="secondary">{igFormatLabel(post)}</Badge>
+            {post.timestamp && <span className="text-xs leading-5 text-muted-foreground">{fmt.date(post.timestamp)}</span>}
           </div>
         </div>
       </div>
 
       <InspectorBenchmark post={post} reachMedian={reachMedian} />
 
-      <MetadataList title="Показатели" columns="single" label={{ position: 'start' }}>
-        <MetadataListItem label="Охват">{fmt.num(post.reach)}</MetadataListItem>
-        <MetadataListItem label="Просмотры">{fmt.num(post.views)}</MetadataListItem>
-        <MetadataListItem label="Взаимодействия">{fmt.num(igInteractions(post))}</MetadataListItem>
-        <MetadataListItem label="ER">{igEr(post) != null ? `${igEr(post)!.toFixed(2)}%` : '—'}</MetadataListItem>
-        <MetadataListItem label="Сохранения">{fmt.num(post.saved)}</MetadataListItem>
-        <MetadataListItem label="Репосты">{fmt.num(post.shares)}</MetadataListItem>
-      </MetadataList>
+      <WorkspaceMetadataList title="Показатели">
+        <WorkspaceMetadataItem label="Охват">{fmt.num(post.reach)}</WorkspaceMetadataItem>
+        <WorkspaceMetadataItem label="Просмотры">{fmt.num(post.views)}</WorkspaceMetadataItem>
+        <WorkspaceMetadataItem label="Взаимодействия">{fmt.num(igInteractions(post))}</WorkspaceMetadataItem>
+        <WorkspaceMetadataItem label="ER">{igEr(post) != null ? `${igEr(post)!.toFixed(2)}%` : '—'}</WorkspaceMetadataItem>
+        <WorkspaceMetadataItem label="Сохранения">{fmt.num(post.saved)}</WorkspaceMetadataItem>
+        <WorkspaceMetadataItem label="Репосты">{fmt.num(post.shares)}</WorkspaceMetadataItem>
+      </WorkspaceMetadataList>
     </WorkspaceInspector>
   );
 }
@@ -954,12 +977,12 @@ function InspectorBenchmark({ post, reachMedian }: { post: IgPost; reachMedian: 
   const cmp = compareToMedian(post.reach == null ? null : Number(post.reach), reachMedian);
   if (!cmp) {
     if (reachMedian == null) {
-      return <AxText type="supporting" size="2xs">Недостаточно публикаций для сравнения с медианой периода</AxText>;
+      return <span className="text-xs leading-5 text-muted-foreground">Недостаточно публикаций для сравнения с медианой периода</span>;
     }
     return null;
   }
-  const color = cmp.dir === 'above' ? 'green' : cmp.dir === 'below' ? 'red' : 'gray';
-  return <Token label={`Охват ${medianDeltaLabel(cmp)}`} size="sm" color={color} />;
+  const variant = cmp.dir === 'above' ? 'success' : cmp.dir === 'below' ? 'destructive' : 'secondary';
+  return <Badge variant={variant}>Охват {medianDeltaLabel(cmp)}</Badge>;
 }
 
 /** The selected secondary analysis — one block at a time (the desktop table is the hero). */

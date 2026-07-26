@@ -295,20 +295,27 @@ test.describe('Смешанная кампания TG+IG', () => {
     const tableRows = table.locator('tbody tr');
     await expect(tableRows).toHaveCount(4);
 
-    // ── Плотность — Astryx SegmentedControl (radiogroup). Дефолт «Обычно» → data-density=balanced. ──
+    // ── Плотность — общий SegmentedControl (toolbar + aria-pressed). Дефолт «Обычно» → balanced. ──
+    const densityTrack = page.getByRole('toolbar', { name: 'Плотность строк' });
     await expect(table).toHaveAttribute('data-density', 'balanced');
-    await page.getByRole('radio', { name: 'Плотно' }).click();
+    await expect(densityTrack.getByRole('button', { name: 'Обычно', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await densityTrack.getByRole('button', { name: 'Плотно', exact: true }).click();
     await expect(table).toHaveAttribute('data-density', 'compact');
-    await page.getByRole('radio', { name: 'Свободно' }).click();
+    await densityTrack.getByRole('button', { name: 'Свободно', exact: true }).click();
     await expect(table).toHaveAttribute('data-density', 'spacious');
+    // Трек — один tab-stop: стрелки водят фокус, Space коммитит (роль toolbar это и обещает).
+    await densityTrack.getByRole('button', { name: 'Свободно', exact: true }).focus();
+    await page.keyboard.press('ArrowLeft');
+    await page.keyboard.press('Space');
+    await expect(table).toHaveAttribute('data-density', 'balanced');
 
-    // ── Видимость колонок — Astryx MultiSelector. Скрытие активной метрики сортировки безопасно ──
-    // ── возвращает сортировку к «дата, убыв». ──
+    // ── Видимость колонок — общий shadcn DropdownMenu (как «Колонки» в IG). Скрытие активной ──
+    // ── метрики сортировки безопасно возвращает сортировку к «дата, убыв». ──
     await table.getByRole('button', { name: 'Основной результат', exact: true }).click();
     await expect.poll(() => new URL(page.url()).searchParams.get('sort')).toBe('result');
     await expect(table.getByRole('columnheader', { name: 'Основной результат' })).toBeVisible();
-    await page.getByRole('combobox', { name: 'Колонки' }).click();
-    await page.getByRole('option', { name: 'Основной результат' }).click();
+    await page.getByRole('button', { name: 'Колонки' }).click();
+    await page.getByRole('menuitemcheckbox', { name: 'Основной результат' }).click();
     await page.keyboard.press('Escape');
     await expect(table.getByRole('columnheader', { name: 'Основной результат' })).toHaveCount(0);
     await expect.poll(() => new URL(page.url()).searchParams.has('sort')).toBe(false);
@@ -322,6 +329,8 @@ test.describe('Смешанная кампания TG+IG', () => {
     await tableRows.filter({ hasText: 'TG видео о продукте' }).locator('[data-campaign-post-open-trigger]').click();
     const inspector = page.locator('[data-campaign-inspector-open]');
     await expect(inspector).toBeVisible();
+    // Панель остаётся complementary-лендмарком с собственным именем (роль даёт сам <aside>).
+    await expect(page.getByRole('complementary', { name: 'Детали выбранной публикации' })).toBeVisible();
     await expect(inspector.getByText('TG видео о продукте')).toBeVisible();
     await expect(inspector.getByText('TG просмотры')).toBeVisible();
     await expect(inspector.getByText('TG реакции + репосты + комментарии')).toBeVisible();
