@@ -759,8 +759,13 @@ export function useMsStatus() {
 }
 
 // ── «Яндекс.Метрика» (source='ym'): сервер-агрегированные дневные отчёты счётчика ────────────
+// total nullable — как и quality: null = сбора не было (пустой архив «Всё» без живого отчёта),
+// а не «ноль визитов». fmt.short(null) рисует «—», канонический знак пропуска.
 const YmSeriesBlockSchema = z
-  .object({ total: z.number(), series: z.array(z.object({ day: z.string(), value: z.number() }).passthrough()) })
+  .object({
+    total: z.number().nullable(),
+    series: z.array(z.object({ day: z.string(), value: z.number() }).passthrough()),
+  })
   .passthrough();
 // Качество трафика: nullable — доли/средние честно недоступны без данных (сервер не выдумывает 0).
 // robot_* — явная роботность: число роботных визитов и их доля (Метрика включает роботов «по

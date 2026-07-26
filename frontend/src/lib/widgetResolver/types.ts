@@ -96,10 +96,17 @@ export interface MsDataContext {
  *  серии УЖЕ нарезаны сервером под окно виджета (зеркало MsDataContext). */
 export interface YmDataContext {
   summary?: {
-    visits: { total: number; series: Array<{ day: string; value: number }> };
-    users: { total: number; series: Array<{ day: string; value: number }> };
-    pageviews: { total: number; series: Array<{ day: string; value: number }> };
+    visits: YmSummaryBlock;
+    users: YmSummaryBlock;
+    pageviews: YmSummaryBlock;
   } | null;
+}
+
+/** total nullable — пропуск сбора, а не ноль (см. buildSummary в server/routes/metrika.js).
+    Резолвер до него не доходит: пустая серия отсекается раньше как `empty`. */
+interface YmSummaryBlock {
+  total: number | null;
+  series: Array<{ day: string; value: number }>;
 }
 
 export interface DataContext {

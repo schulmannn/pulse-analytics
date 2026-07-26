@@ -200,10 +200,18 @@ function registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cach
   // base = summaryFromRows(...) (дневные серии + суммарные итоги); exact = exactTotalsFromBody|null.
   // Серии архива/окна НЕ подменяем; точные итоги (когда есть) замещают суммарные, качество — из них.
   const buildSummary = (base, exact, meta, qualitySeries) => {
+    // НИ ОДНОГО дня и НИ ОДНОГО точного живого итога — это ПРОПУСК сбора, а не ноль. «0 визитов
+    // за всё время» врёт про счётчик, по которому мы просто ещё ничего не собрали (пустой архив
+    // ym_daily + недоступное живое обогащение). Тот же канон, что у quality: сервер не выдумывает
+    // 0. Пустой, но РЕАЛЬНО нулевой счётчик сюда не попадает — у него живой отчёт отвечает, и
+    // exact != null несёт честный 0. Оконная ветка не затрагивается: reportToDailySeries строит
+    // плотную строку на каждый день окна, поэтому series там непустые всегда.
+    const noData = !exact && base.visits.series.length === 0;
+    const totalOf = (block) => (noData ? null : block.total);
     const out = {
-      visits: { total: base.visits.total, series: base.visits.series },
-      users: { total: base.users.total, series: base.users.series },
-      pageviews: { total: base.pageviews.total, series: base.pageviews.series },
+      visits: { total: totalOf(base.visits), series: base.visits.series },
+      users: { total: totalOf(base.users), series: base.users.series },
+      pageviews: { total: totalOf(base.pageviews), series: base.pageviews.series },
       quality: exact ? exact.quality : { ...EMPTY_QUALITY },
       // Дневные серии качества (все метрики, включая роботность) — АДДИТИВНОЕ поле: старые
       // потребители читают visits/users/pageviews/quality как прежде. Итоги качества остаются
