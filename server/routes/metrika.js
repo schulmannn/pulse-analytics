@@ -248,11 +248,25 @@ function registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cach
     return parsed.getUTCFullYear() === year && parsed.getUTCMonth() === month - 1 && parsed.getUTCDate() === day;
   };
 
+  // Потолок ШИРИНЫ произвольного диапазона. Дневное окно материализуется построчно: summary
+  // строит плотную строку на КАЖДЫЙ день (reportToDailySeries) плюс семь серий качества той же
+  // длины и кладёт всё это в кэш, ограниченный ЧИСЛОМ записей (infrastructure/memoryCache), а не
+  // байтами — «за десятилетия» превращается в мегабайты на запись у единственной реплики. 400 дней
+  // — канон дневных окон бэка (getChannelHistoryForActor(..., 400)): год с запасом на YoY-сдвиг
+  // окна. Историю целиком показывает пресет «Всё» (days=0 БЕЗ from/to) — он идёт другой веткой
+  // (архив ym_daily в summary, allRangeWindow от даты создания счётчика в разрезах) и потолком
+  // ширины не ограничен.
+  const YM_RANGE_MAX_DAYS = 400;
+  // Инклюзивная ширина окна в днях. Полдень UTC — DST-безопасно (канон reportToDailySeries).
+  const rangeDays = (from, to) =>
+    Math.round((Date.parse(`${to}T12:00:00Z`) - Date.parse(`${from}T12:00:00Z`)) / 86400000) + 1;
+
   // Единый разбор периода data-роутов: пресет days ЛИБО точный произвольный диапазон
   // (?from&to=YYYY-MM-DD, инклюзивный с обоих концов — окно топбара; фронт всегда шлёт days
   // рядом как пресет-фолбэк). У Метрики окна дневные (date1/date2 без времени), поэтому
   // отдельных moment-границ нет. Возвращает:
-  //   invalid=true — from/to присланы, но кривые/перевёрнуты: честный 400;
+  //   invalid=true — from/to присланы, но кривые/перевёрнуты/шире потолка: честный 400
+  //                  (period.error несёт причину, badRange её и печатает);
   //   date1/date2  — инклюзивные дневные границы живых отчётов; оба null у пресета «Всё»;
   //   range        — true для произвольного диапазона (отличает его от days=0 в ветвлениях);
   //   periodKey    — стабильный кэш-токен ('r:from:to' | 'd:days').
@@ -264,6 +278,12 @@ function registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cach
       if (!isDayKey(rawFrom) || !isDayKey(rawTo) || rawFrom > rawTo) {
         return { invalid: true };
       }
+      if (rangeDays(rawFrom, rawTo) > YM_RANGE_MAX_DAYS) {
+        return {
+          invalid: true,
+          error: `Слишком широкий диапазон дат: максимум ${YM_RANGE_MAX_DAYS} дней. Для всей истории выберите период «Всё»`,
+        };
+      }
       return { invalid: false, range: true, days, date1: rawFrom, date2: rawTo, periodKey: `r:${rawFrom}:${rawTo}` };
     }
     if (days === 0) {
@@ -273,8 +293,12 @@ function registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cach
     const from = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (days - 1));
     return { invalid: false, range: false, days, date1: fmtDay(from), date2: fmtDay(now), periodKey: `d:${days}` };
   }
-  const badRange = (res) =>
-    res.status(400).json({ error: 'Некорректный диапазон дат (ожидается from<=to в формате YYYY-MM-DD)' });
+  // Единый 400 для периода: причина берётся из period.error (слишком широкий диапазон), иначе —
+  // прежний текст про формат/порядок границ. Форма ответа не меняется.
+  const badRange = (res, period) =>
+    res.status(400).json({
+      error: (period && period.error) || 'Некорректный диапазон дат (ожидается from<=to в формате YYYY-MM-DD)',
+    });
 
   // Единый маппинг ошибок ymFetch для data-роутов (зеркало sendMsError). 429 (уже ПОСЛЕ одной
   // внутренней повторной попытки клиента) → честный 503 с retry-хинтом. 401/403 от Метрики =
@@ -600,7 +624,7 @@ function registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cach
   app.get('/api/ym/summary', requireAuth, async (req, res, next) => {
     try {
       const period = parseYmPeriod(req);
-      if (period.invalid) return badRange(res);
+      if (period.invalid) return badRange(res, period);
 
       if (period.days === 0 && !period.range) {
         // Архивная ветка: канал резолвим и 404-им как data-роут (после отключения учётки «Всё»
@@ -736,7 +760,7 @@ function registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cach
   app.get('/api/ym/sources', requireAuth, async (req, res, next) => {
     try {
       const period = parseYmPeriod(req);
-      if (period.invalid) return badRange(res);
+      if (period.invalid) return badRange(res, period);
       const goalId = goalIdOf(req);
       const ym = await resolveYm(req, res);
       if (!ym) return;
@@ -833,7 +857,7 @@ function registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cach
   app.get('/api/ym/goals', requireAuth, async (req, res, next) => {
     try {
       const period = parseYmPeriod(req);
-      if (period.invalid) return badRange(res);
+      if (period.invalid) return badRange(res, period);
       const ym = await resolveYm(req, res);
       if (!ym) return;
       const cacheKey = `ym:goals:${ym.channel.id}:${period.periodKey}`;
@@ -906,7 +930,7 @@ function registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cach
   app.get('/api/ym/pages', requireAuth, async (req, res, next) => {
     try {
       const period = parseYmPeriod(req);
-      if (period.invalid) return badRange(res);
+      if (period.invalid) return badRange(res, period);
       const limit = pagesLimitOf(req);
       const ym = await resolveYm(req, res);
       if (!ym) return;
@@ -971,7 +995,7 @@ function registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cach
   app.get('/api/ym/landings', requireAuth, async (req, res, next) => {
     try {
       const period = parseYmPeriod(req);
-      if (period.invalid) return badRange(res);
+      if (period.invalid) return badRange(res, period);
       const limit = landingsLimitOf(req);
       const goalId = goalIdOf(req);
       const ym = await resolveYm(req, res);
@@ -1049,7 +1073,7 @@ function registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cach
   app.get('/api/ym/exits', requireAuth, async (req, res, next) => {
     try {
       const period = parseYmPeriod(req);
-      if (period.invalid) return badRange(res);
+      if (period.invalid) return badRange(res, period);
       const limit = exitsLimitOf(req);
       const ym = await resolveYm(req, res);
       if (!ym) return;
@@ -1110,7 +1134,7 @@ function registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cach
   app.get('/api/ym/hourly', requireAuth, async (req, res, next) => {
     try {
       const period = parseYmPeriod(req);
-      if (period.invalid) return badRange(res);
+      if (period.invalid) return badRange(res, period);
       const ym = await resolveYm(req, res);
       if (!ym) return;
       const cacheKey = `ym:hourly:${ym.channel.id}:${period.periodKey}`;
@@ -1199,7 +1223,7 @@ function registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cach
   app.get('/api/ym/utm', requireAuth, async (req, res, next) => {
     try {
       const period = parseYmPeriod(req);
-      if (period.invalid) return badRange(res);
+      if (period.invalid) return badRange(res, period);
       const goalId = goalIdOf(req);
       const ym = await resolveYm(req, res);
       if (!ym) return;
@@ -1341,7 +1365,7 @@ function registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cach
     app.get(`/api/ym/${route}`, requireAuth, async (req, res, next) => {
       try {
         const period = parseYmPeriod(req);
-        if (period.invalid) return badRange(res);
+        if (period.invalid) return badRange(res, period);
         const goalId = goals ? goalIdOf(req) : null;
         const ym = await resolveYm(req, res);
         if (!ym) return;

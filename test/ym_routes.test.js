@@ -212,6 +212,42 @@ test('summary: кривой диапазон (from>to / мусор) → 400, к 
   assert.equal(fetches, 0);
 });
 
+test('summary: диапазон шире потолка → 400 (строка на каждый день окна = OOM-вектор), к Метрике не ходим', async () => {
+  let fetches = 0;
+  const { routes } = buildYm({ ymFetch: async () => { fetches += 1; return {}; } });
+  // Десятилетие: 3654 плотных дневных строк × (базовые серии + 7 серий качества) в кэш, который
+  // ограничен ЧИСЛОМ записей, а не байтами.
+  const wide = await invoke(routes, 'GET /api/ym/summary', { query: { from: '2016-01-01', to: '2026-01-01' } });
+  assert.equal(wide.statusCode, 400);
+  assert.match(wide.body.error, /Слишком широкий диапазон/);
+  assert.match(wide.body.error, /400 дней/);
+  // Потолок распространяется на все data-роуты (разбор периода общий).
+  const wideSources = await invoke(routes, 'GET /api/ym/sources', { query: { from: '2016-01-01', to: '2026-01-01' } });
+  assert.equal(wideSources.statusCode, 400);
+  assert.equal(fetches, 0, 'широкое окно отсекается ДО запроса в Метрику');
+});
+
+test('summary: граничные 400 дней проходят, 401-й — уже 400; «Всё» потолком не ограничено', async () => {
+  const edge = buildYm({
+    ymFetch: async () => ({ data: [], totals: [] }),
+  });
+  const ok = await invoke(edge.routes, 'GET /api/ym/summary', { query: { from: '2025-01-01', to: '2026-02-04' } });
+  assert.equal(ok.statusCode, 200, 'ровно 400 дней — легитимное окно (год + запас на YoY-сдвиг)');
+  assert.equal(ok.body.visits.series.length, 400, 'плотная серия ровно на ширину окна');
+
+  const over = await invoke(edge.routes, 'GET /api/ym/summary', { query: { from: '2025-01-01', to: '2026-02-05' } });
+  assert.equal(over.statusCode, 400, '401 день — за потолком');
+
+  // «Всё» (days=0 без from/to) идёт архивной веткой и потолка ширины не знает.
+  const all = buildYm({
+    ymFetch: async () => ({ data: [], totals: [] }),
+    db: { getYmDailyAllForActor: async () => [{ day: '2015-01-01', visits: 1, users: 1, pageviews: 1 }] },
+  });
+  const allTime = await invoke(all.routes, 'GET /api/ym/summary', { query: { days: '0' } });
+  assert.equal(allTime.statusCode, 200);
+  assert.equal(allTime.body.meta.all_time, true);
+});
+
 test('sources: маппинг строк + totals полного отчёта авторитетнее суммы среза', async () => {
   const { routes } = buildYm({
     ymFetch: async (_t, path) => {
