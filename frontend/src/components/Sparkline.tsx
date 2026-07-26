@@ -144,11 +144,23 @@ export function Sparkline({
         onMouseMove={interactive ? onMove : undefined}
         onMouseLeave={interactive ? () => setHover(null) : undefined}
       >
+        {/* Декоративная искра рядом с числом действительно ничего не добавляет скринридеру и
+            остаётся aria-hidden. Но `interactive` — уже не украшение: у неё есть hover-читалка со
+            значениями, которую мышиный пользователь видит, а AT — нет. Такая искра получает тот же
+            режим, что и полный LineChart: role="img" плюс подпись, несущая данные (макс/последнее).
+            Точечная клавиатурная навигация — отдельный пункт роадмапа, общий с LineChart. */}
         <svg
           viewBox={`0 0 ${VBW} ${VBH}`}
           preserveAspectRatio="none"
           className="h-full w-full"
-          aria-hidden="true"
+          {...(interactive && values.length
+            ? {
+                role: 'img',
+                'aria-label':
+                  `График: ${values.length} точек, макс ${formatValue(Math.max(...values))}, ` +
+                  `последнее ${formatValue(values[values.length - 1])}`,
+              }
+            : { 'aria-hidden': true as const })}
           data-chart-kind="sparkline"
         >
           {area && (
