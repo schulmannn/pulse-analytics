@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { bootDemo, overflowingCards } from './helpers';
+import { bootDemo, expandWidget, overflowingCards } from './helpers';
 
 test.beforeEach(async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop-1440', 'MoySklad analytics is desktop-first');
@@ -17,7 +17,7 @@ test('MoySklad RFM is an honest compact distribution with a canonical full page'
 
   await metric.getByRole('button', { name: 'Выручка' }).click();
   await expect(metric.getByRole('button', { name: 'Выручка' })).toHaveAttribute('aria-pressed', 'true');
-  await card.getByRole('button', { name: 'Развернуть виджет «RFM-сегменты»' }).click();
+  await expandWidget(card, 'RFM-сегменты');
 
   await expect(page).toHaveURL(/\/metrics\/ms-rfm$/);
   await expect(page.getByRole('heading', { name: 'RFM-сегменты', level: 1 })).toBeVisible({ timeout: 20_000 });
