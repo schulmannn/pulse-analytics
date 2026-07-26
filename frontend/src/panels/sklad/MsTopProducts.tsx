@@ -274,15 +274,32 @@ function MsConcentrationView({
           <li key={`${p.rank}-${p.name}`}>{cumulativePointLabel(p)}</li>
         ))}
       </ol>
-      <MsConcentrationKpis summary={summary} />
+      <MsConcentrationKpis summary={summary} share={share} topN={topN} metricWord={metricWord} />
     </div>
   );
 }
 
-/** Решающие KPI концентрации: число товаров в полном отчёте, общая маржа (только при выручке > 0)
-    и убыточные позиции (счётчик + абсолютный убыток). */
-function MsConcentrationKpis({ summary }: { summary: MsTopSummary }) {
+/** Решающие KPI концентрации: САМА доля топ-N, число товаров в полном отчёте, общая маржа (только
+    при выручке > 0) и убыточные позиции (счётчик + абсолютный убыток).
+ *
+ *  Доля идёт первой и живёт ИМЕННО здесь, а не только в заголовке ChartCardBody: в развороте
+ *  (полная страница /metrics/ms-products) ChartCardBody намеренно отдаёт всю ширину графику и
+ *  заголовок с числом не рисует — «страница уже несёт текущее значение в инспекторе». Для вида
+ *  «Концентрация» этим текущим значением и является доля топ-N, поэтому без неё в леджере число,
+ *  ради которого открыт весь отчёт, на странице просто отсутствовало. */
+function MsConcentrationKpis({
+  summary,
+  share,
+  topN,
+  metricWord,
+}: {
+  summary: MsTopSummary;
+  share: number;
+  topN: number;
+  metricWord: string;
+}) {
   const tiles = [
+    { label: `Доля топ-${topN}`, value: `${share.toFixed(1)}%` },
     { label: 'Товаров в отчёте', value: fmt.num(summary.product_count) },
     { label: 'Общая маржа', value: summary.net_margin_pct == null ? '—' : `${summary.net_margin_pct.toFixed(1)}%` },
     {
@@ -294,13 +311,20 @@ function MsConcentrationKpis({ summary }: { summary: MsTopSummary }) {
     },
   ];
   return (
-    <div className="grid grid-cols-1 gap-x-6 gap-y-2 border-t border-border pt-3 sm:grid-cols-3">
-      {tiles.map((t) => (
-        <div key={t.label} className="flex items-baseline justify-between gap-3">
-          <span className="text-2xs tracking-wide text-muted-foreground">{t.label}</span>
-          <span className="text-sm font-medium tabular-nums text-foreground">{t.value}</span>
-        </div>
-      ))}
+    <div className="border-t border-border pt-3">
+      <div className="grid grid-cols-1 gap-x-6 gap-y-2 sm:grid-cols-2 lg:grid-cols-4">
+        {tiles.map((t) => (
+          <div key={t.label} className="flex items-baseline justify-between gap-3">
+            <span className="text-2xs tracking-wide text-muted-foreground">{t.label}</span>
+            <span className="text-sm font-medium tabular-nums text-foreground">{t.value}</span>
+          </div>
+        ))}
+      </div>
+      {/* Расшифровка доли — та же строка, что несёт caption карточки в компактном виде. В развороте
+          caption не рисуется вместе с заголовком, а без неё «доля» это процент без знаменателя. */}
+      <p className="mt-2 text-2xs text-muted-foreground">
+        топ-{topN} из {fmt.num(summary.product_count)} товаров дают эту долю {metricWord}
+      </p>
     </div>
   );
 }
