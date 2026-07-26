@@ -21,6 +21,43 @@ import { msPeriodKey, type MsPeriod } from '@/lib/msPeriod';
  * - `.all` — префикс семьи для инвалидации всех её ключей (TanStack матчит ключи
  *   поэлементно с начала массива); параметризованные формы — точный ключ чтения.
  */
+
+/** Семья отчёта «Яндекс.Метрики»: префикс инвалидации (`all`) + точный ключ чтения (`window`).
+    Хвост (`limit`, цель) добавляется ПОЗИЦИОННО в том же порядке, что и в query-строке запроса. */
+const ymFamily = (name: string) => ({
+  all: [name] as const,
+  window: (channelId: number | null, period: MsPeriod, ...tail: number[]) =>
+    [name, channelId, ...msPeriodKey(period), ...tail],
+});
+
+/**
+ * Один счётчик Метрики кормит 17 семей: статус, сводка и 15 разрезов. Смена счётчика обязана
+ * сбрасывать ВСЕ — иначе разрезы до истечения staleTime (5 мин) показывают данные прошлого
+ * счётчика. Поэтому семьи собраны в одну запись, а `qk.ymAll` отдаёт их префиксы списком.
+ */
+const ymFamilies = {
+  ymStatus: {
+    all: ['ym-status'] as const,
+    byChannel: (channelId: number | null) => ['ym-status', channelId] as const,
+  },
+  ymSummary: ymFamily('ym-summary'),
+  ymSources: ymFamily('ym-sources'),
+  ymReferrers: ymFamily('ym-referrers'),
+  ymSocial: ymFamily('ym-social'),
+  ymMessengers: ymFamily('ym-messengers'),
+  ymDevices: ymFamily('ym-devices'),
+  ymCountries: ymFamily('ym-countries'),
+  ymCities: ymFamily('ym-cities'),
+  ymAge: ymFamily('ym-age'),
+  ymGender: ymFamily('ym-gender'),
+  ymGoals: ymFamily('ym-goals'),
+  ymUtm: ymFamily('ym-utm'),
+  ymPages: ymFamily('ym-pages'),
+  ymLandings: ymFamily('ym-landings'),
+  ymHourly: ymFamily('ym-hourly'),
+  ymExits: ymFamily('ym-exits'),
+};
+
 export const qk = {
   // ── Профиль / сессия ──
   me: ['me'] as const,
@@ -52,19 +89,10 @@ export const qk = {
     window: (channelId: number | null, period: MsPeriod, limit: number, sort: string) =>
       ['ms-top-products', channelId, ...msPeriodKey(period), limit, sort],
   },
-  ymStatus: {
-    all: ['ym-status'] as const,
-    byChannel: (channelId: number | null) => ['ym-status', channelId] as const,
-  },
-  ymSummary: {
-    all: ['ym-summary'] as const,
-    window: (channelId: number | null, period: MsPeriod) => ['ym-summary', channelId, ...msPeriodKey(period)],
-  },
-  ymSources: {
-    all: ['ym-sources'] as const,
-    window: (channelId: number | null, period: MsPeriod, goal: number | null) =>
-      ['ym-sources', channelId, ...msPeriodKey(period), goal ?? 0],
-  },
+  ...ymFamilies,
+  /** Префиксы ВСЕХ семей Метрики одним списком: `invalidateYm` после смены счётчика обязан
+      пройтись по ним, а не по трём — иначе 14 карточек разрезов до 5 минут врут прошлым счётчиком. */
+  ymAll: Object.values(ymFamilies).map((family) => family.all),
 
   // ── Аккаунт-кластер ──
   adminUsers: ['admin-users'] as const,

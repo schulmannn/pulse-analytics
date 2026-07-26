@@ -7,6 +7,15 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 const STALE_LIVE = 5 * 60 * 1000;      // живые агрегаты (tg-full, ig-insights, посты, графы)
 const STALE_ARCHIVE = 30 * 60 * 1000;  // дневные архивы Postgres (history, ig_daily, velocity)
 const STALE_STATUS = 60 * 1000;        // свежесть-статусы (collector-status кормит бейдж)
+// ── Правило `retry: false` (арх-аудит: ретраи по вертикалям, а не по семантике) ────────────────
+// Глобальный дефолт (main.tsx) и так НЕ ретраит 4xx и даёт ровно ОДИН ретрай на 5xx/сеть, поэтому
+// «читающему данные» хуку локальный retry:false ничего не добавляет — он только лишает транзиентный
+// 502 самолечения (ErrorState вместо второй попытки). Ставим retry:false ТОЛЬКО там, где вторая
+// попытка вредна или бессмысленна по смыслу:
+//   • ворота сессии/окружения — useMe, useConfig (401/пустой конфиг = ответ, а не сбой);
+//   • статусы подключений — ms/ym-status, mention-settings (ошибка = «не подключено», её и рисуем);
+//   • поллинг — backfill-status, mention-notify-status (следующий тик и есть ретрай).
+// Все витрины данных (tg/ig/ym/ms/отчёты/кампании) живут на дефолте.
 
 import { z } from 'zod';
 import { apiGet, apiSend } from '@/api/client';
@@ -859,7 +868,6 @@ export function useYmSummary(period: MsPeriod, opts?: { enabled?: boolean }) {
     enabled: channelId != null && opts?.enabled !== false,
     queryKey: qk.ymSummary.window(channelId, period),
     staleTime: STALE_LIVE,
-    retry: false,
     queryFn: ({ signal }) => apiGet(`/api/ym/summary?${msPeriodQuery(period)}`, YmSummarySchema, { signal, channelId }),
   });
 }
@@ -870,22 +878,55 @@ export function useYmSummary(period: MsPeriod, opts?: { enabled?: boolean }) {
 const ymGoalParam = (goalId: number | null): number | null =>
   goalId != null && Number.isSafeInteger(goalId) && goalId > 0 ? goalId : null;
 
-export function useYmSources(period: MsPeriod, goalId: number | null = null) {
-  const { channelId } = useSelectedChannel();
-  const goal = ymGoalParam(goalId);
-  return useQuery({
-    enabled: channelId != null,
-    queryKey: qk.ymSources.window(channelId, period, goal),
-    staleTime: STALE_LIVE,
-    retry: false,
-    queryFn: ({ signal }) =>
-      apiGet(
-        `/api/ym/sources?${msPeriodQuery(period)}${goal != null ? `&goal_id=${goal}` : ''}`,
-        YmSourcesSchema,
-        { signal, channelId },
-      ),
-  });
+/** Параметры разреза Метрики. Все три опциональны — семья сама решает, что из них у неё есть. */
+export interface YmBreakdownParams {
+  /** Выбранная цель атрибуции (источники/устройства/UTM/страницы входа); не-цель отсекает ymGoalParam. */
+  goalId?: number | null;
+  /** Размер топа отчёта — только у семей с limit (страницы входа/выхода). */
+  limit?: number;
+  /** Внешний гейт поверх канального (карточка ещё не подошла к вьюпорту); queryKey прежний. */
+  enabled?: boolean;
 }
+
+/** Ключевая семья разреза из `qk` — структурный контракт, чтобы фабрика не знала про весь `qk`. */
+interface YmKeyFamily {
+  window: (channelId: number | null, period: MsPeriod, ...tail: number[]) => Array<string | number | null>;
+}
+
+/**
+ * Фабрика хука одного разреза Метрики. 15 хуков отличались ТОЛЬКО путём, литералом семьи и
+ * Zod-схемой — по 10-13 строк копипасты на каждый. Формы ключей сохранены БАЙТ-В-БАЙТ (они в проде
+ * и в живых кэшах): `[семья, channelId, ...msPeriodKey(period), limit?, goal ?? 0?]`. Хвост ключа и
+ * хвост query-строки идут в ОДНОМ порядке — сперва `limit`, затем `goal_id`.
+ */
+function ymBreakdownQuery<S extends z.ZodTypeAny>(
+  family: YmKeyFamily,
+  path: string,
+  schema: S,
+  shape: { goal?: boolean; limit?: number } = {},
+) {
+  return function useYmBreakdown(period: MsPeriod, params: YmBreakdownParams = {}) {
+    const { channelId } = useSelectedChannel();
+    const goal = shape.goal ? ymGoalParam(params.goalId ?? null) : null;
+    const limit = shape.limit != null ? (params.limit ?? shape.limit) : null;
+    const tail: number[] = [];
+    if (limit != null) tail.push(limit);
+    if (shape.goal) tail.push(goal ?? 0);
+    return useQuery({
+      enabled: channelId != null && params.enabled !== false,
+      queryKey: family.window(channelId, period, ...tail),
+      staleTime: STALE_LIVE,
+      queryFn: ({ signal }) =>
+        apiGet(
+          `${path}?${msPeriodQuery(period)}${limit != null ? `&limit=${limit}` : ''}${goal != null ? `&goal_id=${goal}` : ''}`,
+          schema,
+          { signal, channelId },
+        ),
+    });
+  };
+}
+
+export const useYmSources = ymBreakdownQuery(qk.ymSources, '/api/ym/sources', YmSourcesSchema, { goal: true });
 
 // Слайс аудитории/источников: устройства (ym:s:deviceCategory), реферальные сайты
 // (ym:s:externalRefererDomain — внешние домены, без внутренних переходов) и соцсети
@@ -923,83 +964,16 @@ const YmBreakdownSchema = z
   .passthrough();
 export type YmBreakdown = z.infer<typeof YmBreakdownSchema>;
 
-export function useYmDevices(period: MsPeriod, goalId: number | null = null) {
-  const { channelId } = useSelectedChannel();
-  const goal = ymGoalParam(goalId);
-  return useQuery({
-    enabled: channelId != null,
-    queryKey: ['ym-devices', channelId, ...msPeriodKey(period), goal ?? 0],
-    staleTime: STALE_LIVE,
-    retry: false,
-    queryFn: ({ signal }) =>
-      apiGet(
-        `/api/ym/devices?${msPeriodQuery(period)}${goal != null ? `&goal_id=${goal}` : ''}`,
-        YmBreakdownSchema,
-        { signal, channelId },
-      ),
-  });
-}
-
-export function useYmReferrers(period: MsPeriod) {
-  const { channelId } = useSelectedChannel();
-  return useQuery({
-    enabled: channelId != null,
-    queryKey: ['ym-referrers', channelId, ...msPeriodKey(period)],
-    staleTime: STALE_LIVE,
-    retry: false,
-    queryFn: ({ signal }) => apiGet(`/api/ym/referrers?${msPeriodQuery(period)}`, YmBreakdownSchema, { signal, channelId }),
-  });
-}
-
-export function useYmSocial(period: MsPeriod) {
-  const { channelId } = useSelectedChannel();
-  return useQuery({
-    enabled: channelId != null,
-    queryKey: ['ym-social', channelId, ...msPeriodKey(period)],
-    staleTime: STALE_LIVE,
-    retry: false,
-    queryFn: ({ signal }) => apiGet(`/api/ym/social?${msPeriodQuery(period)}`, YmBreakdownSchema, { signal, channelId }),
-  });
-}
-
-export function useYmMessengers(period: MsPeriod) {
-  const { channelId } = useSelectedChannel();
-  return useQuery({
-    enabled: channelId != null,
-    queryKey: ['ym-messengers', channelId, ...msPeriodKey(period)],
-    staleTime: STALE_LIVE,
-    retry: false,
-    queryFn: ({ signal }) =>
-      apiGet(`/api/ym/messengers?${msPeriodQuery(period)}`, YmBreakdownSchema, { signal, channelId }),
-  });
-}
+export const useYmDevices = ymBreakdownQuery(qk.ymDevices, '/api/ym/devices', YmBreakdownSchema, { goal: true });
+export const useYmReferrers = ymBreakdownQuery(qk.ymReferrers, '/api/ym/referrers', YmBreakdownSchema);
+export const useYmSocial = ymBreakdownQuery(qk.ymSocial, '/api/ym/social', YmBreakdownSchema);
+export const useYmMessengers = ymBreakdownQuery(qk.ymMessengers, '/api/ym/messengers', YmBreakdownSchema);
 
 // География посетителей: страны (ym:s:regionCountry) и города (ym:s:regionCity). Тот же breakdown-
 // контракт (визиты/посетители + отказы по строке, стабильный id + русское имя при lang=ru), без
 // атрибуции цели. Живые отчёты, общий оконный контракт 7/30/90/диапазон/«Всё».
-export function useYmCountries(period: MsPeriod) {
-  const { channelId } = useSelectedChannel();
-  return useQuery({
-    enabled: channelId != null,
-    queryKey: ['ym-countries', channelId, ...msPeriodKey(period)],
-    staleTime: STALE_LIVE,
-    retry: false,
-    queryFn: ({ signal }) =>
-      apiGet(`/api/ym/countries?${msPeriodQuery(period)}`, YmBreakdownSchema, { signal, channelId }),
-  });
-}
-
-export function useYmCities(period: MsPeriod) {
-  const { channelId } = useSelectedChannel();
-  return useQuery({
-    enabled: channelId != null,
-    queryKey: ['ym-cities', channelId, ...msPeriodKey(period)],
-    staleTime: STALE_LIVE,
-    retry: false,
-    queryFn: ({ signal }) =>
-      apiGet(`/api/ym/cities?${msPeriodQuery(period)}`, YmBreakdownSchema, { signal, channelId }),
-  });
-}
+export const useYmCountries = ymBreakdownQuery(qk.ymCountries, '/api/ym/countries', YmBreakdownSchema);
+export const useYmCities = ymBreakdownQuery(qk.ymCities, '/api/ym/cities', YmBreakdownSchema);
 
 // Демография посетителей: возраст (ym:s:ageInterval) и пол (ym:s:gender). Тот же breakdown-контракт
 // (визиты/посетители + отказы по строке, стабильный id + русское имя при lang=ru), без атрибуции
@@ -1012,29 +986,8 @@ const YmDemographicsSchema = YmBreakdownSchema.extend({
 });
 export type YmDemographics = z.infer<typeof YmDemographicsSchema>;
 
-export function useYmAge(period: MsPeriod) {
-  const { channelId } = useSelectedChannel();
-  return useQuery({
-    enabled: channelId != null,
-    queryKey: ['ym-age', channelId, ...msPeriodKey(period)],
-    staleTime: STALE_LIVE,
-    retry: false,
-    queryFn: ({ signal }) =>
-      apiGet(`/api/ym/age?${msPeriodQuery(period)}`, YmDemographicsSchema, { signal, channelId }),
-  });
-}
-
-export function useYmGender(period: MsPeriod) {
-  const { channelId } = useSelectedChannel();
-  return useQuery({
-    enabled: channelId != null,
-    queryKey: ['ym-gender', channelId, ...msPeriodKey(period)],
-    staleTime: STALE_LIVE,
-    retry: false,
-    queryFn: ({ signal }) =>
-      apiGet(`/api/ym/gender?${msPeriodQuery(period)}`, YmDemographicsSchema, { signal, channelId }),
-  });
-}
+export const useYmAge = ymBreakdownQuery(qk.ymAge, '/api/ym/age', YmDemographicsSchema);
+export const useYmGender = ymBreakdownQuery(qk.ymGender, '/api/ym/gender', YmDemographicsSchema);
 
 // Слайс 2: цели (reaches + conversionRate — отдельная метрика, из reaches не выводится),
 // топ-страницы (hits-неймспейс, просмотры ≠ визиты) и utm_source-разрез с честным хвостом
@@ -1076,44 +1029,9 @@ const YmUtmSchema = z
   })
   .passthrough();
 
-export function useYmGoals(period: MsPeriod) {
-  const { channelId } = useSelectedChannel();
-  return useQuery({
-    enabled: channelId != null,
-    queryKey: ['ym-goals', channelId, ...msPeriodKey(period)],
-    staleTime: STALE_LIVE,
-    retry: false,
-    queryFn: ({ signal }) => apiGet(`/api/ym/goals?${msPeriodQuery(period)}`, YmGoalsSchema, { signal, channelId }),
-  });
-}
-
-export function useYmPages(period: MsPeriod) {
-  const { channelId } = useSelectedChannel();
-  return useQuery({
-    enabled: channelId != null,
-    queryKey: ['ym-pages', channelId, ...msPeriodKey(period)],
-    staleTime: STALE_LIVE,
-    retry: false,
-    queryFn: ({ signal }) => apiGet(`/api/ym/pages?${msPeriodQuery(period)}`, YmPagesSchema, { signal, channelId }),
-  });
-}
-
-export function useYmUtm(period: MsPeriod, goalId: number | null = null) {
-  const { channelId } = useSelectedChannel();
-  const goal = ymGoalParam(goalId);
-  return useQuery({
-    enabled: channelId != null,
-    queryKey: ['ym-utm', channelId, ...msPeriodKey(period), goal ?? 0],
-    staleTime: STALE_LIVE,
-    retry: false,
-    queryFn: ({ signal }) =>
-      apiGet(
-        `/api/ym/utm?${msPeriodQuery(period)}${goal != null ? `&goal_id=${goal}` : ''}`,
-        YmUtmSchema,
-        { signal, channelId },
-      ),
-  });
-}
+export const useYmGoals = ymBreakdownQuery(qk.ymGoals, '/api/ym/goals', YmGoalsSchema);
+export const useYmPages = ymBreakdownQuery(qk.ymPages, '/api/ym/pages', YmPagesSchema);
+export const useYmUtm = ymBreakdownQuery(qk.ymUtm, '/api/ym/utm', YmUtmSchema, { goal: true });
 
 // Слайс качества: лендинги (страницы ВХОДА — startURLPath, не PathFull) с отказами и
 // опциональными достижениями/конверсией ОДНОЙ выбранной цели. goal — положительный id или null;
@@ -1146,24 +1064,13 @@ const YmLandingsSchema = z
   .passthrough();
 export type YmLandings = z.infer<typeof YmLandingsSchema>;
 
-/** Топ страниц входа. `goalId` (положительный id или null) добавляет достижения/конверсию цели;
-    входит в queryKey и в query-строку — переключение цели рефетчит, но не плодит ключей вне цели. */
-export function useYmLandings(period: MsPeriod, goalId: number | null, limit = 10) {
-  const { channelId } = useSelectedChannel();
-  const goalParam = goalId != null && Number.isSafeInteger(goalId) && goalId > 0 ? goalId : null;
-  return useQuery({
-    enabled: channelId != null,
-    queryKey: ['ym-landings', channelId, ...msPeriodKey(period), limit, goalParam ?? 0],
-    staleTime: STALE_LIVE,
-    retry: false,
-    queryFn: ({ signal }) =>
-      apiGet(
-        `/api/ym/landings?${msPeriodQuery(period)}&limit=${limit}${goalParam != null ? `&goal_id=${goalParam}` : ''}`,
-        YmLandingsSchema,
-        { signal, channelId },
-      ),
-  });
-}
+/** Топ страниц входа. `goalId` (положительный id или null — общий гейт ymGoalParam) добавляет
+    достижения/конверсию цели; вместе с `limit` входит в queryKey и в query-строку — переключение
+    цели рефетчит, но не плодит ключей вне цели. */
+export const useYmLandings = ymBreakdownQuery(qk.ymLandings, '/api/ym/landings', YmLandingsSchema, {
+  goal: true,
+  limit: 10,
+});
 
 // Слайс ритма/выходов: распределение визитов по часу суток (ym:s:hour — суточный профиль, всегда
 // 24 плотные строки 0..23 + пик) и страницы выхода (ym:s:endURLPath — зеркало входов, БЕЗ атрибуции
@@ -1183,16 +1090,7 @@ const YmHourlySchema = z
   .passthrough();
 export type YmHourly = z.infer<typeof YmHourlySchema>;
 
-export function useYmHourly(period: MsPeriod) {
-  const { channelId } = useSelectedChannel();
-  return useQuery({
-    enabled: channelId != null,
-    queryKey: ['ym-hourly', channelId, ...msPeriodKey(period)],
-    staleTime: STALE_LIVE,
-    retry: false,
-    queryFn: ({ signal }) => apiGet(`/api/ym/hourly?${msPeriodQuery(period)}`, YmHourlySchema, { signal, channelId }),
-  });
-}
+export const useYmHourly = ymBreakdownQuery(qk.ymHourly, '/api/ym/hourly', YmHourlySchema);
 
 // Страницы выхода — зеркало лендингов (путь + визиты/посетители + отказы), но без полей цели.
 const YmExitsSchema = z
@@ -1211,17 +1109,7 @@ const YmExitsSchema = z
   .passthrough();
 export type YmExits = z.infer<typeof YmExitsSchema>;
 
-export function useYmExits(period: MsPeriod, limit = 10) {
-  const { channelId } = useSelectedChannel();
-  return useQuery({
-    enabled: channelId != null,
-    queryKey: ['ym-exits', channelId, ...msPeriodKey(period), limit],
-    staleTime: STALE_LIVE,
-    retry: false,
-    queryFn: ({ signal }) =>
-      apiGet(`/api/ym/exits?${msPeriodQuery(period)}&limit=${limit}`, YmExitsSchema, { signal, channelId }),
-  });
-}
+export const useYmExits = ymBreakdownQuery(qk.ymExits, '/api/ym/exits', YmExitsSchema, { limit: 10 });
 
 const MsBackfillStatusSchema = z
   .object({
@@ -1278,7 +1166,6 @@ export function useMsFunnel(period: MsPeriod) {
     enabled: channelId != null,
     queryKey: ['ms-funnel', channelId, ...msPeriodKey(period)],
     staleTime: STALE_LIVE,
-    retry: false,
     queryFn: ({ signal }) => apiGet(`/api/ms/funnel?${msPeriodQuery(period)}`, MsFunnelSchema, { signal, channelId }),
   });
 }
@@ -1319,7 +1206,6 @@ export function useMsCustomers(period: MsPeriod) {
     enabled: channelId != null,
     queryKey: ['ms-customers', channelId, ...msPeriodKey(period)],
     staleTime: STALE_LIVE,
-    retry: false,
     queryFn: ({ signal }) => apiGet(`/api/ms/customers?${msPeriodQuery(period)}`, MsCustomersSchema, { signal, channelId }),
   });
 }
@@ -1356,7 +1242,6 @@ export function useMsRfm(period: MsPeriod) {
     enabled: channelId != null,
     queryKey: ['ms-rfm', channelId, ...msPeriodKey(period)],
     staleTime: STALE_LIVE,
-    retry: false,
     queryFn: ({ signal }) => apiGet(`/api/ms/rfm?${msPeriodQuery(period)}`, MsRfmSchema, { signal, channelId }),
   });
 }
@@ -1407,7 +1292,6 @@ export function useMsRfmSegmentCustomers(period: MsPeriod, segment: string | nul
     enabled: channelId != null && segment != null,
     queryKey: ['ms-rfm-customers', channelId, ...msPeriodKey(period), segment, offset],
     staleTime: STALE_LIVE,
-    retry: false,
     queryFn: ({ signal }) =>
       apiGet(
         `/api/ms/rfm-customers?${msPeriodQuery(period)}&segment=${encodeURIComponent(segment ?? '')}&limit=${MS_RFM_CUSTOMERS_PAGE}&offset=${offset}`,
@@ -1456,7 +1340,6 @@ export function useMsCohorts() {
     enabled: channelId != null,
     queryKey: ['ms-cohorts', channelId],
     staleTime: STALE_ARCHIVE,
-    retry: false,
     queryFn: ({ signal }) => apiGet('/api/ms/cohorts', MsCohortsSchema, { signal, channelId }),
   });
 }
@@ -1488,7 +1371,6 @@ export function useMsSalesByChannel(period: MsPeriod) {
     enabled: channelId != null,
     queryKey: ['ms-sales-by-channel', channelId, ...msPeriodKey(period)],
     staleTime: STALE_LIVE,
-    retry: false,
     queryFn: ({ signal }) =>
       apiGet(`/api/ms/sales-by-channel?${msPeriodQuery(period)}`, MsSalesByChannelSchema, { signal, channelId }),
   });
@@ -1526,7 +1408,6 @@ export function useMsChannelSeries(period: MsPeriod, opts: { channels: string[];
     enabled: channelId != null,
     queryKey: ['ms-channel-series', channelId, ...msPeriodKey(period), channels.join(',') || 'all', breakdown],
     staleTime: STALE_LIVE,
-    retry: false,
     queryFn: ({ signal }) =>
       apiGet(
         `/api/ms/channel-series?${msPeriodQuery(period)}${channelParam}${breakdown ? '&breakdown=1' : ''}`,
@@ -1551,7 +1432,6 @@ export function useMsGeography(period: MsPeriod) {
     enabled: channelId != null,
     queryKey: ['ms-geography', channelId, ...msPeriodKey(period)],
     staleTime: STALE_LIVE,
-    retry: false,
     queryFn: ({ signal }) => apiGet(`/api/ms/geography?${msPeriodQuery(period)}`, MsGeographySchema, { signal, channelId }),
   });
 }
@@ -1573,7 +1453,6 @@ export function useMsTopCustomers(period: MsPeriod) {
     enabled: channelId != null,
     queryKey: ['ms-top-customers', channelId, ...msPeriodKey(period)],
     staleTime: STALE_LIVE,
-    retry: false,
     queryFn: ({ signal }) => apiGet(`/api/ms/top-customers?${msPeriodQuery(period)}`, MsTopCustomersSchema, { signal, channelId }),
   });
 }
@@ -1599,7 +1478,6 @@ export function useMsReturns(period: MsPeriod) {
     enabled: channelId != null,
     queryKey: ['ms-returns', channelId, ...msPeriodKey(period)],
     staleTime: STALE_LIVE,
-    retry: false,
     queryFn: ({ signal }) => apiGet(`/api/ms/returns?${msPeriodQuery(period)}`, MsReturnsSchema, { signal, channelId }),
   });
 }
@@ -1611,7 +1489,6 @@ export function useMsSummary(period: MsPeriod, opts?: { enabled?: boolean }) {
     enabled: channelId != null && opts?.enabled !== false,
     queryKey: qk.msSummary.window(channelId, period),
     staleTime: STALE_LIVE,
-    retry: false,
     queryFn: ({ signal }) => apiGet(`/api/ms/summary?${msPeriodQuery(period)}`, MsSummarySchema, { signal, channelId }),
   });
 }
@@ -1624,7 +1501,6 @@ export function useMsTopProducts(period: MsPeriod, limit = 10, sort: MsProductSo
     enabled: enabled && channelId != null,
     queryKey: qk.msTopProducts.window(channelId, period, limit, sort),
     staleTime: STALE_LIVE,
-    retry: false,
     queryFn: ({ signal }) =>
       apiGet(`/api/ms/top-products?${msPeriodQuery(period)}&limit=${limit}&sort=${sort}`, MsTopProductsSchema, { signal, channelId }),
   });
@@ -1643,7 +1519,6 @@ export function useMsAssortmentComparison(period: MsPeriod, enabled: boolean) {
     enabled: enabled && channelId != null,
     queryKey: ['ms-top-products-compare', channelId, ...msPeriodKey(period)],
     staleTime: STALE_LIVE,
-    retry: false,
     queryFn: ({ signal }) =>
       apiGet(`/api/ms/top-products?${msPeriodQuery(period)}&limit=1&compare=prev`, MsTopProductsSchema, { signal, channelId }),
   });
@@ -1680,7 +1555,6 @@ export function useMsStock(period: MsPeriod) {
     enabled: channelId != null,
     queryKey: ['ms-stock', channelId, ...msPeriodKey(period)],
     staleTime: STALE_LIVE,
-    retry: false,
     queryFn: ({ signal }) => apiGet(`/api/ms/stock?${msPeriodQuery(period)}`, MsStockSchema, { signal, channelId }),
   });
 }
@@ -1695,7 +1569,6 @@ export function useAnnotations(channelId: number | null) {
     enabled: channelId != null,
     queryKey: qk.annotations(channelId),
     staleTime: STALE_ARCHIVE,
-    retry: false,
     queryFn: ({ signal }) => apiGet(`/api/channels/${channelId}/annotations`, AnnotationsResponseSchema, { signal }),
   });
 }

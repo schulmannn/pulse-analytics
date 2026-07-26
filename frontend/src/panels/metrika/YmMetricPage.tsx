@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
 
-import { ChartExpandedContext } from '@/components/ExpandableChart';
+import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
 import { SegmentedControl } from '@/components/SegmentedControl';
@@ -14,41 +14,19 @@ import { SourceIdentity } from '@/components/SourceIdentity';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { PinnedDayPanel } from '@/components/PinnedDayPanel';
-import { TableSkeleton, ChartSkeleton } from '@/components/ui/dataSkeleton';
+import { ChartSkeleton } from '@/components/ui/dataSkeleton';
 import { Skeleton } from '@/components/ui/skeleton';
 import { fmt } from '@/lib/format';
 import { lttbDownsample } from '@/lib/downsample';
 import { useExplorerChartHeight } from '@/lib/useExplorerChartHeight';
 import { usePeriod, type DateRange, type PeriodDays } from '@/lib/period';
 import { useMsResolvedPeriod, type MsPeriod } from '@/lib/msPeriod';
+import { useYmGoals, useYmHourly, useYmSummary } from '@/api/queries';
 import {
-  useYmSummary,
-  useYmSources,
-  useYmReferrers,
-  useYmSocial,
-  useYmMessengers,
-  useYmDevices,
-  useYmCountries,
-  useYmCities,
-  useYmAge,
-  useYmGender,
-  useYmGoals,
-  useYmUtm,
-  useYmPages,
-  useYmLandings,
-  useYmHourly,
-  useYmExits,
-} from '@/api/queries';
-import {
-  YmBreakdownRows,
-  YM_DEVICE_LABELS,
-  YM_AGE_LABELS,
-  YM_GENDER_LABELS,
-  demographicsFootnote,
-  breakdownNote,
-  goalNote,
-  joinNote,
-} from '@/panels/metrika/YmOverview';
+  YM_BREAKDOWN_BY_KEY,
+  type AboutDef,
+  type YmBreakdownDef,
+} from '@/panels/metrika/ymBreakdowns';
 import { isYmMetricKey } from '@/panels/metrika/ymMetricKeys';
 import { AboutRow, ComparisonDeltaRow, MetricBackLink, MetricColumns, MetricDescriptor, WindowBarShell, RailSection } from '@/components/metric/shared';
 
@@ -76,36 +54,12 @@ export function YmMetricPage({ metricKey }: { metricKey: string }) {
       return <YmSeriesPage def={SERIES_DEFS['ym-pageviews']} />;
     case 'ym-hourly':
       return <YmHourlyPage />;
-    case 'ym-sources':
-      return <YmSourcesPage />;
-    case 'ym-referrers':
-      return <YmReferrersPage />;
-    case 'ym-social':
-      return <YmSocialPage />;
-    case 'ym-messengers':
-      return <YmMessengersPage />;
-    case 'ym-devices':
-      return <YmDevicesPage />;
-    case 'ym-countries':
-      return <YmCountriesPage />;
-    case 'ym-cities':
-      return <YmCitiesPage />;
-    case 'ym-age':
-      return <YmAgePage />;
-    case 'ym-gender':
-      return <YmGenderPage />;
-    case 'ym-goals':
-      return <YmGoalsPage />;
-    case 'ym-utm':
-      return <YmUtmPage />;
-    case 'ym-pages':
-      return <YmPagesPage />;
-    case 'ym-landings':
-      return <YmLandingsPage />;
-    case 'ym-exits':
-      return <YmExitsPage />;
-    default:
-      return null;
+    default: {
+      // Остальные 14 — breakdown/список из ОБЩЕЙ таблицы разрезов: та же дефиниция, что кормит
+      // карточку Обзора, поэтому тексты пустых состояний и сноски здесь и там совпадают по строению.
+      const def = YM_BREAKDOWN_BY_KEY[metricKey];
+      return def ? <YmBreakdownPage def={def} /> : null;
+    }
   }
 }
 
@@ -115,12 +69,6 @@ export { isYmMetricKey };
 // ── Shared shell ─────────────────────────────────────────────────────────────────────────────
 
 const BACK = { to: '/metrika', label: 'Метрика · Обзор' };
-
-interface AboutDef {
-  formula: string;
-  included?: string;
-  source: string;
-}
 
 /** Тихая шапка + две колонки (главный блок + rail «Сравнение»/«О метрике»), как у `/metrics/ig-reach`. */
 function YmMetricShell({
@@ -221,9 +169,11 @@ function NoComparison({ text }: { text: string }) {
 
 /** Одна выбранная цель атрибуции на страницу: селектор появляется ТОЛЬКО когда на счётчике есть
     цели (как в Обзоре). id хранится строкой (контракт PillSelect); '' = «Без цели» (топ-цель НЕ
-    подставляется автоматически). Валидируем производно: id обязан существовать в текущем словаре. */
-function useYmGoalSelector(period: MsPeriod) {
-  const goals = useYmGoals(period);
+    подставляется автоматически). Валидируем производно: id обязан существовать в текущем словаре.
+    `enabled=false` (у разреза нет атрибуции) держит словарь целей незагруженным — лишнего запроса
+    на страницах без селектора не появляется. */
+function useYmGoalSelector(period: MsPeriod, enabled = true) {
+  const goals = useYmGoals(period, { enabled });
   const [value, setValue] = useState('');
   const rows = goals.data?.rows ?? [];
   const hasGoals = rows.length > 0;
@@ -539,623 +489,51 @@ function YmSeriesPage({ def }: { def: YmSeriesDef }) {
   );
 }
 
-// ── Breakdown / list report shell ─────────────────────────────────────────────────────────────
+// ── Breakdown / list report page ──────────────────────────────────────────────────────────────
 
-/** Каркас отчётной карточки: полноэкранная карточка с ПОЛНЫМ (развёрнутым) списком отчёта. */
+/** Каркас отчётной карточки: полноэкранная карточка с ПОЛНЫМ (развёрнутым) списком отчёта.
+    Оба контекста обязательны и идут ПАРОЙ, как у всех пяти соседних вертикалей (MsReportCard /
+    TgReportCard / IgReportCard / MentionsReportCard / CampaignReportCard): ChartExpandedContext
+    раскрывает список на все строки, ExpandedChartHeightContext отдаёт графикам полную высоту
+    explorer'а. Без второго карточка отдавала бы графикам fillHeight=null (у defaultSize="full"
+    ChartSection не задаёт высоту), и любой график отчёта Метрики рисовался бы своей дефолтной
+    высотой вместо explorer-высоты соседей. */
 function YmReportCard({ id, title, action, children }: { id: string; title: string; action?: ReactNode; children: ReactNode }) {
+  const chartH = useExplorerChartHeight();
   return (
     <ChartWidget id={id} title={title} defaultSize="full" noExpand action={action}>
-      <ChartExpandedContext.Provider value={true}>{children}</ChartExpandedContext.Provider>
+      <ChartExpandedContext.Provider value={true}>
+        <ExpandedChartHeightContext.Provider value={chartH}>{children}</ExpandedChartHeightContext.Provider>
+      </ChartExpandedContext.Provider>
     </ChartWidget>
-  );
-}
-
-interface BreakdownRow {
-  key: string;
-  label: string;
-  value: number;
-  note: string | null;
-}
-
-/** Тело breakdown-отчёта: pending/error/empty + полный список строк (ChartExpandedContext=true в
-    YmReportCard раскрывает YmBreakdownRows на все строки). */
-function YmReportBody<T>({
-  state,
-  errorTitle,
-  empty,
-  build,
-}: {
-  state: { isPending: boolean; isError: boolean; isFetching: boolean; error: unknown; data: T | undefined; refetch: () => void };
-  errorTitle: string;
-  empty: ReactNode;
-  build: (data: T) => {
-    rows: BreakdownRow[];
-    tailWord: string;
-    unitTotal?: number | null;
-    footnote?: string | null;
-  } | null;
-}) {
-  if (state.isPending) return <TableSkeleton rows={6} columns={2} className="py-2" />;
-  if (state.isError) {
-    return (
-      <ErrorState
-        compact
-        size="table"
-        className="py-4"
-        title={errorTitle}
-        reason={state.error instanceof Error ? state.error.message : 'ошибка'}
-        onRetry={() => state.refetch()}
-        retrying={state.isFetching}
-      />
-    );
-  }
-  const built = state.data ? build(state.data) : null;
-  if (!built || built.rows.length === 0) return <>{empty}</>;
-  return (
-    <YmBreakdownRows
-      rows={built.rows}
-      tailWord={built.tailWord}
-      unitTotal={built.unitTotal ?? null}
-      footnote={built.footnote ?? null}
-    />
   );
 }
 
 const LIST_COMPARISON = 'Это разрез структуры за окно, а не одна метрика периода — сравнение периодов не рассчитывается. Меняйте окно, чтобы пересобрать список.';
 
-// ── Breakdown pages ────────────────────────────────────────────────────────────────────────────
-
-function YmSourcesPage() {
+/**
+ * Полностраничный отчёт любого из 14 разрезов. Раньше здесь лежали 14 почти одинаковых функций
+ * (~35 строк каждая), различавшихся только текстами; теперь всё, что их различало — заголовок,
+ * дескриптор, «О метрике», тексты пустого/ошибочного состояния и сборка строк — живёт в ОДНОЙ
+ * таблице `ymBreakdowns.tsx` вместе с карточкой Обзора.
+ */
+function YmBreakdownPage({ def }: { def: YmBreakdownDef }) {
   const window = useYmMetricWindow();
-  const goal = useYmGoalSelector(window.period);
-  const q = useYmSources(window.period, goal.selectedGoalId);
+  // Словарь целей грузим ТОЛЬКО там, где у разреза действительно есть селектор атрибуции.
+  const goal = useYmGoalSelector(window.period, def.goalAria != null);
   return (
     <YmMetricShell
-      term="Источники трафика"
-      descriptor="Откуда пришли визиты за выбранное окно"
-      about={{
-        formula: 'Группировка визитов по источнику трафика (поиск/прямые/соцсети/реклама/…). Строка — визиты и посетители источника.',
-        included: 'С выбранной целью строки дополняются достижениями и конверсией (CR) этой цели.',
-        source: 'Отчёт визитов Метрики (ym:s:<trafficSource>).',
-      }}
+      term={def.title}
+      descriptor={def.descriptor}
+      about={def.about}
       comparison={<NoComparison text={LIST_COMPARISON} />}
     >
-      <YmReportCard id="ym-page-sources" title="Все источники" action={goal.control('Цель для источников трафика')}>
-        <YmReportBody
-          state={q}
-          errorTitle="Не удалось получить источники трафика"
-          empty={<EmptyState compact size="table" title="Нет визитов за период." />}
-          build={(data) => ({
-            rows: data.rows.map((r) => ({
-              key: r.id ?? r.name ?? 'unknown',
-              label: r.name ?? 'Другие источники',
-              value: r.visits,
-              note: joinNote(`${fmt.num(r.users)} чел.`, goalNote(data.goal_id, r.goal_reaches, r.goal_conversion)),
-            })),
-            tailWord: 'визитов',
-            unitTotal: data.visits_total,
-          })}
-        />
-      </YmReportCard>
-      <YmControlBar window={window} />
-    </YmMetricShell>
-  );
-}
-
-function YmReferrersPage() {
-  const window = useYmMetricWindow();
-  const q = useYmReferrers(window.period);
-  return (
-    <YmMetricShell
-      term="Реферальные сайты"
-      descriptor="Внешние домены, приводящие трафик по ссылкам"
-      about={{
-        formula: 'Группировка визитов по внешнему домену-источнику перехода. Строка — визиты и отказы домена.',
-        source: 'Отчёт визитов Метрики (ym:s:externalRefererDomain).',
-      }}
-      comparison={<NoComparison text={LIST_COMPARISON} />}
-    >
-      <YmReportCard id="ym-page-referrers" title="Все домены">
-        <YmReportBody
-          state={q}
-          errorTitle="Не удалось получить реферальные сайты"
-          empty={
-            <EmptyState
-              compact
-              size="table"
-              title="Реферальных переходов за период нет."
-              reason="Здесь появятся внешние сайты, приводящие трафик по ссылкам."
-            />
-          }
-          build={(data) => ({
-            rows: data.rows.map((r) => ({
-              key: r.name ?? r.id ?? 'unknown',
-              label: r.name ?? r.id ?? 'домен',
-              value: r.visits,
-              note: breakdownNote(r.users, r.bounce_rate),
-            })),
-            tailWord: 'визитов',
-            unitTotal: data.visits_total,
-          })}
-        />
-      </YmReportCard>
-      <YmControlBar window={window} />
-    </YmMetricShell>
-  );
-}
-
-function YmSocialPage() {
-  const window = useYmMetricWindow();
-  const q = useYmSocial(window.period);
-  return (
-    <YmMetricShell
-      term="Соцсети"
-      descriptor="Конкретные соцсети, приводящие трафик"
-      about={{
-        formula: 'Группировка визитов из соцсетей по конкретной сети. Строка — визиты и отказы сети.',
-        source: 'Отчёт визитов Метрики (ym:s:lastsignSocialNetwork).',
-      }}
-      comparison={<NoComparison text={LIST_COMPARISON} />}
-    >
-      <YmReportCard id="ym-page-social" title="Все соцсети">
-        <YmReportBody
-          state={q}
-          errorTitle="Не удалось получить соцсети"
-          empty={
-            <EmptyState
-              compact
-              size="table"
-              title="Переходов из соцсетей за период нет."
-              reason="Здесь появятся конкретные соцсети, приводящие трафик."
-            />
-          }
-          build={(data) => ({
-            rows: data.rows.map((r) => ({
-              key: r.id ?? r.name ?? 'unknown',
-              label: r.name ?? r.id ?? 'соцсеть',
-              value: r.visits,
-              note: breakdownNote(r.users, r.bounce_rate),
-            })),
-            tailWord: 'визитов',
-            unitTotal: data.visits_total,
-          })}
-        />
-      </YmReportCard>
-      <YmControlBar window={window} />
-    </YmMetricShell>
-  );
-}
-
-function YmMessengersPage() {
-  const window = useYmMetricWindow();
-  const q = useYmMessengers(window.period);
-  return (
-    <YmMetricShell
-      term="Мессенджеры"
-      descriptor="Telegram и другие мессенджеры — отдельная размерность, не внутри «Соцсетей»"
-      about={{
-        formula: 'Группировка визитов из мессенджеров по конкретному мессенджеру. Строка — визиты и отказы.',
-        source: 'Отчёт визитов Метрики (ym:s:<messenger>).',
-      }}
-      comparison={<NoComparison text={LIST_COMPARISON} />}
-    >
-      <YmReportCard id="ym-page-messengers" title="Все мессенджеры">
-        <YmReportBody
-          state={q}
-          errorTitle="Не удалось получить мессенджеры"
-          empty={
-            <EmptyState
-              compact
-              size="table"
-              title="Переходов из мессенджеров за период нет."
-              reason="Здесь появятся Telegram и другие мессенджеры, приводящие трафик."
-            />
-          }
-          build={(data) => ({
-            rows: data.rows.map((r) => ({
-              key: r.id ?? r.name ?? 'unknown',
-              label: r.name ?? r.id ?? 'мессенджер',
-              value: r.visits,
-              note: breakdownNote(r.users, r.bounce_rate),
-            })),
-            tailWord: 'визитов',
-            unitTotal: data.visits_total,
-          })}
-        />
-      </YmReportCard>
-      <YmControlBar window={window} />
-    </YmMetricShell>
-  );
-}
-
-function YmDevicesPage() {
-  const window = useYmMetricWindow();
-  const goal = useYmGoalSelector(window.period);
-  const q = useYmDevices(window.period, goal.selectedGoalId);
-  return (
-    <YmMetricShell
-      term="Устройства"
-      descriptor="Типы устройств посетителей за выбранное окно"
-      about={{
-        formula: 'Группировка визитов по типу устройства (десктоп/смартфон/планшет/ТВ). Строка — визиты и отказы.',
-        included: 'Тип локализуется по стабильному id категории; с выбранной целью строки дополняются достижениями и CR.',
-        source: 'Отчёт визитов Метрики (ym:s:deviceCategory).',
-      }}
-      comparison={<NoComparison text={LIST_COMPARISON} />}
-    >
-      <YmReportCard id="ym-page-devices" title="Все устройства" action={goal.control('Цель для устройств')}>
-        <YmReportBody
-          state={q}
-          errorTitle="Не удалось получить устройства"
-          empty={<EmptyState compact size="table" title="Нет визитов за период." />}
-          build={(data) => ({
-            rows: data.rows.map((r) => ({
-              key: r.id ?? r.name ?? 'unknown',
-              label: (r.id != null ? YM_DEVICE_LABELS[r.id] : undefined) ?? r.name ?? 'Другие устройства',
-              value: r.visits,
-              note: joinNote(breakdownNote(r.users, r.bounce_rate), goalNote(data.goal_id, r.goal_reaches, r.goal_conversion)),
-            })),
-            tailWord: 'визитов',
-            unitTotal: data.visits_total,
-          })}
-        />
-      </YmReportCard>
-      <YmControlBar window={window} />
-    </YmMetricShell>
-  );
-}
-
-function YmCountriesPage() {
-  const window = useYmMetricWindow();
-  const q = useYmCountries(window.period);
-  return (
-    <YmMetricShell
-      term="Страны"
-      descriptor="География посетителей по странам за выбранное окно"
-      about={{
-        formula: 'Группировка визитов по стране визита. Строка — визиты и отказы страны.',
-        included: 'География определяется Метрикой по данным визита, а не по GPS.',
-        source: 'Отчёт визитов Метрики (ym:s:regionCountry, lang=ru).',
-      }}
-      comparison={<NoComparison text={LIST_COMPARISON} />}
-    >
-      <YmReportCard id="ym-page-countries" title="Все страны">
-        <YmReportBody
-          state={q}
-          errorTitle="Не удалось получить страны"
-          empty={<EmptyState compact size="table" title="Нет визитов за период." />}
-          build={(data) => ({
-            rows: data.rows.map((r) => ({
-              key: r.id ?? r.name ?? 'unknown',
-              label: r.name ?? r.id ?? 'страна',
-              value: r.visits,
-              note: breakdownNote(r.users, r.bounce_rate),
-            })),
-            tailWord: 'визитов',
-            unitTotal: data.visits_total,
-            footnote: 'География определяется Метрикой по данным визита, а не по GPS.',
-          })}
-        />
-      </YmReportCard>
-      <YmControlBar window={window} />
-    </YmMetricShell>
-  );
-}
-
-function YmCitiesPage() {
-  const window = useYmMetricWindow();
-  const q = useYmCities(window.period);
-  return (
-    <YmMetricShell
-      term="Города"
-      descriptor="География посетителей по городам за выбранное окно"
-      about={{
-        formula: 'Группировка визитов по городу визита — отдельная от страны размерность. Строка — визиты и отказы.',
-        included: 'География определяется Метрикой по данным визита, а не по GPS.',
-        source: 'Отчёт визитов Метрики (ym:s:regionCity, lang=ru).',
-      }}
-      comparison={<NoComparison text={LIST_COMPARISON} />}
-    >
-      <YmReportCard id="ym-page-cities" title="Все города">
-        <YmReportBody
-          state={q}
-          errorTitle="Не удалось получить города"
-          empty={<EmptyState compact size="table" title="Нет визитов за период." />}
-          build={(data) => ({
-            rows: data.rows.map((r) => ({
-              key: r.id ?? r.name ?? 'unknown',
-              label: r.name ?? r.id ?? 'город',
-              value: r.visits,
-              note: breakdownNote(r.users, r.bounce_rate),
-            })),
-            tailWord: 'визитов',
-            unitTotal: data.visits_total,
-          })}
-        />
-      </YmReportCard>
-      <YmControlBar window={window} />
-    </YmMetricShell>
-  );
-}
-
-function YmAgePage() {
-  const window = useYmMetricWindow();
-  const q = useYmAge(window.period);
-  return (
-    <YmMetricShell
-      term="Возраст"
-      descriptor="Возрастные группы посетителей — оценка Метрики (Crypta)"
-      about={{
-        formula: 'Группировка визитов по возрастной группе посетителя. Строка — визиты и отказы группы.',
-        included: 'Значения — оценка Метрики по поведению аудитории, не анкета; при малой выборке часть данных скрыта.',
-        source: 'Отчёт визитов Метрики (ym:s:ageInterval).',
-      }}
-      comparison={<NoComparison text={LIST_COMPARISON} />}
-    >
-      <YmReportCard id="ym-page-age" title="Все возрастные группы">
-        <YmReportBody
-          state={q}
-          errorTitle="Не удалось получить возраст"
-          empty={
-            <div>
-              <EmptyState compact size="table" title="Демографические данные недоступны за период." />
-              {q.data && <p className="text-2xs text-muted-foreground">{demographicsFootnote(q.data)}</p>}
-            </div>
-          }
-          build={(data) => ({
-            rows: data.rows.map((r) => ({
-              key: r.id ?? r.name ?? 'unknown',
-              label: (r.id != null ? YM_AGE_LABELS[r.id] : undefined) ?? r.name ?? 'возраст неизвестен',
-              value: r.visits,
-              note: breakdownNote(r.users, r.bounce_rate),
-            })),
-            tailWord: 'визитов',
-            unitTotal: data.visits_total,
-            footnote: demographicsFootnote(data),
-          })}
-        />
-      </YmReportCard>
-      <YmControlBar window={window} />
-    </YmMetricShell>
-  );
-}
-
-function YmGenderPage() {
-  const window = useYmMetricWindow();
-  const q = useYmGender(window.period);
-  return (
-    <YmMetricShell
-      term="Пол"
-      descriptor="Пол посетителей — оценка Метрики (Crypta)"
-      about={{
-        formula: 'Группировка визитов по полу посетителя. Строка — визиты и отказы группы.',
-        included: 'Значения — оценка Метрики по поведению аудитории, не анкета; при малой выборке часть данных скрыта.',
-        source: 'Отчёт визитов Метрики (ym:s:gender).',
-      }}
-      comparison={<NoComparison text={LIST_COMPARISON} />}
-    >
-      <YmReportCard id="ym-page-gender" title="По полу">
-        <YmReportBody
-          state={q}
-          errorTitle="Не удалось получить пол"
-          empty={
-            <div>
-              <EmptyState compact size="table" title="Демографические данные недоступны за период." />
-              {q.data && <p className="text-2xs text-muted-foreground">{demographicsFootnote(q.data)}</p>}
-            </div>
-          }
-          build={(data) => ({
-            rows: data.rows.map((r) => ({
-              key: r.id ?? r.name ?? 'unknown',
-              label: (r.id != null ? YM_GENDER_LABELS[r.id] : undefined) ?? r.name ?? 'не определён',
-              value: r.visits,
-              note: breakdownNote(r.users, r.bounce_rate),
-            })),
-            tailWord: 'визитов',
-            unitTotal: data.visits_total,
-            footnote: demographicsFootnote(data),
-          })}
-        />
-      </YmReportCard>
-      <YmControlBar window={window} />
-    </YmMetricShell>
-  );
-}
-
-function YmGoalsPage() {
-  const window = useYmMetricWindow();
-  const q = useYmGoals(window.period);
-  return (
-    <YmMetricShell
-      term="Цели"
-      descriptor="Достижения целей и конверсия за выбранное окно"
-      about={{
-        formula: 'Достижения (reaches) каждой цели за окно; конверсия (CR) — отдельная метрика Метрики, из reaches не выводится.',
-        source: 'Отчёт целей Метрики (goal reaches + conversionRate).',
-      }}
-      comparison={<NoComparison text={LIST_COMPARISON} />}
-    >
-      <YmReportCard id="ym-page-goals" title="Все цели">
-        <YmReportBody
-          state={q}
-          errorTitle="Не удалось получить цели"
-          empty={
-            <EmptyState
-              compact
-              size="table"
-              title="На счётчике нет целей."
-              reason="Настройте цели в Яндекс.Метрике — конверсии появятся здесь."
-            />
-          }
-          build={(data) => ({
-            rows: data.rows.map((g) => ({
-              key: g.id,
-              label: g.name ?? `Цель ${g.id}`,
-              value: g.reaches,
-              note: `CR ${g.conversion_rate.toLocaleString('ru-RU', { maximumFractionDigits: 2 })}%`,
-            })),
-            tailWord: 'достижений',
-            footnote: data.truncated ? 'Показаны первые 20 целей счётчика.' : null,
-          })}
-        />
-      </YmReportCard>
-      <YmControlBar window={window} />
-    </YmMetricShell>
-  );
-}
-
-function YmUtmPage() {
-  const window = useYmMetricWindow();
-  const goal = useYmGoalSelector(window.period);
-  const q = useYmUtm(window.period, goal.selectedGoalId);
-  return (
-    <YmMetricShell
-      term="UTM-метки"
-      descriptor="Размеченные визиты по utm_source за выбранное окно"
-      about={{
-        formula: 'Группировка размеченных визитов по utm_source. Неразмеченные визиты — честной сноской, не строкой.',
-        included: 'С выбранной целью строки дополняются достижениями и конверсией (CR) этой цели.',
-        source: 'Отчёт визитов Метрики (ym:s:<UTMSource>).',
-      }}
-      comparison={<NoComparison text={LIST_COMPARISON} />}
-    >
-      <YmReportCard id="ym-page-utm" title="Все UTM-источники" action={goal.control('Цель для UTM-меток')}>
-        <YmReportBody
-          state={q}
-          errorTitle="Не удалось получить UTM-разметку"
-          empty={
-            <EmptyState
-              compact
-              size="table"
-              title="UTM-меток за период нет."
-              reason="Размечайте ссылки в постах utm_source — источники появятся здесь."
-            />
-          }
-          build={(data) => ({
-            rows: data.rows.map((r) => ({
-              key: r.id ?? r.name ?? 'unknown',
-              label: r.name ?? r.id ?? 'utm',
-              value: r.visits,
-              note: joinNote(`${fmt.num(r.users)} чел.`, goalNote(data.goal_id, r.goal_reaches, r.goal_conversion)),
-            })),
-            tailWord: 'визитов',
-            unitTotal: data.tagged_visits,
-            footnote:
-              data.untagged_visits > 0
-                ? `Без метки — ${fmt.num(data.untagged_visits)} визитов из ${fmt.num(data.visits_total)}.`
-                : null,
-          })}
-        />
-      </YmReportCard>
-      <YmControlBar window={window} />
-    </YmMetricShell>
-  );
-}
-
-function YmPagesPage() {
-  const window = useYmMetricWindow();
-  const q = useYmPages(window.period);
-  return (
-    <YmMetricShell
-      term="Топ-страницы"
-      descriptor="Самые просматриваемые страницы за выбранное окно"
-      about={{
-        formula: 'Группировка ПРОСМОТРОВ страниц по пути. Просмотры — hits-метрика, не визиты (другая единица).',
-        source: 'Отчёт просмотров Метрики (ym:pv:URLPath).',
-      }}
-      comparison={<NoComparison text={LIST_COMPARISON} />}
-    >
-      <YmReportCard id="ym-page-pages" title="Все страницы">
-        <YmReportBody
-          state={q}
-          errorTitle="Не удалось получить страницы"
-          empty={<EmptyState compact size="table" title="Нет просмотров за период." />}
-          build={(data) => ({
-            rows: data.rows.map((r) => ({
-              key: r.path,
-              label: r.path,
-              value: r.pageviews,
-              note: `${fmt.num(r.users)} чел.`,
-            })),
-            tailWord: 'просмотров',
-            unitTotal: data.pageviews_total,
-          })}
-        />
-      </YmReportCard>
-      <YmControlBar window={window} />
-    </YmMetricShell>
-  );
-}
-
-function YmLandingsPage() {
-  const window = useYmMetricWindow();
-  const goal = useYmGoalSelector(window.period);
-  const q = useYmLandings(window.period, goal.selectedGoalId, 100);
-  return (
-    <YmMetricShell
-      term="Страницы входа"
-      descriptor="Где визиты начинаются за выбранное окно"
-      about={{
-        formula: 'Группировка визитов по странице ВХОДА (startURLPath). Строка — визиты и отказы страницы.',
-        included: 'С выбранной целью строки дополняются достижениями и конверсией (CR) этой цели.',
-        source: 'Отчёт визитов Метрики (ym:s:startURLPath).',
-      }}
-      comparison={<NoComparison text={LIST_COMPARISON} />}
-    >
-      <YmReportCard id="ym-page-landings" title="Все страницы входа" action={goal.control('Цель для страниц входа')}>
-        <YmReportBody
-          state={q}
-          errorTitle="Не удалось получить страницы входа"
-          empty={<EmptyState compact size="table" title="Нет визитов по страницам входа за период." />}
-          build={(data) => ({
-            rows: data.rows.map((r) => ({
-              key: r.path,
-              label: r.path,
-              value: r.visits,
-              note: joinNote(
-                r.bounce_rate != null ? `${r.bounce_rate.toLocaleString('ru-RU', { maximumFractionDigits: 1 })}% отказов` : null,
-                goalNote(data.goal_id, r.goal_reaches, r.goal_conversion),
-              ),
-            })),
-            tailWord: 'визитов',
-            unitTotal: data.visits_total,
-          })}
-        />
-      </YmReportCard>
-      <YmControlBar window={window} />
-    </YmMetricShell>
-  );
-}
-
-function YmExitsPage() {
-  const window = useYmMetricWindow();
-  const q = useYmExits(window.period, 100);
-  return (
-    <YmMetricShell
-      term="Страницы выхода"
-      descriptor="Где визиты заканчиваются за выбранное окно"
-      about={{
-        formula: 'Группировка визитов по странице ВЫХОДА (endURLPath) — зеркало входов. Строка — визиты и отказы.',
-        source: 'Отчёт визитов Метрики (ym:s:endURLPath).',
-      }}
-      comparison={<NoComparison text={LIST_COMPARISON} />}
-    >
-      <YmReportCard id="ym-page-exits" title="Все страницы выхода">
-        <YmReportBody
-          state={q}
-          errorTitle="Не удалось получить страницы выхода"
-          empty={<EmptyState compact size="table" title="Нет визитов по страницам выхода за период." />}
-          build={(data) => ({
-            rows: data.rows.map((r) => ({
-              key: r.path,
-              label: r.path,
-              value: r.visits,
-              note: breakdownNote(r.users, r.bounce_rate),
-            })),
-            tailWord: 'визитов',
-            unitTotal: data.visits_total,
-          })}
-        />
+      <YmReportCard
+        id={`ym-page-${def.key.replace(/^ym-/, '')}`}
+        title={def.pageTitle}
+        action={def.goalAria ? goal.control(def.goalAria) : undefined}
+      >
+        <def.Body period={window.period} goalId={goal.selectedGoalId} surface="page" />
       </YmReportCard>
       <YmControlBar window={window} />
     </YmMetricShell>

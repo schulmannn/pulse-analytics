@@ -15,11 +15,11 @@ import { WidgetInViewContext } from '@/lib/widgetViewport';
 export function ChartSection(props: ChartSectionProps) {
   const model = useChartSectionModel(props);
   const homeSource = useHomeSource();
-  // Прогрессивная загрузка Главной: только homeKey-карточки (доска) гейтят data-запросы тела до
-  // приближения к вьюпорту — content-visibility (#290) уже скипает их layout/paint, но данные всей
-  // доски фетчались разом. Одноразово: увидели → true навсегда. Без IntersectionObserver
-  // (jsdom/SSR — гвард как в observeSize) не гейтим вовсе.
-  const dataGated = !!props.homeKey;
+  // Прогрессивная загрузка: homeKey-карточки (доска Главной) и явно помеченные `deferData` доски
+  // гейтят data-запросы тела до приближения к вьюпорту — content-visibility (#290) уже скипает их
+  // layout/paint, но данные всей доски фетчались разом. Одноразово: увидели → true навсегда. Без
+  // IntersectionObserver (jsdom/SSR — гвард как в observeSize) не гейтим вовсе.
+  const dataGated = !!props.homeKey || !!props.deferData;
   const [inView, setInView] = useState(() => !dataGated || typeof IntersectionObserver === 'undefined');
   const sectionRef = model.refs.sectionRef;
   useEffect(() => {
