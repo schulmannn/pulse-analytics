@@ -1,13 +1,11 @@
 import { memo, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useChannels } from '@/api/queries';
 import { ChartSection, PERIOD_WORD } from '@/components/ChartWidget';
 import { WidgetRenderer, WidgetSkeleton } from '@/components/WidgetRenderer';
 import { ConfigEditDialog } from '@/components/ConfigEditDialog';
 import { LEGACY_RENDER } from '@/components/legacyAdapters';
 import { ChannelScope, useSelectedChannel } from '@/lib/channel-context';
-import { getRememberedChannel } from '@/lib/channel';
-import { resolveHomeSourceChannel } from '@/lib/channelSource';
+import { useWidgetSourceChannel } from '@/lib/useWidgetSource';
 import { useWidgetData } from '@/lib/useWidgetData';
 import { useIgWidgetData } from '@/lib/useIgWidgetData';
 import { useMsWidgetData } from '@/lib/useMsWidgetData';
@@ -43,23 +41,19 @@ export const ConfigWidget = memo(function ConfigWidget({ config, homeKey }: { co
   const navigate = useNavigate();
   const metric = getMetric(config.metricId);
   const legacyKey = legacyKeyForMetricId(config.metricId);
-  const sourceNetwork =
-    metric?.source === 'ig' ? 'ig' : metric?.source === 'ms' ? 'ms' : metric?.source === 'ym' ? 'ym' : 'tg';
   // Metric widgets and legacy composites both drive the universal editor / explorer.
   const configurable = !!metric || !!legacyKey;
   const label = config.title || metric?.label || (legacyKey ? LEGACY_LABEL[legacyKey] : undefined) || 'Метрика';
   const { channelId: globalChannelId } = useSelectedChannel();
-  const channels = useChannels().data?.channels;
   // Канон Главной: карточка НЕ следует глобальному свитчеру. Без явного «Источника» карточка
   // на доске (homeKey) пинится к каналу СВОЕЙ сети — запомненному per-network либо первому
   // подходящему: глобальный выбор может быть каналом другой сети (например, МойСклад), и тогда
-  // TG/IG-виджет читал бы пустоту под чужой подписью. Вне Главной (превью/эксплорер/страницы)
-  // поведение прежнее — следовать активному каналу.
-  const effectiveSource = useMemo(() => {
-    if (config.source != null) return config.source;
-    if (!homeKey) return null;
-    return resolveHomeSourceChannel(channels ?? [], sourceNetwork, getRememberedChannel(sourceNetwork));
-  }, [config.source, homeKey, channels, sourceNetwork]);
+  // TG/IG-виджет читал бы пустоту под чужой подписью. Вне Главной (превью) поведение прежнее —
+  // следовать активному каналу. Полноэкранный эксплорер той же карточки резолвит источник ЭТИМ
+  // ЖЕ хуком (см. WidgetExplorer), иначе он расходился бы с карточкой, из которой открыт.
+  const { network: sourceNetwork, channelId: effectiveSource } = useWidgetSourceChannel(config, {
+    pinned: !!homeKey,
+  });
   // Drilldown (steep #9): only the six core TG metrics have a metric page (/metrics/:drillKey), so
   // only those cards' hero value + chart points navigate. Everything else (IG, breakdowns, legacy)
   // has no page → no drill. A card pinned to ДРУГОЙ канал (в т.ч. авто-пин Главной) is not

@@ -1,6 +1,6 @@
-import { useContext, useLayoutEffect, useRef, useState } from 'react';
+import { useContext, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ShareTrack } from '@/components/ShareRows';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
 import { observeSize } from '@/lib/observeSize';
 import { useMsFunnel, useMsReturns, useMsSummary } from '@/api/queries';
@@ -15,10 +15,11 @@ import { ErrorState } from '@/components/ErrorState';
 import { ChartSkeleton, TableSkeleton } from '@/components/ui/dataSkeleton';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { Sparkline } from '@/components/Sparkline';
+import { pctDelta } from '@/lib/delta';
 import { lttbDownsample } from '@/lib/downsample';
 import { fmt } from '@/lib/format';
 import { usePagePeriod } from '@/lib/period';
-import { useMsPagePeriod, type MsPeriod } from '@/lib/msPeriod';
+import { msPreviousPeriod, useMsPagePeriod, type MsPeriod } from '@/lib/msPeriod';
 import {
   aggregatePlotPoints,
   bucketPoints,
@@ -47,6 +48,12 @@ export function MsOverview() {
   const period = useMsPagePeriod();
   const windowLabel = pp?.range ? 'за выбранный период' : days === 0 ? 'за всё время' : `за ${days} дн.`;
   const summary = useMsSummary(period);
+  // Канон карточки-метрики: число + дельта к ПРЕДЫДУЩЕМУ равному окну (паттерн YmOverview).
+  // У «Всё» честного предшественника нет (msPreviousPeriod → null) — запрос не уходит, и
+  // previous.data при выключенном запросе НЕ читаем: fallback-ключ совпал бы с текущим окном.
+  const previousPeriod = useMemo(() => msPreviousPeriod(period), [period]);
+  const previous = useMsSummary(previousPeriod ?? period, { enabled: previousPeriod != null });
+  const navigate = useNavigate();
   // «Всё» (0) бэк со слайса 4 считает честно: полный диапазон от старейшего заказа архива
   // (страничная добивка отчёта + кэш 1 час) — подмена 0→30 больше не нужна.
   const [funnelMetric, setFunnelMetric] = useState<'orders' | 'revenue'>('orders');
@@ -118,17 +125,38 @@ export function MsOverview() {
   const avgLabels = avgSampled.map((p) => fmt.day(p.day));
   const avgValues = avgSampled.map((p) => p.sum / p.count);
   const avgTotal = orders.totalCount > 0 ? orders.totalSum / orders.totalCount : null;
+  // Дельты — только при живом прошлом окне (см. previousPeriod выше); один prev-фетч кормит все
+  // три story-карточки. Средний чек сравнивается с чеком прошлого окна той же формулой.
+  const prev = previousPeriod != null ? previous.data : undefined;
+  const revenueDelta = prev ? pctDelta(revenue.total, prev.revenue.total) : null;
+  const ordersDelta = prev ? pctDelta(orders.totalCount, prev.orders.totalCount) : null;
+  const prevAvg = prev && prev.orders.totalCount > 0 ? prev.orders.totalSum / prev.orders.totalCount : null;
+  const avgDelta = avgTotal != null && prevAvg != null ? pctDelta(avgTotal, prevAvg) : null;
 
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-6">
-      <ChartWidget id="ms-revenue" title="Выручка" fixedSize="half" drillTo="/metrics/ms-revenue">
-        <ChartCardBody value={`${fmt.short(revenue.total)} ₽`} caption={windowLabel}>
+      {/* Story-карточки — та же грамматика, что у Обзоров TG/IG/Метрики (steep story card):
+          подпись окна, hero-число, дельта к прошлому периоду и area-спарклайн без осей. Полные
+          оси и тултипы по датам живут на /metrics/ms-* (MsSummaryExplorer ниже в этом файле). */}
+      <ChartWidget id="ms-revenue" title="Выручка" fixedSize="half" defaultColor={1} drillTo="/metrics/ms-revenue">
+        <ChartCardBody
+          hero
+          label={windowLabel}
+          value={`${fmt.short(revenue.total)} ₽`}
+          delta={revenueDelta}
+          onValueClick={() => navigate('/metrics/ms-revenue')}
+          drillLabel="Выручка"
+        >
           {revValues.length > 1 ? (
-            <LineChart
+            <Sparkline
               values={revValues}
               labels={revLabels}
-              titles={revSeries.map((p) => `${fmt.day(p.day)}: ${fmt.num(p.value)} ₽`)}
-              yMin={0}
+              area
+              strokeWidth={2}
+              interactive
+              caption="по дням"
+              formatValue={(v) => `${fmt.num(Math.round(v))} ₽`}
+              className="h-full min-h-14 w-full"
             />
           ) : (
             <EmptyState compact size="chart" title="Недостаточно дней для графика." />
@@ -136,17 +164,26 @@ export function MsOverview() {
         </ChartCardBody>
       </ChartWidget>
 
-      <ChartWidget id="ms-orders" title="Заказы" fixedSize="half" drillTo="/metrics/ms-orders">
+      <ChartWidget id="ms-orders" title="Заказы" fixedSize="half" defaultColor={5} drillTo="/metrics/ms-orders">
         <ChartCardBody
+          hero
+          label={windowLabel}
           value={fmt.num(orders.totalCount)}
-          caption={`на ${fmt.short(orders.totalSum)} ₽ ${windowLabel}`}
+          delta={ordersDelta}
+          caption={`на ${fmt.short(orders.totalSum)} ₽`}
+          onValueClick={() => navigate('/metrics/ms-orders')}
+          drillLabel="Заказы"
         >
           {ordValues.length > 1 ? (
-            <LineChart
+            <Sparkline
               values={ordValues}
               labels={ordLabels}
-              titles={ordSeries.map((p) => `${fmt.day(p.day)}: ${fmt.num(p.count)} · ${fmt.num(p.sum)} ₽`)}
-              yMin={0}
+              area
+              strokeWidth={2}
+              interactive
+              caption="по дням"
+              formatValue={fmt.num}
+              className="h-full min-h-14 w-full"
             />
           ) : (
             <EmptyState compact size="chart" title="Недостаточно дней для графика." />
@@ -154,14 +191,26 @@ export function MsOverview() {
         </ChartCardBody>
       </ChartWidget>
 
-      <ChartWidget id="ms-avg-check" title="Средний чек" fixedSize="half" drillTo="/metrics/ms-aov">
-        <ChartCardBody value={avgTotal != null ? `${fmt.short(avgTotal)} ₽` : '—'} caption={`${windowLabel} · по дням с заказами`}>
+      <ChartWidget id="ms-avg-check" title="Средний чек" fixedSize="half" defaultColor={2} drillTo="/metrics/ms-aov">
+        <ChartCardBody
+          hero
+          label={windowLabel}
+          value={avgTotal != null ? `${fmt.short(avgTotal)} ₽` : '—'}
+          delta={avgDelta}
+          caption="по дням с заказами"
+          onValueClick={() => navigate('/metrics/ms-aov')}
+          drillLabel="Средний чек"
+        >
           {avgValues.length > 1 ? (
-            <LineChart
+            <Sparkline
               values={avgValues}
               labels={avgLabels}
-              titles={avgSampled.map((p) => `${fmt.day(p.day)}: ${fmt.num(Math.round(p.sum / p.count))} ₽`)}
-              yMin={0}
+              area
+              strokeWidth={2}
+              interactive
+              caption="по дням с заказами"
+              formatValue={(v) => `${fmt.num(Math.round(v))} ₽`}
+              className="h-full min-h-14 w-full"
             />
           ) : (
             <EmptyState compact size="chart" title="Недостаточно дней с заказами для графика." />
@@ -225,7 +274,7 @@ export function MsOverview() {
         <MsTopProductsCard period={period} />
       </ChartWidget>
 
-      <ChartWidget id="ms-returns" title="Возвраты" fixedSize="half" drillTo="/metrics/ms-returns">
+      <ChartWidget id="ms-returns" title="Возвраты" fixedSize="half" defaultColor={4} drillTo="/metrics/ms-returns">
         {returns.isPending ? (
           <ChartSkeleton />
         ) : returns.isError ? (

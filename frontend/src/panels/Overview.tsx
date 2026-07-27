@@ -1,6 +1,8 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { useChannels, useHistory, useTgFull, useTgQrStatus } from '@/api/queries';
 import { useSelectedChannel } from '@/lib/channel-context';
+import { lttbDownsample } from '@/lib/downsample';
+import { CHART_MAX_POINTS } from '@/lib/msSeries';
 import { useWidgetPeriod } from '@/lib/period';
 import { useWidgetInView } from '@/lib/widgetViewport';
 import { pctDelta, subscriberChange } from '@/lib/delta';
@@ -207,8 +209,12 @@ export function SubscriberGrowth() {
   const rows = (history?.rows ?? [])
     .filter((r) => r.subscribers != null && inRange(r.day))
     .sort((a, b) => a.day.localeCompare(b.day));
-  const values = rows.map((r) => Number(r.subscribers));
-  const labels = rows.map((r) => fmt.day(r.day));
+  // Канон графиков: длинные серии капаются LTTB перед рендером — окно «Всё» отдаёт до 730 дневных
+  // точек, суб-пиксельная мазня в 200×32-спарклайне. Кап чисто визуальный: LTTB сохраняет первую
+  // и последнюю точки, поэтому headline-числа (currentSubs/change) не меняются.
+  const spark = lttbDownsample(rows, CHART_MAX_POINTS, (r) => Number(r.subscribers));
+  const values = spark.map((r) => Number(r.subscribers));
+  const labels = spark.map((r) => fmt.day(r.day));
   // A historical custom range must end at its own last archive level, not today's channel snapshot.
   const currentSubs = range
     ? values.at(-1) ?? 0

@@ -12,6 +12,7 @@ import { ChartCardBody, ChartSection as WidgetChartSection } from '@/components/
 import { CompactStatHeadline } from '@/components/CompareStat';
 import { Sparkline } from '@/components/Sparkline';
 import type { WidgetSize } from '@/lib/widgetPrefsStore';
+import { bucketIgSeries } from '@/lib/igAggregations';
 import { fmtDay, pairDelta, windowIgSeries, type Point, type WindowPair } from '@/lib/igMetrics';
 import type { IgOverviewChart } from '@/lib/igWindowMetrics';
 import { calendarWindowForPeriod, periodDateTimestamp, splitCalendarRows } from '@/lib/period';
@@ -124,17 +125,22 @@ export function KpiHero({
 }) {
   const navigate = useNavigate();
   const daily = (series ?? []).filter((p) => p.day !== 'total');
-  // Метки оси ровные: акцент-пилюля последней метки удалена продуктово (прод-фидбек по Обзору:
-  // читалась как залипший ховер) — см. компакт-метки в LineChart.
   // Кап длинной линии (канон CLAUDE.md): на «Всё» дневной архив уходил в чарт целиком —
-  // LTTB прореживает до CHART_MAX_POINTS, labels/titles строятся из тех же выбранных точек.
+  // LTTB прореживает до CHART_MAX_POINTS, labels строятся из тех же выбранных точек.
   const shown = lttbDownsample(daily, CHART_MAX_POINTS, (p) => p.value);
+  // Канон hero-карточки Обзора — безосевой area-Sparkline (TG-твин FeaturedKpi): ряд дат на лице
+  // не рисуем, значения по дням читаются hover-читалкой (caption обязателен — без него Sparkline
+  // не рендерит читалку вовсе); полные оси живут на /metrics/ig-* (drillTo).
   const chart = shown.length > 1 && (
-    <LineChart
+    <Sparkline
       values={shown.map((p) => p.value)}
-      labels={pickLabels(shown)}
-      titles={shown.map((p) => `${fmtDay(p.day)}: ${fmt.num(p.value)}`)}
-      height={112}
+      labels={shown.map((p) => fmtDay(p.day))}
+      area
+      strokeWidth={2}
+      interactive
+      caption="по дням"
+      formatValue={fmt.num}
+      className="h-full min-h-28 w-full"
     />
   );
   // Steep anatomy (owner rule): label + number + delta bottom-left, the chart inset to the RIGHT.
@@ -184,6 +190,19 @@ export function FollowsByDayCard({ data, drillTo, id, homeKey, title = 'Подп
           ? selected.previous.reduce((acc, p) => acc + p.value, 0)
           : null;
         const delta = prev != null && prev > 0 ? pctDelta(total, prev) : null;
+        // Кап длинного окна (канон CLAUDE.md; бар-ветка — capResultSeries/windowGraphSeries):
+        // «Всё» отдаёт весь дневной архив (до ~400 строк) прямо в столбцы. Децимировать бары
+        // нельзя — пропущенные дни врут, — поэтому длинная серия честно схлопывается в
+        // Monday-anchored календарные недели (сумма: подписки — поток). total/delta — от дневных.
+        const weekly = w.length > CHART_MAX_POINTS;
+        const bars = weekly
+          ? bucketIgSeries(
+              w,
+              periodDateTimestamp(w[0].day),
+              periodDateTimestamp(w[w.length - 1].day),
+              'week',
+            ).map((b) => ({ day: b.date, value: b.value }))
+          : w;
         return [
           {
             key: 'bar',
@@ -192,9 +211,9 @@ export function FollowsByDayCard({ data, drillTo, id, homeKey, title = 'Подп
               w.length > 0 ? (
                 <ChartCardBody value={`+${fmt.kpi(total)}`} delta={delta} caption={delta ? 'к пред. периоду' : period.days === 0 ? 'за всё время' : undefined}>
                   <BarChart
-                    values={w.map((d) => d.value)}
-                    labels={w.map((d) => fmtDay(d.day))}
-                    titles={w.map((d) => `${fmtDay(d.day)}: +${fmt.num(d.value)}`)}
+                    values={bars.map((d) => d.value)}
+                    labels={bars.map((d) => fmtDay(d.day))}
+                    titles={bars.map((d) => `${fmtDay(d.day)}${weekly ? ' · неделя' : ''}: +${fmt.num(d.value)}`)}
                   />
                 </ChartCardBody>
               ) : (

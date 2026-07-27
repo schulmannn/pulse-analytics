@@ -7,6 +7,7 @@ import { serializeContentPeriod } from '@/lib/contentFilters';
 import {
   applyMentionsFilters,
   buildMentionsTimeline,
+  capMentionsTimeline,
   ddmmFromIso,
   filterMentionRows,
   mentionsDelta,
@@ -162,12 +163,18 @@ export function MentionsDesktop() {
   const scopeTo = data?.scope?.to ?? null;
   const timeline = useMemo(
     () =>
-      buildMentionsTimeline(
-        daily,
-        previousDaily,
-        pageDays,
-        data?.scope?.current_to ?? Date.now(),
-        scopeFrom && scopeTo ? { from: scopeFrom, to: scopeTo } : null,
+      // Кап длинного окна перед рендером (канон CLAUDE.md): «Всё» = до 365 дневных баров, кастомный
+      // диапазон не ограничен вовсе — capMentionsTimeline честно сворачивает их в календарные
+      // недели (bar-ветка), сохраняя ghost теми же корзинами. KPI выше читают totals из data.
+      capMentionsTimeline(
+        buildMentionsTimeline(
+          daily,
+          previousDaily,
+          pageDays,
+          data?.scope?.current_to ?? Date.now(),
+          scopeFrom && scopeTo ? { from: scopeFrom, to: scopeTo } : null,
+        ),
+        'bar',
       ),
     [daily, previousDaily, pageDays, data?.scope?.current_to, scopeFrom, scopeTo],
   );

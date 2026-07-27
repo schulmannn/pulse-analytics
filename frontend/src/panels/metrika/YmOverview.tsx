@@ -1,17 +1,20 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useYmGoals, useYmHourly, useYmSummary } from '@/api/queries';
 import { PillSelect } from '@/components/PillSelect';
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
 import { ChartCardBody } from '@/components/chartWidget/ChartCardBody';
-import { LineChart } from '@/components/LineChart';
+import { Sparkline } from '@/components/Sparkline';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { ChartSkeleton } from '@/components/ui/dataSkeleton';
+import { DeltaPill } from '@/components/DeltaPill';
 import { InlineSpark } from '@/components/InlineSpark';
+import { pctDelta, type MetricDelta } from '@/lib/delta';
 import { lttbDownsample } from '@/lib/downsample';
 import { fmt } from '@/lib/format';
 import { usePagePeriod } from '@/lib/period';
-import { useMsPagePeriod } from '@/lib/msPeriod';
+import { msPreviousPeriod, useMsPagePeriod } from '@/lib/msPeriod';
 import { YM_BREAKDOWNS } from '@/panels/metrika/ymBreakdowns';
 
 /**
@@ -49,7 +52,17 @@ export function YmOverview() {
   const selectedGoalId = validGoalValue !== '' ? Number(validGoalValue) : null;
 
   const summary = useYmSummary(period);
+  // Канон карточки-метрики: число + сравнение с ПРЕДЫДУЩИМ равным окном. Раньше карточки Метрики
+  // были единственными в продукте без дельты — «5.7k» без ответа на «больше или меньше, чем было».
+  // Окно берём тем же хелпером, что МойСклад (msPreviousPeriod); у «Всё» честного предшественника
+  // нет — запрос не уходит и дельта не показывается (как в rail'е /metrics/ym-*). ВАЖНО: при
+  // выключенном запросе fallback-ключ (previousPeriod ?? period) совпадает с текущим окном и
+  // previous.data вернул бы ТЕКУЩУЮ сводку из кэша — поэтому data читается только через
+  // previousPeriod != null (см. prev ниже), а не напрямую.
+  const previousPeriod = useMemo(() => msPreviousPeriod(period), [period]);
+  const previous = useYmSummary(previousPeriod ?? period, { enabled: previousPeriod != null });
   const hourly = useYmHourly(period);
+  const navigate = useNavigate();
   // Общие опции + рендер синхронного селектора цели (одинаковое value/handler на всех карточках,
   // card-specific aria-label). Показываем ТОЛЬКО при наличии целей — иначе UI как прежде.
   const goalOptions = [
@@ -115,24 +128,48 @@ export function YmOverview() {
 
   const { visits, users, pageviews } = summary.data;
   // Канон графиков: длинные серии (окно «Всё» после лет архива ym_daily) даунсэмплятся до ~140
-  // точек ПЕРЕД рендером; labels/titles строятся из той же выборки, чтобы тултипы совпадали с
-  // точками. Оконные 7/30/90 короче порога и проходят как есть.
+  // точек ПЕРЕД рендером; labels строятся из той же выборки, чтобы ховер совпадал с точками.
+  // Оконные 7/30/90 короче порога и проходят как есть.
+  //
+  // Грамматика карточки — ОБЩАЯ с Обзорами Telegram и Instagram (steep story card): подпись окна,
+  // крупное число, дельта к прошлому периоду и area-спарклайн без осей справа. Полные оси, точки,
+  // сравнение и статистика живут на своей поверхности — `/metrics/ym-*`, куда ведёт drillTo.
   const metricCard = (
     id: string,
     title: string,
+    color: number,
     block: { total: number | null; series: Array<{ day: string; value: number }> },
-    caption: string,
+    prevTotal: number | null | undefined,
+    caption?: string,
   ) => {
     const sampled = lttbDownsample(block.series, 140, (p) => p.value);
+    const delta =
+      block.total != null && prevTotal != null && prevTotal > 0
+        ? pctDelta(block.total, prevTotal)
+        : null;
     return (
-      <ChartWidget id={id} title={title} fixedSize="half" drillTo={`/metrics/${id}`}>
-        <ChartCardBody value={fmt.short(block.total)} caption={caption}>
+      <ChartWidget id={id} title={title} fixedSize="half" defaultColor={color} drillTo={`/metrics/${id}`}>
+        <ChartCardBody
+          hero
+          label={windowLabel}
+          value={fmt.short(block.total)}
+          delta={delta}
+          caption={caption}
+          onValueClick={() => navigate(`/metrics/${id}`)}
+          drillLabel={title}
+        >
           {sampled.length > 1 ? (
-            <LineChart
+            <Sparkline
               values={sampled.map((p) => p.value)}
               labels={sampled.map((p) => fmt.day(p.day))}
-              titles={sampled.map((p) => `${fmt.day(p.day)}: ${fmt.num(p.value)}`)}
-              yMin={0}
+              area
+              strokeWidth={2}
+              interactive
+              // caption включает hover-читалку «дата · значение · Δ» (Sparkline рисует её только
+              // при заданном caption) — значения по дням остаются читаемы прямо с карточки.
+              caption="по дням"
+              formatValue={fmt.num}
+              className="h-full min-h-14 w-full"
             />
           ) : (
             <EmptyState compact size="chart" title="Недостаточно дней для графика." />
@@ -148,16 +185,25 @@ export function YmOverview() {
   // «Посетители» за окно теперь период-точные, когда сервер дал body.totals; при «Всё» без
   // живого токена подпись остаётся честной «сумма по дням».
   const exactTotals = meta?.exact_period_totals === true;
-  const usersCaption = exactTotals ? windowLabel : `${windowLabel} · сумма по дням`;
+  const usersCaption = exactTotals ? undefined : 'сумма по дням';
+  // Прошлое окно приходит своим запросом и может ещё грузиться — тогда дельты просто нет.
+  // Гейт по previousPeriod обязателен (см. комментарий у хука выше).
+  const prev = previousPeriod != null ? previous.data : undefined;
 
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-6">
-      {metricCard('ym-visits', 'Визиты', visits, windowLabel)}
-      {metricCard('ym-users', 'Посетители', users, usersCaption)}
-      {metricCard('ym-pageviews', 'Просмотры страниц', pageviews, windowLabel)}
+      {metricCard('ym-visits', 'Визиты', 1, visits, prev?.visits.total)}
+      {metricCard('ym-users', 'Посетители', 5, users, prev?.users.total, usersCaption)}
+      {metricCard('ym-pageviews', 'Просмотры страниц', 2, pageviews, prev?.pageviews.total)}
 
       {/* Качество трафика: отказы/длительность/глубина/новые/роботы — nullable, «—» когда недоступно. */}
-      <YmQualityStrip quality={quality} qualitySeries={qualitySeries} meta={meta} windowLabel={windowLabel} />
+      <YmQualityStrip
+        quality={quality}
+        qualitySeries={qualitySeries}
+        prevQuality={previousPeriod != null ? prev?.quality ?? null : null}
+        meta={meta}
+        windowLabel={windowLabel}
+      />
 
       {/* Трафик по часам: суточный heatmap-профиль визитов (ym:s:hour) — когда приходят посетители.
           Полные 24 клетки, подпись отмечает час пика. Визиты — своя единица, не TG/IG-метрики. */}
@@ -288,6 +334,8 @@ interface YmQualityTile {
   value: string;
   /** Ключ дневной серии качества для тренд-спарклайна (тренд — по РЕАЛЬНЫМ точкам, null пропущены). */
   seriesKey: YmQualitySeriesKey;
+  /** Дельта к предыдущему окну — только у аддитивных потоков (новые, роботы-счётчик). */
+  delta?: MetricDelta | null;
 }
 
 /** Доля роботов + их число: «12,3% · 45». Оба null → «—»; показываем, а не исключаем молча. */
@@ -305,6 +353,7 @@ const fmtRobots = (pct: number | null | undefined, count: number | null | undefi
 function YmQualityStrip({
   quality,
   qualitySeries,
+  prevQuality,
   meta,
   windowLabel,
 }: {
@@ -318,6 +367,11 @@ function YmQualityStrip({
     robot_percentage?: number | null;
   } | null;
   qualitySeries: YmQualitySeries | null;
+  /** Качество ПРЕДЫДУЩЕГО равного окна (null при «Всё»/отсутствии) — дельты аддитивных тайлов. */
+  prevQuality: {
+    new_users: number | null;
+    robot_visits?: number | null;
+  } | null;
   meta: {
     exact_period_totals: boolean;
     all_time?: boolean;
@@ -328,13 +382,33 @@ function YmQualityStrip({
   } | null;
   windowLabel: string;
 }) {
+  // Дельты — только у АДДИТИВНЫХ потоков («Новые» и счётчик «Роботы»): доли/длительности/глубина
+  // сравниваются не процентом, а п.п./секундами — вне минимальной грамматики тайла.
   const tiles: YmQualityTile[] = [
     { key: 'bounce', label: 'Отказы', value: fmtQualityPct(quality?.bounce_rate), seriesKey: 'bounce_rate' },
     { key: 'dur', label: 'Средний визит', value: fmtDuration(quality?.avg_visit_duration_seconds), seriesKey: 'avg_visit_duration_seconds' },
     { key: 'depth', label: 'Глубина', value: fmtQualityNum(quality?.page_depth), seriesKey: 'page_depth' },
-    { key: 'new', label: 'Новые', value: fmt.short(quality?.new_users ?? null), seriesKey: 'new_users' },
+    {
+      key: 'new',
+      label: 'Новые',
+      value: fmt.short(quality?.new_users ?? null),
+      seriesKey: 'new_users',
+      delta:
+        quality?.new_users != null && prevQuality?.new_users != null && prevQuality.new_users > 0
+          ? pctDelta(quality.new_users, prevQuality.new_users)
+          : null,
+    },
     { key: 'pctnew', label: 'Доля новых', value: fmtQualityPct(quality?.percent_new_visitors), seriesKey: 'percent_new_visitors' },
-    { key: 'robots', label: 'Роботы', value: fmtRobots(quality?.robot_percentage, quality?.robot_visits), seriesKey: 'robot_percentage' },
+    {
+      key: 'robots',
+      label: 'Роботы',
+      value: fmtRobots(quality?.robot_percentage, quality?.robot_visits),
+      seriesKey: 'robot_percentage',
+      delta:
+        quality?.robot_visits != null && prevQuality?.robot_visits != null && prevQuality.robot_visits > 0
+          ? pctDelta(quality.robot_visits, prevQuality.robot_visits)
+          : null,
+    },
   ];
   // Тренд-спарклайн: только РЕАЛЬНЫЕ дневные точки метрики (null = «нет данных» пропускаем), и
   // только когда их ≥2 — иначе InlineSpark сам ничего не рисует, но экономим и пустой контейнер.
@@ -378,7 +452,11 @@ function YmQualityStrip({
           return (
             <div key={t.key} className="min-w-0">
               <div className="text-2xs tracking-wide text-muted-foreground">{t.label}</div>
-              <div className="mt-0.5 text-lg font-medium tabular-nums tracking-tight text-foreground">{t.value}</div>
+              <div className="mt-0.5 flex items-baseline gap-2">
+                <span className="text-lg font-medium tabular-nums tracking-tight text-foreground">{t.value}</span>
+                {/* DeltaPill сам скрывается при flat/null — отдельных веток не нужно. */}
+                <DeltaPill delta={t.delta} />
+              </div>
               {trend.length >= 2 && (
                 <div className="mt-1 h-4">
                   <InlineSpark values={trend} width={72} height={16} />

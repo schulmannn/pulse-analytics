@@ -12,10 +12,12 @@ import { SegmentedControl } from '@/components/SegmentedControl';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { ChartSkeleton, TableSkeleton } from '@/components/ui/dataSkeleton';
+import { Sparkline } from '@/components/Sparkline';
+import { pctDelta } from '@/lib/delta';
 import { lttbDownsample } from '@/lib/downsample';
 import { fmt, pluralRu } from '@/lib/format';
 import { usePagePeriod, usePeriod } from '@/lib/period';
-import { useMsPagePeriod, type MsPeriod } from '@/lib/msPeriod';
+import { msPreviousPeriod, useMsPagePeriod, type MsPeriod } from '@/lib/msPeriod';
 import {
   bucketCustomerDays,
   customerMetricTotal,
@@ -41,6 +43,10 @@ export function MsClients() {
   const period = useMsPagePeriod();
   const windowLabel = pp?.range ? 'за выбранный период' : days === 0 ? 'за всё время' : `за ${days} дн.`;
   const customers = useMsCustomers(period);
+  // Канон карточки-метрики: дельта к предыдущему равному окну (паттерн YmOverview/MsOverview).
+  // «Всё» предшественника не имеет — запрос не уходит, previous.data не читаем.
+  const previousPeriod = useMemo(() => msPreviousPeriod(period), [period]);
+  const previous = useMsCustomers(previousPeriod ?? period, { enabled: previousPeriod != null });
   const cohorts = useMsCohorts();
   const topCustomers = useMsTopCustomers(period);
   const rfm = useMsRfm(period);
@@ -59,8 +65,9 @@ export function MsClients() {
     return {
       count: sampled.length,
       labels: sampled.map((r) => fmt.day(r.day)),
-      newValues: sampled.map((r) => r.new_orders),
-      repeatValues: sampled.map((r) => r.repeat_orders),
+      // Лицо карточки — одна суммарная серия заказов (канон story card); разбивка «Новые /
+      // Повторные» с двумя линиями и датами живёт в MsCustomerExplorer (/metrics/ms-customers).
+      values: sampled.map((r) => r.new_orders + r.repeat_orders),
     };
   }, [series, period]);
 
@@ -88,6 +95,9 @@ export function MsClients() {
   }
 
   const { summary } = customers.data;
+  const prevCustomers = previousPeriod != null ? previous.data?.summary.customers : null;
+  const customersDelta =
+    prevCustomers != null && prevCustomers > 0 ? pctDelta(summary.customers, prevCustomers) : null;
   const repeatShare = summary.customers > 0 ? Math.round((summary.repeat_customers / summary.customers) * 100) : 0;
   const everShare = summary.repeat_ever; // клиенты с ≥2 заказами за всю историю
   const repeatRevenueTotal = summary.sum_new + summary.sum_repeat;
@@ -99,18 +109,28 @@ export function MsClients() {
         id="ms-customers"
         title="Покупатели"
         fixedSize="half"
+        defaultColor={1}
         drillTo="/metrics/ms-customers"
       >
-        <ChartCardBody value={fmt.num(summary.customers)} caption={windowLabel}>
+        <ChartCardBody
+          hero
+          label={windowLabel}
+          value={fmt.num(summary.customers)}
+          delta={customersDelta}
+          caption="в графике — заказы по дням"
+          onValueClick={() => navigate('/metrics/ms-customers')}
+          drillLabel="Покупатели"
+        >
           {chart && chart.count > 1 ? (
-            <LineChart
-              values={chart.newValues}
-              ghost={chart.repeatValues}
-              primaryLabel="Новые"
-              comparisonDelta={false}
-              ghostLabel="Повторные"
+            <Sparkline
+              values={chart.values}
               labels={chart.labels}
-              yMin={0}
+              area
+              strokeWidth={2}
+              interactive
+              caption="заказы по дням"
+              formatValue={fmt.num}
+              className="h-full min-h-14 w-full"
             />
           ) : (
             <EmptyState compact size="chart" title="Недостаточно дней для графика." />

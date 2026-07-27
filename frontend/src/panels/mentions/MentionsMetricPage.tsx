@@ -21,6 +21,7 @@ import { serializeContentPeriod } from '@/lib/contentFilters';
 import { fmt } from '@/lib/format';
 import {
   buildMentionsTimeline,
+  capMentionsTimeline,
   type MentionDailyPoint,
   type MentionSourceOption,
 } from '@/lib/mentionsFilters';
@@ -180,6 +181,9 @@ function MentionsTimelinePage() {
       ),
     [daily, previousDaily, days, data?.scope?.current_to, scopeFrom, scopeTo],
   );
+  // Кап только рендера (канон CLAUDE.md): линия — pickIndexes/LTTB, столбцы — календарные недели;
+  // хедлайн окна и дельта ниже считаются от ПОЛНОГО timeline (кап чисто визуальный).
+  const chartTimeline = useMemo(() => capMentionsTimeline(timeline, kind), [timeline, kind]);
   const comparisonAvailable = timeline.ghost != null;
   const showComparison = comparisonAvailable && compare === 'prev';
   const currentTotal = timeline.values.reduce((sum, value) => sum + value, 0);
@@ -297,23 +301,23 @@ function MentionsTimelinePage() {
           <EmptyState compact size="chart" title="За выбранный период упоминаний нет." />
         ) : kind === 'line' ? (
           <LineChart
-            values={timeline.values}
-            labels={timeline.labels}
-            titles={timeline.titles}
+            values={chartTimeline.values}
+            labels={chartTimeline.labels}
+            titles={chartTimeline.titles}
             yMin={0}
             markAnomalies
             markExtremes
-            showPoints={timeline.values.length <= 45}
-            ghost={showComparison ? timeline.ghost : undefined}
+            showPoints={chartTimeline.values.length <= 45}
+            ghost={showComparison ? chartTimeline.ghost : undefined}
             ghostLabel="Пред. период"
             legendToggle={false}
           />
         ) : (
           <BarChart
-            values={timeline.values}
-            labels={timeline.labels}
-            titles={timeline.titles}
-            ghost={showComparison ? timeline.ghost : undefined}
+            values={chartTimeline.values}
+            labels={chartTimeline.labels}
+            titles={chartTimeline.titles}
+            ghost={showComparison ? chartTimeline.ghost : undefined}
             ghostLabel="Пред. период"
             legendToggle={false}
           />

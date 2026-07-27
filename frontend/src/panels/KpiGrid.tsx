@@ -3,6 +3,8 @@ import type { ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useChannels, useHistory, useTgFull } from '@/api/queries';
 import { useSelectedChannel } from '@/lib/channel-context';
+import { lttbDownsample } from '@/lib/downsample';
+import { CHART_MAX_POINTS } from '@/lib/msSeries';
 import { fmt } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { ErrorState } from '@/components/ErrorState';
@@ -293,6 +295,16 @@ interface FeaturedKpiProps {
     bottom-LEFT, the area sparkline filling the width to the RIGHT of the number block. The ledger
     below is untouched — the hero zone just turned horizontal. */
 function FeaturedKpi({ label, value, trend, caption, spark, info, onDrill }: FeaturedKpiProps) {
+  // Кап длинной серии перед рендером (канон CLAUDE.md): на окне «Всё» архивный viewsSpark несёт
+  // до 730 дневных точек — в 200×32-спарклайне это суб-пиксельная мазня. Пары {value,label}
+  // прореживаются ВМЕСТЕ, чтобы hover-читалка называла именно отобранные LTTB точки; хедлайн,
+  // дельта и caption считаются от полного окна в deriveKpis и капом не затрагиваются.
+  const sparkShown = useMemo(() => {
+    if (!spark || spark.values.length <= CHART_MAX_POINTS) return spark;
+    const rows = spark.values.map((value, i) => ({ value, label: spark.labels[i] ?? '' }));
+    const sampled = lttbDownsample(rows, CHART_MAX_POINTS, (r) => r.value);
+    return { labels: sampled.map((r) => r.label), values: sampled.map((r) => r.value) };
+  }, [spark]);
   return (
     <ChartCardBody
       hero
@@ -308,10 +320,10 @@ function FeaturedKpi({ label, value, trend, caption, spark, info, onDrill }: Fea
       onValueClick={onDrill}
       drillLabel={label}
     >
-      {spark && spark.values.length > 1 ? (
+      {sparkShown && sparkShown.values.length > 1 ? (
         <Sparkline
-          values={spark.values}
-          labels={spark.labels}
+          values={sparkShown.values}
+          labels={sparkShown.labels}
           area
           strokeWidth={2}
           interactive
