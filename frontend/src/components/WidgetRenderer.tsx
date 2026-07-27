@@ -58,6 +58,9 @@ export function WidgetRenderer({
   // Detail overlay / explorer set this true → show the full explain panel there; the collapsed card
   // gets the compact ⓘ instead (see the meta row below).
   const expanded = useContext(ChartExpandedContext);
+  // На РАЗВЁРНУТОЙ поверхности (полноэкранный эксплорер `/widgets/:id`, оверлей развёртки) высоту
+  // плота задаёт хост — useExplorerChartHeight / измеренный регион оверлея. Её и уважаем.
+  const requestedHeight = useContext(ExpandedChartHeightContext);
   // The chart must size to ITS band, not the whole card body: the card's height context carries the
   // full body measurement (hero + chart + meta), so a hero-led card's chart rendered taller than its
   // flex band and the bottom of the plot (min-value points) was clipped by overflow-hidden
@@ -97,7 +100,10 @@ export function WidgetRenderer({
   // Lead with a hero headline whenever the resolver provides one — value/series metrics, and now
   // ADDITIVE breakdowns (a total, steep #4.9). A non-additive breakdown carries no value, so it
   // still leads with its chart (the distribution IS the story, and the card title names it).
-  const showHero = hasValue && !expanded;
+  // Развёрнутая поверхность отдаёт всю площадь графику — число уже есть в шапке страницы. Но у
+  // метрики БЕЗ ряда и без разреза графика не существует (WidgetChart вернул бы null), и тогда
+  // эксплорер оставался пустым: ни числа, ни графика. Такое значение показываем героем и там.
+  const showHero = hasValue && (!expanded || (!hasSeries && !hasBreakdown));
 
   // «N% от цели» (steep) — when a target is set and the metric has a scalar to measure against it.
   const targetPct = result.targetPct;
@@ -173,9 +179,15 @@ export function WidgetRenderer({
       <WidgetTargetContext.Provider value={result.target ?? null}>
         {/* overflow-hidden: fixed-tile charts size their svg from the measured BODY height, which
             can overrun this flex-1 band and paint under the meta line / stats footer — clip the
-            chart to its allotted band so the caption stays legible. */}
-        <div ref={bandRef} className={`min-h-0 flex-1 overflow-hidden ${showHero ? 'mt-3' : ''}`}>
-          <ExpandedChartHeightContext.Provider value={bandH}>
+            chart to its allotted band so the caption stays legible. Развёрнутая поверхность живёт
+            наоборот: высоту диктует хост, полоса растёт под неё (мерить полосу там значило бы
+            гонять высоту по кругу — на одном и том же экране разные виджеты получали 706px и
+            548px вместо заявленных explorer-высот). */}
+        <div
+          ref={bandRef}
+          className={`min-h-0 ${expanded ? '' : 'flex-1 overflow-hidden'} ${showHero ? 'mt-3' : ''}`}
+        >
+          <ExpandedChartHeightContext.Provider value={expanded ? requestedHeight : bandH}>
             <WidgetChart result={result} eff={eff} onDrill={onDrill} expanded={expanded} />
           </ExpandedChartHeightContext.Provider>
         </div>

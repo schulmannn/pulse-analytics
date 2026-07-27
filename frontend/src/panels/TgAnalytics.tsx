@@ -417,8 +417,15 @@ export function deriveWeekday(full: TgFull | undefined, inRange: InRange) {
   return { wdAvgValues, wdCountValues, maxWdAvg, bestWdLabel };
 }
 
-/** Joined, left and signed net follower flows over one resolved calendar window. */
-export function deriveFollowerFlows(graphs: TgGraphs | undefined, win: CalendarWindow | null) {
+/** Joined, left and signed net follower flows over one resolved calendar window.
+    opts.grain === 'week' сворачивает СЕРИЮ в Monday-anchored недельные корзины (сумма нетто —
+    поток), той же анкер-математикой, что у windowGraphSeries; тоталы/prevTotal остаются от
+    дневных рядов до свёртки (контракт «grain only re-shapes the chart»). */
+export function deriveFollowerFlows(
+  graphs: TgGraphs | undefined,
+  win: CalendarWindow | null,
+  opts?: { grain?: 'day' | 'week' },
+) {
   const empty = {
     values: [] as number[],
     titles: [] as string[],
@@ -446,15 +453,36 @@ export function deriveFollowerFlows(graphs: TgGraphs | undefined, win: CalendarW
     });
   }
   const selected = splitCalendarRows(rows, win, (row) => row.timestamp);
-  const values = selected.current.map((row) => row.net);
-  const titles = selected.current.map((row) => {
-    const label = Number.isFinite(row.timestamp) ? formatMsDate(row.timestamp) : '';
-    return `${label}: ${row.net >= 0 ? '+' : ''}${fmt.num(row.net)} за день`;
-  });
+  let values: number[];
+  let titles: string[];
+  if (opts?.grain === 'week') {
+    const buckets = new Map<string, { sum: number; anchor: number }>();
+    for (const row of selected.current) {
+      if (!Number.isFinite(row.timestamp)) continue;
+      const d = new Date(row.timestamp);
+      const back = (d.getDay() + 6) % 7; // Monday-anchored week bucket
+      const mon = new Date(d.getFullYear(), d.getMonth(), d.getDate() - back);
+      const key = `${mon.getFullYear()}-${mon.getMonth()}-${mon.getDate()}`;
+      const b = buckets.get(key);
+      if (b) b.sum += row.net;
+      else buckets.set(key, { sum: row.net, anchor: mon.getTime() });
+    }
+    const weekRows = [...buckets.values()].sort((a, b) => a.anchor - b.anchor);
+    values = weekRows.map((r) => r.sum);
+    titles = weekRows.map(
+      (r) => `${formatMsDate(r.anchor)}: ${r.sum >= 0 ? '+' : ''}${fmt.num(r.sum)} за неделю`,
+    );
+  } else {
+    values = selected.current.map((row) => row.net);
+    titles = selected.current.map((row) => {
+      const label = Number.isFinite(row.timestamp) ? formatMsDate(row.timestamp) : '';
+      return `${label}: ${row.net >= 0 ? '+' : ''}${fmt.num(row.net)} за день`;
+    });
+  }
   return {
     values,
     titles,
-    total: values.reduce((sum, value) => sum + value, 0),
+    total: selected.current.reduce((sum, row) => sum + row.net, 0),
     prevTotal: selected.previous
       ? selected.previous.reduce((sum, row) => sum + row.net, 0)
       : null,
@@ -464,8 +492,12 @@ export function deriveFollowerFlows(graphs: TgGraphs | undefined, win: CalendarW
 }
 
 /** Backward-compatible focused shape used by the net-growth card and its tests. */
-export function deriveNetGrowth(graphs: TgGraphs | undefined, win: CalendarWindow | null) {
-  const { values, titles, total, prevTotal } = deriveFollowerFlows(graphs, win);
+export function deriveNetGrowth(
+  graphs: TgGraphs | undefined,
+  win: CalendarWindow | null,
+  opts?: { grain?: 'day' | 'week' },
+) {
+  const { values, titles, total, prevTotal } = deriveFollowerFlows(graphs, win, opts);
   return { values, titles, total, prevTotal };
 }
 
@@ -729,8 +761,15 @@ export function TgAnalytics({
   );
   const netGrowthVariants = useCallback(
     (period: WidgetPeriodValue) => {
-      const w = deriveNetGrowth(graphs, calendarWindowForPeriod(period));
-      const delta = w.prevTotal != null && w.prevTotal > 0 && w.total >= 0 ? pctDelta(w.total, w.prevTotal) : null;
+      // Кап длинного окна — паттерн соседних «Просмотров»/«Репостов» (строки выше): децимировать
+      // бары нельзя, длинная дневная серия честно сворачивается в календарные недели; headline и
+      // delta читаются от дневного деривата (тоталы по построению идентичны).
+      const daily = deriveNetGrowth(graphs, calendarWindowForPeriod(period));
+      const w =
+        daily.values.length > CHART_MAX_POINTS
+          ? deriveNetGrowth(graphs, calendarWindowForPeriod(period), { grain: 'week' })
+          : daily;
+      const delta = daily.prevTotal != null && daily.prevTotal > 0 && daily.total >= 0 ? pctDelta(daily.total, daily.prevTotal) : null;
       const caption = delta ? 'к пред. периоду' : period.days === 0 && !period.range ? 'за всё время' : 'за период';
       return [
         {
@@ -739,7 +778,7 @@ export function TgAnalytics({
           render:
             w.values.length > 0 ? (
               <ChartCardBody
-                value={`${w.total >= 0 ? '+' : '−'}${fmt.kpi(Math.abs(w.total))}`}
+                value={`${daily.total >= 0 ? '+' : '−'}${fmt.kpi(Math.abs(daily.total))}`}
                 delta={delta}
                 caption={caption}
               >

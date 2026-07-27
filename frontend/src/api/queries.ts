@@ -1187,10 +1187,11 @@ const MsCustomersSchema = z
   })
   .passthrough();
 
-export function useMsCustomers(period: MsPeriod) {
+export function useMsCustomers(period: MsPeriod, opts?: { enabled?: boolean }) {
   const { channelId } = useSelectedChannel();
   return useQuery({
-    enabled: channelId != null,
+    // opts.enabled — внешний гейт поверх канального (зеркало useMsSummary/useYmSummary).
+    enabled: channelId != null && opts?.enabled !== false,
     queryKey: ['ms-customers', channelId, ...msPeriodKey(period)],
     staleTime: STALE_LIVE,
     queryFn: ({ signal }) => apiGet(`/api/ms/customers?${msPeriodQuery(period)}`, MsCustomersSchema, { signal, channelId }),

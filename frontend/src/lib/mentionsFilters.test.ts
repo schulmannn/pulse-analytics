@@ -3,6 +3,7 @@ import {
   MENTIONS_DEFAULTS,
   applyMentionsFilters,
   buildMentionsTimeline,
+  capMentionsTimeline,
   ddmmFromIso,
   filterMentionRows,
   mentionsDelta,
@@ -227,5 +228,72 @@ describe('table filter/sort', () => {
 describe('ddmmFromIso', () => {
   it('formats an ISO day', () => {
     expect(ddmmFromIso('2026-07-09')).toBe('09.07');
+  });
+});
+
+describe('capMentionsTimeline', () => {
+  /** Плотное окно из n дней, заканчивающееся 2026-07-27, с ghost'ом той же длины. */
+  const denseTimeline = (n: number) => {
+    const days: string[] = [];
+    for (let i = n - 1; i >= 0; i--) {
+      const d = new Date(Date.UTC(2026, 6, 27));
+      d.setUTCDate(d.getUTCDate() - i);
+      days.push(d.toISOString().slice(0, 10));
+    }
+    return {
+      values: days.map((_, i) => (i % 3 === 0 ? 2 : i % 5 === 0 ? 1 : 0)),
+      ghost: days.map((_, i) => (i % 4 === 0 ? 1 : 0)),
+      labels: days.map(ddmmFromIso),
+      titles: days.map((d) => `${ddmmFromIso(d)}: t`),
+      days,
+      views: days.map((_, i) => i),
+    };
+  };
+
+  it('is a no-op for short windows (7/30/90 stay daily)', () => {
+    const t = denseTimeline(90);
+    expect(capMentionsTimeline(t, 'bar')).toBe(t);
+    expect(capMentionsTimeline(t, 'line')).toBe(t);
+  });
+
+  it('bar: collapses a 365-day window into ≤53 weekly buckets with aligned ghost and honest labels', () => {
+    const t = denseTimeline(365);
+    const capped = capMentionsTimeline(t, 'bar');
+    expect(capped.values.length).toBeLessThanOrEqual(53);
+    expect(capped.values.length).toBeGreaterThan(40);
+    expect(capped.ghost).toHaveLength(capped.values.length);
+    expect(capped.labels).toHaveLength(capped.values.length);
+    // Суммы сохраняются: недельные корзины — перегруппировка, не потеря.
+    const sum = (a: number[]) => a.reduce((s, v) => s + v, 0);
+    expect(sum(capped.values)).toBe(sum(t.values));
+    expect(sum(capped.ghost!)).toBe(sum(t.ghost));
+    expect(sum(capped.views)).toBe(sum(t.views));
+    // Тултип обязан нести маркер недели (честность подписи).
+    expect(capped.titles[0]).toContain('неделя');
+  });
+
+  it('line: with a ghost picks THE SAME indexes for both series', () => {
+    const t = denseTimeline(365);
+    const capped = capMentionsTimeline(t, 'line');
+    expect(capped.values.length).toBeLessThanOrEqual(140);
+    expect(capped.ghost).toHaveLength(capped.values.length);
+    // Первая/последняя точки сохраняются, пары (value, ghost) остаются исходными парами.
+    expect(capped.values[0]).toBe(t.values[0]);
+    expect(capped.values.at(-1)).toBe(t.values.at(-1));
+    capped.days.forEach((day, i) => {
+      const orig = t.days.indexOf(day);
+      expect(orig).toBeGreaterThanOrEqual(0);
+      expect(capped.values[i]).toBe(t.values[orig]);
+      expect(capped.ghost![i]).toBe(t.ghost[orig]);
+    });
+  });
+
+  it('line: without a ghost falls back to LTTB and keeps endpoints', () => {
+    const t = { ...denseTimeline(365), ghost: undefined };
+    const capped = capMentionsTimeline(t, 'line');
+    expect(capped.values.length).toBeLessThanOrEqual(140);
+    expect(capped.ghost).toBeUndefined();
+    expect(capped.days[0]).toBe(t.days[0]);
+    expect(capped.days.at(-1)).toBe(t.days.at(-1));
   });
 });

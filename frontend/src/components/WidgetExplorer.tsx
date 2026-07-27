@@ -7,8 +7,10 @@ import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/E
 import { MetricBackLink } from '@/components/metric/shared';
 import { ChannelScope } from '@/lib/channel-context';
 import { editorSpec } from '@/lib/widgetCapabilities';
+import { ChartSkeleton } from '@/components/ui/dataSkeleton';
 import { normalizeWidget, type WidgetConfig } from '@/lib/widgetConfig';
 import { useExplorerChartHeight } from '@/lib/useExplorerChartHeight';
+import { useWidgetSourceChannel } from '@/lib/useWidgetSource';
 
 /**
  * The universal full-page explorer — one place, every config widget. A card opens a SANDBOX:
@@ -30,6 +32,12 @@ export function WidgetExplorer({
   const [draft, setDraft] = useState<WidgetConfig>(config);
   const spec = editorSpec(draft);
   const chartHeight = useExplorerChartHeight();
+  // Источник резолвится ТЕМ ЖЕ хуком, что и карточка, из которой открыт эксплорер: без явного
+  // «Источника» берётся канал сети виджета, а не глобальный свитчер. Иначе TG/IG-виджет,
+  // открытый при активном МойСклад/Метрика-канале, читал бы чужой канал (пустой ряд нулей).
+  // До resolved (холодный deep-link: список каналов ещё летит) график не монтируем — иначе
+  // data-хуки выстрелили бы по глобальному каналу и перещёлкнулись после ответа.
+  const { channelId: sourceChannel, resolved: sourceResolved } = useWidgetSourceChannel(draft, { pinned: true });
 
   const patch = (p: Partial<WidgetConfig>) => setDraft((d) => normalizeWidget({ ...d, ...p }) ?? d);
   const changed = JSON.stringify(draft) !== JSON.stringify(config);
@@ -78,7 +86,13 @@ export function WidgetExplorer({
           а не space-y-6. */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_320px] xl:gap-8">
         <div className="min-w-0 rounded-2xl border border-border bg-card p-4 sm:p-5">
-          {draft.source != null ? <ChannelScope channelId={draft.source}>{chart}</ChannelScope> : chart}
+          {!sourceResolved ? (
+            <ChartSkeleton />
+          ) : sourceChannel != null ? (
+            <ChannelScope channelId={sourceChannel}>{chart}</ChannelScope>
+          ) : (
+            chart
+          )}
         </div>
         <aside className="min-w-0">
           <div className="lg:sticky lg:top-4">

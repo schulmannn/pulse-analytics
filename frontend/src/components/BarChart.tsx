@@ -202,8 +202,16 @@ export function BarChart({
     const usable = Math.max(graphHeight - padTop, 1);
 
     // Expanded view: nice-tick labels right-aligned in a reserved left gutter (0 = baseline).
-    const yTicks = scale ? scale.ticks.filter((t) => t > 0) : [];
-    const tickLabels = yTicks.map((v) => axisLabel(v, scale ? scale.step : 1));
+    // Дедуп подписей — как в LineChart: на крошечном домене (все значения 0 → hi=1) шкала даёт
+    // тики 1 / 0.5, а axisLabel округляет оба в «1», и ось печатала «1 1 0».
+    const scaledTicks = scale
+      ? scale.ticks
+          .filter((t) => t > 0)
+          .map((v) => ({ v, label: axisLabel(v, scale.step) }))
+          .filter((tick, i, arr) => i === 0 || tick.label !== arr[i - 1].label)
+      : [];
+    const yTicks = scaledTicks.map((t) => t.v);
+    const tickLabels = scaledTicks.map((t) => t.label);
     const gutterW = expanded
       ? Math.max(28, Math.round(Math.max(...tickLabels.map((l) => l.length)) * CHAR_W) + 14)
       : 0;
@@ -253,9 +261,21 @@ export function BarChart({
       : [];
     const columnTops = values.map((_, i) => stacked && ghostBars[i]?.h > 0 ? ghostBars[i].y : bars[i].y);
 
-    // Under the bars: gridlines + tick labels (expanded only).
+    // Under the bars: the zero baseline, then gridlines + tick labels (expanded only).
+    // Базовая линия рисуется ВСЕГДА: нулевой столбец честно имеет высоту 0, и без неё окно, где
+    // все значения нулевые (пустой фильтр, канал чужой сети), выглядело как «график не отрисовался»
+    // — пустое место вместо ряда на нуле. Столбчатой диаграмме нулевая база нужна и по канону.
     const underLayer = (
       <>
+        <line
+          x1={gutterW}
+          y1={graphHeight}
+          x2={chartWidth}
+          y2={graphHeight}
+          stroke="hsl(var(--border))"
+          strokeWidth="1"
+          vectorEffect="non-scaling-stroke"
+        />
         {yTicks.map((v, idx) => {
           const y = barTop(v);
           return (
@@ -358,7 +378,7 @@ export function BarChart({
           <>
             {([['макс', refLines.max], ['сред.', refLines.avg], ['мин', refLines.min]] as const).map(([lbl, v]) => (
               <g key={lbl} className="pointer-events-none">
-                <line x1={gutterW} y1={barTop(v)} x2={chartWidth} y2={barTop(v)} stroke="hsl(var(--chart-role-neutral))" strokeDasharray="6 4" strokeWidth="1.2" opacity="0.7" />
+                <line x1={gutterW} y1={barTop(v)} x2={chartWidth} y2={barTop(v)} stroke="hsl(var(--chart-role-neutral))" strokeDasharray="6 4" strokeWidth="1.2" opacity="0.7" vectorEffect="non-scaling-stroke" />
                 <text
                   x={chartWidth - 4}
                   y={barTop(v) - 4 < 10 ? barTop(v) + 12 : barTop(v) - 4}
@@ -568,6 +588,7 @@ export function BarChart({
               fill={stacked ? 'none' : 'hsl(var(--chart-role-selection))'}
               stroke={stacked ? 'hsl(var(--chart-role-selection))' : undefined}
               strokeWidth={stacked ? 2 : undefined}
+              vectorEffect={stacked ? 'non-scaling-stroke' : undefined}
               rx={stacked ? 4 : 2}
             />
             <line

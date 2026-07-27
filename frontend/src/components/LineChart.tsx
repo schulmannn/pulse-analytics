@@ -257,8 +257,12 @@ export function LineChart({
       const v = values[i];
       if (v != null) real.push({ i, v });
     }
-    // Меньше двух реальных точек — графика нет: дыры данными не считаются.
-    if (real.length < 2) return null;
+    // Ни одной реальной точки — графика нет: дыры данными не считаются. РОВНО одна точка — это
+    // факт, а не пустота: сегмент из одной точки ниже рисуется кружком (lonePts), поэтому серия
+    // из одного бакета (грануляция «Квартал»/«Год», первый день сбора) больше не показывает
+    // «Нет данных за период» поверх реального значения — паритет со столбцами, где один бакет
+    // всегда рисовался.
+    if (real.length < 1) return null;
 
     // In a fixed-height card tile (ctxHeight = the tile's leftover height, and NOT the expanded
     // overlay), the svg shares the tile with the HTML rows drawn below it — the minimal x-label
@@ -583,8 +587,9 @@ export function LineChart({
     };
   }, [onPointClick, plot, values.length]);
 
-  // Пустое состояние считается по РЕАЛЬНЫМ точкам (plot = null при < 2 non-null): серия из
-  // одних null-дней — честное «нет данных», а не нулевая линия.
+  // Пустое состояние считается по РЕАЛЬНЫМ точкам (plot = null при 0 non-null): серия из
+  // одних null-дней — честное «нет данных», а не нулевая линия. Одна реальная точка рисуется
+  // lone-кружком, не пустым состоянием (паритет со столбцами).
   if (!plot) {
     return (
       <EmptyState compact size="chart" title="Нет данных за период" />
@@ -806,7 +811,7 @@ export function LineChart({
             />
             {/* Solid-маркер — только у реальной точки: у дыры нет значения, куда его ставить. */}
             {pinnedPt.y != null && (
-              <circle cx={pinnedPt.x} cy={pinnedPt.y} r="4.5" fill="hsl(var(--chart-role-selection))" stroke="hsl(var(--background))" strokeWidth="2" />
+              <circle cx={pinnedPt.x} cy={pinnedPt.y} r="4.5" fill="hsl(var(--chart-role-selection))" stroke="hsl(var(--background))" strokeWidth="2" vectorEffect="non-scaling-stroke" />
             )}
           </g>
         )}
@@ -835,7 +840,7 @@ export function LineChart({
             {hovered.y != null && (
               <>
                 {rhea && <circle data-chart-hover-halo cx={hovered.x} cy={hovered.y} r="7" fill="hsl(var(--chart-role-selection) / 0.16)" />}
-                <circle data-chart-hover-marker cx={hovered.x} cy={hovered.y} r={rhea ? '3.5' : '4'} fill="hsl(var(--chart-role-selection))" stroke="hsl(var(--background))" strokeWidth={rhea ? '2' : '1.5'} />
+                <circle data-chart-hover-marker cx={hovered.x} cy={hovered.y} r={rhea ? '3.5' : '4'} fill="hsl(var(--chart-role-selection))" stroke="hsl(var(--background))" strokeWidth={rhea ? '2' : '1.5'} vectorEffect="non-scaling-stroke" />
               </>
             )}
           </>
