@@ -43,7 +43,7 @@ import { CHART_MAX_POINTS, pickIndexes } from '@/lib/msSeries';
 import { useExplorerChartHeight } from '@/lib/useExplorerChartHeight';
 import { splitDailyWindows } from '@/lib/delta';
 import { MediaThumb } from '@/components/MediaThumb';
-import { AboutRow, MetricBackLink, MetricDescriptor, RailSection } from '@/components/metric/shared';
+import { MetricBackLink, MetricDescriptor, RailSection } from '@/components/metric/shared';
 
 /** Короткий день недели для тултипов дневной гранулы («чт, 2 июл») — артефакт v2. */
 const WEEKDAY_FMT = new Intl.DateTimeFormat('ru-RU', { weekday: 'short' });
@@ -1273,14 +1273,8 @@ export function MetricPage() {
             </RailSection>
           )}
 
-          <RailSection title="О метрике" mark="about" variant="card">
-            <dl className="space-y-3 text-sm">
-              {def.formula && <AboutRow label="Как считается" text={def.formula} />}
-              {def.included && <AboutRow label="Что учитывается" text={def.included} />}
-              {def.source && <AboutRow label="Источник" text={def.source} />}
-            </dl>
-          </RailSection>
-
+          {/* Блок «О метрике» (формула/источник) убран со всех детальных страниц — техническая
+              информация не для конечного пользователя (владелец, 2026-07-27). */}
           <Link
             to="/analytics"
             className="inline-flex items-center gap-1 text-xs font-medium text-primary transition-colors hover:text-primary/80"

@@ -257,7 +257,9 @@ function TgTrendStat({
           area
           strokeWidth={2}
           interactive
-          caption="по датам публикаций"
+          // caption="" — ховер-читалка «дата · значение · Δ» живёт, а idle-подпись «по датам
+          // публикаций» убрана (владелец: лишняя строка на лице карточки).
+          caption=""
           formatValue={format}
           className="h-full min-h-14 w-full"
         />

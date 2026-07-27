@@ -35,7 +35,7 @@ import { isIgChartMetricKey } from '@/panels/igMetricKeys';
 import { useIgScopedPosts } from '@/panels/instagram/igContentScope';
 import { useExplorerChartHeight } from '@/lib/useExplorerChartHeight';
 import type { ReactNode } from 'react';
-import { AboutRow, ComparisonDeltaRow, MetricBackLink, MetricDescriptor, WindowBarShell, RailSection } from '@/components/metric/shared';
+import { ComparisonDeltaRow, MetricBackLink, MetricDescriptor, WindowBarShell, RailSection } from '@/components/metric/shared';
 
 /**
  * Instagram metric pages — the drill target the unified chart contract points IG cards at
@@ -582,14 +582,7 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
             )}
           </RailSection>
 
-          <RailSection title="О метрике">
-            <dl className="space-y-3 text-sm">
-              <AboutRow label="Как считается" text={daily.formula} />
-              <AboutRow label="Что учитывается" text={daily.included} />
-              <AboutRow label="Источник" text={daily.source} />
-            </dl>
-          </RailSection>
-
+          {/* «О метрике» убран — техническая информация не для конечного пользователя (владелец). */}
           <Link to="/instagram/analytics" className="inline-flex items-center gap-1 text-xs font-medium text-primary transition-colors hover:text-primary/80">
             Открыть IG-аналитику <span aria-hidden="true">→</span>
           </Link>
@@ -669,12 +662,6 @@ function IgAggregatePage({ def, pair, windowDays, handle }: { def: IgAggDef; pai
               <span className="text-xs text-muted-foreground">Текущее окно</span>
               <span className="text-base font-medium tabular-nums text-foreground">{pair.hasCur ? fmt.kpi(pair.cur) : '—'}</span>
             </div>
-          </RailSection>
-          <RailSection title="О метрике">
-            <dl className="space-y-3 text-sm">
-              <AboutRow label="Как считается" text={def.formula} />
-              <AboutRow label="Источник" text={def.source} />
-            </dl>
           </RailSection>
           <Link to="/instagram/analytics" className="inline-flex items-center gap-1 text-xs font-medium text-primary transition-colors hover:text-primary/80">
             Открыть IG-аналитику <span aria-hidden="true">→</span>
@@ -787,12 +774,6 @@ function IgErPage({
               <span className="text-base font-medium tabular-nums text-foreground">{hasCur ? `${erReach.toFixed(2)}%` : '—'}</span>
             </div>
           </RailSection>
-          <RailSection title="О метрике">
-            <dl className="space-y-3 text-sm">
-              <AboutRow label="Как считается" text={ER_DEF.formula} />
-              <AboutRow label="Источник" text={ER_DEF.source} />
-            </dl>
-          </RailSection>
           <Link to="/instagram/analytics" className="inline-flex items-center gap-1 text-xs font-medium text-primary transition-colors hover:text-primary/80">
             Открыть IG-аналитику <span aria-hidden="true">→</span>
           </Link>
@@ -824,7 +805,6 @@ function IgChartShell({
   handle,
   descriptor,
   comparison,
-  about,
   children,
 }: {
   back: { to: string; label: string };
@@ -850,13 +830,6 @@ function IgChartShell({
         <div className="min-w-0 space-y-6">{children}</div>
         <aside id="ig-shell-inspector" className="space-y-6">
           <RailSection title="Сравнение">{comparison}</RailSection>
-          <RailSection title="О метрике">
-            <dl className="space-y-3 text-sm">
-              <AboutRow label="Как считается" text={about.formula} />
-              {about.included && <AboutRow label="Что учитывается" text={about.included} />}
-              <AboutRow label="Источник" text={about.source} />
-            </dl>
-          </RailSection>
           <Link to={back.to} className="inline-flex items-center gap-1 text-xs font-medium text-primary transition-colors hover:text-primary/80">
             Открыть раздел <span aria-hidden="true">→</span>
           </Link>

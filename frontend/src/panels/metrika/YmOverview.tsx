@@ -167,7 +167,7 @@ export function YmOverview() {
               interactive
               // caption включает hover-читалку «дата · значение · Δ» (Sparkline рисует её только
               // при заданном caption) — значения по дням остаются читаемы прямо с карточки.
-              caption="по дням"
+              caption=""
               formatValue={fmt.num}
               className="h-full min-h-14 w-full"
             />

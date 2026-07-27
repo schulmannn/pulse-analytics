@@ -124,12 +124,12 @@ test('desktop Overview keeps period context compact', async ({ page }, testInfo)
   await page.keyboard.press('Escape');
   expect(await overflowingCards(page)).toEqual([]);
 
-  // Owner override: the three third-width TG cards (Ср. охват / Реакции / Вовлечённость) each carry
-  // an honest active-window publication-date sparkline — its caption renders even though these
-  // cards have no previous-window comparison available.
+  // Owner override 2026-07-27: idle-подпись «по датам публикаций» под спарклайном убрана (лишняя
+  // строка на лице карточки); сами три компакт-карточки с графиком остаются.
   for (const card of ['Ср. охват', 'Реакции', 'Вовлечённость']) {
     const section = page.getByRole('heading', { name: card, exact: true }).locator('xpath=ancestor::section[1]');
-    await expect(section.getByText('по датам публикаций')).toBeVisible();
+    await expect(section.getByText('по датам публикаций')).toHaveCount(0);
+    await expect(section.locator('svg[data-chart-kind="sparkline"]')).toBeVisible();
   }
 
   const compactTop = await page.getByRole('heading', { name: 'Ср. охват', exact: true }).evaluate((el) => el.closest('section')!.getBoundingClientRect().top);
@@ -155,7 +155,9 @@ test('desktop Instagram Overview keeps the split KPI hierarchy intact', async ({
     await expect(page.getByRole('heading', { name: heading, exact: true })).toBeVisible();
   }
   const audienceSection = page.getByRole('heading', { name: 'Динамика аудитории', exact: true }).locator('xpath=ancestor::section[1]');
-  await expect(audienceSection.getByText('по дням')).toBeVisible();
+  // Idle-подпись «по дням» убрана (владелец, 2026-07-27); сам спарклайн уровня базы остаётся.
+  await expect(audienceSection.getByText('по дням')).toHaveCount(0);
+  await expect(audienceSection.locator('svg[data-chart-kind="sparkline"]')).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Неделя аккаунта' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Главное изменение' })).toBeVisible();
   expect(await overflowingCards(page)).toEqual([]);
@@ -165,7 +167,9 @@ test('desktop Instagram Overview keeps the split KPI hierarchy intact', async ({
   // and the old previous-period empty copy is gone (the chart never depends on prior-window coverage).
   for (const card of ['Просмотры', 'Взаимодействия', 'Вовлечённость']) {
     const section = page.getByRole('heading', { name: card, exact: true }).locator('xpath=ancestor::section[1]');
-    await expect(section.getByText('по дням')).toBeVisible();
+    // Idle-подпись «по дням» убрана (владелец, 2026-07-27); спарклайн остаётся.
+    await expect(section.getByText('по дням')).toHaveCount(0);
+    await expect(section.locator('svg[data-chart-kind="sparkline"]')).toBeVisible();
     await expect(section.getByText('Нет данных за предыдущий период для сравнения.')).toHaveCount(0);
     await expect(section.getByText('Недостаточно дневных данных для графика.')).toHaveCount(0);
   }

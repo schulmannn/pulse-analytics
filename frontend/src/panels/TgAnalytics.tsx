@@ -892,11 +892,12 @@ export function TgAnalytics({
           group === 'audience' && 'lg:[&>section:last-child:nth-child(odd)]:col-span-6',
         )}
       >
-        {/* Сводка показателей — the 'strip' contract (unified-feed step 2, hand-rolled):
-            a real widget (hide/reorder with its siblings) whose chrome is a bare full-width
-            row — a card frame would make a thin ratio strip compete with the charts. */}
+        {/* Сводка показателей — strip-виджет С ВИДИМЫМ заголовком (stripToolbar): «плавающий»
+            вариант (sr-only заголовок + ⋯ в углу над голой линией) на реальных данных читался как
+            сломанная вёрстка — «таблицу пережало» (владелец, 2026-07-27). Карточной рамки по-прежнему
+            нет: тонкая леджер-полоса не должна конкурировать с графиками. */}
         {inGroup('dynamics') && (
-          <ChartSection strip id="tg-derived-kpis" title="Сводка показателей" defaultSize="full" noExpand>
+          <ChartSection strip stripToolbar id="tg-derived-kpis" title="Сводка показателей" defaultSize="full" noExpand>
             <TgAnalyticsSummary full={full} />
           </ChartSection>
         )}

@@ -138,7 +138,7 @@ export function KpiHero({
       area
       strokeWidth={2}
       interactive
-      caption="по дням"
+      caption=""
       formatValue={fmt.num}
       className="h-full min-h-28 w-full"
     />
@@ -460,7 +460,7 @@ export function IgAudienceBody({ ig }: { ig: IgData }) {
               area
               strokeWidth={2}
               interactive
-              caption="по дням"
+              caption=""
               formatValue={(n) => fmt.num(Math.round(n))}
               className="h-full min-h-14 w-full"
             />
@@ -509,7 +509,7 @@ function IgTrendStat({
           area
           strokeWidth={2}
           interactive
-          caption="по дням"
+          caption=""
           formatValue={format}
           className="h-full min-h-14 w-full"
         />

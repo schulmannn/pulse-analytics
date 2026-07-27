@@ -29,10 +29,9 @@ test('MoySklad returns compact card shows a real series and drills to a full cou
   await expect(metric.getByRole('button', { name: 'Сумма' })).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByText('Сумма возвратов', { exact: true })).toBeVisible();
 
-  // Общая грамматика полной метрик-страницы + honest separate-from-revenue note.
+  // Общая грамматика полной метрик-страницы; «О метрике» убран (владелец, 2026-07-27).
   await expect(page.getByRole('heading', { name: 'Сравнение' })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'О метрике' })).toBeVisible();
-  await expect(page.getByText('Возвраты считаются отдельно и из выручки не вычитаются.').first()).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'О метрике' })).toHaveCount(0);
   await expect(page.getByRole('dialog')).toHaveCount(0);
   expect(await overflowingCards(page)).toEqual([]);
 });
