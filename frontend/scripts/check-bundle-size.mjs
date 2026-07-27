@@ -29,14 +29,17 @@ const BUDGETS = {
   authCode: 175 * KB,
   protectedJs: 220 * KB,
   protectedCode: 250 * KB,
-  overviewCode: 345 * KB,
-  metricDispatcherCode: 265 * KB,
-  genericMetricCode: 335 * KB,
-  instagramMetricCode: 340 * KB,
-  moySkladMetricCode: 340 * KB,
-  metrikaMetricCode: 320 * KB,
-  telegramMetricCode: 330 * KB,
-  mentionsMetricCode: 310 * KB,
+  // +5KB к виджет-несущим маршрутам (2026-07-27): осознанные фичи владельца — контекстное меню
+  // карточек (@radix-ui/react-context-menu в замыкании ChartSection) и hover-превью строк таблиц
+  // (@radix-ui/react-hover-card: упоминания + кампании). Бюджеты подняты ровно на прирост.
+  overviewCode: 350 * KB,
+  metricDispatcherCode: 270 * KB,
+  genericMetricCode: 340 * KB,
+  instagramMetricCode: 345 * KB,
+  moySkladMetricCode: 350 * KB,
+  metrikaMetricCode: 325 * KB,
+  telegramMetricCode: 335 * KB,
+  mentionsMetricCode: 315 * KB,
 };
 
 const kb = (bytes) => (bytes / KB).toFixed(1);

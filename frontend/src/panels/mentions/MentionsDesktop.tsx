@@ -4,6 +4,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { useMentionSettings, useMentions, useMentionsArchive } from '@/api/queries';
 import { usePagePeriod } from '@/lib/period';
 import { serializeContentPeriod } from '@/lib/contentFilters';
+import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card';
 import {
   applyMentionsFilters,
   buildMentionsTimeline,
@@ -705,7 +706,28 @@ function MentionsTable({
                   </td>
                   <td className="px-3 py-2.5 align-top">
                     {r.snippet ? (
-                      <span className="line-clamp-2 text-sm leading-relaxed text-muted-foreground">{r.snippet}</span>
+                      // Hover-превью (shadcn Hover Card, выбор владельца): полный сниппет без
+                      // клика — строка усечена до двух строк.
+                      <HoverCard>
+                        <HoverCardTrigger asChild>
+                          <span className="line-clamp-2 text-sm leading-relaxed text-muted-foreground">{r.snippet}</span>
+                        </HoverCardTrigger>
+                        <HoverCardContent className="w-96">
+                          <div className="mb-2 flex items-baseline justify-between gap-3">
+                            <span className="min-w-0 truncate text-xs font-medium text-foreground">
+                              {r.username ? `@${r.username}` : r.title || 'Канал'}
+                            </span>
+                            {r.views != null && (
+                              <span className="shrink-0 text-2xs tabular-nums text-muted-foreground">
+                                {fmt.num(r.views)} просм.
+                              </span>
+                            )}
+                          </div>
+                          <p className="line-clamp-[10] whitespace-pre-line text-sm leading-relaxed text-foreground">
+                            {r.snippet}
+                          </p>
+                        </HoverCardContent>
+                      </HoverCard>
                     ) : (
                       <span className="text-sm italic text-muted-foreground/60">Без текста</span>
                     )}

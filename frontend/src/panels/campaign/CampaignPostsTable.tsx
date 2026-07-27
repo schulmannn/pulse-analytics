@@ -15,6 +15,7 @@ import {
 import { TableSkeleton } from '@/components/ui/dataSkeleton';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
+import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card';
 import {
   applyCampaignPostTableState,
   filterPostsByQuery,
@@ -532,19 +533,56 @@ function PostCell({ post: p, first = false, onOpen }: { post: CampaignPost; firs
   ) : (
     <span className="italic text-muted-foreground">Содержимое скрыто</span>
   );
+  // Hover-превью (shadcn Hover Card, выбор владельца): полный текст публикации + дата и главные
+  // числа БЕЗ клика — строка таблицы усечена до одной строки. Только там, где есть что открыть:
+  // недоступный пост честно остаётся «Содержимое скрыто» и превью не получает.
+  const primary = postPrimaryResult(p);
+  const interactions = postInteractions(p);
+  const trigger = onOpen ? (
+    <button
+      type="button"
+      onClick={onOpen}
+      data-campaign-post-open-trigger
+      className="block w-full max-w-md rounded text-left focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/45"
+    >
+      {body}
+    </button>
+  ) : (
+    body
+  );
   return (
     <td className={cn(first ? 'py-3 pl-0 pr-3' : 'px-3 py-3')}>
-      {onOpen ? (
-        <button
-          type="button"
-          onClick={onOpen}
-          data-campaign-post-open-trigger
-          className="block w-full max-w-md rounded text-left focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/45"
-        >
-          {body}
-        </button>
+      {p.accessible && p.caption ? (
+        <HoverCard>
+          <HoverCardTrigger asChild>{trigger}</HoverCardTrigger>
+          <HoverCardContent>
+            <div className="mb-2 flex items-center gap-2">
+              <NetworkBadge network={p.network} />
+              {p.published_at && (
+                <span className="text-2xs text-muted-foreground">{fmt.date(p.published_at)}</span>
+              )}
+            </div>
+            <p className="line-clamp-[8] whitespace-pre-line text-sm leading-relaxed text-foreground">
+              {markdownToPlainText(p.caption)}
+            </p>
+            <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 border-t border-border pt-2 text-2xs text-muted-foreground">
+              <span>
+                {primary.label}{' '}
+                <span className="font-medium tabular-nums text-foreground">
+                  {primary.value == null ? '—' : fmt.short(primary.value)}
+                </span>
+              </span>
+              <span>
+                {interactions.label}{' '}
+                <span className="font-medium tabular-nums text-foreground">
+                  {interactions.value == null ? '—' : fmt.short(interactions.value)}
+                </span>
+              </span>
+            </div>
+          </HoverCardContent>
+        </HoverCard>
       ) : (
-        body
+        trigger
       )}
     </td>
   );

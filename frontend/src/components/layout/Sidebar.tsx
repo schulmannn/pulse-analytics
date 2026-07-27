@@ -7,6 +7,7 @@ import { useMediaQuery } from '@/lib/useMediaQuery';
 import { useSidebarMode } from '@/lib/sidebar';
 import { cn } from '@/lib/utils';
 import { Icon, PanelToggleGlyph } from '@/components/nav-icons';
+import { Kbd, KbdGroup } from '@/components/ui/kbd';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -130,8 +131,10 @@ function SidebarToggle({ rail, onToggle }: { rail: boolean; onToggle: () => void
         className="sidebar-tooltip rounded-lg border bg-popover px-2.5 py-1.5 text-xs text-popover-foreground"
       >
         <span className="whitespace-nowrap">{label}</span>
-        <kbd className="sidebar-key font-mono text-2xs">Ctrl</kbd>
-        <kbd className="sidebar-key font-mono text-2xs">B</kbd>
+        <KbdGroup>
+          <Kbd>Ctrl</Kbd>
+          <Kbd>B</Kbd>
+        </KbdGroup>
       </span>
     </div>
   );
