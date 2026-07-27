@@ -378,7 +378,10 @@ function SourceSheet({ title, onClose, children }: { title: string; onClose: () 
           aria-label={title}
           onCloseAutoFocus={restoreOpener}
           onEscapeKeyDown={(event) => event.stopPropagation()}
-          className="pointer-events-none fixed inset-0 z-modal flex flex-col justify-end"
+          onPointerDown={(event) => {
+            if (event.target === event.currentTarget) onClose();
+          }}
+          className="fixed inset-0 z-modal flex flex-col justify-end"
         >
           <div className="sheet-in pointer-events-auto relative z-10 flex max-h-[85vh] w-full flex-col overflow-hidden rounded-t-xl border-t border-border bg-popover pb-[env(safe-area-inset-bottom)]">
             <div className="flex shrink-0 items-center justify-between gap-2 px-3 pb-1 pt-2.5">

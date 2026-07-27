@@ -576,8 +576,8 @@ test('export: keyset pages tile the archive with no duplication/omission, incl. 
       [a.ch, n]);
     await pool.query(
       `INSERT INTO ms_daily (channel_id, day, revenue_kopecks, orders_count, orders_sum_kopecks)
-       VALUES ($1, ${day(n)}, $2, $2, $2)`,
-      [a.ch, n]);
+       VALUES ($1, ${day(n)}, $2, $3, $4)`,
+      [a.ch, n, n, n]);
     await pool.query(
       `INSERT INTO raw_snapshots (channel_id, source, kind, day, payload)
        VALUES ($1, 'tg', 'graphs', ${day(n)}, jsonb_build_object('n', $2::int))`,

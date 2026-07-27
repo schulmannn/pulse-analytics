@@ -103,7 +103,10 @@ export function DetailShell({ ariaLabel, onClose, fit = 'viewport', originRect, 
           aria-label={ariaLabel}
           onCloseAutoFocus={restoreOpener}
           onEscapeKeyDown={(event) => event.stopPropagation()}
-          className="pointer-events-none fixed inset-0 z-modal flex items-center justify-center p-0 sm:p-4"
+          onPointerDown={(event) => {
+            if (event.target === event.currentTarget) onClose();
+          }}
+          className="fixed inset-0 z-modal flex items-center justify-center p-0 sm:p-4"
         >
           <Card
             ref={panelRef}

@@ -102,10 +102,13 @@ test('mobile 390: dialog, editor, post and pinned-point actions keep 44px target
   await page.getByRole('menuitem', { name: 'Изменить' }).first().click();
   const editor = page.getByRole('dialog', { name: /^Настройка виджета/ });
   await expect(editor).toBeVisible();
+  // DialogContent scales from 95% on entry; measure the settled controls, not an animation frame.
+  await page.waitForTimeout(250);
   expect(await visibleTouchTargetFailures(page, '[role="dialog"]')).toEqual([]);
   await editor.getByRole('button', { name: 'Закрыть', exact: true }).click();
 
   // The catalog used to render its own × in addition to DialogContent's ×. There must be one.
+  await bootDemo(page, '/home');
   await page.locator('button.edit-toggle').click();
   await page.locator('button.add-widget-trigger').click();
   await page.getByRole('button', { name: /Метрика из каталога/ }).click();
@@ -121,9 +124,12 @@ test('mobile 390: dialog, editor, post and pinned-point actions keep 44px target
   await metricCard.getByRole('button', { name: 'Тип графика: Линия' }).click();
   const line = metricCard.locator('svg[data-chart-kind="line"][data-chart-expanded]').first();
   await line.waitFor({ state: 'visible', timeout: 10_000 });
-  const lineBox = await line.boundingBox();
-  if (!lineBox) throw new Error('line chart has no box');
-  await page.mouse.click(lineBox.x + lineBox.width * 0.5, lineBox.y + lineBox.height * 0.55);
+  // The audit replaced raw SVG clicks with a semantic keyboard/touch overlay. Activate its
+  // default (last real) point so this test cannot accidentally choose a null data gap.
+  const chartControl = line.locator('xpath=following-sibling::button[1]');
+  await expect(chartControl).toBeVisible();
+  await chartControl.focus();
+  await chartControl.press('Enter');
   const pinned = page.locator('[data-pinned-day="detail"]');
   await expect(pinned).toBeVisible();
   expect(await visibleTouchTargetFailures(page, '[data-pinned-day="detail"]')).toEqual([]);
@@ -180,7 +186,8 @@ test('mobile 390: detail deep-links, Back closes it, reload reopens, source surv
   await page.setViewportSize({ width: 390, height: 820 });
   await bootDemo(page, '/');
 
-  const sourceLabelBefore = await page.getByRole('button', { name: /^Источник/ }).getAttribute('aria-label');
+  const sourceTrigger = page.locator('button[aria-label^="Источник"]').first();
+  const sourceLabelBefore = await sourceTrigger.getAttribute('aria-label');
 
   // Open a widget's detail from its header ↗ button → the URL gains ?detail= (a pushed history entry).
   await openDetailOverlay(page);
@@ -201,7 +208,9 @@ test('mobile 390: detail deep-links, Back closes it, reload reopens, source surv
   await expect(page.getByRole('dialog', { name: /^График/ })).toBeVisible();
 
   // The active source (channel) is unchanged across the whole dance.
-  expect(await page.getByRole('button', { name: /^Источник/ }).getAttribute('aria-label')).toBe(sourceLabelBefore);
+  // Radix correctly hides the background shell from the accessibility tree while the modal is open,
+  // so read the persisted trigger's DOM label directly.
+  expect(await sourceTrigger.getAttribute('aria-label')).toBe(sourceLabelBefore);
 });
 
 // ── The shared page period survives opening + closing a detail overlay ─────────────────────────

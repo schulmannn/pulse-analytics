@@ -37,17 +37,11 @@ test.describe('reorder виджетов с клавиатуры (/home, 1440)', 
   });
 
   test('стрелки двигают карточку, порядок сохраняется, фокус остаётся на ручке', async ({ page }) => {
-    const handle = page.locator('[data-reorder-handle]').first();
-    await expect(handle).toBeVisible();
-    const label = ((await handle.getAttribute('aria-label')) ?? '').replace(
-      /^Переместить виджет «(.*)»$/,
-      '$1',
-    );
-    expect(label.length).toBeGreaterThan(0);
-
     const before = await boardOrder(page);
     expect(before.length).toBeGreaterThan(1);
-    expect(before[0]).toBe(label);
+    const label = before[0];
+    const handle = page.getByRole('button', { name: `Переместить виджет «${label}»` });
+    await expect(handle).toBeVisible();
 
     await handle.focus();
     await expect(handle).toBeFocused();
@@ -75,12 +69,9 @@ test.describe('reorder виджетов с клавиатуры (/home, 1440)', 
   });
 
   test('край списка объявляется, а не проглатывается молча', async ({ page }) => {
-    const handle = page.locator('[data-reorder-handle]').first();
-    const label = ((await handle.getAttribute('aria-label')) ?? '').replace(
-      /^Переместить виджет «(.*)»$/,
-      '$1',
-    );
     const before = await boardOrder(page);
+    const label = before[0];
+    const handle = page.getByRole('button', { name: `Переместить виджет «${label}»` });
 
     await handle.focus();
     await page.keyboard.press('ArrowLeft'); // уже первая карточка

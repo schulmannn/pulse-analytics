@@ -532,9 +532,11 @@ test('desktop Home splits the legacy Telegram «Показатели» composite
   // A saved board with the composite between two other widgets, plus the composite's old per-card
   // prefs (period + source) that each split card must inherit.
   await page.addInitScript(() => {
+    if (localStorage.getItem('e2e_home_kpi_split_seeded') === '1') return;
     localStorage.setItem('pulse_home_blocks', JSON.stringify({ keys: ['week', 'kpi', 'growth'] }));
     localStorage.setItem('pulse_widget_configs', '[]');
     localStorage.setItem('pulse_widget_prefs', JSON.stringify({ 'home-kpi': { period: 90, source: 3, includeToday: false } }));
+    localStorage.setItem('e2e_home_kpi_split_seeded', '1');
   });
 
   await bootDemo(page, '/home', { theme: 'dark' });

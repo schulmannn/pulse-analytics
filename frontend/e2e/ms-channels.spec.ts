@@ -27,7 +27,7 @@ test('MoySklad channels uses the flat feed shell and multi-channel explorer', as
   await expect(dynamics.getByText('2 канала', { exact: true })).toBeVisible();
 
   await dynamics.getByRole('toolbar', { name: 'Вид' }).getByRole('button', { name: 'По каналам' }).click();
-  const comparisonChart = dynamics.getByRole('img', {
+  const comparisonChart = dynamics.getByRole('slider', {
     name: /Выручка по каналам: Интернет-магазин, Партнёры/,
   });
   await expect(comparisonChart).toBeVisible();
@@ -48,7 +48,7 @@ test('MoySklad channels uses the flat feed shell and multi-channel explorer', as
   // Sparse AOV keeps the shared calendar axis and honest empty tooltips, but each selected channel
   // remains a readable observation line instead of a collection of isolated one-point segments.
   await dynamics.getByRole('toolbar', { name: 'Метрика', exact: true }).getByRole('button', { name: 'Средний чек' }).click();
-  const aovComparisonChart = dynamics.getByRole('img', { name: /Средний чек по каналам/ });
+  const aovComparisonChart = dynamics.getByRole('slider', { name: /Средний чек по каналам/ });
   await expect(aovComparisonChart).toBeVisible();
   await expect(dynamics.getByText(/только периоды с заказами/)).toBeVisible();
   const aovShot = testInfo.outputPath('moysklad-channels-aov-dark.png');

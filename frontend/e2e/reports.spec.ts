@@ -241,7 +241,9 @@ test.describe('Отчёты — desktop', () => {
     await expect(dialog).toBeVisible();
     await expect(dialog.getByLabel('Источник · Telegram').locator('option[value="2"]')).toHaveCount(0);
     await dialog.getByLabel('Название').fill('Новый тест');
-    await dialog.getByRole('radio', { name: /Пустой/ }).click();
+    const blankTemplate = dialog.getByRole('radio', { name: /Пустой/ });
+    await dialog.getByText('Пустой', { exact: true }).click();
+    await expect(blankTemplate).toBeChecked();
     await dialog.getByRole('button', { name: '90д' }).click();
     await selectPill(dialog.getByLabel('Доставка на почту'), { value: 'weekly' });
     await dialog.getByRole('button', { name: 'Создать отчёт' }).click();

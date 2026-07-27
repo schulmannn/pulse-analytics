@@ -24,7 +24,8 @@ export function DashboardLayout({ email, role, avatar }: DashboardLayoutProps) {
   // hooks/effects twice. Conditional render keeps a single instance per breakpoint.
   const isMd = useMediaQuery('(min-width: 768px)');
   const { pathname } = useLocation();
-  const isDesktopMetricRoute = isMd && pathname.startsWith('/metrics/');
+  const isDesktopExplorerRoute =
+    isMd && (pathname.startsWith('/metrics/') || pathname.startsWith('/widgets/'));
   // Widget customisation follows the account (user_prefs), not the browser.
   useWidgetPrefsSync();
   return (
@@ -39,7 +40,7 @@ export function DashboardLayout({ email, role, avatar }: DashboardLayoutProps) {
       <Sidebar email={email} role={role} avatar={avatar} />
       <div className="flex min-w-0 flex-1 flex-col md:overflow-y-auto md:rounded-2xl md:border md:border-border md:scrollbar-gutter-stable">
         {isMd ? (
-          isDesktopMetricRoute ? null : <Topbar />
+          isDesktopExplorerRoute ? null : <Topbar />
         ) : (
           <MobileHeader email={email} role={role} avatar={avatar} platformNav={<PlatformNav />} />
         )}
@@ -47,7 +48,7 @@ export function DashboardLayout({ email, role, avatar }: DashboardLayoutProps) {
         <main
           className={cn(
             'flex-1 px-4 pb-24 sm:px-6 md:pb-5',
-            isDesktopMetricRoute ? 'pt-3' : 'pt-5',
+            isDesktopExplorerRoute ? 'pt-3' : 'pt-5',
           )}
         >
           <div className="mx-auto w-full max-w-(--breakpoint-2xl)">

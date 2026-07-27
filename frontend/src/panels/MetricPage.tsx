@@ -959,7 +959,9 @@ export function MetricPage() {
               </button>
             )}
             {/* Пейджер окон — единой пилюлей с бордером (как одна двухкнопочная деталь тулбара). */}
-            <div className="inline-flex h-11 items-center rounded-full border border-border sm:h-7">
+            {/* The 1px border subtracts 2px from the content box; 46px keeps each h-full child at
+                the required 44px touch height while preserving the single outlined pager. */}
+            <div className="inline-flex h-[46px] items-center rounded-full border border-border sm:h-7">
               <button
                 type="button"
                 data-mobile-touch-target=""
@@ -1062,7 +1064,7 @@ export function MetricPage() {
                         onChange={(e) => setAnnLabel(e.target.value)}
                         maxLength={80}
                         placeholder="Отметить событие дня — реклама, пост-хит…"
-                        className="h-11 min-w-0 flex-1 rounded-lg border border-border bg-card px-3 text-xs text-foreground outline-hidden placeholder:text-muted-foreground focus:ring-2 focus:ring-primary/40 sm:h-9"
+                        className="h-11 min-w-0 w-full rounded-lg border border-border bg-card px-3 text-xs text-foreground outline-hidden placeholder:text-muted-foreground focus:ring-2 focus:ring-primary/40 sm:h-9 sm:w-auto sm:flex-1"
                       />
                       <button
                         type="submit"
