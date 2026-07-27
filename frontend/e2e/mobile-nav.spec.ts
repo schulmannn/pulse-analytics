@@ -93,6 +93,9 @@ test('mobile 390: dialog, editor, post and pinned-point actions keep 44px target
   const account = page.getByRole('button', { name: 'Аккаунт' });
   await account.click();
   await expect(page.getByRole('menu')).toBeVisible();
+  // DropdownMenuContent also scales from 95% on entry, which transiently turns a 44px
+  // target into a 42–43px bounding box on faster CI runners.
+  await page.waitForTimeout(250);
   expect(await visibleTouchTargetFailures(page, '[role="menu"]')).toEqual([]);
   await page.keyboard.press('Escape');
 
