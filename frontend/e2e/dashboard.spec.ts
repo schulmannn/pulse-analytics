@@ -14,6 +14,26 @@ const ROUTES = [
   { path: '/reports', name: 'reports' },
 ];
 
+test('desktop shell owns the only vertical scrollbar', async ({ page }) => {
+  test.skip((page.viewportSize()?.width ?? 0) < 768, 'mobile intentionally uses document scrolling');
+  await bootDemo(page, '/', { theme: 'dark' });
+
+  const scroll = await page.evaluate(() => {
+    const shell = document.querySelector<HTMLElement>('[data-dashboard-scroll]');
+    if (!shell) throw new Error('dashboard scroll container is missing');
+    return {
+      documentOverflow:
+        document.documentElement.scrollHeight - document.documentElement.clientHeight,
+      shellOverflow: shell.scrollHeight - shell.clientHeight,
+      shellOverflowY: getComputedStyle(shell).overflowY,
+    };
+  });
+
+  expect(scroll.documentOverflow, 'desktop document must not create a second scrollbar').toBeLessThanOrEqual(1);
+  expect(scroll.shellOverflowY).toBe('auto');
+  expect(scroll.shellOverflow, 'the dashboard panel should remain the page scroller').toBeGreaterThan(1);
+});
+
 for (const route of ROUTES) {
   test(`no inner scrollbars — ${route.name}`, async ({ page }) => {
     await bootDemo(page, route.path);
