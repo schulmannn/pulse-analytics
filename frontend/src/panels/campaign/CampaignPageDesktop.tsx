@@ -5,7 +5,7 @@ import { ChartSection } from '@/components/ChartWidget';
 import { EmptyState } from '@/components/EmptyState';
 import { Icon } from '@/components/nav-icons';
 import { LineChart } from '@/components/LineChart';
-import { PieChart } from '@/components/PieChart';
+import { RadialShare } from '@/components/RadialShare';
 import { Button } from '@/components/ui/button';
 import {
   CampaignColorDot,
@@ -137,8 +137,14 @@ export function CampaignPageDesktop(props: CampaignViewProps) {
                 fixedSize="half"
                 drillTo={campaignMetricPath(props.campaign.id, 'formats', searchParams)}
               >
+                {/* Полукольцо (выбор владельца) — унификация языка долей с Возраст/Пол Метрики и
+                    статусами МС; полная круговая ушла. Форматы — части целого по числу публикаций. */}
                 {slices.values.length > 0 ? (
-                  <PieChart values={slices.values} labels={slices.labels} titles={slices.titles} />
+                  <RadialShare
+                    segments={slices.labels.map((label, i) => ({ key: label, label, value: slices.values[i] ?? 0 }))}
+                    unitWord="публ."
+                    centerCaption="публикаций"
+                  />
                 ) : (
                   <EmptyState compact title="Нет данных о форматах." />
                 )}

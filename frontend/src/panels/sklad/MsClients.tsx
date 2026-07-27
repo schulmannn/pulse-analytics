@@ -13,6 +13,7 @@ import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { ChartSkeleton, TableSkeleton } from '@/components/ui/dataSkeleton';
 import { DeltaPill } from '@/components/DeltaPill';
+import { RadialGauge } from '@/components/RadialGauge';
 import { Sparkline } from '@/components/Sparkline';
 import { pctDelta, type MetricDelta } from '@/lib/delta';
 import { lttbDownsample } from '@/lib/downsample';
@@ -152,23 +153,25 @@ export function MsClients() {
         fixedSize="half"
         drillTo="/metrics/ms-repeat"
       >
+        {/* Radial-Text (выбор владельца): доля — настоящая часть целого (покупатели окна/истории),
+            дуга честная. Кольцо слева, честная разбивка Новые/Повторные — справа. */}
         {days === 0 && !pp?.range ? (
-          // На «Всё» окно совпадает с историей — «новых в окне» не бывает; честная метрика
-          // здесь — сколько клиентов вообще возвращалось.
-          <MsStatCardBody
-            value={`${summary.customers > 0 ? Math.round((everShare / summary.customers) * 100) : 0}%`}
-            caption={`возвращались: ${fmt.num(everShare)} из ${fmt.num(summary.customers)} клиентов`}
+          <MsRepeatGaugeBody
+            pct={summary.customers > 0 ? Math.round((everShare / summary.customers) * 100) : 0}
+            label="возвращались"
+            caption={`${fmt.num(everShare)} из ${fmt.num(summary.customers)} клиентов`}
           >
             <MsRepeatBreakdown summary={summary} repeatRevenueShare={repeatRevenueShare} allTime />
-          </MsStatCardBody>
+          </MsRepeatGaugeBody>
         ) : (
-          <MsStatCardBody
-            value={`${repeatShare}%`}
+          <MsRepeatGaugeBody
+            pct={repeatShare}
+            label="повторных"
+            caption={windowLabel}
             delta={repeatShareDelta}
-            caption={`повторных покупателей ${windowLabel}`}
           >
             <MsRepeatBreakdown summary={summary} repeatRevenueShare={repeatRevenueShare} />
-          </MsStatCardBody>
+          </MsRepeatGaugeBody>
         )}
       </ChartWidget>
 
@@ -490,26 +493,28 @@ export function MsRfmBody({
 /** Вертикальное тело карточки-статистики без графика: значение + подпись сразу под заголовком,
     строки ниже. Горизонтальный ChartCardBody прижимал число к левому низу, а строки — к правому
     верху, оставляя диагональную пустоту. */
-function MsStatCardBody({
-  value,
-  delta,
+/** Тело «Повторных покупок»: кольцевой прогресс (Radial-Text) слева + разбивка справа. Доля —
+    честная часть целого; дельта и подпись окна — под кольцом, разбивка сохраняет все числа. */
+function MsRepeatGaugeBody({
+  pct,
+  label,
   caption,
+  delta,
   children,
 }: {
-  value: string;
-  /** Дельта к пред. равному окну (канон п.7); DeltaPill сам скрывается при flat/null. */
+  pct: number;
+  label: string;
+  caption: string;
   delta?: MetricDelta | null;
-  caption: ReactNode;
   children: ReactNode;
 }) {
   return (
-    <div className="pt-1">
-      <div className="flex items-baseline gap-2.5">
-        <span className="kpi-accent text-3xl font-medium leading-[1.15] tabular-nums tracking-tight">{value}</span>
-        <DeltaPill delta={delta} />
+    <div className="flex h-full min-h-0 items-center gap-6 pt-1">
+      <div className="flex shrink-0 flex-col items-center gap-1">
+        <RadialGauge fraction={pct / 100} value={`${pct}%`} label={label} size={124} caption={caption} />
+        {delta != null && <DeltaPill delta={delta} />}
       </div>
-      <div className="mt-1.5 text-2xs text-muted-foreground">{caption}</div>
-      <div className="mt-3">{children}</div>
+      <div className="min-w-0 flex-1">{children}</div>
     </div>
   );
 }

@@ -14,6 +14,7 @@ import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { ChartSkeleton, TableSkeleton } from '@/components/ui/dataSkeleton';
 import { DeltaPill } from '@/components/DeltaPill';
+import { RadialShare } from '@/components/RadialShare';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { Sparkline } from '@/components/Sparkline';
 import { pctDelta, type MetricDelta } from '@/lib/delta';
@@ -598,6 +599,28 @@ export function MsFunnelRows({
   const statusTotal =
     rows.reduce((acc, row) => acc + Math.max(0, selectedValue(row)), 0)
     + Math.max(0, metric === 'orders' ? noState : noStateSum);
+  // Компакт карточки — составное полукольцо (выбор владельца, унификация с Возраст/Пол Метрики):
+  // статусы окна — части целого, итог в центре, безстатусный остаток кольцо дорисует само из
+  // total. Полный список с построчными числами остаётся на развороте и /metrics/ms-funnel.
+  if (!expanded) {
+    return (
+      <RadialShare
+        segments={ranked.map((r) => ({
+          key: r.state_id,
+          label: r.name ?? 'Статус без имени',
+          value: Math.max(0, selectedValue(r)),
+        }))}
+        total={statusTotal}
+        unitWord={metric === 'orders' ? 'заказов' : '₽'}
+        centerCaption={metric === 'orders' ? 'заказов' : '₽ выручки'}
+        format={metric === 'orders' ? fmt.num : (v) => fmt.short(v)}
+        // Кольцо слева, легенда справа: в тайле над телом уже стоит переключатель Заказы/Выручка,
+        // столбик «кольцо + легенда» по высоте не помещается. Топ-3 + хвост — по той же причине.
+        layout="row"
+        legendMax={3}
+      />
+    );
+  }
   return (
     <div className={expanded ? 'space-y-2 pt-1' : 'space-y-1.5'}>
       {top.map((r) => (

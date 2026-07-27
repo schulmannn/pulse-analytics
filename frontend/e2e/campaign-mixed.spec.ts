@@ -407,7 +407,8 @@ test.describe('Смешанная кампания TG+IG', () => {
     await page.locator('[data-drill-to*="/campaigns/1/metrics/formats"]').click();
     await expect.poll(() => new URL(page.url()).pathname).toBe('/campaigns/1/metrics/formats');
     await expect(page.getByRole('heading', { level: 1, name: 'Форматы кампании' })).toBeVisible();
-    await expect(page.getByRole('img', { name: 'Круговая диаграмма' })).toBeVisible();
+    // Форматы — составное полукольцо (RadialShare, выбор владельца): имя графики несёт итог+состав.
+    await expect(page.getByRole('img', { name: /^Всего .* публ\./ })).toBeVisible();
     await expect(page.getByRole('toolbar', { name: 'Тип графика' })).toHaveCount(0);
   });
 

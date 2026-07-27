@@ -8,6 +8,7 @@ import { PieChart } from '@/components/PieChart';
 import { Breakdown } from '@/components/Breakdown';
 import { ChartExpandedContext, ExpandedChartHeightContext, WidgetTargetContext } from '@/components/ExpandableChart';
 import { ChartCardBody } from '@/components/chartWidget/ChartCardBody';
+import { RadialGauge } from '@/components/RadialGauge';
 import { observeSize } from '@/lib/observeSize';
 import { MetricExplainTooltip } from '@/components/MetricExplain';
 import { EmptyState } from '@/components/EmptyState';
@@ -97,18 +98,51 @@ export function WidgetRenderer({
   const hasValue = result.value != null;
   const eff = effectiveViz(viz, hasSeries, hasBreakdown, result.unit);
 
+  // «N% от цели» (steep) — when a target is set and the metric has a scalar to measure against it.
+  const targetPct = result.targetPct;
+  const progress =
+    targetPct != null && Number.isFinite(targetPct) ? `${Math.round(targetPct)}% от цели` : null;
+
+  // KPI-виджет с целью — кольцевой прогресс (форма shadcn «Radial Text», выбор владельца):
+  // дуга = честная доля от цели, число метрики в центре. Hero при этом не дублируется — кольцо
+  // и есть герой; дельта уезжает в строку под кольцом. Серийные визы не трогаем: у линии/баров
+  // цель уже нарисована пунктирной goal-линией на самом графике.
+  const kpiGauge = eff === 'kpi' && targetPct != null && Number.isFinite(targetPct);
+
   // Lead with a hero headline whenever the resolver provides one — value/series metrics, and now
   // ADDITIVE breakdowns (a total, steep #4.9). A non-additive breakdown carries no value, so it
   // still leads with its chart (the distribution IS the story, and the card title names it).
   // Развёрнутая поверхность отдаёт всю площадь графику — число уже есть в шапке страницы. Но у
   // метрики БЕЗ ряда и без разреза графика не существует (WidgetChart вернул бы null), и тогда
   // эксплорер оставался пустым: ни числа, ни графика. Такое значение показываем героем и там.
-  const showHero = hasValue && (!expanded || (!hasSeries && !hasBreakdown));
+  const showHero = hasValue && (!expanded || (!hasSeries && !hasBreakdown)) && !kpiGauge;
 
-  // «N% от цели» (steep) — when a target is set and the metric has a scalar to measure against it.
-  const targetPct = result.targetPct;
-  const progress =
-    targetPct != null && Number.isFinite(targetPct) ? `${Math.round(targetPct)}% от цели` : null;
+  if (kpiGauge) {
+    return (
+      <div className="flex h-full min-h-0 flex-col" data-widget-story-card>
+        <div className="min-h-0 flex-1">
+          <RadialGauge
+            fraction={(targetPct as number) / 100}
+            value={result.value ?? '—'}
+            label={`${Math.round(targetPct as number)}% от цели`}
+            size={expanded ? 220 : 132}
+          />
+        </div>
+        {result.delta && (
+          <div className="flex shrink-0 justify-center pt-1">
+            <DeltaPill delta={result.delta} />
+          </div>
+        )}
+        {!expanded && (
+          <WidgetMetaLine
+            meta={result.meta}
+            className="mt-2"
+            info={<MetricExplainTooltip metricId={result.metricId} meta={result.meta} />}
+          />
+        )}
+      </div>
+    );
+  }
 
   // A collapsed single-series line is a dashboard story, not a miniature report. Reuse the same
   // horizontal anatomy as the curated Overview cards (headline left, axis-free sparkline right).

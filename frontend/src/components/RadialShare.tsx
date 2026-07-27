@@ -61,6 +61,8 @@ export function RadialShare({
   unitWord,
   centerCaption,
   format = fmt.num,
+  legendMax = 4,
+  layout = 'column',
 }: {
   segments: RadialSegment[];
   /** Итог ПОЛНОГО отчёта. null → сумма сегментов (тогда остатка нет по построению). */
@@ -70,6 +72,12 @@ export function RadialShare({
   /** Подпись под числом в центре (по умолчанию — unitWord). */
   centerCaption?: string;
   format?: (n: number) => string;
+  /** Строк легенды до сводного хвоста «Ещё N». Отчётные поверхности передают Infinity. */
+  legendMax?: number;
+  /** 'row' — кольцо слева, легенда справа: для фикс-тайлов с дополнительным контролом в шапке
+      (например «Статусы заказов» с переключателем Заказы/Выручка), где вертикальной высоты на
+      столбик «кольцо + легенда» не хватает. */
+  layout?: 'column' | 'row';
 }) {
   const [hover, setHover] = useState<string | null>(null);
   const detachSvgListeners = useRef<(() => void) | null>(null);
@@ -149,16 +157,15 @@ export function RadialShare({
   // Без этого 7 возрастных групп съедали высоту тайла, и flex-1 регион дуги схлопывался в
   // крошечное кольцо (владелец: «график стал слишком маленьким»). Дуга рисует ВСЕ сегменты,
   // hover/центр читают каждый, aria-label перечисляет всё — сжимается только легенда.
-  const LEGEND_MAX = 4;
-  const legendShown = arcs.slice(0, LEGEND_MAX);
-  const legendRest = arcs.slice(LEGEND_MAX);
+  const legendShown = Number.isFinite(legendMax) ? arcs.slice(0, legendMax) : arcs;
+  const legendRest = Number.isFinite(legendMax) ? arcs.slice(legendMax) : [];
   const legendRestSum = legendRest.reduce((acc, a) => acc + a.value, 0);
   const legendRestPct = legendRest.reduce((acc, a) => acc + a.pct, 0);
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className={layout === 'row' ? 'flex h-full min-h-0 items-center gap-5' : 'flex h-full min-h-0 flex-col'}>
       {/* min-h держит кольцо читаемым независимо от числа строк легенды. */}
-      <div className="relative min-h-[104px] flex-1">
+      <div className={layout === 'row' ? 'relative h-full max-h-32 w-32 shrink-0' : 'relative min-h-[104px] flex-1'}>
         {/* aria-label вместо svg <title>: у <title> есть побочный нативный браузерный тултип —
             нестилизуемый прямоугольник с острыми углами (канон: только свои скруглённые читалки). */}
         <svg
@@ -194,7 +201,11 @@ export function RadialShare({
           а сырое значение не теряется за одним процентом. На 320/390px остаётся одна колонка. */}
       <ul
         aria-label="Легенда состава"
-        className="mt-1 grid min-w-0 grid-cols-1 gap-x-3 gap-y-1 text-2xs sm:grid-cols-2"
+        className={
+          layout === 'row'
+            ? 'grid min-w-0 flex-1 grid-cols-1 gap-y-1 text-2xs'
+            : 'mt-1 grid min-w-0 grid-cols-1 gap-x-3 gap-y-1 text-2xs sm:grid-cols-2'
+        }
       >
         {legendShown.map((a) => (
           <li
