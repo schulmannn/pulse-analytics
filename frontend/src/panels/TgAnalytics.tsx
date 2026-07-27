@@ -549,7 +549,7 @@ function TgAnalyticsSummary({ full }: { full: TgFull | undefined }) {
   const posts = normalizeTgPosts(full?.posts ?? [], full?.channel ?? {}).filter((post) => inRange(post.date));
 
   if (posts.length === 0) {
-    return <p className="border-t border-border py-5 text-sm text-muted-foreground">В выбранном периоде нет публикаций для сводки.</p>;
+    return <p className="py-2 text-sm text-muted-foreground">В выбранном периоде нет публикаций для сводки.</p>;
   }
 
   const erv = average(posts.map((post) => post.erv).filter((value): value is number => value != null));
@@ -567,7 +567,9 @@ function TgAnalyticsSummary({ full }: { full: TgFull | undefined }) {
   ];
 
   return (
-    <div className="grid grid-cols-2 gap-x-6 gap-y-4 border-t border-border pt-4 sm:grid-cols-3 lg:grid-cols-6">
+    // Без собственного border-t: раньше леджер жил «голой» полосой и линия отделяла его от
+    // контента выше; внутри карточки прямо под заголовком она давала двойную рамку и «пережимала».
+    <div className="grid grid-cols-2 gap-x-6 gap-y-5 pt-2 sm:grid-cols-3 lg:grid-cols-6">
       {items.map((item) => (
         <div key={item.label} className="min-w-0">
           <div className="truncate text-2xs tracking-wide text-muted-foreground">{item.label}</div>
@@ -892,12 +894,12 @@ export function TgAnalytics({
           group === 'audience' && 'lg:[&>section:last-child:nth-child(odd)]:col-span-6',
         )}
       >
-        {/* Сводка показателей — strip-виджет С ВИДИМЫМ заголовком (stripToolbar): «плавающий»
-            вариант (sr-only заголовок + ⋯ в углу над голой линией) на реальных данных читался как
-            сломанная вёрстка — «таблицу пережало» (владелец, 2026-07-27). Карточной рамки по-прежнему
-            нет: тонкая леджер-полоса не должна конкурировать с графиками. */}
+        {/* Сводка показателей — ОБЫЧНАЯ карточка. Обе «голые» ленты (плавающий strip и strip с
+            тулбаром) между двумя крупными тонированными картами читались как сломанная таблица —
+            «таблицу пережало» / «таблицу поправь» (владелец, 2026-07-27). Auto-height full-карточка
+            даёт леджеру ту же рамку и внутренние отступы, что у соседей. */}
         {inGroup('dynamics') && (
-          <ChartSection strip stripToolbar id="tg-derived-kpis" title="Сводка показателей" defaultSize="full" noExpand>
+          <ChartSection id="tg-derived-kpis" title="Сводка показателей" defaultSize="full" noExpand>
             <TgAnalyticsSummary full={full} />
           </ChartSection>
         )}
@@ -1092,13 +1094,16 @@ function TgAnalyticsSkeletons({ showSummary }: { showSummary: boolean }) {
   return (
     <div className="space-y-6">
       {showSummary && (
-        <div className="grid grid-cols-2 gap-x-6 gap-y-4 border-t border-border pt-4 sm:grid-cols-3 lg:grid-cols-6">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <div key={i}>
-              <Skeleton className="h-2.5 w-2/3" />
-              <Skeleton className="mt-2 h-5 w-1/2" />
-            </div>
-          ))}
+        <div className="rounded-2xl border border-border bg-card p-4 dark:border-white/6 sm:p-5">
+          <Skeleton className="h-3 w-40" />
+          <div className="mt-5 grid grid-cols-2 gap-x-6 gap-y-5 sm:grid-cols-3 lg:grid-cols-6">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div key={i}>
+                <Skeleton className="h-2.5 w-2/3" />
+                <Skeleton className="mt-2 h-5 w-1/2" />
+              </div>
+            ))}
+          </div>
         </div>
       )}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
