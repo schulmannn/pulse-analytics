@@ -218,7 +218,10 @@ export function Sparkline({
       </div>
 
       {interactive && caption !== undefined && (
-        <div className="mt-1 truncate text-2xs tabular-nums text-muted-foreground">{readout}</div>
+        // min-h резервирует строку и при ПУСТОМ idle-caption (caption="" — читалка без idle-текста):
+        // без резерва пустой div схлопывался в 0, ховер-текст раздувал ряд, и график «скакал»
+        // (владелец, Метрика/МойСклад). Высота = line-box text-2xs.
+        <div className="mt-1 min-h-4 truncate text-2xs tabular-nums text-muted-foreground">{readout}</div>
       )}
     </div>
   );
