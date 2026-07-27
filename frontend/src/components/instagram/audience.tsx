@@ -3,6 +3,7 @@ import { fmt } from '@/lib/format';
 import { ChartTooltip, type TooltipState } from '@/components/ChartTooltip';
 import { EmptyChart } from '@/components/instagram/shared';
 import { ChartSection } from '@/components/ChartWidget';
+import { RadialShare } from '@/components/RadialShare';
 import { WidgetGroup } from '@/components/widgets/WidgetGroup';
 import { breakdownVariants, reorderDefault } from '@/components/widgets/variants';
 import type { IgBreakdowns, IgOnline } from '@/api/schemas';
@@ -40,7 +41,23 @@ export function AudienceBlock({ breakdowns, followers }: { breakdowns: IgBreakdo
             <EmptyChart />
           </ChartSection>
         )}
-        <ChartSection title="Пол" drillTo="/metrics/ig-gender" variants={breakdownVariants(genderItems)} />
+        {/* Полукольцо (выбор владельца) — та же форма, что «Пол» Метрики: фикс-набор долей целого;
+            непокрытый демографией остаток кольцо честно дорисует из total приглушённым сегментом. */}
+        {genderItems.length > 0 ? (
+          <ChartSection title="Пол" drillTo="/metrics/ig-gender">
+            <RadialShare
+              segments={genderItems.map((g) => ({ key: g.label, label: g.label, value: g.value }))}
+              total={followers > 0 ? followers : null}
+              unitWord="подписчиков"
+              centerCaption="подписчиков"
+              format={(v) => fmt.short(v)}
+            />
+          </ChartSection>
+        ) : (
+          <ChartSection title="Пол" drillTo="/metrics/ig-gender">
+            <EmptyChart />
+          </ChartSection>
+        )}
         <ChartSection title="Топ стран" drillTo="/metrics/ig-countries" variants={breakdownVariants(countryItems)} />
         <ChartSection title="Топ городов" drillTo="/metrics/ig-cities" variants={breakdownVariants(cityItems)} />
       </WidgetGroup>

@@ -13,7 +13,7 @@ import {
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { LineChart } from '@/components/LineChart';
-import { PieChart } from '@/components/PieChart';
+import { RadialShare } from '@/components/RadialShare';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import {
   CampaignColorDot,
@@ -48,7 +48,7 @@ import {
   campaignBackPath,
   isCampaignMetricKey,
 } from '@/panels/campaign/campaignMetricKeys';
-import { AboutRow, MetricBackLink, MetricColumns, MetricDescriptor, WindowBarShell, RailSection } from '@/components/metric/shared';
+import { MetricBackLink, MetricColumns, MetricDescriptor, WindowBarShell, RailSection } from '@/components/metric/shared';
 
 type ChartKind = 'line' | 'bar';
 
@@ -179,7 +179,6 @@ function CampaignMetricShell({
   backTo,
   term,
   descriptor,
-  about,
   comparison,
   children,
 }: {
@@ -214,13 +213,7 @@ function CampaignMetricShell({
         rail={
           <>
             <RailSection title="Сравнение">{comparison}</RailSection>
-            <RailSection title="О графике">
-              <dl className="space-y-3 text-sm">
-                <AboutRow label="Как считается" text={about.formula} />
-                <AboutRow label="Что учитывается" text={about.included} />
-                <AboutRow label="Источник" text={about.source} />
-              </dl>
-            </RailSection>
+            {/* «О графике» убран — техническая информация не для конечного пользователя (владелец). */}
             <Link
               to={backTo}
               className="inline-flex items-center gap-1 text-xs font-medium text-primary transition-colors hover:text-primary/80"
@@ -461,8 +454,14 @@ function CampaignFormatsMetric({
       }
     >
       <CampaignReportCard id="campaign-page-formats" title="По числу публикаций">
+        {/* Полукольцо (выбор владельца) — отчётная поверхность показывает ВСЮ легенду. */}
         {slices.values.length > 0 ? (
-          <PieChart values={slices.values} labels={slices.labels} titles={slices.titles} />
+          <RadialShare
+            segments={slices.labels.map((label, i) => ({ key: label, label, value: slices.values[i] ?? 0 }))}
+            unitWord="публ."
+            centerCaption="публикаций"
+            legendMax={Infinity}
+          />
         ) : (
           <EmptyState compact size="chart" title="Нет данных о форматах." />
         )}
