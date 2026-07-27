@@ -117,6 +117,8 @@ test('mobile 390: dialog, editor, post and pinned-point actions keep 44px target
   await page.getByRole('button', { name: /Метрика из каталога/ }).click();
   const catalog = page.getByRole('dialog', { name: 'Добавить метрику' });
   await expect(catalog).toBeVisible();
+  // This dialog uses the same zoom-in entry animation as the editor above.
+  await page.waitForTimeout(250);
   await expect(catalog.getByRole('button', { name: 'Закрыть', exact: true })).toHaveCount(1);
   expect(await visibleTouchTargetFailures(page, '[role="dialog"]')).toEqual([]);
   await catalog.getByRole('button', { name: 'Закрыть', exact: true }).click();

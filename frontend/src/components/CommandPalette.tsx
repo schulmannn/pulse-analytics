@@ -1,10 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useChannels, useLogout, useMe } from '@/api/queries';
 import { accountExitLabel, runAccountExit } from '@/lib/accountExit';
 import { useSelectedChannel } from '@/lib/channel-context';
-import { setCommandPaletteOpen, toggleCommandPalette, useCommandPaletteOpen } from '@/lib/command-palette';
+import { useCommandPaletteOpen } from '@/lib/command-palette';
 import { DRILL_KEYS } from '@/lib/kpiDerive';
 import { NetworkGlyph } from '@/lib/networks';
 import { setActiveNetwork } from '@/lib/networkStore';
@@ -38,28 +38,6 @@ interface PaletteCommand {
 interface PaletteSection {
   title: string | null;
   items: PaletteCommand[];
-}
-
-/** Open-state lives in the shared store (lib/command-palette) so any control can call
-    openCommandPalette(); this hook adds the ⌘K / Ctrl+K / Escape keyboard wiring. */
-export function useCommandPalette() {
-  const { open, setOpen } = useCommandPaletteOpen();
-
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
-        event.preventDefault();
-        toggleCommandPalette();
-      } else if (event.key === 'Escape') {
-        setCommandPaletteOpen(false);
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
-
-  return { open, setOpen };
 }
 
 // Сетевые разделы (Обзор/Аналитика/Контент/… каждой сети) строятся из реестра lib/networks —
@@ -97,7 +75,7 @@ function saveRecent(id: string) {
 }
 
 export function CommandPalette() {
-  const { open, setOpen } = useCommandPalette();
+  const { open, setOpen } = useCommandPaletteOpen();
   // Mount-per-open (как и раньше): query/recents сбрасываются естественно, cmdk строит список
   // заново на каждое открытие (recents другой вкладки подтягиваются при следующем ⌘K).
   if (!open) return null;

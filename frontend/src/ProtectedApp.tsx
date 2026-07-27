@@ -15,6 +15,7 @@ import { DemoProvider } from '@/lib/demo-context';
 import { PeriodProvider } from '@/lib/period';
 import { ConfirmProvider } from '@/components/ConfirmDialogProvider';
 import { Toaster } from '@/components/ui/sonner';
+import { useCommandPaletteHotkeys } from '@/lib/command-palette';
 
 // ── Code splitting ────────────────────────────────────────────────────────────
 // The heavy/rare route groups load on demand instead of riding in the entry chunk:
@@ -165,6 +166,7 @@ function PanelSuspense({ children }: { children: ReactNode }) {
 }
 
 function ProtectedLayout({ me }: { me: Me }) {
+  useCommandPaletteHotkeys();
   return (
     <ErrorBoundary>
       <PeriodUrlSync />
