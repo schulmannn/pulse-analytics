@@ -18,6 +18,7 @@ import type { PaletteChannel } from '@/lib/paletteCommands';
 import { getDrillMetric } from '@/lib/widgetMetrics';
 import { Icon } from '@/components/nav-icons';
 import type { IconName } from '@/components/nav-icons';
+import { Kbd, KbdGroup } from '@/components/ui/kbd';
 import {
   CommandDialog,
   CommandEmpty,
@@ -222,7 +223,7 @@ function PaletteDialog({ close }: { close: () => void }) {
           onValueChange={setQuery}
           placeholder="Поиск: разделы, метрики, источники…"
         />
-        <kbd className="rounded border border-border px-1.5 py-0.5 font-mono text-2xs text-muted-foreground">esc</kbd>
+        <Kbd className="h-6 px-1.5">esc</Kbd>
       </div>
       <CommandList className="max-h-[46vh] border-t border-border p-2">
         <CommandEmpty className="px-3 py-8 text-center text-sm text-muted-foreground">Ничего не нашлось</CommandEmpty>
@@ -241,11 +242,11 @@ function PaletteDialog({ close }: { close: () => void }) {
           </CommandGroup>
         ))}
       </CommandList>
-      {/* Footer hints (steep/Claude): quiet keyboard legend, no chrome. */}
+      {/* Footer hints: клавиши — Kbd-чипами (shadcn Kbd, единый чип шортката по продукту). */}
       <div className="flex items-center gap-4 border-t border-border px-4 py-2 text-2xs text-muted-foreground">
-        <span>↑↓ — навигация</span>
-        <span>⏎ — открыть</span>
-        <span>esc — закрыть</span>
+        <span className="inline-flex items-center gap-1.5"><KbdGroup><Kbd>↑</Kbd><Kbd>↓</Kbd></KbdGroup> навигация</span>
+        <span className="inline-flex items-center gap-1.5"><Kbd>⏎</Kbd> открыть</span>
+        <span className="inline-flex items-center gap-1.5"><Kbd>esc</Kbd> закрыть</span>
       </div>
     </CommandDialog>
   );

@@ -1,14 +1,25 @@
 import { useEffect, useRef, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { toast } from 'sonner';
 import { PERIOD_WORD, SIZE_COL_SPAN, SIZE_DEFER_RENDER, SIZE_HEIGHT } from './constants';
 import { useChartSectionModel } from './useChartSectionModel';
 import { WidgetBody } from './WidgetBody';
 import { WidgetHeader } from './WidgetHeader';
+import { MenuIcon } from './WidgetMenu';
 import { WidgetEditOverlay, WidgetExpandOverlay } from './WidgetOverlays';
 import { WidgetPeriodPills } from './WidgetPeriodPills';
 import { WidgetResizeHandle } from './WidgetResizeHandle';
 import type { ChartSectionProps } from './types';
 import { SourceIdentity } from '@/components/SourceIdentity';
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
 import { useHomeSource } from '@/lib/homeSourceContext';
+import { pinToHome, unpinFromHome } from '@/lib/widgetPrefsStore';
 import { WidgetInViewContext } from '@/lib/widgetViewport';
 
 /** Configurable dashboard card. Public consumers import this through components/ChartWidget. */
@@ -64,6 +75,11 @@ export function ChartSection(props: ChartSectionProps) {
   const cardRef = useRef<HTMLDivElement>(null);
   const cardPressRef = model.refs.cardPressRef;
   const openExpand = model.expansion.openExpand;
+  const navigate = useNavigate();
+  const { pathname } = useLocation();
+  // Контекстное (правый клик) меню карточки — те же действия, что у кнопки «⋯» (WidgetMenu):
+  // power-путь без прицеливания в иконку. В reorder-режиме и у strip-полос меню не живёт.
+  const contextActions = !reorder && !props.strip;
 
   // The whole-card tap is a pointer convenience around the real, labelled expand button rendered
   // by WidgetHeader. Keep the passive card a <div> (it contains menus and other controls, so it
@@ -132,6 +148,8 @@ export function ChartSection(props: ChartSectionProps) {
           фетчить всегда (deep-link ?detail= может открыть невиденную карточку) и берёт дефолт
           контекста (true). */}
       <WidgetInViewContext.Provider value={inView}>
+      <ContextMenu>
+      <ContextMenuTrigger asChild disabled={!contextActions}>
       <div
         ref={cardRef}
         className={`${
@@ -217,6 +235,64 @@ export function ChartSection(props: ChartSectionProps) {
           resetKeys={model.bodyResetKeys}
         />
       </div>
+      </ContextMenuTrigger>
+      {contextActions && (
+        <ContextMenuContent aria-label={`Действия виджета «${label}»`}>
+          {allowExpand && (
+            <ContextMenuItem onSelect={() => openExpand()}>
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5" aria-hidden="true">
+                <path d="M9.5 2.5h4v4M13.5 2.5 9 7M6.5 13.5h-4v-4M2.5 13.5 7 9" />
+              </svg>
+              Развернуть
+            </ContextMenuItem>
+          )}
+          {!props.strip && (
+            <ContextMenuItem onSelect={() => model.controls.openEdit()}>
+              <MenuIcon kind="edit" /> Изменить
+            </ContextMenuItem>
+          )}
+          {(allowExpand || !props.strip) && (group || props.homeKey) && <ContextMenuSeparator />}
+          {group && (
+            <ContextMenuItem
+              onSelect={() => {
+                group.beginReorder();
+                requestAnimationFrame(() =>
+                  document.querySelector<HTMLElement>('[data-reorder-done]')?.focus(),
+                );
+              }}
+            >
+              <MenuIcon kind="drag" /> Переставить
+            </ContextMenuItem>
+          )}
+          {props.homeKey && (
+            <ContextMenuItem
+              onSelect={() => {
+                // Зеркало пункта WidgetMenu: результат пина живёт на другой странице — тост.
+                const homeKey = props.homeKey as string;
+                if (pinned) {
+                  unpinFromHome(homeKey);
+                  if (pathname !== '/home') toast(`«${label}» — убрано с главной`);
+                } else {
+                  pinToHome(homeKey);
+                  if (pathname !== '/home') {
+                    toast(`«${label}» — на главной`, {
+                      action: { label: 'Открыть', onClick: () => navigate('/home') },
+                    });
+                  }
+                }
+              }}
+            >
+              <MenuIcon kind="home" /> {pinned ? 'Убрать с главной' : 'На главную'}
+            </ContextMenuItem>
+          )}
+          {group && (
+            <ContextMenuItem onSelect={() => updatePrefs({ ...prefs, hidden: true })}>
+              <MenuIcon kind="hide" /> Скрыть
+            </ContextMenuItem>
+          )}
+        </ContextMenuContent>
+      )}
+      </ContextMenu>
       </WidgetInViewContext.Provider>
       {model.layout.resizeEnabled && !reorder && (
         <WidgetResizeHandle
