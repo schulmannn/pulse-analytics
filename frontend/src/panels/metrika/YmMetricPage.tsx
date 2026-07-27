@@ -589,11 +589,20 @@ function YmHourlyPage() {
             </div>
             <div className="grid grid-cols-8 gap-x-2 gap-y-3 sm:grid-cols-12">
               {q.data.rows.map((row) => {
-                const opacity = maxVisits > 0 ? Math.max(0.1, row.visits / maxVisits) : 0.08;
+                // Ноль — реальное отсутствие (канон п.8, зеркало карточки Обзора): нейтральный
+                // трек вместо самой бледной ступени брендовой шкалы.
+                const zero = row.visits === 0;
+                const opacity = zero ? 1 : maxVisits > 0 ? Math.max(0.1, row.visits / maxVisits) : 0.08;
                 const title = `${padHour(row.hour)}:00 — ${fmt.num(row.visits)} визитов, ${fmt.num(row.users)} посетителей`;
                 return (
                   <div key={row.hour} role="img" aria-label={title} title={title} className="min-w-0 text-center">
-                    <div className="h-10 rounded-sm" style={{ backgroundColor: 'hsl(var(--brand-iris))', opacity }} />
+                    <div
+                      className="h-10 rounded-sm"
+                      style={{
+                        backgroundColor: zero ? 'hsl(var(--border) / 0.3)' : 'hsl(var(--brand-iris))',
+                        opacity,
+                      }}
+                    />
                     <span className="mt-1 block text-2xs tabular-nums text-muted-foreground">{padHour(row.hour)}</span>
                   </div>
                 );

@@ -25,6 +25,7 @@ import {
 } from '@/lib/campaignSummary';
 import {
   applyTimelineMode,
+  capTimelineMode,
   resolveTimelineMode,
   scopeNote,
   sourceLeaderboard,
@@ -236,11 +237,15 @@ function TimelineExplorer({
         fixedSize="full"
         drillTo={campaignMetricPath(campaignId, 'timeline', searchParams, active.key)}
       >
-        {active.kind === 'line' ? (
-          <LineChart values={active.values} labels={active.labels} titles={active.titles} showPoints fullAxes />
-        ) : (
-          <BarChart values={active.values} labels={active.labels} titles={active.titles} />
-        )}
+        {/* Кап длинной серии перед рендером (canon CLAUDE.md): линия — LTTB, столбцы — недели. */}
+        {(() => {
+          const shown = capTimelineMode(active);
+          return shown.kind === 'line' ? (
+            <LineChart values={shown.values} labels={shown.labels} titles={shown.titles} showPoints={shown.values.length <= 45} fullAxes />
+          ) : (
+            <BarChart values={shown.values} labels={shown.labels} titles={shown.titles} />
+          );
+        })()}
       </ChartSection>
     </WidgetGroup>
   );

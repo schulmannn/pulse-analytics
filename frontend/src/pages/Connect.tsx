@@ -8,7 +8,7 @@ import { useChannels, useCollectorStatus, useConnectIg, useCreateKey, useDisconn
 import { ApiError, apiSend } from '@/api/client';
 import { qk } from '@/api/queryKeys';
 import { fmt } from '@/lib/format';
-import { useSelectedChannel } from '@/lib/channel-context';
+import { ChannelScope, useSelectedChannel } from '@/lib/channel-context';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
@@ -133,9 +133,17 @@ export function Connect() {
   // IG counts as connected when a per-channel OAuth account is linked OR the global env account is
   // serving data (env_fallback) — both mean real Instagram numbers are flowing.
   const igConnected = (igStatus.data?.connected ?? false) || (igStatus.data?.env_fallback ?? false);
-  const tgConnected = (channelsData?.channels?.length ?? 0) > 0;
-  const msConnected = msStatus.data?.connected ?? false;
-  const ymConnected = ymStatus.data?.connected ?? false;
+  // Статус источника — на уровне WORKSPACE, не активного канала: useMsStatus/useYmStatus читают
+  // текущий канал свитчера, и подключённый на СВОЁМ канале МойСклад показывался «Доступен»
+  // (владелец: «пишет, что МойСклад не подключён»). Канал каждой сети источника уже есть в списке
+  // каналов (source: 'ms' | 'ym'); Telegram считает только собственные каналы (зеркало
+  // channelsForSource), а не любой канал workspace.
+  const channels = channelsData?.channels ?? [];
+  const tgConnected = channels.some((c) => c.source !== 'ig' && c.source !== 'ms' && c.source !== 'ym');
+  const msChannelId = channels.find((c) => c.source === 'ms')?.id ?? null;
+  const ymChannelId = channels.find((c) => c.source === 'ym')?.id ?? null;
+  const msConnected = (msStatus.data?.connected ?? false) || msChannelId != null;
+  const ymConnected = (ymStatus.data?.connected ?? false) || ymChannelId != null;
   const stateOf = (s: Service): 'connected' | 'available' | 'soon' => {
     if (s.kind === 'soon') return 'soon';
     if (s.kind === 'instagram') return igConnected ? 'connected' : 'available';
@@ -196,9 +204,19 @@ export function Connect() {
 
   return (
     <div className="mx-auto max-w-5xl">
-      <div className="mb-2">
-        <Link to="/settings" className="text-xs text-muted-foreground transition-colors hover:text-foreground">
-          ← Назад к настройкам
+      <div className="mb-3">
+        {/* Возврат — круглая иконко-кнопка со стрелкой + тихая подпись (выбор владельца из
+            вариантов дизайна): жест «назад» первичен, подпись вторична. */}
+        <Link
+          to="/settings"
+          className="group inline-flex items-center gap-2.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <span className="inline-flex size-7 items-center justify-center rounded-full border border-border text-foreground/80 transition-colors group-hover:border-muted-foreground group-hover:bg-card group-hover:text-foreground">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="size-3.5" aria-hidden="true">
+              <path d="M19 12H5M11 6l-6 6 6 6" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </span>
+          Настройки
         </Link>
       </div>
       <div className="flex flex-col gap-1">
@@ -225,14 +243,11 @@ export function Connect() {
             <div className="absolute inset-0 rounded-full border border-border" aria-hidden="true" />
             <div className="absolute inset-[9%] rounded-full border border-dashed border-border opacity-60" aria-hidden="true" />
 
-            {/* hub */}
-            <div className="connect-hub absolute left-1/2 top-1/2 flex aspect-square w-[38%] -translate-x-1/2 -translate-y-1/2 flex-col items-center justify-center rounded-full border border-border bg-card px-4 text-center" aria-live="polite">
-              <span className="text-2xs font-medium uppercase tracking-widest text-muted-foreground">Источник</span>
-              <span className="mt-1 text-base font-medium tracking-tight text-foreground sm:text-lg">{active.name}</span>
-              <span className="mt-0.5 text-2xs text-muted-foreground">
-                {activeState === 'connected' ? 'Подключён' : activeState === 'available' ? 'Доступен' : 'Скоро'}
-              </span>
-            </div>
+            {/* Хаб-круг с именем выбранного источника убран (владелец: дублировал панель справа —
+                имя и статус уже в её шапке). AT-анонс выбора сохранён невизуальным live-регионом. */}
+            <span className="sr-only" aria-live="polite">
+              {active.name} — {activeState === 'connected' ? 'подключён' : activeState === 'available' ? 'доступен' : 'скоро'}
+            </span>
 
             {/* nodes */}
             {SERVICES.map((s, i) => {
@@ -299,8 +314,25 @@ export function Connect() {
             <TelegramPanel channelName={channelName(channelsData)} queryTab={tgTab} reconnectRequested={actionParam === 'reconnect'} />
           )}
           {active.kind === 'instagram' && <InstagramPanel />}
-          {active.kind === 'moysklad' && <MoySkladPanel />}
-          {active.kind === 'metrika' && <MetrikaPanel />}
+          {/* Панель источника скоупится на КАНАЛ ЭТОГО источника (когда он есть в workspace):
+              статус/учётка/бэкфилл — атрибуты канала источника, а не активного канала свитчера —
+              иначе подключённый на своём канале МС показывал «Доступен» + поле токена. */}
+          {active.kind === 'moysklad' &&
+            (msChannelId != null ? (
+              <ChannelScope channelId={msChannelId}>
+                <MoySkladPanel />
+              </ChannelScope>
+            ) : (
+              <MoySkladPanel />
+            ))}
+          {active.kind === 'metrika' &&
+            (ymChannelId != null ? (
+              <ChannelScope channelId={ymChannelId}>
+                <MetrikaPanel />
+              </ChannelScope>
+            ) : (
+              <MetrikaPanel />
+            ))}
           {active.kind === 'soon' && <SoonPanel name={active.name} glyph={active.id} note={active.soon ?? ''} />}
         </div>
       </div>
@@ -419,6 +451,8 @@ function PanelHead({ id, name, pill }: { id: ServiceId; name: string; pill: { la
 // ── МойСклад: история заказов (бэкфилл с прогрессом — слайс 2б) ──
 function MsBackfillBlock() {
   const qc = useQueryClient();
+  // Канал панели (ChannelScope на /connect) — бэкфилл обязан стартовать на канале ИСТОЧНИКА.
+  const { channelId } = useSelectedChannel();
   // kick = «только что нажали»: движок пишет running-строку ПОСЛЕ живой оценки объёма (~секунда),
   // поэтому сразу после POST статус ещё старый — и без принудительного поллинга интервал хука не
   // завёлся бы вовсе (кнопка выглядела мёртвой — прод-фидбек владельца).
@@ -451,7 +485,7 @@ function MsBackfillBlock() {
     kickBaseRef.current = st?.status ?? null;
     setKick(true);
     try {
-      await apiSend('POST', '/api/ms/backfill', undefined, MsBackfillStartSchema);
+      await apiSend('POST', '/api/ms/backfill', undefined, MsBackfillStartSchema, { channelId });
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
         // Прогон уже идёт (другая вкладка/повторный клик) — не ошибка: поллинг покажет прогресс.
@@ -565,6 +599,9 @@ function MsBackfillBlock() {
 function MoySkladPanel() {
   const qc = useQueryClient();
   const status = useMsStatus();
+  // Канал панели (ChannelScope на /connect = канал источника). Мутации обязаны слать ЕГО явно:
+  // apiSend без opts падает на глобальный стор свитчера — отключение/бэкфилл ушли бы не туда.
+  const { channelId } = useSelectedChannel();
   const [token, setToken] = useState('');
   const [busy, setBusy] = useState(false);
   const [freshOrg, setFreshOrg] = useState<string | null>(null);
@@ -591,7 +628,7 @@ function MoySkladPanel() {
     try {
       // Токен уходит только на НАШ бэкенд (шифруется AES-256-GCM до записи) — в браузере,
       // логах и git он не живёт; в МойСклад ходит сервер.
-      const res = await apiSend('POST', '/api/ms/connect', { token: value }, MsConnectSchema);
+      const res = await apiSend('POST', '/api/ms/connect', { token: value }, MsConnectSchema, { channelId });
       setFreshOrg(res?.org_name || 'организация');
       setToken('');
       toast('МойСклад подключён');
@@ -608,7 +645,7 @@ function MoySkladPanel() {
     setBusy(true);
     setError(null);
     try {
-      await apiSend('DELETE', '/api/ms/account', undefined, MutationOkSchema);
+      await apiSend('DELETE', '/api/ms/account', undefined, MutationOkSchema, { channelId });
       setFreshOrg(null);
       toast('МойСклад отключён');
       await invalidateMs();
@@ -687,6 +724,9 @@ function MoySkladPanel() {
 function MetrikaPanel() {
   const qc = useQueryClient();
   const status = useYmStatus();
+  // Канал панели (ChannelScope на /connect = канал источника) — мутации шлют его явно
+  // (apiSend без opts падает на глобальный стор свитчера).
+  const { channelId } = useSelectedChannel();
   const [token, setToken] = useState('');
   const [busy, setBusy] = useState(false);
   const [freshName, setFreshName] = useState<string | null>(null);
@@ -720,6 +760,7 @@ function MetrikaPanel() {
         '/api/ym/connect',
         counterId ? { token: value, counter_id: counterId } : { token: value },
         YmConnectSchema,
+        { channelId },
       );
       if (res?.choice_required) {
         setCounters(Array.isArray(res.counters) ? res.counters : []);
@@ -747,7 +788,7 @@ function MetrikaPanel() {
     setBusy(true);
     setError(null);
     try {
-      await apiSend('DELETE', '/api/ym/account', undefined, MutationOkSchema);
+      await apiSend('DELETE', '/api/ym/account', undefined, MutationOkSchema, { channelId });
       setFreshName(null);
       toast('Метрика отключена');
       await invalidateYm();

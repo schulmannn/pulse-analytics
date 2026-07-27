@@ -12,8 +12,9 @@ import { SegmentedControl } from '@/components/SegmentedControl';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { ChartSkeleton, TableSkeleton } from '@/components/ui/dataSkeleton';
+import { DeltaPill } from '@/components/DeltaPill';
 import { Sparkline } from '@/components/Sparkline';
-import { pctDelta } from '@/lib/delta';
+import { pctDelta, type MetricDelta } from '@/lib/delta';
 import { lttbDownsample } from '@/lib/downsample';
 import { fmt, pluralRu } from '@/lib/format';
 import { usePagePeriod, usePeriod } from '@/lib/period';
@@ -99,6 +100,13 @@ export function MsClients() {
   const customersDelta =
     prevCustomers != null && prevCustomers > 0 ? pctDelta(summary.customers, prevCustomers) : null;
   const repeatShare = summary.customers > 0 ? Math.round((summary.repeat_customers / summary.customers) * 100) : 0;
+  // Дельта доли повторных — относительное изменение той же формулы на прошлом окне (тот же
+  // prev-фетч, что у «Покупателей»).
+  const prevSummary = previousPeriod != null ? previous.data?.summary : undefined;
+  const prevRepeatShare =
+    prevSummary && prevSummary.customers > 0 ? (prevSummary.repeat_customers / prevSummary.customers) * 100 : null;
+  const repeatShareDelta =
+    prevRepeatShare != null && prevRepeatShare > 0 ? pctDelta(repeatShare, prevRepeatShare) : null;
   const everShare = summary.repeat_ever; // клиенты с ≥2 заказами за всю историю
   const repeatRevenueTotal = summary.sum_new + summary.sum_repeat;
   const repeatRevenueShare = repeatRevenueTotal > 0 ? (summary.sum_repeat / repeatRevenueTotal) * 100 : null;
@@ -156,6 +164,7 @@ export function MsClients() {
         ) : (
           <MsStatCardBody
             value={`${repeatShare}%`}
+            delta={repeatShareDelta}
             caption={`повторных покупателей ${windowLabel}`}
           >
             <MsRepeatBreakdown summary={summary} repeatRevenueShare={repeatRevenueShare} />
@@ -357,12 +366,15 @@ export function MsTopCustomersBody({ state }: { state: ReturnType<typeof useMsTo
 
 type RfmMode = 'customers' | 'revenue';
 
+// Цвет = ИДЕНТИЧНОСТЬ сегмента (канон: зелёный/красный зарезервированы за оценённым изменением) —
+// категориальные акценты палитры графиков, а не «чемпионы хорошие / под риском плохие»: оценка
+// остаётся в label/action, читателю не навязывается светофор.
 export const RFM_SEGMENTS = {
-  champions: { label: 'Чемпионы', action: 'часто покупают, недавно и на крупную сумму', color: 'hsl(var(--chart-role-positive))' },
+  champions: { label: 'Чемпионы', action: 'часто покупают, недавно и на крупную сумму', color: 'hsl(var(--chart-1-accent))' },
   loyal: { label: 'Лояльные', action: 'стабильно возвращаются и приносят выручку', color: 'hsl(var(--chart-role-primary))' },
-  potential: { label: 'Потенциально лояльные', action: 'есть потенциал для следующей покупки', color: 'hsl(var(--chart-role-comparison))' },
+  potential: { label: 'Потенциально лояльные', action: 'есть потенциал для следующей покупки', color: 'hsl(var(--chart-3-accent))' },
   new: { label: 'Новые', action: 'покупали недавно, но пока редко', color: 'hsl(var(--chart-role-primary) / 0.65)' },
-  at_risk: { label: 'Под риском', action: 'раньше были ценными, но давно не покупали', color: 'hsl(var(--chart-role-negative))' },
+  at_risk: { label: 'Под риском', action: 'раньше были ценными, но давно не покупали', color: 'hsl(var(--chart-4-accent))' },
   hibernating: { label: 'Спящие', action: 'давно не покупали и были малоактивны', color: 'hsl(var(--muted-foreground) / 0.55)' },
 } as const;
 
@@ -480,16 +492,22 @@ export function MsRfmBody({
     верху, оставляя диагональную пустоту. */
 function MsStatCardBody({
   value,
+  delta,
   caption,
   children,
 }: {
   value: string;
+  /** Дельта к пред. равному окну (канон п.7); DeltaPill сам скрывается при flat/null. */
+  delta?: MetricDelta | null;
   caption: ReactNode;
   children: ReactNode;
 }) {
   return (
     <div className="pt-1">
-      <div className="kpi-accent text-3xl font-medium leading-none tabular-nums tracking-tight">{value}</div>
+      <div className="flex items-baseline gap-2.5">
+        <span className="kpi-accent text-3xl font-medium leading-[1.15] tabular-nums tracking-tight">{value}</span>
+        <DeltaPill delta={delta} />
+      </div>
       <div className="mt-1.5 text-2xs text-muted-foreground">{caption}</div>
       <div className="mt-3">{children}</div>
     </div>

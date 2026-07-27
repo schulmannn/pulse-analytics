@@ -519,14 +519,15 @@ test('Обзор Метрики: карточки метрик, источник
   await expect(page.getByText('25–34 года', { exact: true })).toBeVisible();
   await expect(page.getByText('age_25_34')).toHaveCount(0); // локализуем по id, не сырое имя
   await expect(page.getByText('age_under_18')).toHaveCount(0); // локализуем по id, не сырое имя
-  // Компакт возраста — полукольцо: оно показывает ВСЕ группы (хвоста нет) плюс нераспознанный
-  // остаток, который Метрика скрывает при малой выборке. Прежний ассерт про свёрнутый хвост
-  // («Ещё 15 визитов из 500») к этой форме неприменим — сама доля 82% проверяется строкой ниже.
+  // Компакт возраста — полукольцо: дуга несёт ВСЕ группы, а ЛЕГЕНДА фикс-тайла компактится до
+  // топ-4 + сводного хвоста «Ещё N …» (иначе 7 строк съедали высоту тайла и кольцо схлопывалось —
+  // фидбек владельца). Сноска — только реальная оговорка (покрытие <100% / redaction), без
+  // постоянного «Оценка Метрики (Crypta)»-префикса (методология живёт в «О метрике»).
   const ageCard = ageHeading.locator('xpath=ancestor::section[1]');
-  await expect(ageCard.getByText('До 18 лет', { exact: true })).toBeVisible();
-  await expect(ageCard.getByText('Не определено', { exact: true })).toBeVisible();
+  await expect(ageCard.getByText('25–34 года', { exact: true })).toBeVisible();
+  await expect(ageCard.getByText(/^Ещё \d+ · /)).toBeVisible();
   await expect(
-    page.getByText('Оценка Метрики (Crypta) · определено для 82% визитов. Часть данных скрыта при малой выборке.'),
+    page.getByText('Определено для 82% визитов · часть данных скрыта при малой выборке.'),
   ).toBeVisible();
 
   // Слайс демографии — пол (gender): локализация по id ('female' → «Женщины»), свой total (360).
@@ -535,7 +536,8 @@ test('Обзор Метрики: карточки метрик, источник
   await expect(genderHeading).toBeVisible();
   await expect(page.getByText('Женщины', { exact: true })).toBeVisible();
   await expect(page.getByText('Мужчины', { exact: true })).toBeVisible();
-  await expect(page.getByText('Оценка Метрики (Crypta) · определено для 90% визитов.')).toBeVisible();
+  // Покрытие <100% — честная оговорка остаётся (без Crypta-префикса); при 100% строки нет вовсе.
+  await expect(page.getByText('Определено для 90% визитов.')).toBeVisible();
 
   // Период-чипсы (общий page-period контракт) на месте.
   await expect(page.getByRole('group', { name: 'Период', exact: true })).toHaveCount(1);

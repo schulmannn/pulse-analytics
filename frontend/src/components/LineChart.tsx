@@ -749,7 +749,9 @@ export function LineChart({
         role="img"
         aria-label={`График: ${values.length} точек, макс ${fmt.short(Math.max(...realValues))}, последнее ${fmt.short(realValues[realValues.length - 1])}`}
       >
-        <title>Линейный график</title>
+        {/* БЕЗ svg <title>: aria-label выше уже даёт имя для AT, а <title> дублировал его нативным
+            браузерным тултипом — нестилизуемый белый прямоугольник с острыми углами поверх нашего
+            скруглённого ChartTooltip (владелец: «появляющийся элемент имеет острые углы»). */}
         {/* Only the data layer animates. Axes, labels and all interaction overlays stay anchored. */}
         {plot.staticUnder}
         <MorphingSeries

@@ -539,7 +539,8 @@ export function BarChart({
         role="img"
         aria-label={`Столбчатая диаграмма: ${values.length} столбцов, макс ${fmt.short(ariaMax)}`}
       >
-        <title>Столбчатая диаграмма</title>
+        {/* БЕЗ svg <title> — см. LineChart: aria-label уже именует график, а <title> дублировал
+            его нестилизуемым нативным тултипом с острыми углами поверх ChartTooltip. */}
         {plot.underLayer}
 
         {/* Cached bar rects; hovering dims the whole group and the highlight below re-draws the

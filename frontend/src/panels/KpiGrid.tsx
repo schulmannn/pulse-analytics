@@ -330,7 +330,11 @@ function FeaturedKpi({ label, value, trend, caption, spark, info, onDrill }: Fea
           formatValue={fmt.num}
           className="h-full min-h-28 w-full"
         />
-      ) : null}
+      ) : (
+        // Честное пустое состояние (канон п.8): молчаливый null оставлял пустую полосу без
+        // объяснения — соседние компакт-карточки (TgTrendStat) говорят то же словами.
+        <p className="self-center text-2xs text-muted-foreground">Недостаточно дней для графика.</p>
+      )}
     </ChartCardBody>
   );
 }

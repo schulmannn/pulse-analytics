@@ -176,7 +176,8 @@ export function Sparkline({
             : { 'aria-hidden': true as const })}
           data-chart-kind="sparkline"
         >
-          <title>График тренда</title>
+          {/* БЕЗ svg <title> — см. LineChart: aria-label (interactive-режим) уже именует график,
+              а <title> дублировал его нестилизуемым нативным тултипом с острыми углами. */}
           {area && (
             <defs>
               <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">

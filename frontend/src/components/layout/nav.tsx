@@ -73,6 +73,9 @@ export const FEED_ROUTES = [
   '/sklad/channels',
   // «Метрика» — тот же FeedBlock-заголовок, что у остальных сетей.
   '/metrika',
+  // /connect рендерит собственную шапку («Подключение источников» + назад-ссылка) — topbar-полоса
+  // «Подключение данных» над ней читалась дублем (владелец).
+  '/connect',
 ];
 
 /** Topbar h1 for the current route; metric pages resolve to the metric's display name. */

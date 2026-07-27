@@ -116,12 +116,14 @@ describe('RadialShare — accessible composition', () => {
     );
     const plain = text(html);
 
+    // Имя графики живёт в aria-label (НЕ в svg <title>: у него есть побочный нативный тултип —
+    // нестилизуемый прямоугольник с острыми углами поверх наших скруглённых читалок).
     expect(html).toContain('role="img"');
-    expect(html).toContain('aria-labelledby=');
-    expect(plain).toContain('Всего 100 визитов.');
-    expect(plain).toContain('Мобильные — 60 визитов, 60.0%');
-    expect(plain).toContain('Компьютеры — 20 визитов, 20.0%');
-    expect(plain).toContain('Не определено — 20 визитов, 20.0%');
+    expect(html).not.toContain('<title');
+    expect(html).toContain('Всего 100 визитов.');
+    expect(html).toContain('Мобильные — 60 визитов, 60.0%');
+    expect(html).toContain('Компьютеры — 20 визитов, 20.0%');
+    expect(html).toContain('Не определено — 20 визитов, 20.0%');
     expect(html).toContain('aria-label="Легенда состава"');
     expect(plain).toContain('60 визитов · 60.0%');
     expect(plain).toContain('20 визитов · 20.0%');
@@ -162,8 +164,9 @@ describe('RadialShare — accessible composition', () => {
       />,
     );
 
-    expect(text(html)).toContain('Всего 5 визитов.');
-    expect(text(html)).toContain('Валидно — 5 визитов, 100.0%');
+    // Имя графики — в aria-label (см. первый тест), поэтому проверяем разметку, а не текст.
+    expect(html).toContain('Всего 5 визитов.');
+    expect(html).toContain('Валидно — 5 визитов, 100.0%');
     expect(html).not.toContain('NaN');
     expect(html).not.toContain('Infinity');
     expect(text(html)).not.toContain('Отрицательно');
