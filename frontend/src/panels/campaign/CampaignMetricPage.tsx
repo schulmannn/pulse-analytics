@@ -32,6 +32,7 @@ import {
   applyTimelineMode,
   resolveTimelineMode,
   sourceLeaderboard,
+  capTimelineMode,
   timelineModes,
   type TimelineMode,
 } from '@/lib/campaignPageModel';
@@ -348,21 +349,27 @@ function CampaignTimelineMetric({
           ) : undefined
         }
       >
+        {/* Кап длинной серии перед рендером (canon CLAUDE.md): линия — LTTB, столбцы — недели. */}
         {!active ? (
           <EmptyState compact size="chart" title="Нет данных для графика динамики." />
-        ) : kind === 'line' ? (
-          <LineChart
-            values={active.values}
-            labels={active.labels}
-            titles={active.titles}
-            yMin={0}
-            showPoints
-            fullAxes
-            markAnomalies
-            markExtremes
-          />
         ) : (
-          <BarChart values={active.values} labels={active.labels} titles={active.titles} />
+          (() => {
+            const shown = capTimelineMode(kind === 'line' ? { ...active, kind: 'line' } : { ...active, kind: 'bar' });
+            return kind === 'line' ? (
+              <LineChart
+                values={shown.values}
+                labels={shown.labels}
+                titles={shown.titles}
+                yMin={0}
+                showPoints={shown.values.length <= 45}
+                fullAxes
+                markAnomalies
+                markExtremes
+              />
+            ) : (
+              <BarChart values={shown.values} labels={shown.labels} titles={shown.titles} />
+            );
+          })()
         )}
       </CampaignReportCard>
       {modes.length > 1 && active && (

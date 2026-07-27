@@ -1460,10 +1460,11 @@ const MsReturnsSchema = z
   })
   .passthrough();
 
-export function useMsReturns(period: MsPeriod) {
+export function useMsReturns(period: MsPeriod, opts?: { enabled?: boolean }) {
   const { channelId } = useSelectedChannel();
   return useQuery({
-    enabled: channelId != null,
+    // opts.enabled — внешний гейт поверх канального (зеркало useMsSummary/useMsCustomers).
+    enabled: channelId != null && opts?.enabled !== false,
     queryKey: ['ms-returns', channelId, ...msPeriodKey(period)],
     staleTime: STALE_LIVE,
     queryFn: ({ signal }) => apiGet(`/api/ms/returns?${msPeriodQuery(period)}`, MsReturnsSchema, { signal, channelId }),

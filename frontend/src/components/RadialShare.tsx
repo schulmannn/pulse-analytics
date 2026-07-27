@@ -1,4 +1,4 @@
-import { useCallback, useId, useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { fmt } from '@/lib/format';
 
 /**
@@ -71,7 +71,6 @@ export function RadialShare({
   centerCaption?: string;
   format?: (n: number) => string;
 }) {
-  const titleId = useId();
   const [hover, setHover] = useState<string | null>(null);
   const detachSvgListeners = useRef<(() => void) | null>(null);
   // The arcs are passive parts of one named graphic. Pointer hover only mirrors a value already
@@ -146,18 +145,30 @@ export function RadialShare({
     .map((a) => `${a.label} — ${format(a.value)} ${unitWord}, ${a.pct.toFixed(1)}%`)
     .join('; ')}`;
 
+  // Легенда фикс-тайла компактится по канону ShareRows: топ-4 построчно + сводный хвост «Ещё N».
+  // Без этого 7 возрастных групп съедали высоту тайла, и flex-1 регион дуги схлопывался в
+  // крошечное кольцо (владелец: «график стал слишком маленьким»). Дуга рисует ВСЕ сегменты,
+  // hover/центр читают каждый, aria-label перечисляет всё — сжимается только легенда.
+  const LEGEND_MAX = 4;
+  const legendShown = arcs.slice(0, LEGEND_MAX);
+  const legendRest = arcs.slice(LEGEND_MAX);
+  const legendRestSum = legendRest.reduce((acc, a) => acc + a.value, 0);
+  const legendRestPct = legendRest.reduce((acc, a) => acc + a.pct, 0);
+
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="relative min-h-0 flex-1">
+      {/* min-h держит кольцо читаемым независимо от числа строк легенды. */}
+      <div className="relative min-h-[104px] flex-1">
+        {/* aria-label вместо svg <title>: у <title> есть побочный нативный браузерный тултип —
+            нестилизуемый прямоугольник с острыми углами (канон: только свои скруглённые читалки). */}
         <svg
           ref={bindSvg}
           viewBox={`0 0 ${VB} ${CY + 14}`}
           className="h-full w-full"
           role="img"
-          aria-labelledby={titleId}
+          aria-label={label}
           focusable="false"
         >
-          <title id={titleId}>{label}</title>
           {arcs.map((a) => (
             <path
               key={a.key}
@@ -185,7 +196,7 @@ export function RadialShare({
         aria-label="Легенда состава"
         className="mt-1 grid min-w-0 grid-cols-1 gap-x-3 gap-y-1 text-2xs sm:grid-cols-2"
       >
-        {arcs.map((a) => (
+        {legendShown.map((a) => (
           <li
             key={a.key}
             className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-x-1.5"
@@ -202,6 +213,14 @@ export function RadialShare({
             </span>
           </li>
         ))}
+        {legendRest.length > 0 && (
+          <li
+            className="min-w-0 truncate text-muted-foreground"
+            title={legendRest.map((a) => a.label).join(', ')}
+          >
+            Ещё {legendRest.length} · {format(legendRestSum)} {unitWord} · {legendRestPct.toFixed(1)}%
+          </li>
+        )}
       </ul>
     </div>
   );

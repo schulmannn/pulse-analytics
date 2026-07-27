@@ -824,9 +824,6 @@ export function MsChannelContribution({
         const currentValue = msChannelContributionCurrent(it, metric);
         const share = total > 0 ? (currentValue / total) * 100 : 0;
         const delta = msChannelContributionDelta(it, metric);
-        const deltaColor = delta == null || delta === 0
-          ? 'hsl(var(--muted-foreground))'
-          : delta > 0 ? 'hsl(var(--chart-role-positive))' : 'hsl(var(--chart-role-negative))';
         return (
           <div key={it.id}>
             <div className="flex items-baseline justify-between gap-3 text-xs">
@@ -843,13 +840,14 @@ export function MsChannelContribution({
                   </span>{' '}
                   · {share.toLocaleString('ru-RU', { maximumFractionDigits: 1 })}%
                 </span>
+                {/* Тихий регистр дельты (канон DeltaPill): направление — в знаке/стрелке, не в
+                    оценочном цвете — «ничего не кричит». */}
                 {comparable && delta != null && (
                   <span
-                    className="inline-flex items-center gap-0.5 text-2xs"
-                    style={{ color: deltaColor }}
+                    className="inline-flex items-center gap-0.5 text-2xs text-muted-foreground"
                     title="Изменение против равного предыдущего окна"
                   >
-                    <span aria-hidden="true">{delta > 0 ? '▲' : delta < 0 ? '▼' : '•'}</span>
+                    <span aria-hidden="true">{delta > 0 ? '↑' : delta < 0 ? '↓' : '•'}</span>
                     {signedValue(delta, metric)}
                   </span>
                 )}

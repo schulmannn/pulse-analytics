@@ -70,20 +70,22 @@ export const YM_GENDER_LABELS: Record<string, string> = {
   female: 'Женщины',
 };
 
-/** Методологическая подпись соцдема: оценочная природа, фактическое покрытие и privacy-redaction
-    перечисляются отдельно. При нулевом total процент не выдумывается. */
+/** Методологическая подпись соцдема — ТОЛЬКО когда есть реальная оговорка (владелец: постоянная
+    строка «Оценка Метрики (Crypta) · определено для 100% визитов» — шум): неполное покрытие и/или
+    privacy-redaction. Полное покрытие без redaction → null (сама оценочная природа задокументирована
+    в «О метрике» и дескрипторе страницы). */
 export const demographicsFootnote = (data: {
   coverage_percent: number | null;
   contains_sensitive_data: boolean;
-}): string => {
-  const coverage =
-    data.coverage_percent == null
-      ? null
-      : `определено для ${data.coverage_percent.toLocaleString('ru-RU', { maximumFractionDigits: 1 })}% визитов`;
-  const base = ['Оценка Метрики (Crypta)', coverage].filter(Boolean).join(' · ');
-  return data.contains_sensitive_data
-    ? `${base}. Часть данных скрыта при малой выборке.`
-    : `${base}.`;
+}): string | null => {
+  const partial = data.coverage_percent != null && data.coverage_percent < 99.95;
+  const coverage = partial
+    ? `Определено для ${data.coverage_percent!.toLocaleString('ru-RU', { maximumFractionDigits: 1 })}% визитов`
+    : null;
+  const redacted = data.contains_sensitive_data ? 'часть данных скрыта при малой выборке' : null;
+  if (!coverage && !redacted) return null;
+  const joined = [coverage, redacted].filter(Boolean).join(' · ');
+  return `${joined.charAt(0).toUpperCase()}${joined.slice(1)}.`;
 };
 
 /** Вторичный контекст строки разреза: посетители + отказы (когда доступны). Отказы nullable —
@@ -329,12 +331,15 @@ function defineYmBreakdown<T>(spec: {
 }
 
 /** Пустое состояние демографии: EmptyState + та же методологическая сноска, что и под строками. */
-const demographicsEmpty = (data: { coverage_percent: number | null; contains_sensitive_data: boolean } | undefined) => (
-  <div>
-    <EmptyState compact size="table" title="Демографические данные недоступны за период." />
-    {data && <p className="text-2xs text-muted-foreground">{demographicsFootnote(data)}</p>}
-  </div>
-);
+const demographicsEmpty = (data: { coverage_percent: number | null; contains_sensitive_data: boolean } | undefined) => {
+  const note = data ? demographicsFootnote(data) : null;
+  return (
+    <div>
+      <EmptyState compact size="table" title="Демографические данные недоступны за период." />
+      {note != null && <p className="text-2xs text-muted-foreground">{note}</p>}
+    </div>
+  );
+};
 
 /** 14 разрезов Метрики в порядке доски Обзора. Каждый — источник правды и для карточки, и для
     полностраничного отчёта `/metrics/<key>`. */

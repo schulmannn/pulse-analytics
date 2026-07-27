@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { lttbDownsample } from '@/lib/downsample';
 import { CHART_MAX_POINTS } from '@/lib/msSeries';
 import { fmt } from '@/lib/format';
@@ -119,8 +119,8 @@ export function KpiHero({
   value: string;
   delta?: MetricDelta | null;
   series?: Point[];
-  /** Route of the metric's explorer page (/metrics/ig-*). The chart surface becomes one real Link
-      (keyboard, touch and pointer share the same drill contract), so the hero is never a dead end. */
+  /** Route of the metric's explorer page (/metrics/ig-*). ТОЛЬКО тихий клик по числу (паритет с
+      TG-твином FeaturedKpi): своя ↗-обёртка графика читалась дублем карточной (визуальный аудит). */
   drillTo?: string;
 }) {
   const navigate = useNavigate();
@@ -146,24 +146,7 @@ export function KpiHero({
   // Steep anatomy (owner rule): label + number + delta bottom-left, the chart inset to the RIGHT.
   return (
     <ChartCardBody hero label={label} value={value} delta={delta} onValueClick={drillTo ? () => navigate(drillTo) : undefined} drillLabel={label}>
-      {chart &&
-        (drillTo ? (
-          <Link
-            to={drillTo}
-            aria-label={`Разбор: ${label}`}
-            title="Подробный разбор"
-            className="group/chart-link relative block h-full rounded focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40"
-          >
-            <span className="absolute right-1 top-1 z-10 rounded-full border border-transparent p-1 text-muted-foreground transition-colors group-hover/chart-link:border-border group-hover/chart-link:bg-background group-hover/chart-link:text-foreground">
-              <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-                <path d="M7 17 17 7M9 7h8v8" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </span>
-            <div className="h-full cursor-pointer">{chart}</div>
-          </Link>
-        ) : (
-          <div className="h-full">{chart}</div>
-        ))}
+      {chart && <div className="h-full">{chart}</div>}
     </ChartCardBody>
   );
 }
@@ -314,14 +297,14 @@ export function IgKpiBlock({ ig }: { ig: IgData }) {
     // TG KpiGrid composition: the hero sits straight on the card and the ledger splits off with
     // ONE quiet top hairline + spacing — no inner plate, no hairline mesh (the card is the frame).
     <div className="space-y-5">
-      {/* Без hero-drillTo: оба хоста («Показатели» на IG-Обзоре и IG·Показатели на Home) несут
-          drillTo на СЕКЦИИ — corner-↗ + whole-card клик + хедер-кнопка. Своя стрелка hero рядом
-          с карточной читалась дублем (визуальный аудит №1). */}
+      {/* Hero-drillTo — только тихий клик по числу (стрелки у hero нет — она читалась дублем
+          карточной, визуальный аудит №1); секционные corner-↗ и whole-card клик не меняются. */}
       <KpiHero
         label={`Охват · ${ig.window.days} дн.`}
         value={fmt.kpi(ig.pairs.reach.cur)}
         delta={pairDelta(ig.pairs.reach)}
         series={ig.series.reach.filter((p) => ig.inWindow(p.day))}
+        drillTo="/metrics/ig-reach"
       />
       <div className="grid grid-cols-2 gap-x-6 gap-y-4 border-t border-border pt-4 lg:grid-cols-4">
         <KpiCard
@@ -421,8 +404,8 @@ export function SubscriberMovement({
 // active window, never on previous-window coverage. Delta stays honest (absent when no previous
 // window). Below the required real daily samples the card keeps its headline and says so.
 
-/** «Охват» — the primary IG daily series (half width): area line + paired-window Δ. Section carries
-    the drill, so KpiHero has no own ↗ (a lone arrow next to the card's read as a dup — visual audit). */
+/** «Охват» — the primary IG daily series (half width): area line + paired-window Δ. Число дриллится
+    тихой кнопкой (TG-паритет FeaturedKpi); собственной ↗ у hero нет — она читалась дублем карточной. */
 export function IgReachBody({ ig }: { ig: IgData }) {
   return (
     <KpiHero
@@ -430,6 +413,7 @@ export function IgReachBody({ ig }: { ig: IgData }) {
       value={fmt.kpi(ig.pairs.reach.cur)}
       delta={pairDelta(ig.pairs.reach)}
       series={ig.series.reach.filter((p) => ig.inWindow(p.day))}
+      drillTo="/metrics/ig-reach"
     />
   );
 }
@@ -458,7 +442,9 @@ export function IgAudienceBody({ ig }: { ig: IgData }) {
         <div className="flex shrink-0 flex-col items-start gap-1.5 pb-0.5">
           <div className="text-xs tracking-wide text-muted-foreground">База · {ig.window.days} дн.</div>
           <div className="flex items-baseline gap-2">
-            <div className="kpi-accent text-hero font-medium leading-none tabular-nums tracking-tight">{fmt.kpi(ig.followers)}</div>
+            {/* leading-[1.15] — канон ChartCardBody hero: leading-none клипал глифы дисплейного
+                начертания в фикс-тайле (глиф-бокс ~4px выше line-box). */}
+            <div className="kpi-accent text-hero font-medium leading-[1.15] tabular-nums tracking-tight">{fmt.kpi(ig.followers)}</div>
             {net.hasCur && net.cur !== 0 && (
               <span className="text-sm font-medium tabular-nums text-muted-foreground">
                 {signedNum(net.cur)}

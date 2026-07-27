@@ -9,7 +9,7 @@ import { Breakdown } from '@/components/Breakdown';
 import { ChartExpandedContext, ExpandedChartHeightContext, WidgetTargetContext } from '@/components/ExpandableChart';
 import { ChartCardBody } from '@/components/chartWidget/ChartCardBody';
 import { observeSize } from '@/lib/observeSize';
-import { MetricExplainPanel, MetricExplainTooltip } from '@/components/MetricExplain';
+import { MetricExplainTooltip } from '@/components/MetricExplain';
 import { EmptyState } from '@/components/EmptyState';
 import { ChartSkeleton } from '@/components/ui/dataSkeleton';
 import { pluralRu } from '@/lib/resolveWidgetMetric';
@@ -192,12 +192,11 @@ export function WidgetRenderer({
           </ExpandedChartHeightContext.Provider>
         </div>
       </WidgetTargetContext.Provider>
-      {expanded ? (
-        // Detail / explorer has room: the full «почему это число такое» panel (formula + source +
-        // live period / sample / freshness / comparison), which subsumes the one-line meta.
-        <MetricExplainPanel metricId={result.metricId} meta={result.meta} className="mt-4 border-t border-border pt-4" />
-      ) : (
-        // Collapsed card: the terse meta line + a compact ⓘ that opens the same explanation.
+      {/* Развёрнутая поверхность — БЕЗ панели «Почему это число такое» (владелец: техническая
+          информация, лишнее на графике). Методология остаётся доступной через компакт-ⓘ на лице
+          карточки; эксплорер отдаёт площадь графику и статистике. */}
+      {!expanded && (
+        // Collapsed card: the terse meta line + a compact ⓘ that opens the explanation.
         <WidgetMetaLine
           meta={result.meta}
           className="mt-2"

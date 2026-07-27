@@ -1,6 +1,9 @@
 import type { CampaignPost, CampaignSummary } from '@/api/schemas';
 import type { TimelineSeries } from '@/lib/campaignSummary';
+import { lttbDownsample } from '@/lib/downsample';
 import { fmt } from '@/lib/format';
+import { bucketKeyOf } from '@/lib/metricSeries';
+import { CHART_MAX_POINTS } from '@/lib/msSeries';
 
 /**
  * Чистые построители представления ДЛЯ desktop-страницы кампании. Здесь только сборка
@@ -102,18 +105,21 @@ export interface TimelineModeOption {
   labels: string[];
   values: number[];
   titles: string[];
+  /** ISO-дни точек — кормят недельные корзины капа (отсутствуют только в старых фикстурах). */
+  days?: string[];
 }
 
 const metricTitles = (labels: string[], values: number[], suffix: string): string[] =>
   labels.map((label, index) => `${label}: ${fmt.short(values[index] ?? 0)} ${suffix}`);
 
-const presentPoints = (labels: string[], values: number[], present: boolean[]) => {
+const presentPoints = (labels: string[], values: number[], present: boolean[], days?: string[]) => {
   const points = labels.flatMap((label, index) =>
-    present[index] ? [{ label, value: values[index] ?? 0 }] : [],
+    present[index] ? [{ label, value: values[index] ?? 0, day: days?.[index] }] : [],
   );
   return {
     labels: points.map((point) => point.label),
     values: points.map((point) => point.value),
+    days: days ? points.map((point) => point.day ?? '') : undefined,
   };
 };
 
@@ -121,7 +127,7 @@ export function timelineModes(series: TimelineSeries): TimelineModeOption[] {
   if (series.labels.length === 0) return [];
   const modes: TimelineModeOption[] = [];
   if (series.hasTg) {
-    const points = presentPoints(series.labels, series.tgViews, series.tgPresent);
+    const points = presentPoints(series.labels, series.tgViews, series.tgPresent, series.days);
     modes.push({
       key: 'tg_views',
       label: 'Просмотры TG',
@@ -130,10 +136,11 @@ export function timelineModes(series: TimelineSeries): TimelineModeOption[] {
       labels: points.labels,
       values: points.values,
       titles: metricTitles(points.labels, points.values, 'просмотров TG'),
+      days: points.days,
     });
   }
   if (series.hasIg) {
-    const points = presentPoints(series.labels, series.igReach, series.igPresent);
+    const points = presentPoints(series.labels, series.igReach, series.igPresent, series.days);
     modes.push({
       key: 'ig_reach',
       label: 'IG сумма охватов',
@@ -142,6 +149,7 @@ export function timelineModes(series: TimelineSeries): TimelineModeOption[] {
       labels: points.labels,
       values: points.values,
       titles: metricTitles(points.labels, points.values, 'суммарного охвата IG'),
+      days: points.days,
     });
   }
   modes.push({
@@ -152,8 +160,57 @@ export function timelineModes(series: TimelineSeries): TimelineModeOption[] {
     labels: series.labels,
     values: series.posts,
     titles: series.labels.map((label, index) => `${label}: ${fmt.num(series.posts[index] ?? 0)} публ.`),
+    days: series.days,
   });
   return modes;
+}
+
+/**
+ * Кап длинной серии таймлайна ПЕРЕД рендером (канон CLAUDE.md; долгоживущая кампания = точка на
+ * каждый день с публикациями). Линия — LTTB по единым индексам (labels/titles из тех же точек);
+ * столбцы децимировать нельзя — при наличии ISO-дней серия честно сворачивается в Monday-anchored
+ * календарные недели (публикации — поток, суммы корзин, маркер « · неделя» в тултипе). Без дней
+ * (старые фикстуры) бар-ветка честно остаётся как есть.
+ */
+export function capTimelineMode(mode: TimelineModeOption): TimelineModeOption {
+  const n = mode.values.length;
+  if (n <= CHART_MAX_POINTS) return mode;
+  if (mode.kind === 'line') {
+    const rows = mode.values.map((value, i) => ({
+      value,
+      label: mode.labels[i] ?? '',
+      title: mode.titles[i] ?? '',
+      day: mode.days?.[i],
+    }));
+    const sampled = lttbDownsample(rows, CHART_MAX_POINTS, (row) => row.value);
+    return {
+      ...mode,
+      values: sampled.map((row) => row.value),
+      labels: sampled.map((row) => row.label),
+      titles: sampled.map((row) => row.title),
+      days: mode.days ? sampled.map((row) => row.day ?? '') : undefined,
+    };
+  }
+  if (!mode.days || mode.days.length !== n) return mode;
+  const buckets = new Map<string, { sum: number }>();
+  const order: string[] = [];
+  mode.days.forEach((day, i) => {
+    const ts = Date.parse(`${day}T00:00:00Z`);
+    const key = Number.isFinite(ts) ? bucketKeyOf(ts, 'week') : day;
+    const bucket = buckets.get(key);
+    if (bucket) bucket.sum += mode.values[i] ?? 0;
+    else {
+      buckets.set(key, { sum: mode.values[i] ?? 0 });
+      order.push(key);
+    }
+  });
+  return {
+    ...mode,
+    values: order.map((key) => buckets.get(key)!.sum),
+    labels: order.map((key) => fmt.day(key)),
+    titles: order.map((key) => `${fmt.day(key)} · неделя: ${fmt.num(buckets.get(key)!.sum)} публ.`),
+    days: order,
+  };
 }
 
 /** Resolve a URL mode against the modes that actually have data. */

@@ -20,6 +20,8 @@ const dayLabel = (day: string) => `${day.slice(8, 10)}.${day.slice(5, 7)}`;
 export interface TimelineSeries {
   labels: string[];
   titles: string[];
+  /** ISO-дни точек (нужны недельным корзинам капа длинной серии); optional для старых фикстур. */
+  days?: string[];
   posts: number[];
   tgViews: number[];
   igReach: number[];
@@ -35,6 +37,7 @@ export function timelineSeries(timeline: CampaignTimelinePoint[]): TimelineSerie
   const labels = sorted.map((t) => dayLabel(t.day));
   return {
     labels,
+    days: sorted.map((t) => t.day),
     titles: sorted.map(
       (t) =>
         `${dayLabel(t.day)}: ${t.posts} публ.` +

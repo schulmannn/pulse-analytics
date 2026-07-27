@@ -13,9 +13,10 @@ import { BarChart } from '@/components/BarChart';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { ChartSkeleton, TableSkeleton } from '@/components/ui/dataSkeleton';
+import { DeltaPill } from '@/components/DeltaPill';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { Sparkline } from '@/components/Sparkline';
-import { pctDelta } from '@/lib/delta';
+import { pctDelta, type MetricDelta } from '@/lib/delta';
 import { lttbDownsample } from '@/lib/downsample';
 import { fmt } from '@/lib/format';
 import { usePagePeriod } from '@/lib/period';
@@ -59,6 +60,8 @@ export function MsOverview() {
   const [funnelMetric, setFunnelMetric] = useState<'orders' | 'revenue'>('orders');
   const funnel = useMsFunnel(period);
   const returns = useMsReturns(period);
+  // Прошлое окно возвратов — только при живом previousPeriod (та же грабля fallback-ключа).
+  const previousReturns = useMsReturns(previousPeriod ?? period, { enabled: previousPeriod != null });
 
   if (summary.isPending) {
     return (
@@ -290,7 +293,17 @@ export function MsOverview() {
         ) : !returns.data ? (
           <EmptyState compact size="chart" title="Нет данных о возвратах за период." />
         ) : (
-          <MsReturnsCardBody data={returns.data} period={period} windowLabel={windowLabel} />
+          <MsReturnsCardBody
+            data={returns.data}
+            period={period}
+            windowLabel={windowLabel}
+            delta={
+              previousPeriod != null && previousReturns.data && previousReturns.data.count > 0
+                ? pctDelta(returns.data.count, previousReturns.data.count)
+                : null
+            }
+            onDrill={() => navigate('/metrics/ms-returns')}
+          />
         )}
       </ChartWidget>
 
@@ -311,10 +324,16 @@ function MsReturnsCardBody({
   data,
   period,
   windowLabel,
+  delta,
+  onDrill,
 }: {
   data: NonNullable<ReturnType<typeof useMsReturns>['data']>;
   period: MsPeriod;
   windowLabel: string;
+  /** Дельта числа возвратов к пред. равному окну (канон п.7). */
+  delta?: MetricDelta | null;
+  /** Дрилл на /metrics/ms-returns — число становится настоящей кнопкой (канон п.2). */
+  onDrill?: () => void;
 }) {
   // Реальная дневная линия числа возвратов: архивную серию (только дни с возвратами)
   // дозаполняем календарными нулями по окну, затем даунсэмплим до канона ~140 точек.
@@ -340,8 +359,23 @@ function MsReturnsCardBody({
   return (
     <div className="flex h-full min-h-0 flex-col pt-1">
       <div className="shrink-0">
-        <div className="kpi-accent text-3xl font-medium leading-none tabular-nums tracking-tight">
-          {fmt.num(data.count)}
+        <div className="flex items-baseline gap-2.5">
+          {onDrill ? (
+            <button
+              type="button"
+              aria-label="Разбор: Возвраты"
+              title="Подробный разбор"
+              onClick={onDrill}
+              className="kpi-accent rounded text-left text-3xl font-medium leading-[1.15] tabular-nums tracking-tight transition-colors hover:text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40"
+            >
+              {fmt.num(data.count)}
+            </button>
+          ) : (
+            <span className="kpi-accent text-3xl font-medium leading-[1.15] tabular-nums tracking-tight">
+              {fmt.num(data.count)}
+            </span>
+          )}
+          <DeltaPill delta={delta} />
         </div>
         <div className="mt-1.5 text-2xs text-muted-foreground">{`на ${fmt.short(data.sum)} ₽ ${windowLabel}`}</div>
       </div>

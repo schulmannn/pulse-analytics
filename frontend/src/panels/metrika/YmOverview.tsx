@@ -273,7 +273,10 @@ function YmHourlyCard({
         >
           <div className="grid h-full grid-cols-12 content-center gap-x-1 gap-y-2">
             {hourly.data.rows.map((row) => {
-              const opacity = maxVisits > 0 ? Math.max(0.1, row.visits / maxVisits) : 0.08;
+              // Ноль — реальное отсутствие (канон п.8): час без визитов рисуется нейтральным
+              // треком, а не самой бледной СТУПЕНЬЮ брендовой шкалы — иначе «0» неотличим от «мало».
+              const zero = row.visits === 0;
+              const opacity = zero ? 1 : maxVisits > 0 ? Math.max(0.1, row.visits / maxVisits) : 0.08;
               const title = `${padHour(row.hour)}:00 — ${fmt.num(row.visits)} визитов, ${fmt.num(row.users)} посетителей`;
               return (
                 <div
@@ -285,7 +288,10 @@ function YmHourlyCard({
                 >
                   <div
                     className="h-8 rounded-sm"
-                    style={{ backgroundColor: 'hsl(var(--brand-iris))', opacity }}
+                    style={{
+                      backgroundColor: zero ? 'hsl(var(--border) / 0.3)' : 'hsl(var(--brand-iris))',
+                      opacity,
+                    }}
                   />
                   <span className="mt-1 block text-2xs tabular-nums text-muted-foreground">
                     {row.hour % 3 === 0 ? row.hour : '\u00a0'}
@@ -410,8 +416,10 @@ function YmQualityStrip({
           : null,
     },
   ];
-  // Тренд-спарклайн: только РЕАЛЬНЫЕ дневные точки метрики (null = «нет данных» пропускаем), и
-  // только когда их ≥2 — иначе InlineSpark сам ничего не рисует, но экономим и пустой контейнер.
+  // Тренд-спарклайн: только РЕАЛЬНЫЕ дневные точки метрики. null-дни пропускаются ОСОЗНАННО — это
+  // ряд НАБЛЮДЕНИЙ (конвенция «Среднего чека» МС: день без данных = неопределённое наблюдение, не
+  // ноль и не разрыв замера), спарк декоративен (aria-hidden), значение уже дано числом. Рисуем
+  // только при ≥2 точках — иначе InlineSpark сам ничего не рисует, но экономим и пустой контейнер.
   const trendValues = (key: YmQualitySeriesKey): number[] => {
     const points = qualitySeries?.[key];
     if (!Array.isArray(points)) return [];

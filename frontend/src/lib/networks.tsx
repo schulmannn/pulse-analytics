@@ -184,10 +184,13 @@ export function NetworkGlyph({ k, className }: { k: string; className?: string }
     );
   }
   if (k === 'ym') {
-    // «Метрика» — три восходящих столбика (веб-аналитика), в духе stroke-only сета.
+    // «Метрика» — кольцо с секторами (мотив круговой диаграммы логотипа Метрики), в духе
+    // stroke-only сета. Прежние три восходящих столбика читались как уровень сотового сигнала
+    // («плохое соединение» — владелец).
     return (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={className} aria-hidden="true">
-        <path d="M5 20v-6M12 20V9M19 20V4" strokeLinecap="round" />
+        <circle cx="12" cy="12" r="8.5" />
+        <path d="M12 12V3.5M12 12l6 6" strokeLinecap="round" />
       </svg>
     );
   }

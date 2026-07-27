@@ -162,21 +162,23 @@ export function Sparkline({
             значениями, которую мышиный пользователь видит, а AT — нет. Такая искра получает тот же
             режим, что и полный LineChart: role="img" плюс подпись, несущая данные (макс/последнее).
             Точечная клавиатурная навигация — отдельный пункт роадмапа, общий с LineChart. */}
+        {/* БЕЗ svg <title> — см. LineChart: aria-label (interactive-режим) уже именует график, а
+            <title> дублировал его нестилизуемым нативным тултипом с острыми углами. Атрибуты —
+            ПРЯМЫЕ ternary, не спред: Biome (noSvgWithoutTitle) статически ищет aria-label/hidden. */}
         <svg
           viewBox={`0 0 ${VBW} ${VBH}`}
           preserveAspectRatio="none"
           className="h-full w-full"
-          {...(interactive && values.length
-            ? {
-                role: 'img',
-                'aria-label':
-                  `График: ${values.length} точек, макс ${formatValue(Math.max(...values))}, ` +
-                  `последнее ${formatValue(values[values.length - 1])}`,
-              }
-            : { 'aria-hidden': true as const })}
+          role={interactive && values.length ? 'img' : undefined}
+          aria-label={
+            interactive && values.length
+              ? `График: ${values.length} точек, макс ${formatValue(Math.max(...values))}, ` +
+                `последнее ${formatValue(values[values.length - 1])}`
+              : undefined
+          }
+          aria-hidden={interactive && values.length ? undefined : true}
           data-chart-kind="sparkline"
         >
-          <title>График тренда</title>
           {area && (
             <defs>
               <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
