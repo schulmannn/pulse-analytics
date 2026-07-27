@@ -43,20 +43,27 @@
 2. Те же env, что у web-сервиса. `DATABASE_URL` — приватный (`*.railway.internal`),
    **без ssl** — канон репо; внешний URL — relaxed ssl. Дополнительно на worker-сервисе:
    `COLLECTION_RECOVERY_MODE=worker`. `PORT` worker'у не нужен.
-3. На **web**-сервисе выставить `JOBS_MODE=off`.
+3. На **web**-сервисе выставить `COLLECTION_RECOVERY_MODE=external`.
+
+   **НЕ `JOBS_MODE=off`**: off гасит на web ОБА бегунка, а worker operational runner
+   (scheduled-отчёты, дневная maintenance, почасовой свип уведомлений об упоминаниях)
+   **не запускает** — эти джобы не исполнялись бы нигде. `external` останавливает только
+   collection-бегунок (его забирает worker), operational остаётся на web. `JOBS_MODE=off`
+   станет валидным шагом только когда worker научится и operational-бегунку.
 
 ### Порядок деплоя
 
 1. Сначала поднять worker-сервис и убедиться в логах: `[worker] Atlavue recovery worker
    запущен (без HTTP-listener)`.
-2. Сразу после — выставить `JOBS_MODE=off` на web (редеплой). Короткое перекрытие проходов
-   между шагами 1 и 2 переживается durable/идемпотентными per-day/per-item гейтами джоб
-   (`runJobOnce`, reservation-гейты), но оставлять оба гонять джобы надолго **нельзя**.
+2. Сразу после — выставить `COLLECTION_RECOVERY_MODE=external` на web (редеплой). Короткое
+   перекрытие проходов между шагами 1 и 2 переживается durable/идемпотентными per-day/per-item
+   гейтами джоб (`runJobOnce`, reservation-гейты), но оставлять оба гонять сбор надолго **нельзя**.
 
 ### Откат
 
 1. Остановить/удалить worker-сервис.
-2. Затем убрать `JOBS_MODE` с web (вернётся `inline`, web снова гоняет всё сам).
+2. Затем вернуть `COLLECTION_RECOVERY_MODE=inline` (или убрать переменную) на web — web снова
+   гоняет сбор сам.
 
 Именно в этом порядке: убрать `JOBS_MODE` при живом worker = оба процесса планируют джобы.
 

@@ -123,6 +123,12 @@ function createAuthService({ config, db }) {
         return res.status(401).json({ error: 'Сессия отозвана — войди снова' });
       }
       req.user = { uid: u.id, role: u.role, email: u.email };
+      // Центральная кэш-политика аутентифицированных ответов (аудит P2): cookie-auth JSON одного
+      // арендатора не должен смешиваться в shared-кэше (CDN/прокси без Vary: Cookie). Railway
+      // сегодня API не кэширует — защищаемся от будущей инфраструктуры одним местом, а не
+      // надеждой на неё. Роут может осознанно переопределить (например, публичный media-прокси
+      // ставит собственный Cache-Control ПОСЛЕ этого middleware).
+      res.set('Cache-Control', 'private, no-store');
       // Sliding idle window, capped by maxExp. Browser JavaScript never sees the
       // refreshed token: only Set-Cookie rotates it.
       const now = Date.now();

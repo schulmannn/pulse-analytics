@@ -46,6 +46,13 @@ const db = {
     return { ...user };
   },
   useEmailToken: async (_hash, kind) => (kind === 'reset' ? { uid: user.id } : null),
+  // Транзакционный consume (аудит P1): роут /api/auth/reset сжигает токен и меняет пароль одним
+  // методом; стаб зеркалит контракт — пароль и token_version меняются вместе.
+  consumeResetTokenAndSetPassword: async (_hash, passHash) => {
+    user.pass_hash = passHash;
+    user.token_version += 1;
+    return { uid: user.id };
+  },
 };
 
 const svc = createAuthService({

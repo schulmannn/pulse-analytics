@@ -8,7 +8,14 @@ function registerAuthRoutes({
   GOOGLE_CLIENT_ID, fetchWithTimeout, log, audit, appBase, sha256, newToken,
   VERIFY_TTL, RESET_TTL, sendEmail, emailShell, emailBtn, escHtml,
   aiEnabledFor, setSessionCookie, clearSessionCookie, migrateSessionCookie,
+  jobTracker,
 }) {
+  // Анти-enumeration роуты (register/forgot/resend) отвечают ДО работы с БД/почтой — это осознанно
+  // (нет timing-оракула). Но server.close() не ждёт код после res.json(), поэтому такой хвост обязан
+  // жить в jobTracker: shutdown (main.js waitForIdle) дожидается его до закрытия пулов, иначе деплой
+  // мог оборвать создание пользователя/токена уже после обещания «проверьте почту» (аудит P1).
+  const trackTail = (job, task) =>
+    jobTracker ? jobTracker.run(task, { job }) : Promise.resolve().then(task).catch(() => {});
   const verifyEmailHtml = (link) => emailShell('Подтверди email',
     `<p>Активируй аккаунт в Atlavue:</p>${emailBtn(link, 'Подтвердить email')}<p style="color:#64748d;font-size:13px">Ссылка действует 24 часа. Если это были не вы — проигнорируйте письмо.</p>`);
   const resetEmailHtml = (link) => emailShell('Сброс пароля',
@@ -34,23 +41,25 @@ function registerAuthRoutes({
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return res.status(400).json({ error: 'Некорректный email' });
     if (password.length < 8) return res.status(400).json({ error: 'Пароль минимум 8 символов' });
     const generic = { status: 'check_email', message: 'Проверь почту — если email свободен, мы отправили ссылку для подтверждения.' };
+    const base = appBase(req);  // читается из req ДО хвоста (после ответа объект запроса не трогаем)
     res.json(generic);          // respond first → constant-time, no existing-vs-new timing oracle
-    try {
-      const base = appBase(req);
-      const existing = await db.getUserByEmail(email);
-      if (existing) {           // don't reveal it's taken; nudge the real owner, cooldown-gated like real tokens
-        const eid = await db.createEmailToken(existing.id, 'exists', sha256(newToken()), new Date(Date.now() + 60000));
-        if (eid) sendEmail(email, 'Аккаунт Atlavue уже существует', existsEmailHtml(base)).catch(() => {});
-        return;
+    trackTail('auth_register_tail', async () => {
+      try {
+        const existing = await db.getUserByEmail(email);
+        if (existing) {         // don't reveal it's taken; nudge the real owner, cooldown-gated like real tokens
+          const eid = await db.createEmailToken(existing.id, 'exists', sha256(newToken()), new Date(Date.now() + 60000));
+          if (eid) await sendEmail(email, 'Аккаунт Atlavue уже существует', existsEmailHtml(base)).catch(() => {});
+          return;
+        }
+        const u = await db.createUser({ email, pass_hash: await hashPassword(password), role: 'user', status: 'unverified' });
+        const raw = newToken();
+        const id = await db.createEmailToken(u.id, 'verify', sha256(raw), new Date(Date.now() + VERIFY_TTL));
+        const link = `${base}/verify?token=${raw}`;
+        if (id) await sendEmail(email, 'Подтверди email — Atlavue', verifyEmailHtml(link), link);
+      } catch (e) {
+        if (e.code !== '23505') console.error('[register]', e.message);   // already responded generically
       }
-      const u = await db.createUser({ email, pass_hash: await hashPassword(password), role: 'user', status: 'unverified' });
-      const raw = newToken();
-      const id = await db.createEmailToken(u.id, 'verify', sha256(raw), new Date(Date.now() + VERIFY_TTL));
-      const link = `${base}/verify?token=${raw}`;
-      if (id) await sendEmail(email, 'Подтверди email — Atlavue', verifyEmailHtml(link), link);
-    } catch (e) {
-      if (e.code !== '23505') console.error('[register]', e.message);   // already responded generically
-    }
+    });
   });
 
   // Login: account (email + password) only.
@@ -107,12 +116,16 @@ function registerAuthRoutes({
       const email = String(info.email).toLowerCase().trim();
       let u = await db.getUserByEmail(email);
       if (u && u.status === 'disabled') return res.status(403).json({ error: 'Аккаунт отключён' });
+      // Google подтверждает ВЛАДЕНИЕ email, но не заменяет одобрение администратора: pending-аккаунт
+      // через Google-вход раньше молча становился active (обход approval-флоу) — тот же ответ, что у
+      // обычного логина. Автоактивация ниже — ТОЛЬКО для 'unverified'.
+      if (u && u.status === 'pending') return res.status(403).json({ error: 'Аккаунт ждёт одобрения администратором' });
       if (!u) {
         // New account — Google already verified the email, so it's active with an unusable password
         // (password login stays impossible until the user sets one via "forgot password").
         const randomPass = await hashPassword(crypto.randomBytes(32).toString('hex'));
         u = await db.createUser({ email, pass_hash: randomPass, role: 'user', status: 'active' });
-      } else if (u.status !== 'active') {
+      } else if (u.status === 'unverified') {
         // Existing but never-verified account (created via email/password; ownership unproven — it could
         // be an attacker pre-registration seeded with a known password). Google now proves the CURRENT
         // user owns the email, so activate it — but first WIPE the pre-seeded password to a random
@@ -122,6 +135,9 @@ function registerAuthRoutes({
         await db.setUserPassword(u.id, await hashPassword(crypto.randomBytes(32).toString('hex')));
         await db.setUserStatus(u.id, 'active');
         u = await db.getUserById(u.id);
+      } else if (u.status !== 'active') {
+        // Неизвестный/будущий не-active статус НЕ активируется молча — политика по умолчанию строгая.
+        return res.status(403).json({ error: 'Аккаунт неактивен' });
       }
       const now = Date.now();
       const expires = now + SESSION_TTL;
@@ -208,16 +224,16 @@ function registerAuthRoutes({
     const raw = String((req.body && req.body.token) || '');
     if (!raw) return res.status(400).json({ error: 'Ссылка недействительна' });
     try {
-      const t = await db.useEmailToken(sha256(raw), 'verify');
-      if (!t) return res.status(400).json({ error: 'Ссылка недействительна или истекла' });
-      const u = await db.getUserById(t.uid);
-      if (u && u.status === 'unverified') {
-        await db.setUserStatus(t.uid, 'active');
-        req.user = { uid: t.uid };                    // attribute the audit event (route is unauthenticated)
+      // Сжигание токена и активация — одна транзакция (аудит P1): сбой активации больше не
+      // оставляет сожжённую ссылку; отказ (disabled/pending) откатывает consume — токен живёт.
+      const r = await db.consumeVerifyTokenAndActivate(sha256(raw));
+      if (!r) return res.status(400).json({ error: 'Ссылка недействительна или истекла' });
+      if (r.outcome === 'activated') {
+        req.user = { uid: r.uid };                    // attribute the audit event (route is unauthenticated)
         audit(req, 'auth.verified', {}).catch(() => {});
         return res.json({ ok: true });
       }
-      if (u && u.status === 'active') return res.json({ ok: true });             // already verified — idempotent
+      if (r.outcome === 'already_active') return res.json({ ok: true });         // idempotent
       return res.status(400).json({ error: 'Аккаунт нельзя активировать' });     // disabled/pending: NOT via verify
     } catch (e) { next(e); }
   });
@@ -225,18 +241,20 @@ function registerAuthRoutes({
   // Password reset request — always generic (no account enumeration).
   app.post('/api/auth/forgot', authLimiter, async (req, res) => {
     const email = String((req.body && req.body.email) || '').toLowerCase().trim();
+    const base = appBase(req);
     res.json({ ok: true, message: 'Если такой аккаунт есть — мы отправили ссылку для сброса.' });   // respond first
     if (!db.enabled || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return;
-    try {
-      const base = appBase(req);
-      const u = await db.getUserByEmail(email);
-      if (u && u.status !== 'disabled') {
-        const raw = newToken();
-        const id = await db.createEmailToken(u.id, 'reset', sha256(raw), new Date(Date.now() + RESET_TTL));
-        const link = `${base}/reset?token=${raw}`;
-        if (id) await sendEmail(email, 'Сброс пароля — Atlavue', resetEmailHtml(link), link);
-      }
-    } catch (e) { console.error('[forgot]', e.message); }   // already responded generically
+    trackTail('auth_forgot_tail', async () => {
+      try {
+        const u = await db.getUserByEmail(email);
+        if (u && u.status !== 'disabled') {
+          const raw = newToken();
+          const id = await db.createEmailToken(u.id, 'reset', sha256(raw), new Date(Date.now() + RESET_TTL));
+          const link = `${base}/reset?token=${raw}`;
+          if (id) await sendEmail(email, 'Сброс пароля — Atlavue', resetEmailHtml(link), link);
+        }
+      } catch (e) { console.error('[forgot]', e.message); }   // already responded generically
+    });
   });
 
   // Password reset — consume token, set new password. Only promotes 'unverified'→'active'
@@ -248,11 +266,12 @@ function registerAuthRoutes({
     if (password.length < 8) return res.status(400).json({ error: 'Пароль минимум 8 символов' });
     if (!raw) return res.status(400).json({ error: 'Ссылка недействительна' });
     try {
-      const t = await db.useEmailToken(sha256(raw), 'reset');
+      // Хеш — ДО транзакции (bcrypt дорог, соединение пула не держим); сжигание токена + смена
+      // пароля (+ активация unverified) — одна транзакция (аудит P1): сбой любого шага не
+      // оставляет сожжённую ссылку без смены пароля.
+      const passHash = await hashPassword(password);
+      const t = await db.consumeResetTokenAndSetPassword(sha256(raw), passHash);
       if (!t) return res.status(400).json({ error: 'Ссылка недействительна или истекла' });
-      await db.setUserPassword(t.uid, await hashPassword(password));
-      const u = await db.getUserById(t.uid);
-      if (u && u.status === 'unverified') await db.setUserStatus(t.uid, 'active');
       req.user = { uid: t.uid };                      // attribute the audit event (route is unauthenticated)
       audit(req, 'auth.reset', {}).catch(() => {});
       clearSessionCookie(req, res);
@@ -263,18 +282,20 @@ function registerAuthRoutes({
   // Resend verification email (generic; only acts for an 'unverified' account).
   app.post('/api/auth/resend-verification', authLimiter, async (req, res) => {
     const email = String((req.body && req.body.email) || '').toLowerCase().trim();
+    const base = appBase(req);
     res.json({ ok: true, message: 'Если аккаунт ждёт подтверждения — письмо отправлено снова.' });   // respond first
     if (!db.enabled) return;
-    try {
-      const base = appBase(req);
-      const u = await db.getUserByEmail(email);
-      if (u && u.status === 'unverified') {
-        const raw = newToken();
-        const id = await db.createEmailToken(u.id, 'verify', sha256(raw), new Date(Date.now() + VERIFY_TTL));
-        const link = `${base}/verify?token=${raw}`;
-        if (id) await sendEmail(email, 'Подтверди email — Atlavue', verifyEmailHtml(link), link);
-      }
-    } catch (e) { console.error('[resend]', e.message); }
+    trackTail('auth_resend_tail', async () => {
+      try {
+        const u = await db.getUserByEmail(email);
+        if (u && u.status === 'unverified') {
+          const raw = newToken();
+          const id = await db.createEmailToken(u.id, 'verify', sha256(raw), new Date(Date.now() + VERIFY_TTL));
+          const link = `${base}/verify?token=${raw}`;
+          if (id) await sendEmail(email, 'Подтверди email — Atlavue', verifyEmailHtml(link), link);
+        }
+      } catch (e) { console.error('[resend]', e.message); }
+    });
   });
 
   app.post('/api/auth/change-password', requireAuth, async (req, res, next) => {

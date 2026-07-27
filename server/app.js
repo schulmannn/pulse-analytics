@@ -161,6 +161,8 @@ function createApp(deps) {
     migrateSessionCookie,
     setSessionCookie,
     clearSessionCookie,
+    // Анти-enumeration хвосты (register/forgot/resend) регистрируются здесь — shutdown их дожидается.
+    jobTracker,
   });
 
   // Account/admin/prefs/config routes are isolated in routes/account.js (accountLimiter travels with
