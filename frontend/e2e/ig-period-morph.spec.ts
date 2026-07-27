@@ -26,7 +26,9 @@ test('instagram reach chart flows between periods without a skeleton swap', asyn
   const reachCard = page.locator('section').filter({
     has: page.getByRole('heading', { name: 'Охват', exact: true }),
   });
-  const chart = reachCard.locator('svg[data-chart-kind="line"]').first();
+  // Канон-грамматика hero-карточки: безосевой area-Sparkline (TG-твин FeaturedKpi). Морф-контракт
+  // тот же — SparklineSeries несёт data-chart-motion="morph" и data-chart-series="primary".
+  const chart = reachCard.locator('svg[data-chart-kind="sparkline"]').first();
   await chart.waitFor({ state: 'visible', timeout: 15_000 });
   const primarySeries = chart.locator('[data-chart-series="primary"]');
   const morphGroup = chart.locator('g[data-chart-motion="morph"]').first();
