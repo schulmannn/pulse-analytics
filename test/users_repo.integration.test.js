@@ -87,6 +87,39 @@ test('email token одноразовый: первый use → {uid}, второ
   assert.strictEqual(second, null, 'повторное использование того же токена — null (одноразовый)');
 });
 
+test('consumeResetTokenAndSetPassword: одна транзакция — пароль сменён, токен сожжён, unverified активирован', { skip }, async () => {
+  const u = await db.createUser({ email: mail('rt'), pass_hash: 'old', role: 'user', status: 'unverified' });
+  const hash = `resethash-${nonce}`;
+  await db.createEmailToken(u.id, 'reset', hash, new Date(Date.now() + 60000));
+
+  const r = await db.consumeResetTokenAndSetPassword(hash, 'newhash');
+  assert.deepStrictEqual(r, { uid: u.id });
+  const re = await db.getUserByEmail(mail('rt'));
+  assert.strictEqual(re.pass_hash, 'newhash', 'пароль сменён в той же транзакции');
+  assert.strictEqual(re.status, 'active', 'reset доказывает владение — unverified активирован');
+  assert.ok(re.token_version > u.token_version, 'старые сессии отозваны');
+  assert.strictEqual(await db.consumeResetTokenAndSetPassword(hash, 'again'), null, 'токен одноразовый');
+});
+
+test('consumeVerifyTokenAndActivate: активация; ineligible ОТКАТЫВАЕТ consume — токен живёт', { skip }, async () => {
+  // unverified → activated, токен сгорает.
+  const u = await db.createUser({ email: mail('vt'), pass_hash: 'x', role: 'user', status: 'unverified' });
+  const okHash = `verifyhash-${nonce}`;
+  await db.createEmailToken(u.id, 'verify', okHash, new Date(Date.now() + 60000));
+  assert.deepStrictEqual(await db.consumeVerifyTokenAndActivate(okHash), { uid: u.id, outcome: 'activated' });
+  assert.strictEqual((await db.getUserById(u.id)).status, 'active');
+  assert.strictEqual(await db.consumeVerifyTokenAndActivate(okHash), null, 'сожжённый токен → null');
+
+  // pending → ineligible, а consume ОТКАЧЕН: та же ссылка сработает после одобрения админом.
+  const p = await db.createUser({ email: mail('vp'), pass_hash: 'x', role: 'user', status: 'pending' });
+  const pendHash = `verifypend-${nonce}`;
+  await db.createEmailToken(p.id, 'verify', pendHash, new Date(Date.now() + 60000));
+  assert.deepStrictEqual(await db.consumeVerifyTokenAndActivate(pendHash), { uid: p.id, outcome: 'ineligible' });
+  assert.strictEqual((await db.getUserById(p.id)).status, 'pending', 'pending не активируется через verify');
+  const { rows } = await pool.query('SELECT used_at FROM email_tokens WHERE token_hash=$1', [pendHash]);
+  assert.strictEqual(rows[0].used_at, null, 'отказ в активации НЕ сжигает токен (rollback)');
+});
+
 test('prefs изоляция: setPrefs(A) виден A, не виден B', { skip }, async () => {
   const a = await db.createUser({ email: mail('pa'), pass_hash: 'x', role: 'user', status: 'active' });
   const b = await db.createUser({ email: mail('pb'), pass_hash: 'x', role: 'user', status: 'active' });

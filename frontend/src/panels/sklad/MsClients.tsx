@@ -136,7 +136,7 @@ export function MsClients() {
               area
               strokeWidth={2}
               interactive
-              caption="заказы по дням"
+              caption=""
               formatValue={fmt.num}
               className="h-full min-h-14 w-full"
             />

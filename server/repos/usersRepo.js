@@ -148,6 +148,70 @@ function createUsersRepo({ pool, enabled, transaction }) {
     return rows[0] ? { uid: rows[0].uid } : null;
   }
 
+  // Внутренний sentinel: осознанный ROLLBACK транзакции consume-методов ниже (не настоящая ошибка).
+  const ROLLBACK_CONSUME = Symbol('rollback-consume');
+
+  /* Сжигание reset-токена и смена пароля — ОДНА транзакция (аудит P1: раньше useEmailToken
+     коммитил used_at автокоммитом, и падение последующего setUserPassword оставляло ссылку
+     сожжённой БЕЗ смены пароля). Здесь сбой любого шага откатывает и used_at — ссылка живёт,
+     пользователь просто повторяет попытку. Reset доказывает владение email, поэтому 'unverified'
+     заодно активируется (политика прежнего роута); token_version бампается — все сессии отозваны.
+     Возвращает { uid } либо null (токен невалиден/просрочен/повторный). */
+  async function consumeResetTokenAndSetPassword(tokenHash, passHash) {
+    if (!enabled) return null;
+    try {
+      return await transaction(async (client) => {
+        const { rows } = await client.query(
+          `UPDATE email_tokens SET used_at=now()
+             WHERE token_hash=$1 AND kind='reset' AND used_at IS NULL AND expires_at > now()
+             RETURNING uid`, [tokenHash]);
+        if (!rows[0]) throw ROLLBACK_CONSUME;   // нечего коммитить — но и записей нет, rollback безвреден
+        const uid = rows[0].uid;
+        await client.query(
+          `UPDATE users SET pass_hash=$2, token_version=token_version+1,
+                  status=(CASE WHEN status='unverified' THEN 'active' ELSE status END)
+            WHERE id=$1`, [uid, passHash]);
+        return { uid };
+      });
+    } catch (e) {
+      if (e === ROLLBACK_CONSUME) return null;
+      throw e;
+    }
+  }
+
+  /* Сжигание verify-токена и активация — ОДНА транзакция (симметрично reset: сбой активации не
+     сжигает ссылку). НЕ-активируемый статус (disabled/pending) осознанно ОТКАТЫВАЕТ consume —
+     токен остаётся живым, а не горит об отказ. Возвращает исход:
+     'activated' | 'already_active' | 'ineligible' | null (токен невалиден). */
+  async function consumeVerifyTokenAndActivate(tokenHash) {
+    if (!enabled) return null;
+    let outcome = null;
+    try {
+      return await transaction(async (client) => {
+        const { rows } = await client.query(
+          `UPDATE email_tokens SET used_at=now()
+             WHERE token_hash=$1 AND kind='verify' AND used_at IS NULL AND expires_at > now()
+             RETURNING uid`, [tokenHash]);
+        if (!rows[0]) throw ROLLBACK_CONSUME;
+        const uid = rows[0].uid;
+        const { rows: users } = await client.query(
+          'SELECT status FROM users WHERE id=$1 FOR UPDATE', [uid]);
+        const status = users[0] ? users[0].status : null;
+        if (status === 'active') return { uid, outcome: 'already_active' };
+        if (status !== 'unverified') {
+          outcome = { uid, outcome: 'ineligible' };
+          throw ROLLBACK_CONSUME;               // токен НЕ горит об отказ в активации
+        }
+        await client.query(
+          "UPDATE users SET status='active', token_version=token_version+1 WHERE id=$1", [uid]);
+        return { uid, outcome: 'activated' };
+      });
+    } catch (e) {
+      if (e === ROLLBACK_CONSUME) return outcome;   // null (плохой токен) либо {outcome:'ineligible'}
+      throw e;
+    }
+  }
+
   /* ── Retention: мёртвые email-токены (verify/reset) ───────────────────────────────────────────
      Токен становится НЕДОСТИЖИМЫМ, как только он consumed (used_at IS NOT NULL) ЛИБО expired
      (expires_at <= now()): useEmailToken матчит лишь `used_at IS NULL AND expires_at > now()`, а
@@ -212,6 +276,7 @@ function createUsersRepo({ pool, enabled, transaction }) {
     countUsers, createUser, getUserByEmail, getUserById, getUserAvatar, setUserAvatar,
     listUsers, updateUser, setUserPassword, revokeUserSessions, setUserStatus,
     createEmailToken, useEmailToken, pruneEmailTokens, getPrefs, setPrefs,
+    consumeResetTokenAndSetPassword, consumeVerifyTokenAndActivate,
   };
 }
 

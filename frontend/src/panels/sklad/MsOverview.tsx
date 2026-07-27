@@ -157,7 +157,7 @@ export function MsOverview() {
               area
               strokeWidth={2}
               interactive
-              caption="по дням"
+              caption=""
               formatValue={(v) => `${fmt.num(Math.round(v))} ₽`}
               className="h-full min-h-14 w-full"
             />
@@ -184,7 +184,7 @@ export function MsOverview() {
               area
               strokeWidth={2}
               interactive
-              caption="по дням"
+              caption=""
               formatValue={fmt.num}
               className="h-full min-h-14 w-full"
             />
@@ -211,7 +211,7 @@ export function MsOverview() {
               area
               strokeWidth={2}
               interactive
-              caption="по дням с заказами"
+              caption=""
               formatValue={(v) => `${fmt.num(Math.round(v))} ₽`}
               className="h-full min-h-14 w-full"
             />

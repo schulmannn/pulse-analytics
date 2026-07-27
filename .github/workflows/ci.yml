@@ -35,15 +35,17 @@ jobs:
       TEST_DATABASE_URL: postgresql://postgres@localhost:5432/pulse
       PGSSL: disable
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 20
           cache: npm
           cache-dependency-path: |
             package-lock.json
             frontend/package-lock.json
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
       - run: npm ci
@@ -88,8 +90,10 @@ jobs:
   security:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 20
       - name: Audit npm dependencies (server)
@@ -102,7 +106,7 @@ jobs:
       - name: Audit npm dependencies (frontend)
         run: npx -y audit-ci@^7 --high --skip-dev --allowlist GHSA-qwww-vcr4-c8h2
         working-directory: frontend
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
       # Аудитим lock-файлы (pip-compile --generate-hashes) — тот же точный прод-набор с
@@ -122,8 +126,10 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 20
           cache: npm
@@ -141,7 +147,7 @@ jobs:
         run: npm run test:e2e:smoke
       - name: Upload Playwright failure artifacts
         if: failure()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
           name: playwright-smoke-${{ github.run_attempt }}
           path: frontend/test-results/
@@ -170,8 +176,10 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 20
           cache: npm
@@ -183,7 +191,7 @@ jobs:
         run: npm run test:e2e:desktop -- --shard=${{ matrix.shard }}/6
       - name: Upload Playwright failure artifacts
         if: failure()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
           name: playwright-e2e-shard${{ matrix.shard }}-${{ github.run_attempt }}
           path: frontend/test-results/
@@ -199,8 +207,10 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 20
           cache: npm
@@ -212,7 +222,7 @@ jobs:
         run: npm run test:e2e:phone
       - name: Upload Playwright phone failure artifacts
         if: failure()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
           name: playwright-phone-${{ github.run_attempt }}
           path: frontend/test-results/

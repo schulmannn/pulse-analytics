@@ -28,7 +28,7 @@ import {
   type YmBreakdownDef,
 } from '@/panels/metrika/ymBreakdowns';
 import { isYmMetricKey } from '@/panels/metrika/ymMetricKeys';
-import { AboutRow, ComparisonDeltaRow, MetricBackLink, MetricColumns, MetricDescriptor, WindowBarShell, RailSection } from '@/components/metric/shared';
+import { ComparisonDeltaRow, MetricBackLink, MetricColumns, MetricDescriptor, WindowBarShell, RailSection } from '@/components/metric/shared';
 
 /**
  * Полностраничные метрики «Яндекс.Метрики» — `/metrics/ym-*`. Каждая карточка Обзора /metrika ведёт
@@ -74,7 +74,6 @@ const BACK = { to: '/metrika', label: 'Метрика · Обзор' };
 function YmMetricShell({
   term,
   descriptor,
-  about,
   comparison,
   children,
 }: {
@@ -104,13 +103,7 @@ function YmMetricShell({
                 </p>
               )}
             </RailSection>
-            <RailSection title="О метрике">
-              <dl className="space-y-3 text-sm">
-                <AboutRow label="Как считается" text={about.formula} />
-                {about.included && <AboutRow label="Что учитывается" text={about.included} />}
-                <AboutRow label="Источник" text={about.source} />
-              </dl>
-            </RailSection>
+            {/* «О метрике» убран — техническая информация не для конечного пользователя (владелец). */}
             <Link
               to={BACK.to}
               className="inline-flex items-center gap-1 text-xs font-medium text-primary transition-colors hover:text-primary/80"

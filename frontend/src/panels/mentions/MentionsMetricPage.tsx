@@ -29,7 +29,7 @@ import { usePeriod, type PeriodDays } from '@/lib/period';
 import { useExplorerChartHeight } from '@/lib/useExplorerChartHeight';
 import { SegSelect } from '@/components/metric/SegSelect';
 import { isMentionsMetricKey } from '@/panels/mentions/mentionsMetricKeys';
-import { AboutRow, MetricBackLink, MetricColumns, MetricDescriptor, WindowBarShell, RailSection } from '@/components/metric/shared';
+import { MetricBackLink, MetricColumns, MetricDescriptor, WindowBarShell, RailSection } from '@/components/metric/shared';
 
 type ChartKind = 'line' | 'bar';
 type CompareMode = 'off' | 'prev';
@@ -72,7 +72,6 @@ function MentionsMetricShell({
   backTo,
   term,
   descriptor,
-  about,
   comparison,
   children,
 }: {
@@ -97,13 +96,7 @@ function MentionsMetricShell({
         rail={
           <>
             <RailSection title="Сравнение">{comparison}</RailSection>
-            <RailSection title="О метрике">
-              <dl className="space-y-3 text-sm">
-                <AboutRow label="Как считается" text={about.formula} />
-                <AboutRow label="Что учитывается" text={about.included} />
-                <AboutRow label="Источник" text={about.source} />
-              </dl>
-            </RailSection>
+            {/* «О метрике» убран — техническая информация не для конечного пользователя (владелец). */}
             <Link
               to={backTo}
               className="inline-flex items-center gap-1 text-xs font-medium text-primary transition-colors hover:text-primary/80"
