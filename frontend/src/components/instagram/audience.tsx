@@ -1,11 +1,11 @@
 import { useRef, useState } from 'react';
 import { fmt } from '@/lib/format';
 import { ChartTooltip, type TooltipState } from '@/components/ChartTooltip';
+import { Breakdown } from '@/components/Breakdown';
 import { EmptyChart } from '@/components/instagram/shared';
 import { ChartSection } from '@/components/ChartWidget';
 import { RadialShare } from '@/components/RadialShare';
 import { WidgetGroup } from '@/components/widgets/WidgetGroup';
-import { breakdownVariants, reorderDefault } from '@/components/widgets/variants';
 import type { IgBreakdowns, IgOnline } from '@/api/schemas';
 import {
   aggregateOnline,
@@ -22,25 +22,40 @@ export function AudienceBlock({ breakdowns, followers }: { breakdowns: IgBreakdo
   // its top-N preview slice, the full page shows all.
   const ageItems = igAgeItems(breakdowns);
   const genderItems = igGenderItems(breakdowns);
-  const countryItems = igCountryItems(breakdowns).slice(0, 8);
-  const cityItems = igCityItems(breakdowns).slice(0, 8);
+  const allCountries = igCountryItems(breakdowns);
+  const allCities = igCityItems(breakdowns);
+  const countryItems = allCountries.slice(0, 8);
+  const cityItems = allCities.slice(0, 8);
 
   const covered = ageItems.reduce((acc, a) => acc + a.value, 0);
   const coverage = followers > 0 && covered > 0 ? covered / followers : 1;
+  // Плотные строки возраста: значение + доля от суммы бакетов, тихий одноцветный трек (без
+  // радужного мини-доната — «выглядит дёшево», владелец). Цвета категорий здесь не несут смысла.
+  const ageRows = ageItems.map(({ label, value }) => ({
+    label,
+    value,
+    display: covered > 0 ? `${fmt.num(value)} · ${((value / covered) * 100).toFixed(1)}%` : fmt.num(value),
+  }));
+  // Гео-строки: доля — от ПОЛНОГО рейтинга (не от показанной восьмёрки), значение компактом.
+  const geoRows = (all: typeof allCountries, shown: typeof allCountries) => {
+    const total = all.reduce((acc, i) => acc + i.value, 0);
+    return shown.map(({ label, value }) => ({
+      label,
+      value,
+      display: total > 0 ? `${fmt.short(value)} · ${((value / total) * 100).toFixed(1)}%` : fmt.short(value),
+    }));
+  };
+  const countryRows = geoRows(allCountries, countryItems);
+  const cityRows = geoRows(allCities, cityItems);
 
   return (
     <div className="space-y-6">
       {/* One WidgetGroup keeps the four demographic cards on the shared dashboard grid. Whole-card
           click drills to a dedicated /metrics/ig-* page instead of the generic ?detail= overlay. */}
       <WidgetGroup id="ig-audience" className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-6">
-        {ageItems.length > 0 ? (
-          // Возраст default = столбцы (упорядоченные бакеты читаются гистограммой).
-          <ChartSection title="Возраст" drillTo="/metrics/ig-age" variants={reorderDefault(breakdownVariants(ageItems), 'bar')} />
-        ) : (
-          <ChartSection title="Возраст" drillTo="/metrics/ig-age">
-            <EmptyChart />
-          </ChartSection>
-        )}
+        <ChartSection title="Возраст" drillTo="/metrics/ig-age">
+          {ageRows.length > 0 ? <Breakdown items={ageRows} /> : <EmptyChart />}
+        </ChartSection>
         {/* Полукольцо (выбор владельца) — та же форма, что «Пол» Метрики: фикс-набор долей целого;
             непокрытый демографией остаток кольцо честно дорисует из total приглушённым сегментом. */}
         {genderItems.length > 0 ? (
@@ -58,8 +73,14 @@ export function AudienceBlock({ breakdowns, followers }: { breakdowns: IgBreakdo
             <EmptyChart />
           </ChartSection>
         )}
-        <ChartSection title="Топ стран" drillTo="/metrics/ig-countries" variants={breakdownVariants(countryItems)} />
-        <ChartSection title="Топ городов" drillTo="/metrics/ig-cities" variants={breakdownVariants(cityItems)} />
+        {/* Гео — фикс-строки той же плотности, что «Возраст» (виз-переключатель с мини-донатом
+            убран — «выглядит дёшево», владелец): значение · доля от полного рейтинга. */}
+        <ChartSection title="Топ стран" drillTo="/metrics/ig-countries">
+          {countryRows.length > 0 ? <Breakdown items={countryRows} /> : <EmptyChart />}
+        </ChartSection>
+        <ChartSection title="Топ городов" drillTo="/metrics/ig-cities">
+          {cityRows.length > 0 ? <Breakdown items={cityRows} /> : <EmptyChart />}
+        </ChartSection>
       </WidgetGroup>
       {coverage < 0.98 && (
         <p className="px-1 text-2xs text-muted-foreground/70">

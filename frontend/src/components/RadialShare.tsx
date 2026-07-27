@@ -165,7 +165,9 @@ export function RadialShare({
   return (
     <div className={layout === 'row' ? 'flex h-full min-h-0 items-center gap-5' : 'flex h-full min-h-0 flex-col'}>
       {/* min-h держит кольцо читаемым независимо от числа строк легенды. */}
-      <div className={layout === 'row' ? 'relative h-full max-h-32 w-32 shrink-0' : 'relative min-h-[104px] flex-1'}>
+      {/* Кап высоты и в column-режиме: flex-1 без потолка раздувал кольцо на всю высоту высокой
+          карточки (IG «Пол» — гигантская дуга без пользы; владелец). Кольцо — модуль, не фон. */}
+      <div className={layout === 'row' ? 'relative h-full max-h-32 w-32 shrink-0' : 'relative mx-auto min-h-[104px] w-full max-w-52 flex-1 [max-height:10rem]'}>
         {/* aria-label вместо svg <title>: у <title> есть побочный нативный браузерный тултип —
             нестилизуемый прямоугольник с острыми углами (канон: только свои скруглённые читалки). */}
         <svg
