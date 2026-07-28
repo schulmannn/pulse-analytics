@@ -144,10 +144,13 @@ export function TopPosts({ variant = 'table' }: { variant?: 'table' | 'cards' } 
   return (
     <>
       {variant === 'cards' && (
+        // Фиксированные колонки (IG-парити, content.tsx): auto-fit СХЛОПЫВАЛ пустые треки, и при
+        // одной публикации в окне карточка растягивалась на всю ширину — крошечный телеграм-превью
+        // раздувался в размытого гиганта (владелец, 7д). С фикс-сеткой одиночная карточка честно
+        // занимает свою треть ряда.
         <div
           data-testid="tg-top-posts-cards"
-          className="hidden md:grid md:gap-6"
-          style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(240px, 100%), 1fr))' }}
+          className="hidden md:grid md:grid-cols-2 md:gap-6 lg:grid-cols-3"
         >
           {cardPosts.map((post, idx) => (
             <TopPostCard
@@ -374,10 +377,7 @@ function TopPostsSkeleton({ variant = 'table' }: { variant?: 'table' | 'cards' }
   return (
     <>
       {variant === 'cards' && (
-        <div
-          className="hidden md:grid md:gap-6"
-          style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(240px, 100%), 1fr))' }}
-        >
+        <div className="hidden md:grid md:grid-cols-2 md:gap-6 lg:grid-cols-3">
           {Array.from({ length: CARDS_LIMIT }).map((_, i) => (
             <div key={i} className="flex flex-col border-t border-border pt-3">
               <div className="mb-2 flex items-center justify-between">
