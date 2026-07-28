@@ -4,6 +4,7 @@ import { useYmGoals, useYmHourly, useYmSummary } from '@/api/queries';
 import { PillSelect } from '@/components/PillSelect';
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
 import { ChartCardBody } from '@/components/chartWidget/ChartCardBody';
+import { ChartTooltip, useHeatmapTip } from '@/components/ChartTooltip';
 import { Sparkline } from '@/components/Sparkline';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
@@ -229,8 +230,10 @@ export function YmOverview() {
 }
 
 /** Трафик по часам суток: доступная heatmap-сетка из 24 клеток (визиты по часу 0..23) + пик.
-    Насыщенность каждой клетки нормирована на максимум текущего окна; title/aria-label сохраняют
-    точные визиты и посетителей. Пустое окно — EmptyState, а не декоративная сетка нулей. */
+    Насыщенность каждой клетки нормирована на максимум текущего окна; aria-label сохраняет точные
+    визиты и посетителей, hover дублирует их канонным ChartTooltip (нативный HTML title убран —
+    нестилизуемый острый прямоугольник, вне канона скруглённых читалок). Пустое окно — EmptyState,
+    а не декоративная сетка нулей. */
 function YmHourlyCard({
   hourly,
   windowLabel,
@@ -240,6 +243,7 @@ function YmHourlyCard({
 }) {
   const padHour = (h: number): string => String(h).padStart(2, '0');
   const maxVisits = Math.max(0, ...(hourly.data?.rows ?? []).map((row) => row.visits));
+  const { wrapRef, tip } = useHeatmapTip();
   return (
     <ChartWidget id="ym-hourly" title="Трафик по часам" fixedSize="half" drillTo="/metrics/ym-hourly">
       {hourly.isPending ? (
@@ -271,6 +275,7 @@ function YmHourlyCard({
             </span>
           }
         >
+          <div ref={wrapRef} className="relative h-full">
           <div className="grid h-full grid-cols-12 content-center gap-x-1 gap-y-2">
             {hourly.data.rows.map((row) => {
               // Ноль — реальное отсутствие (канон п.8): час без визитов рисуется нейтральным
@@ -283,8 +288,8 @@ function YmHourlyCard({
                   key={row.hour}
                   role="img"
                   aria-label={title}
-                  title={title}
-                  className="min-w-0 text-center"
+                  data-heatmap-tip={title}
+                  className="min-w-0 cursor-crosshair text-center"
                 >
                   <div
                     className="h-8 rounded-sm transition-opacity dur-base ease-house"
@@ -299,6 +304,8 @@ function YmHourlyCard({
                 </div>
               );
             })}
+          </div>
+          <ChartTooltip tip={tip} />
           </div>
         </ChartCardBody>
       )}

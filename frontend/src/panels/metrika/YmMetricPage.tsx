@@ -15,6 +15,7 @@ import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { PinnedDayPanel } from '@/components/PinnedDayPanel';
 import { ChartSkeleton } from '@/components/ui/dataSkeleton';
+import { ChartTooltip, useHeatmapTip } from '@/components/ChartTooltip';
 import { Skeleton } from '@/components/ui/skeleton';
 import { fmt } from '@/lib/format';
 import { lttbDownsample } from '@/lib/downsample';
@@ -542,6 +543,7 @@ function YmHourlyPage() {
   const q = useYmHourly(window.period);
   const padHour = (h: number): string => String(h).padStart(2, '0');
   const maxVisits = Math.max(0, ...(q.data?.rows ?? []).map((row) => row.visits));
+  const { wrapRef, tip } = useHeatmapTip();
   const peakLabel = useMemo(
     () => (q.data?.peak_hour != null ? `Пик в ${padHour(q.data.peak_hour)}:00` : null),
     [q.data?.peak_hour],
@@ -580,26 +582,31 @@ function YmHourlyPage() {
               <span className="text-3xl font-medium leading-none tabular-nums tracking-tight">{fmt.short(q.data.visits_total)}</span>
               <span className="text-xs tracking-wide text-muted-foreground">визитов{peakLabel ? ` · ${peakLabel}` : ''}</span>
             </div>
-            <div className="grid grid-cols-8 gap-x-2 gap-y-3 sm:grid-cols-12">
-              {q.data.rows.map((row) => {
-                // Ноль — реальное отсутствие (канон п.8, зеркало карточки Обзора): нейтральный
-                // трек вместо самой бледной ступени брендовой шкалы.
-                const zero = row.visits === 0;
-                const opacity = zero ? 1 : maxVisits > 0 ? Math.max(0.1, row.visits / maxVisits) : 0.08;
-                const title = `${padHour(row.hour)}:00 — ${fmt.num(row.visits)} визитов, ${fmt.num(row.users)} посетителей`;
-                return (
-                  <div key={row.hour} role="img" aria-label={title} title={title} className="min-w-0 text-center">
-                    <div
-                      className="h-10 rounded-sm transition-opacity dur-base ease-house"
-                      style={{
-                        backgroundColor: zero ? 'hsl(var(--border) / 0.3)' : 'hsl(var(--brand-iris))',
-                        opacity,
-                      }}
-                    />
-                    <span className="mt-1 block text-2xs tabular-nums text-muted-foreground">{padHour(row.hour)}</span>
-                  </div>
-                );
-              })}
+            {/* hover — канонный ChartTooltip через useHeatmapTip (нативный HTML title убран:
+                нестилизуемый острый прямоугольник); aria-label ячеек несёт те же точные числа. */}
+            <div ref={wrapRef} className="relative">
+              <div className="grid grid-cols-8 gap-x-2 gap-y-3 sm:grid-cols-12">
+                {q.data.rows.map((row) => {
+                  // Ноль — реальное отсутствие (канон п.8, зеркало карточки Обзора): нейтральный
+                  // трек вместо самой бледной ступени брендовой шкалы.
+                  const zero = row.visits === 0;
+                  const opacity = zero ? 1 : maxVisits > 0 ? Math.max(0.1, row.visits / maxVisits) : 0.08;
+                  const title = `${padHour(row.hour)}:00 — ${fmt.num(row.visits)} визитов, ${fmt.num(row.users)} посетителей`;
+                  return (
+                    <div key={row.hour} role="img" aria-label={title} data-heatmap-tip={title} className="min-w-0 cursor-crosshair text-center">
+                      <div
+                        className="h-10 rounded-sm transition-opacity dur-base ease-house"
+                        style={{
+                          backgroundColor: zero ? 'hsl(var(--border) / 0.3)' : 'hsl(var(--brand-iris))',
+                          opacity,
+                        }}
+                      />
+                      <span className="mt-1 block text-2xs tabular-nums text-muted-foreground">{padHour(row.hour)}</span>
+                    </div>
+                  );
+                })}
+              </div>
+              <ChartTooltip tip={tip} />
             </div>
             <p className="text-2xs text-muted-foreground">Часы — в часовом поясе счётчика.</p>
           </div>

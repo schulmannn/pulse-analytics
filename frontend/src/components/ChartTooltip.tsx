@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 
 /** One line of a structured readout: a label (with an optional series-colour dot) and a value. */
 export type TooltipRow = { label: string; value: string; color?: string };
@@ -7,6 +7,56 @@ export type TooltipRow = { label: string; value: string; color?: string };
 export type TooltipState =
   | { x: number; y: number; text?: string; title?: string; rows?: TooltipRow[] }
   | null;
+
+/**
+ * Делегированный hover-читатель для DOM-хитмапов (не-SVG сетки ячеек): вешает pointer-обработчики
+ * на relative-обёртку (`wrapRef`), читает текст из ближайшего `[data-heatmap-tip]` и отдаёт
+ * TooltipState в координатах обёртки для {@link ChartTooltip}. Вынесен из TG-хитмапа активности
+ * (panels/Charts.tsx) — один канонный скруглённый тултип вместо нативного HTML `title`
+ * (нестилизуемый острый прямоугольник). Ячейки остаются пассивными (никаких фокус-целей на
+ * каждый час) — hover лишь дублирует то, что aria-label ячейки уже даёт AT. Тултип гасится над
+ * пустыми ячейками, при прокрутке и потере фокуса — mouseleave при колесе не срабатывает
+ * (канон BarChart/PieChart, дизайн-проход №3).
+ */
+export function useHeatmapTip(): { wrapRef: RefObject<HTMLDivElement | null>; tip: TooltipState } {
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const [tip, setTip] = useState<TooltipState>(null);
+  useEffect(() => {
+    const wrap = wrapRef.current;
+    if (!wrap) return;
+    const clear = () => setTip(null);
+    const move = (event: PointerEvent) => {
+      const target = event.target instanceof Element
+        ? event.target.closest<HTMLElement>('[data-heatmap-tip]')
+        : null;
+      const text = target && wrap.contains(target) ? target.dataset.heatmapTip : null;
+      if (!text) {
+        clear();
+        return;
+      }
+      const rect = wrap.getBoundingClientRect();
+      setTip({ x: event.clientX - rect.left, y: event.clientY - rect.top, text });
+    };
+    wrap.addEventListener('pointermove', move);
+    wrap.addEventListener('pointerleave', clear);
+    return () => {
+      wrap.removeEventListener('pointermove', move);
+      wrap.removeEventListener('pointerleave', clear);
+    };
+  }, []);
+  const hasTip = tip !== null;
+  useEffect(() => {
+    if (!hasTip) return;
+    const clear = () => setTip(null);
+    window.addEventListener('scroll', clear, true);
+    window.addEventListener('blur', clear);
+    return () => {
+      window.removeEventListener('scroll', clear, true);
+      window.removeEventListener('blur', clear);
+    };
+  }, [hasTip]);
+  return { wrapRef, tip };
+}
 
 /** Floating readout for the SVG charts — anchored to a point inside a `relative` chart
     container. Placed above the anchor and flipped below when it would clip the container's
