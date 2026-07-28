@@ -199,7 +199,10 @@ export function WidgetGroup({ id, className, children }: WidgetGroupProps) {
       el.style.transition = 'none';
       el.style.transform = `translate(${dx}px, ${dy}px)`;
       void el.offsetHeight; // commit the inverted position before playing
-      el.style.transition = 'transform var(--motion-glide) var(--ease-standard)';
+      // Пружина почти критического дампинга (волна B): FLIP-глайд получает «вес» — микро-овершут
+    // ~1-2%, не bounce. Двойное объявление = фолбэк для браузеров без linear().
+    el.style.transition = 'transform var(--motion-glide) var(--ease-standard)';
+    el.style.transitionTimingFunction = 'var(--ease-spring, var(--ease-standard))';
       el.style.transform = '';
       const glideToken = String(++glideSequence.current);
       el.dataset.gliding = glideToken;
@@ -422,7 +425,10 @@ export function WidgetGroup({ id, className, children }: WidgetGroupProps) {
     // Glide home from wherever the pointer let go (the live reorder already committed).
     el.dataset.gliding = '1';
     void el.offsetHeight;
+    // Пружина почти критического дампинга (волна B): FLIP-глайд получает «вес» — микро-овершут
+    // ~1-2%, не bounce. Двойное объявление = фолбэк для браузеров без linear().
     el.style.transition = 'transform var(--motion-glide) var(--ease-standard)';
+    el.style.transitionTimingFunction = 'var(--ease-spring, var(--ease-standard))';
     el.style.transform = '';
     el.addEventListener('transitionend', done);
     window.setTimeout(done, 400); // transitionend can be swallowed (tab switch) — belt & braces

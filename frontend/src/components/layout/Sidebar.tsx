@@ -1,6 +1,7 @@
 import { useEffect, useId, useState } from 'react';
 import type { ReactNode } from 'react';
 import { NavLink } from 'react-router-dom';
+import { isPlainLeftClick, useViewTransitionNavigate } from '@/lib/viewTransitionNavigate';
 import { openCommandPalette } from '@/lib/command-palette';
 import { PLAN_LABEL, usePlan } from '@/lib/plan';
 import { useMediaQuery } from '@/lib/useMediaQuery';
@@ -215,10 +216,19 @@ function SidebarNavGroup({ label, items, rail }: { label?: string; items: NavLin
     reserved for links/brand. NavLink emits aria-current="page" on the active row by itself.
     Rail: icon only, centered, with the label as a title tooltip + aria-label. */
 function NavItem({ to, label, icon, end, rail }: NavLinkDef & { rail?: boolean }) {
+  const vtNavigate = useViewTransitionNavigate();
   return (
     <NavLink
       to={to}
       end={end}
+      // View Transitions (волна B): перехват обычного левого клика → навигация внутри
+      // document.startViewTransition (plain BrowserRouter — RR-проп инертен; см.
+      // lib/viewTransitionNavigate). Модификаторы/средняя кнопка уходят браузеру как раньше.
+      onClick={(event) => {
+        if (!isPlainLeftClick(event)) return;
+        event.preventDefault();
+        vtNavigate(to);
+      }}
       title={rail ? label : undefined}
       aria-label={rail ? label : undefined}
       className={({ isActive }) =>

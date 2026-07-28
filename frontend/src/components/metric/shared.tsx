@@ -7,13 +7,21 @@
 
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
+import { isPlainLeftClick, useViewTransitionNavigate } from '@/lib/viewTransitionNavigate';
 
 /** Back-ссылка metric-страницы («← Обзор» / «← Instagram» / …): единый глиф (скрыт от SR),
     размер и hover-переход хлебной крошки — чтобы копии вертикалей не расходились. */
 export function MetricBackLink({ to, children }: { to: string; children: ReactNode }) {
+  // View Transitions (волна B): возврат метрик-страница → фид тем же кроссфейдом, что и drill.
+  const vtNavigate = useViewTransitionNavigate();
   return (
     <Link
       to={to}
+      onClick={(event) => {
+        if (!isPlainLeftClick(event)) return;
+        event.preventDefault();
+        vtNavigate(to);
+      }}
       className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
     >
       <span aria-hidden="true">←</span> {children}
