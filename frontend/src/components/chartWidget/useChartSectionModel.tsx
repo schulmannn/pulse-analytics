@@ -1,6 +1,7 @@
 import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useViewTransitionNavigate } from '@/lib/viewTransitionNavigate';
 import { WidgetTargetContext } from '@/components/ExpandableChart';
 import { ThrowInRender } from '@/components/WidgetErrorBoundary';
 import { GroupCtx, prefersReducedMotion } from '@/components/widgets/WidgetGroup';
@@ -52,6 +53,7 @@ export function useChartSectionModel(props: ChartSectionProps) {
   const [editOpen, setEditOpen] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
+  const vtNavigate = useViewTransitionNavigate();
   const sectionRef = useRef<HTMLElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const originRectRef = useRef<DOMRect | null>(null);
@@ -77,7 +79,9 @@ export function useChartSectionModel(props: ChartSectionProps) {
       // before navigating so 7/30/90/custom never snaps back to an unrelated old metric-page value.
       if (pagePeriod?.range) explorerPeriod.setRange(pagePeriod.range);
       else if (pagePeriod) explorerPeriod.setDays(pagePeriod.days);
-      navigate(drillTo);
+      // View Transitions (волна B): карточка → метрик-страница нативным кроссфейдом
+      // (ручной паттерн — plain BrowserRouter, см. lib/viewTransitionNavigate).
+      vtNavigate(drillTo);
       return;
     }
     originRectRef.current = sectionRef.current?.getBoundingClientRect() ?? null;
@@ -89,7 +93,7 @@ export function useChartSectionModel(props: ChartSectionProps) {
       },
       { replace: false },
     );
-  }, [drillTo, explorerPeriod, navigate, pagePeriod, setSearchParams, widgetId]);
+  }, [drillTo, explorerPeriod, vtNavigate, pagePeriod, setSearchParams, widgetId]);
   const closeExpand = useCallback(() => {
     // Закрытие (Escape/крестик/backdrop) чистит ?detail= из ЖИВОГО URL, а не из снапшота рендера:
     // react-router передаёт функциональному апдейтеру searchParams из замыкания ПОСЛЕДНЕГО рендера

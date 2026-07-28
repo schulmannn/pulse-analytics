@@ -1,6 +1,7 @@
 import { Suspense, lazy, useEffect } from 'react';
 import type { ComponentType, ReactNode } from 'react';
 import { installScrollEdgeFade } from '@/lib/scrollEdgeFade';
+import { RouteCommitSignal } from '@/lib/viewTransitionNavigate';
 import { Route, Routes } from 'react-router-dom';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { lazyWithReload } from '@/lib/lazyWithReload';
@@ -38,6 +39,8 @@ export default function App() {
   }, []);
   return (
     <ErrorBoundary>
+      {/* Сигнал коммита роута для View Transitions (см. lib/viewTransitionNavigate). */}
+      <RouteCommitSignal />
       <Routes>
         <Route path="login" element={<AuthSuspense><LoginPage /></AuthSuspense>} />
         <Route path="register" element={<AuthSuspense><RegisterPage /></AuthSuspense>} />

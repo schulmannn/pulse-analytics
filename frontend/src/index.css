@@ -1804,6 +1804,12 @@
        exit reads as hesitation. Same family, so enter and leave stay recognisably one system. */
     --ease-exit: cubic-bezier(0.7, 0, 0.8, 0.3);
     --ease-chart-morph: cubic-bezier(0.25, 0.1, 0.25, 1); /* Recharts `ease` update curve */
+    /* Пружина с ПОЧТИ критическим дампингом (овершут ~1-2% — «вес», не bounce; канон не терпит
+       отскоков). ТОЛЬКО для FLIP-glide реордера; у потребителей ОБЯЗАТЕЛЕН фолбэк двойным
+       объявлением (старый браузер отбрасывает linear() на парсинге):
+         transition-timing-function: var(--ease-standard);
+         transition-timing-function: var(--ease-spring); */
+    --ease-spring: linear(0, 0.0637, 0.2105, 0.3963 18.2%, 0.7538 29.4%, 0.9243, 1.0126 47%, 1.0329, 1.0298 58.8%, 1.0034 70.6%, 0.9982, 1);
     --motion-track: 100ms;    /* smoothing for a transform written per pointermove frame   */
     --motion-press: 140ms;    /* tactile press feedback (button dip)                       */
     --motion-fast: 200ms;     /* quick opacity / colour fades                              */
@@ -2002,6 +2008,25 @@
     [data-chart-tooltip] {
       animation: none;
       transition: none;
+    }
+  }
+
+  /* ── View Transitions (волна B, 2026-07-28) ────────────────────────────────────────────────
+     Нативный кроссфейд роут-переходов (RR viewTransition на сайдбаре/drill/back-link). Только
+     route-level: страница на время перехода заморожена снапшотом, поэтому НИКОГДА не оборачивать
+     внутристраничный стейт (морф графиков/FLIP живут своей жизнью). Держим коротко: RR исполняет
+     апдейт через flushSync. Без поддержки API — мгновенный переход, деградация канонична. */
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation-duration: var(--motion-base);
+    animation-timing-function: var(--ease-standard);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    ::view-transition-group(*),
+    ::view-transition-image-pair(*),
+    ::view-transition-old(*),
+    ::view-transition-new(*) {
+      animation: none !important;
     }
   }
 

@@ -36,9 +36,12 @@ const BUDGETS = {
   metricDispatcherCode: 270 * KB,
   genericMetricCode: 340 * KB,
   instagramMetricCode: 345 * KB,
-  moySkladMetricCode: 350 * KB,
+  // 2026-07-28: +1KB — View Transitions навигация (viewTransitionNavigate в замыкании
+  // useChartSectionModel; волна B). CI-сборка на ~0.3KB тяжелее локальной — с запасом.
+  moySkladMetricCode: 351 * KB,
   metrikaMetricCode: 325 * KB,
-  telegramMetricCode: 335 * KB,
+  // 2026-07-28: +1KB — та же волна B (см. выше).
+  telegramMetricCode: 336 * KB,
   // 2026-07-28: +1KB — sync-hover графиков (chartHoverSync в LineChart/Sparkline, волна D).
   mentionsMetricCode: 316 * KB,
 };
