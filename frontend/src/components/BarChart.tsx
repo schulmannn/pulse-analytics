@@ -8,6 +8,7 @@ import { axisLabelIndexSet } from '@/lib/chartLabels';
 import { ChartTooltip, type TooltipRow, type TooltipState } from '@/components/ChartTooltip';
 import { axisLabel, niceScale } from '@/components/LineChart';
 import { seriesMotionKey } from '@/lib/chartMotion';
+import { useMorphValues } from '@/lib/useMorphValues';
 import {
   activateChartControl,
   chartControlAriaLabel,
@@ -165,10 +166,11 @@ export function BarChart({
   const showGhost = hasGhost && !ghostHidden;
   const activeGhost = showGhost ? ghost : undefined;
 
-  // Stable data signature for the grow-in (see index.css «Chart motion»). Keyed on the SERIES content
-  // — primary values + the shown comparison — so the bars grow from the baseline again on a period /
-  // filter / compare change, but NOT on hover (separate state), tooltip movement or a ResizeObserver
-  // width change (width is absent). Same key → geometry updates in place (no remount, no replay).
+  // Stable data signature for the UPDATE morph (see index.css «Chart motion»). Keyed on the SERIES
+  // content — primary values + the shown comparison — so the bar silhouette FLOWS into the new shape
+  // on a period / filter / compare change (useMorphValues below), but NOT on hover (separate state),
+  // tooltip movement or a ResizeObserver width change (width is absent). The baseline grow is
+  // mount-only: the [data-chart-motion="grow"] group is no longer remounted per data change.
   const motionKey = seriesMotionKey(values, activeGhost);
 
   // ── Geometry + the static plot, memoized APART from hover ────────────────────────────────
@@ -259,8 +261,6 @@ export function BarChart({
           };
         })
       : [];
-    const columnTops = values.map((_, i) => stacked && ghostBars[i]?.h > 0 ? ghostBars[i].y : bars[i].y);
-
     // Under the bars: the zero baseline, then gridlines + tick labels (expanded only).
     // Базовая линия рисуется ВСЕГДА: нулевой столбец честно имеет высоту 0, и без неё окно, где
     // все значения нулевые (пустой фильтр, канал чужой сети), выглядело как «график не отрисовался»
@@ -287,34 +287,6 @@ export function BarChart({
             </g>
           );
         })}
-      </>
-    );
-
-    // The bars themselves — flat single-token fill; the render site wraps this cached layer in a
-    // group whose opacity carries the hover dim (0.85 idle → 0.55 while a column is hovered).
-    // Ghost-пара рисуется в том же слое (контекст тускнеет вместе с остальными колонками).
-    const barsLayer = (
-      <>
-        {bars.map((b, i) => stacked ? (
-          <path
-            key={`b${i}`}
-            data-chart-series="current"
-            d={stackSegmentPath(b, ghostBars[i]?.h <= 0, true)}
-            fill="hsl(var(--chart-role-primary))"
-          />
-        ) : (
-          <rect key={`b${i}`} data-chart-series="current" x={b.x} y={b.y} width={b.w} height={b.h} fill="hsl(var(--chart-role-primary))" rx={2} />
-        ))}
-        {ghostBars.map((b, i) => stacked ? (
-          <path
-            key={`gb${i}`}
-            data-chart-series="comparison"
-            d={stackSegmentPath(b, true, bars[i]?.h <= 0)}
-            fill="hsl(var(--chart-role-comparison))"
-          />
-        ) : (
-          <rect key={`gb${i}`} data-chart-series="comparison" x={b.x} y={b.y} width={b.w} height={b.h} fill="hsl(var(--chart-role-comparison) / 0.35)" rx={2} />
-        ))}
       </>
     );
 
@@ -394,8 +366,64 @@ export function BarChart({
       </>
     );
 
-    return { chartWidth, chartHeight, graphHeight, offsetX, itemWidth, bars, ghostBars, columnTops, stacked, barTop, barCenterX, underLayer, barsLayer, overLayer };
+    return { chartWidth, chartHeight, graphHeight, offsetX, itemWidth, bars, ghostBars, stacked, barTop, barCenterX, underLayer, overLayer };
   }, [values, labels, activeGhost, hasGhost, target, refLines, width, ctxHeight, height, expanded, comparisonStyle]);
+
+  // ── UPDATE morph: the silhouette flows into the new shape on a data change ────────────────
+  // Heights (the ONE dimension the data owns — x/width are layout) tween from the previously
+  // rendered silhouette to the target via useMorphValues('silhouette'): a 30→7 period swap
+  // proportionally maps every new column onto the old shape, so bars flow instead of replaying the
+  // baseline grow. All boxes below (bars layer, hover/pinned highlight, tooltip anchors) derive from
+  // the MORPHED heights, so nothing floats off a moving bar mid-flight.
+  const targetBarHeights = useMemo(() => (plot ? plot.bars.map((b) => b.h) : []), [plot]);
+  const targetGhostHeights = useMemo(() => (plot ? plot.ghostBars.map((b) => b.h) : []), [plot]);
+  const barHeights = useMorphValues(targetBarHeights, motionKey, 'silhouette');
+  const ghostHeights = useMorphValues(targetGhostHeights, motionKey, 'silhouette');
+  const morphed = useMemo(() => {
+    if (!plot) return null;
+    const bars = plot.bars.map((b, i) => {
+      const h = barHeights[i] ?? b.h;
+      return { ...b, h, y: plot.graphHeight - h };
+    });
+    const ghostBars = plot.ghostBars.map((b, i) => {
+      const h = ghostHeights[i] ?? b.h;
+      return { ...b, h, y: plot.stacked ? (bars[i]?.y ?? plot.graphHeight) - h : plot.graphHeight - h };
+    });
+    const columnTops = bars.map((b, i) => (plot.stacked && (ghostBars[i]?.h ?? 0) > 0 ? ghostBars[i].y : b.y));
+    return { bars, ghostBars, columnTops };
+  }, [plot, barHeights, ghostHeights]);
+
+  // The bars themselves — flat single-token fill; the render site wraps this layer in a group whose
+  // opacity carries the hover dim. Rebuilt per morph frame from the morphed boxes (≤ CHART_MAX_POINTS
+  // columns — cheap); hover still never rebuilds it (hover state is not an input here).
+  const barsLayer = useMemo(() => {
+    if (!plot || !morphed) return null;
+    const { bars, ghostBars } = morphed;
+    return (
+      <>
+        {bars.map((b, i) => plot.stacked ? (
+          <path
+            key={`b${i}`}
+            data-chart-series="current"
+            d={stackSegmentPath(b, (ghostBars[i]?.h ?? 0) <= 0, true)}
+            fill="hsl(var(--chart-role-primary))"
+          />
+        ) : (
+          <rect key={`b${i}`} data-chart-series="current" x={b.x} y={b.y} width={b.w} height={b.h} fill="hsl(var(--chart-role-primary))" rx={2} />
+        ))}
+        {ghostBars.map((b, i) => plot.stacked ? (
+          <path
+            key={`gb${i}`}
+            data-chart-series="comparison"
+            d={stackSegmentPath(b, true, (bars[i]?.h ?? 0) <= 0)}
+            fill="hsl(var(--chart-role-comparison))"
+          />
+        ) : (
+          <rect key={`gb${i}`} data-chart-series="comparison" x={b.x} y={b.y} width={b.w} height={b.h} fill="hsl(var(--chart-role-comparison) / 0.35)" rx={2} />
+        ))}
+      </>
+    );
+  }, [plot, morphed]);
 
   // Hover-only charts have no activation semantics: the SVG stays one passive named graphic and
   // pointer scrubbing is registered on its DOM node. Drillable charts use the real overlay button
@@ -427,11 +455,13 @@ export function BarChart({
     };
   }, [onPointClick, plot, values.length]);
 
-  if (!values || values.length === 0 || !plot) {
+  if (!values || values.length === 0 || !plot || !morphed) {
     return <EmptyState compact size="chart" title="Нет данных за период" />;
   }
 
-  const { chartWidth, chartHeight, graphHeight, offsetX, itemWidth, bars, ghostBars, columnTops, stacked, barTop, barCenterX } = plot;
+  const { chartWidth, chartHeight, graphHeight, offsetX, itemWidth, stacked, barTop, barCenterX } = plot;
+  // Hover/pinned highlight + tooltip anchors read the MORPHED boxes so they track a mid-flight bar.
+  const { bars, ghostBars, columnTops } = morphed;
   const n = values.length;
   const ariaMax = stacked && activeGhost
     ? Math.max(...values.map((value, i) => value + (activeGhost[i] ?? 0)))
@@ -543,17 +573,17 @@ export function BarChart({
             его нестилизуемым нативным тултипом с острыми углами поверх ChartTooltip. */}
         {plot.underLayer}
 
-        {/* Cached bar rects; hovering dims the whole group and the highlight below re-draws the
+        {/* Bar rects; hovering dims the whole group and the highlight below re-draws the
             hovered bar at full opacity — same reading as the old per-bar opacity swap, without
             re-rendering a rect per column per mousemove. transition-opacity only WHILE hovered so
             the un-dim on leave snaps (the full-opacity highlight unmounts in the same commit) — no
             below-idle dip on the just-hovered bar. */}
         <g className={hover ? 'transition-opacity' : undefined} opacity={hover ? 0.5 : appearance === 'comparison' ? 1 : 0.85}>
-          {/* Inner keyed group grows the bars from the baseline (fill-box scaleY) + fades on a data
-              change; the outer group keeps owning the hover dim. Stacked/grouped geometry is preserved
-              — the whole group scales as one from the shared baseline, so segments never gap. */}
-          <g key={motionKey} data-chart-motion="grow">
-            {plot.barsLayer}
+          {/* Inner group grows the bars from the baseline ONCE on mount (fill-box scaleY). Data
+              changes no longer remount it — the silhouette MORPHS via useMorphValues above, mirroring
+              the line charts' mount-reveal + update-morph split. */}
+          <g data-chart-motion="grow">
+            {barsLayer}
           </g>
         </g>
 

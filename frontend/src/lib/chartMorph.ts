@@ -64,6 +64,32 @@ export function resamplePoints(source: ReadonlyArray<MorphPoint>, length: number
 }
 
 /**
+ * Resample a plain numeric series (bar heights, radial values) to exactly `length` entries by the
+ * same proportional index mapping {@link resamplePoints} uses. This is the bar-silhouette matcher:
+ * a 30→7 period swap maps each target column onto its proportional position in the old silhouette,
+ * so the columns' heights flow from the OLD shape at their x instead of snapping. No gap semantics —
+ * absent bars are honest zeros, not nulls.
+ */
+export function resampleSeries(source: ReadonlyArray<number>, length: number): number[] {
+  if (length <= 0) return [];
+  const m = source.length;
+  if (m === 0) return Array.from({ length }, () => 0);
+  if (m === 1) return Array.from({ length }, () => source[0]);
+  const out: number[] = [];
+  for (let j = 0; j < length; j++) {
+    const pos = length === 1 ? 0 : (j / (length - 1)) * (m - 1);
+    const i = Math.floor(pos);
+    const f = pos - i;
+    if (i >= m - 1 || f === 0) {
+      out.push(source[i]);
+      continue;
+    }
+    out.push(lerp(source[i], source[i + 1], f));
+  }
+  return out;
+}
+
+/**
  * Interpolate two equal-length matched point arrays at progress `t ∈ [0,1]`. Per index: if EITHER
  * endpoint is a gap, the point takes its TARGET position at every `t` (honest — it appears at its
  * destination instead of sliding across a hole); otherwise x and y lerp from→to. Returns fresh

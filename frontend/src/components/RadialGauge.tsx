@@ -55,6 +55,9 @@ export function RadialGauge({
             strokeWidth={stroke}
           />
           {shown > 0 && (
+            // Дуга ПЕРЕТЕКАЕТ при смене значения (канон Chart motion): длина штриха — одно число,
+            // CSS-переход на stroke-dasharray дешевле RAF-морфа и гаснет под reduced-motion
+            // глобальной сетью. Появление (mount) честно снапает — переходить не с чего.
             <circle
               cx={size / 2}
               cy={size / 2}
@@ -64,6 +67,7 @@ export function RadialGauge({
               strokeWidth={stroke}
               strokeLinecap="round"
               strokeDasharray={`${dash} ${c}`}
+              className="transition-[stroke-dasharray] dur-reveal ease-house"
             />
           )}
         </svg>

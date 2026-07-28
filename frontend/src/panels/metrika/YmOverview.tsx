@@ -287,7 +287,7 @@ function YmHourlyCard({
                   className="min-w-0 text-center"
                 >
                   <div
-                    className="h-8 rounded-sm"
+                    className="h-8 rounded-sm transition-opacity dur-base ease-house"
                     style={{
                       backgroundColor: zero ? 'hsl(var(--border) / 0.3)' : 'hsl(var(--brand-iris))',
                       opacity,

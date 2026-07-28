@@ -1,6 +1,8 @@
-import { useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { columnIndex } from '@/lib/chartHover';
 import { axisLabelIndexSet } from '@/lib/chartLabels';
+import { seriesMotionKey } from '@/lib/chartMotion';
+import { useMorphValues } from '@/lib/useMorphValues';
 import { observeSize } from '@/lib/observeSize';
 import { ChartTooltip } from '@/components/ChartTooltip';
 import { EmptyState } from '@/components/EmptyState';
@@ -25,7 +27,6 @@ interface Hover {
     height an ancestor dictates — the fixed widget tile or the expand overlay — via
     ExpandedChartHeightContext (like BarChart), else the caller's `height`, else 120px. */
 export function DivergingBars({ values, labels, titles, height }: DivergingBarsProps) {
-  const titleId = useId();
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const [hover, setHover] = useState<Hover | null>(null);
@@ -81,28 +82,15 @@ export function DivergingBars({ values, labels, titles, height }: DivergingBarsP
     const gap = step * 0.3;
     const labelIndexes = axisLabelIndexSet(values.length, W, { minLabelPx: expanded ? 68 : 78, maxLabels: expanded ? 12 : 7 });
 
-    // Per-bar boxes — the cached rect layer below and the hover highlight both draw from these.
-    const bars = normalized.map((value, i) => {
+    // SIGNED extents (px up/down from the midline) — the one dimension the data owns; the morph
+    // below tweens these, and the boxes/opacity derive from the tweened sign+magnitude per frame.
+    // Invalid values are honest zeros (op 0 keeps them invisible even mid-flight).
+    const extents = normalized.map((value, i) => {
       const valid = Number.isFinite(values[i]);
       const bh = valid ? Math.max(1, (Math.abs(value) / maxAbs) * (mid - 4)) : 0;
-      return {
-        x: i * step + gap / 2,
-        y: value >= 0 ? mid - bh : mid,
-        w: barWidth,
-        h: bh,
-        fill: 'hsl(var(--chart-role-primary))',
-        // Down bars: same ink, one luminance step quieter — position already says the direction.
-        op: valid ? (value >= 0 ? 1 : 0.6) : 0,
-      };
+      return value >= 0 ? bh : -bh;
     });
-
-    const barsLayer = (
-      <>
-        {bars.map((b, i) => (
-          <rect key={i} x={b.x} y={b.y} width={b.w} height={b.h} fill={b.fill} fillOpacity={b.op} rx={1} />
-        ))}
-      </>
-    );
+    const valid = values.map((value) => Number.isFinite(value));
 
     const labelsLayer = hasLabels
       ? values.map((_, i) => {
@@ -123,8 +111,37 @@ export function DivergingBars({ values, labels, titles, height }: DivergingBarsP
         })
       : null;
 
-    return { W, h, mid, step, bars, barsLayer, labelsLayer, labelPad };
+    return { W, h, mid, step, barWidth, gap, extents, valid, labelsLayer, labelPad };
   }, [values, labels, width, ctxHeight, height, expanded]);
+
+  // ── UPDATE morph (canon BarChart): the signed silhouette flows into the new shape ─────────
+  // A sign flip mid-flight honestly passes through the midline (the bar shrinks to 0 and re-grows
+  // on the other side), switching to the quieter down-opacity at the crossing.
+  const motionKey = seriesMotionKey(values);
+  const targetExtents = useMemo(() => plot?.extents ?? [], [plot]);
+  const extents = useMorphValues(targetExtents, motionKey, 'silhouette');
+  const bars = useMemo(() => {
+    if (!plot) return null;
+    return extents.map((extent, i) => {
+      const bh = Math.abs(extent);
+      return {
+        x: i * plot.step + plot.gap / 2,
+        y: extent >= 0 ? plot.mid - bh : plot.mid,
+        w: plot.barWidth,
+        h: bh,
+        fill: 'hsl(var(--chart-role-primary))',
+        // Down bars: same ink, one luminance step quieter — position already says the direction.
+        op: plot.valid[i] ? (extent >= 0 ? 1 : 0.6) : 0,
+      };
+    });
+  }, [plot, extents]);
+  const barsLayer = useMemo(
+    () =>
+      bars?.map((b, i) => (
+        <rect key={i} x={b.x} y={b.y} width={b.w} height={b.h} fill={b.fill} fillOpacity={b.op} rx={1} />
+      )) ?? null,
+    [bars],
+  );
 
   // Pointer reading is supplementary to the graphic's full text summary. Listen on the passive
   // SVG node and keep it out of the keyboard order; there is no activation action to expose.
@@ -149,11 +166,11 @@ export function DivergingBars({ values, labels, titles, height }: DivergingBarsP
   }, [plot, values.length]);
 
   const hasFiniteValue = values?.some((value) => Number.isFinite(value)) ?? false;
-  if (!values || values.length === 0 || !hasFiniteValue || !plot) {
+  if (!values || values.length === 0 || !hasFiniteValue || !plot || !bars) {
     return <EmptyState compact size="chart" title="Нет данных" />;
   }
 
-  const { W, h, mid, bars, labelPad } = plot;
+  const { W, h, mid, labelPad } = plot;
   const n = values.length;
   const tipText = (i: number) =>
     titles?.[i] ?? (Number.isFinite(values[i]) ? `${values[i]}` : 'Нет данных');
@@ -175,21 +192,22 @@ export function DivergingBars({ values, labels, titles, height }: DivergingBarsP
       <svg
         ref={svgRef}
         role="img"
-        aria-labelledby={titleId}
+        aria-label={accessibleSummary}
         className="block w-full cursor-crosshair"
         height={h + labelPad}
         viewBox={`0 0 ${W} ${h + labelPad}`}
         preserveAspectRatio="none"
       >
-        <title id={titleId}>{accessibleSummary}</title>
+        {/* БЕЗ svg <title> — см. LineChart/BarChart: aria-label уже именует график, а <title>
+            дублировал его нестилизуемым нативным тултипом с острыми углами поверх ChartTooltip. */}
         <line x1={0} y1={mid} x2={W} y2={mid} stroke="hsl(var(--border))" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
 
-        {/* Cached bar rects; hovering dims the whole group and the overlay below re-draws the
-            hovered bar at full opacity — same reading as the old per-bar opacity swap.
+        {/* Bar rects (morphed above); hovering dims the whole group and the overlay below re-draws
+            the hovered bar at full opacity — same reading as the old per-bar opacity swap.
             transition-opacity only WHILE hovered so the un-dim on leave snaps back to idle (the
             full-opacity highlight unmounts in the same commit) — no below-idle dip. */}
         <g className={hover ? 'transition-opacity' : undefined} opacity={hover ? 0.55 : 1}>
-          {plot.barsLayer}
+          {barsLayer}
         </g>
 
         {plot.labelsLayer}

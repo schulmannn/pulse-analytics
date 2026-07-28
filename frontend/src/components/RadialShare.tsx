@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from 'react';
 import { fmt } from '@/lib/format';
+import { useMorphValues } from '@/lib/useMorphValues';
 
 /**
  * Составное полукольцо: доли фиксированного малого набора категорий плюс ИТОГ в центре.
@@ -115,10 +116,8 @@ export function RadialShare({
     .filter((segment) => segment.value > 0)
     .sort((a, b) => b.value - a.value || a.key.localeCompare(b.key));
   const shownSum = shown.reduce((acc, s) => acc + s.value, 0);
-  if (!shown.length || !Number.isFinite(shownSum) || shownSum <= 0) return null;
   const safeTotal = total != null && Number.isFinite(total) && total >= 0 ? total : null;
   const whole = Math.max(shownSum, safeTotal ?? 0);
-  if (!Number.isFinite(whole) || whole <= 0) return null;
 
   // Остаток — то, что сервер посчитал в итоге, но не отнёс ни к одной категории (Метрика скрывает
   // демографию при малой выборке). Рисуем его приглушённым, а не растягиваем сегменты на 100%.
@@ -127,9 +126,23 @@ export function RadialShare({
     ? [...shown, { key: '__rest', label: 'Не определено', value: rest }]
     : shown;
 
+  // UPDATE-морф дуг (канон Chart motion): на смене периода/фильтра значения сегментов ПЕРЕТЕКАЮТ
+  // (index-режим: новый сегмент честно растёт с нуля), и спаны пересчитываются по кадру от суммы
+  // текущих значений — кольцо всегда полно. Тексты (центр, легенда, aria) снапают на target: числа
+  // не «крутятся». Хук ДО ранних return-ов (React #310); сигнатура — ключи+значения состава.
+  const tweened = useMorphValues(
+    parts.map((p) => p.value),
+    parts.map((p) => `${p.key}:${p.value}`).join('|'),
+    'index',
+  );
+  if (!shown.length || !Number.isFinite(shownSum) || shownSum <= 0) return null;
+  if (!Number.isFinite(whole) || whole <= 0) return null;
+
+  const tweenedWhole = tweened.reduce((acc, v) => acc + v, 0);
   let cursor = 180;
   const arcs = parts.map((p, i) => {
-    const span = (p.value / whole) * 180;
+    const tv = tweened[i] ?? p.value;
+    const span = tweenedWhole > 0 ? (tv / tweenedWhole) * 180 : 0;
     const from = cursor;
     const to = cursor - span;
     cursor = to;

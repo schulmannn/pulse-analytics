@@ -4,6 +4,7 @@ import {
   easeChartMorph,
   interpolatePoints,
   resamplePoints,
+  resampleSeries,
   type MorphPoint,
 } from '@/lib/chartMorph';
 
@@ -66,6 +67,40 @@ describe('resamplePoints (proportional length matching — Recharts matchByIndex
   it('degenerate lengths are safe', () => {
     expect(resamplePoints([p(0, 0), p(1, 1)], 0)).toEqual([]);
     expect(resamplePoints([], 3)).toEqual([p(0, null), p(0, null), p(0, null)]);
+  });
+});
+
+describe('resampleSeries (bar-silhouette matcher — numeric, no gap semantics)', () => {
+  it('returns the same values when the target length equals the source length', () => {
+    expect(resampleSeries([3, 7, 5], 3)).toEqual([3, 7, 5]);
+  });
+
+  it('keeps the first and last values exact when up- or down-sampling', () => {
+    const up = resampleSeries([0, 10, 0], 5);
+    expect(up).toHaveLength(5);
+    expect(up[0]).toBe(0);
+    expect(up[4]).toBe(0);
+    // Midpoint slot lands exactly on the source apex.
+    expect(up[2]).toBe(10);
+    const down = resampleSeries([2, 4, 6, 8], 2);
+    expect(down).toEqual([2, 8]);
+  });
+
+  it('linearly interpolates in-between slots', () => {
+    // 2 source values over 3 slots: middle slot sits at pos 0.5 between 0 and 10.
+    expect(resampleSeries([0, 10], 3)).toEqual([0, 5, 10]);
+  });
+
+  it('handles empty, single-value and zero-length targets', () => {
+    expect(resampleSeries([], 3)).toEqual([0, 0, 0]);
+    expect(resampleSeries([4], 3)).toEqual([4, 4, 4]);
+    expect(resampleSeries([1, 2, 3], 0)).toEqual([]);
+  });
+
+  it('does not mutate the source', () => {
+    const src = [1, 2, 3];
+    resampleSeries(src, 7);
+    expect(src).toEqual([1, 2, 3]);
   });
 });
 

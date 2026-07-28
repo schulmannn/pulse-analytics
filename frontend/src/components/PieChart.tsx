@@ -2,6 +2,7 @@ import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { EmptyState } from '@/components/EmptyState';
 import { fmt } from '@/lib/format';
 import { observeSize } from '@/lib/observeSize';
+import { useMorphValues } from '@/lib/useMorphValues';
 import { ChartTooltip } from '@/components/ChartTooltip';
 import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
 
@@ -147,10 +148,6 @@ export function PieChart({ values, labels, titles, colors, height = 200 }: PieCh
     };
   }, [total]);
 
-  if (!values || values.length === 0 || total <= 0) {
-    return <EmptyState compact size="chart" title="Нет данных за период" />;
-  }
-
   // Keep the six largest slices (each a distinct hue: the item's own colour, else a --chart token
   // by rank), fold every remaining slice into one muted «Прочее» — collision-free by construction.
   type Slice = { label: string; value: number; color: string; title: string };
@@ -169,6 +166,20 @@ export function PieChart({ values, labels, titles, colors, height = 200 }: PieCh
     otherValue > 0
       ? [...big, { label: 'Прочее', value: otherValue, color: 'hsl(var(--chart-role-neutral))', title: `Прочее: ${fmt.num(otherValue)}` }]
       : big;
+
+  // UPDATE-морф долек (канон Chart motion): на смене периода/фильтра значения ПЕРЕТЕКАЮТ
+  // (index-режим — новая долька растёт с нуля), доли считаются по кадру от текущей суммы, так что
+  // кольцо всегда полно. Тексты (центр «всего», легенда, тултип) снапают на target. Хук ДО раннего
+  // return (React #310); сигнатура — метки+значения состава.
+  const tweened = useMorphValues(
+    slices.map((s) => s.value),
+    slices.map((s) => `${s.label}:${s.value}`).join('|'),
+    'index',
+  );
+
+  if (!values || values.length === 0 || total <= 0) {
+    return <EmptyState compact size="chart" title="Нет данных за период" />;
+  }
 
   const chartHeight = ctxHeight ?? height;
   // In a FIXED tile (ctxHeight set) the donut sits LEFT and the legend RIGHT so nothing scrolls
@@ -195,11 +206,12 @@ export function PieChart({ values, labels, titles, colors, height = 200 }: PieCh
   const rOuter = size / 2 - 4;
   const rInner = rOuter * DONUT_RATIO;
 
-  // Cumulative fractions per slice.
+  // Cumulative fractions per slice — from the TWEENED values so the wedges flow; text stays target.
+  const tweenedTotal = tweened.reduce((sum, v) => sum + v, 0) || total;
   let acc = 0;
-  const arcs = slices.map((s) => {
+  const arcs = slices.map((s, i) => {
     const from = acc;
-    acc += s.value / total;
+    acc += (tweened[i] ?? s.value) / tweenedTotal;
     return { ...s, from, to: acc, mid: (from + acc) / 2 };
   });
 
