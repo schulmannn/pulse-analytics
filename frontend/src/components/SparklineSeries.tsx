@@ -61,7 +61,7 @@ function PoleDot({ p, size, stroke }: { p: MorphPoint; size: number; stroke: str
       strokeWidth={size}
       strokeLinecap="round"
       vectorEffect="non-scaling-stroke"
-      aria-hidden="true"
+      focusable="false"
     />
   );
 }
