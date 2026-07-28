@@ -27,9 +27,15 @@ interface SparklineSeriesProps {
   strokeWidth: number;
   area: boolean;
   gradientId: string;
+  /** Полюса линии (канон LineChart): начало — полая точка, конец — сплошная. Рисуются из
+      ТЕКУЩЕГО КАДРА морфа, чтобы скользить вместе с линией (в HTML-оверлее родителя они прыгали
+      в целевое место при смене периода — владелец). viewBox растянут (preserveAspectRatio=none),
+      поэтому это не <circle> (стал бы эллипсом), а линия нулевой длины с round-cap и
+      non-scaling-stroke — идеально круглая точка в экранных px при любом растяжении. */
+  poles?: boolean;
 }
 
-type SparkPaths = { line: string; area: string };
+type SparkPaths = { line: string; area: string; points: ReadonlyArray<MorphPoint> };
 
 // Sparkline area closes to the viewBox floor and back to the left edge — identical to sparkAreaPath,
 // so a settled morph frame is byte-identical to the static render.
@@ -41,7 +47,23 @@ function buildSparkPaths(points: ReadonlyArray<MorphPoint>): SparkPaths {
     points.map((p) => ({ x: p.x, y: (p.y ?? 0) as number })),
     1,
   );
-  return { line, area: line ? `${line}${AREA_CLOSE}` : '' };
+  return { line, area: line ? `${line}${AREA_CLOSE}` : '', points };
+}
+
+/** Круглая точка в растянутом viewBox: линия нулевой длины + round-cap + non-scaling-stroke.
+    `size` — диаметр в ЭКРАННЫХ px (это strokeWidth, а он non-scaling). */
+function PoleDot({ p, size, stroke }: { p: MorphPoint; size: number; stroke: string }) {
+  return (
+    <path
+      d={`M ${p.x} ${p.y} h 0.0001`}
+      fill="none"
+      stroke={stroke}
+      strokeWidth={size}
+      strokeLinecap="round"
+      vectorEffect="non-scaling-stroke"
+      focusable="false"
+    />
+  );
 }
 
 function samePoints(a: ReadonlyArray<MorphPoint>, b: ReadonlyArray<MorphPoint>): boolean {
@@ -50,7 +72,7 @@ function samePoints(a: ReadonlyArray<MorphPoint>, b: ReadonlyArray<MorphPoint>):
   return a.every((point, index) => point.x === b[index].x && point.y === b[index].y);
 }
 
-export function SparklineSeries({ points, signature, color, strokeWidth, area, gradientId }: SparklineSeriesProps) {
+export function SparklineSeries({ points, signature, color, strokeWidth, area, gradientId, poles = false }: SparklineSeriesProps) {
   // Idle / settled paths — recomputed only when the geometry object changes, never per frame. During
   // a morph we render `framePaths` instead.
   const targetPaths = useMemo<SparkPaths>(() => buildSparkPaths(points), [points]);
@@ -152,6 +174,8 @@ export function SparklineSeries({ points, signature, color, strokeWidth, area, g
   );
 
   const paths = framePaths ?? targetPaths;
+  const first = poles && paths.points.length > 0 ? paths.points[0] : null;
+  const last = poles && paths.points.length > 1 ? paths.points[paths.points.length - 1] : null;
 
   return (
     // One mount-only reveal fade (data-chart-motion="morph"); UPDATE morphs are the point
@@ -169,6 +193,20 @@ export function SparklineSeries({ points, signature, color, strokeWidth, area, g
           strokeLinecap="round"
           vectorEffect="non-scaling-stroke"
         />
+      )}
+      {/* Полюса: начало — полая (цветное кольцо поверх фоновой сердцевины), конец — сплошная
+          с фоновым гало (отделяется от линии). Едут с текущим кадром морфа. */}
+      {first && first.y != null && (
+        <g data-chart-pole="first">
+          <PoleDot p={first} size={7} stroke={color} />
+          <PoleDot p={first} size={4} stroke="hsl(var(--background))" />
+        </g>
+      )}
+      {last && last.y != null && (
+        <g data-chart-pole="last">
+          <PoleDot p={last} size={9} stroke="hsl(var(--background))" />
+          <PoleDot p={last} size={6} stroke={color} />
+        </g>
       )}
     </g>
   );
