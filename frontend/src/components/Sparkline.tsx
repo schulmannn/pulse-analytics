@@ -113,8 +113,6 @@ export function Sparkline({
   const xPct = (i: number) => ((PAD + i * step) / VBW) * 100;
   const yPct = (v: number) => ((VBH - PAD - ((v - min) / range) * (VBH - PAD * 2)) / VBH) * 100;
 
-  const maxIdx = values.indexOf(max);
-  const lastIdx = n - 1;
   const active = hover;
 
   // Read-out text: idle caption, or date · value · Δ-vs-previous-point while hovering.
@@ -129,22 +127,17 @@ export function Sparkline({
     readout = `${label ? `${label} · ` : ''}${formatValue(v)}${diffStr}`;
   }
 
-  const dot = (i: number, kind: 'peak' | 'last' | 'active') => (
+  // Ховер-точка — единственный HTML-оверлей: полюса (начало/конец) рисует SparklineSeries из
+  // текущего кадра морфа, а peak-маркер посередине линии убран целиком (владелец: «точки по
+  // середине графика — лишнее; точки начала и конца нужно анимировать»).
+  const dot = (i: number) => (
     <span
       aria-hidden="true"
-      className={cn(
-        'pointer-events-none absolute -translate-x-1/2 -translate-y-1/2 rounded-full',
-        kind === 'active'
-          ? 'h-2.5 w-2.5 ring-2 ring-background'
-          : kind === 'peak'
-            ? 'h-1.5 w-1.5 ring-2 ring-background'
-            : 'h-1.5 w-1.5',
-      )}
+      className="pointer-events-none absolute h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full ring-2 ring-background"
       style={{
         left: `${xPct(i)}%`,
         top: `${yPct(values[i])}%`,
-        background: kind === 'peak' ? 'transparent' : color,
-        boxShadow: kind === 'peak' ? `inset 0 0 0 1.5px ${color}` : undefined,
+        background: color,
       }}
     />
   );
@@ -197,6 +190,7 @@ export function Sparkline({
             strokeWidth={strokeWidth}
             area={area}
             gradientId={gradientId}
+            poles={interactive}
           />
         </svg>
 
@@ -210,9 +204,7 @@ export function Sparkline({
                 style={{ left: `${xPct(active)}%` }}
               />
             )}
-            {maxIdx !== lastIdx && active !== maxIdx && dot(maxIdx, 'peak')}
-            {active !== lastIdx && dot(lastIdx, 'last')}
-            {active != null && dot(active, 'active')}
+            {active != null && dot(active)}
           </>
         )}
       </div>

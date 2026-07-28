@@ -331,12 +331,9 @@ export function LineChart({
     });
 
     // Маркер «сейчас» — последняя РЕАЛЬНАЯ точка: хвостовая дыра не должна вешать его в пустоту.
+    // Сами ПОЛЮСА (первая полая + последняя сплошная точки) рисует MorphingSeries из текущего
+    // кадра морфа; здесь lastReal остаётся только для markExtremes-подписей ниже.
     const lastReal = real[real.length - 1];
-    const lastPt = { x: points[lastReal.i].x, y: yFor(lastReal.v) };
-    // Начало серии — ПОЛАЯ точка (steep): полюса линии размечены парой «прокол → сплошная»,
-    // взгляд сразу считывает направление чтения. Тоже первая РЕАЛЬНАЯ точка.
-    const firstReal = real[0];
-    const firstPt = { x: points[firstReal.i].x, y: yFor(firstReal.v) };
 
     // Линия и заливка — СЕГМЕНТАМИ по непрерывным run'ам реальных точек: дыра = честный разрыв,
     // интерполяция «через пропуск» нарисовала бы данные, которых не было.
@@ -512,16 +509,9 @@ export function LineChart({
           ) : null;
         })}
 
-        {/* Полюса линии (steep): начало — полая точка, конец — сплошной маркер «сейчас».
-            Оба стоят на РЕАЛЬНЫХ точках: краевые дыры маркеров не получают. Полюса — часть
-            дефолтного стиля карточек; rich-хосты (Rhea/comparison) их прячут, кривая при этом
-            одинаково сглажена в обоих режимах. */}
-        {!richStyle && (
-          <>
-            <circle cx={firstPt.x} cy={firstPt.y} r="3.5" fill="hsl(var(--background))" stroke="hsl(var(--chart-role-primary))" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
-            <circle cx={lastPt.x} cy={lastPt.y} r="4" fill="hsl(var(--chart-role-primary))" stroke="hsl(var(--background))" strokeWidth="2" vectorEffect="non-scaling-stroke" />
-          </>
-        )}
+        {/* Полюса линии (первая полая + последняя сплошная точки) переехали в MorphingSeries:
+            они рисуются из ТЕКУЩЕГО КАДРА морфа и скользят вместе с линией — в статичном слое
+            они прыгали в целевое место, пока линия ещё перетекала (владелец). */}
 
         {/* Max / last value labels (markExtremes) — bare tabular text, no boxes */}
         {extremes.map((e) => (
@@ -761,6 +751,7 @@ export function LineChart({
           comparisonGradientId={comparisonGradientId}
           comparison={comparison}
           richStyle={richStyle}
+          poles={!richStyle}
         />
         {plot.staticOver}
 

@@ -31,10 +31,14 @@ interface MorphingSeriesProps {
   comparison: boolean;
   /** Rich hosts (rhea/comparison) use a softer 2px primary stroke vs the 2.5px default. */
   richStyle: boolean;
+  /** Полюса линии (steep): начало — полая точка, конец — сплошной маркер «сейчас». Рисуются
+      ЗДЕСЬ, из текущего КАДРА морфа, а не из статичного слоя — иначе при смене периода точки
+      прыгали в целевое место, пока линия ещё перетекала (владелец). */
+  poles?: boolean;
 }
 
 type SeriesPaths = { line: string; area: string };
-type FramePaths = { primary: SeriesPaths; ghost: SeriesPaths | null };
+type FramePaths = { primary: SeriesPaths; ghost: SeriesPaths | null; primaryPoints: MorphPoint[] };
 
 function samePoints(a: ReadonlyArray<MorphPoint> | null, b: ReadonlyArray<MorphPoint> | null): boolean {
   if (a === b) return true;
@@ -53,6 +57,7 @@ export function MorphingSeries({
   comparisonGradientId,
   comparison,
   richStyle,
+  poles = false,
 }: MorphingSeriesProps) {
   // Idle / settled paths — recomputed only when the geometry object changes (a data swap or a
   // resize), never per frame. During a morph we render `framePaths` instead.
@@ -60,6 +65,7 @@ export function MorphingSeries({
     () => ({
       primary: buildSeriesPaths(geom.primary, geom.baseY),
       ghost: geom.ghost ? buildSeriesPaths(geom.ghost, geom.baseY) : null,
+      primaryPoints: geom.primary,
     }),
     [geom],
   );
@@ -110,6 +116,7 @@ export function MorphingSeries({
     setFramePaths({
       primary: buildSeriesPaths(curP, target.baseY),
       ghost: curG ? buildSeriesPaths(curG, target.baseY) : null,
+      primaryPoints: curP,
     });
     if (t < 1) {
       rafRef.current = requestAnimationFrame(() => tickRef.current());
@@ -173,6 +180,7 @@ export function MorphingSeries({
     setFramePaths({
       primary: buildSeriesPaths(fromP, geom.baseY),
       ghost: fromG ? buildSeriesPaths(fromG, geom.baseY) : null,
+      primaryPoints: fromP,
     });
     if (rafRef.current == null) rafRef.current = requestAnimationFrame(() => tickRef.current());
   }, [geom, signature]);
@@ -188,6 +196,11 @@ export function MorphingSeries({
 
   const paths = framePaths ?? targetPaths;
   const ghost = paths.ghost;
+  // Полюса — первая и последняя РЕАЛЬНЫЕ точки ТЕКУЩЕГО кадра (дыры полюсов не получают):
+  // во время морфа они скользят вместе с линией, в покое byte-идентичны прежнему статичному слою.
+  const realPts = poles ? paths.primaryPoints.filter((p) => p.y != null) : [];
+  const firstPt = realPts.length > 0 ? realPts[0] : null;
+  const lastPt = realPts.length > 0 ? realPts[realPts.length - 1] : null;
 
   return (
     // One mount-only reveal fade (data-chart-motion="morph"); UPDATE morphs are the point
@@ -229,6 +242,14 @@ export function MorphingSeries({
           strokeLinecap="round"
           vectorEffect="non-scaling-stroke"
         />
+      )}
+
+      {/* Полюса линии (steep): начало — полая точка, конец — сплошной маркер «сейчас». */}
+      {firstPt && firstPt.y != null && (
+        <circle data-chart-pole="first" cx={firstPt.x} cy={firstPt.y} r="3.5" fill="hsl(var(--background))" stroke="hsl(var(--chart-role-primary))" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+      )}
+      {lastPt && lastPt.y != null && (
+        <circle data-chart-pole="last" cx={lastPt.x} cy={lastPt.y} r="4" fill="hsl(var(--chart-role-primary))" stroke="hsl(var(--background))" strokeWidth="2" vectorEffect="non-scaling-stroke" />
       )}
     </g>
   );
