@@ -15,13 +15,15 @@ const SRC = fileURLToPath(new URL('..', import.meta.url));
 // Только литералы: имена событий в кодовой базе всегда строковые константы (переменных нет).
 const LISTENER_CALL = /\b(add|remove)EventListener\(\s*(['"])([^'"]+)\2/g;
 
-/** Графики с hover-тултипом: слушатели вешаются на время наведения и обязаны сниматься. */
+/** Графики с hover-тултипом: слушатели вешаются на время наведения и обязаны сниматься.
+    Хитмапы (TG-активность в panels/Charts, почасовые Метрики) делят useHeatmapTip —
+    контракт проверяется в его домашнем файле ChartTooltip.tsx. */
 const HOVER_CHARTS = [
   'components/LineChart.tsx',
   'components/BarChart.tsx',
   'components/PieChart.tsx',
   'components/DivergingBars.tsx',
-  'panels/Charts.tsx',
+  'components/ChartTooltip.tsx',
 ];
 
 function sourceFiles(dir: string): string[] {

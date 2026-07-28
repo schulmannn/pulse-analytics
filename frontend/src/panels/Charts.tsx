@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo } from 'react';
 import { useHistory, useVelocity, useTgFull } from '@/api/queries';
 import type { TgFull } from '@/api/schemas';
 import { lttbDownsample } from '@/lib/downsample';
 import { BarChart } from '@/components/BarChart';
 import { DivergingBars } from '@/components/DivergingBars';
 import { LineChart } from '@/components/LineChart';
-import { ChartTooltip, type TooltipState } from '@/components/ChartTooltip';
+import { ChartTooltip, useHeatmapTip } from '@/components/ChartTooltip';
 import { fmt, ruAxisLabel, pluralRu } from '@/lib/format';
 import { ChartSkeleton as DataChartSkeleton } from '@/components/ui/dataSkeleton';
 import { useWidgetPeriod } from '@/lib/period';
@@ -386,46 +386,10 @@ function HeatmapSurface({
   bestSlot: HeatmapBestSlot | null;
   hourRange: { from: number; to: number };
 }) {
-  const [tip, setTip] = useState<TooltipState>(null);
-  const wrapRef = useRef<HTMLDivElement>(null);
-  // Pointer hover is a visual enhancement on a passive chart. Native delegation keeps the
-  // heatmap's DOM semantics non-interactive while still clearing the tooltip over empty cells.
-  useEffect(() => {
-    const wrap = wrapRef.current;
-    if (!wrap) return;
-    const clear = () => setTip(null);
-    const move = (event: PointerEvent) => {
-      const target = event.target instanceof Element
-        ? event.target.closest<HTMLElement>('[data-heatmap-tip]')
-        : null;
-      const text = target && wrap.contains(target) ? target.dataset.heatmapTip : null;
-      if (!text) {
-        clear();
-        return;
-      }
-      const rect = wrap.getBoundingClientRect();
-      setTip({ x: event.clientX - rect.left, y: event.clientY - rect.top, text });
-    };
-    wrap.addEventListener('pointermove', move);
-    wrap.addEventListener('pointerleave', clear);
-    return () => {
-      wrap.removeEventListener('pointermove', move);
-      wrap.removeEventListener('pointerleave', clear);
-    };
-  }, []);
-  // Тултип не должен зависать при прокрутке/потере фокуса — mouseleave при колесе не срабатывает
-  // (канон BarChart/PieChart, дизайн-проход №3).
-  const hasTip = tip !== null;
-  useEffect(() => {
-    if (!hasTip) return;
-    const clear = () => setTip(null);
-    window.addEventListener('scroll', clear, true);
-    window.addEventListener('blur', clear);
-    return () => {
-      window.removeEventListener('scroll', clear, true);
-      window.removeEventListener('blur', clear);
-    };
-  }, [hasTip]);
+  // Делегированный hover-читатель [data-heatmap-tip] — вынесен в useHeatmapTip (общий с
+  // почасовыми хитмапами Метрики), поведение прежнее: пассивные ячейки, гашение над пустыми,
+  // при прокрутке и потере фокуса.
+  const { wrapRef, tip } = useHeatmapTip();
   // Видимые часы (сжатый диапазон из HeatmapBody). Подпись — «6:00», не голое «6»: на сжатом
   // 7д-окне колонок мало и цифры без «:00» читались как непонятные числа/даты (проход №3).
   // Плотность подписей — по ширине формата: «6:00» шире голой цифры, каждый час подписываем
