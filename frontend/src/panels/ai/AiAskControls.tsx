@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { LoaderDots } from '@/components/ui/loader';
 import { useChannels } from '@/api/queries';
 import {
   AI_PERIODS,
@@ -193,10 +194,8 @@ export function AiSendButton({
       className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-40 sm:h-9 sm:w-9"
     >
       {busy ? (
-        <svg viewBox="0 0 16 16" fill="none" className="h-4 w-4 animate-spin" aria-hidden="true">
-          <circle cx="8" cy="8" r="6" stroke="currentColor" strokeOpacity="0.35" strokeWidth="2" />
-          <path d="M14 8a6 6 0 0 0-6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-        </svg>
+        // Канон-лоадер (полировка 2026-07-28): стаггер-точки вместо вращающегося спиннера.
+        <LoaderDots />
       ) : (
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7" className="h-4 w-4" aria-hidden="true">
           <path d="M8 12.5v-9M4 7l4-3.5L12 7" strokeLinecap="round" strokeLinejoin="round" />

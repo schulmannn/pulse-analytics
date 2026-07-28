@@ -1,4 +1,5 @@
 import { useCallback, useMemo } from 'react';
+import { ValueSwap } from '@/components/ValueSwap';
 import { useTgFull, useTgGraphs } from '@/api/queries';
 import type { TgFull, TgGraphs } from '@/api/schemas';
 import { lttbDownsample } from '@/lib/downsample';
@@ -573,7 +574,9 @@ function TgAnalyticsSummary({ full }: { full: TgFull | undefined }) {
       {items.map((item) => (
         <div key={item.label} className="min-w-0">
           <div className="truncate text-2xs tracking-wide text-muted-foreground">{item.label}</div>
-          <div className="mt-1.5 text-2xl font-medium tabular-nums tracking-tight text-foreground">{item.value}</div>
+          <div className="mt-1.5 text-2xl font-medium tabular-nums tracking-tight text-foreground">
+            <ValueSwap swapKey={item.value}>{item.value}</ValueSwap>
+          </div>
           <div className="mt-1 truncate text-2xs text-muted-foreground" title={item.captionTitle}>{item.caption}</div>
         </div>
       ))}

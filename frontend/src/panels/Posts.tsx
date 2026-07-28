@@ -77,6 +77,8 @@ export function Posts() {
     >
       <TabsList
         aria-label="Раздел контента"
+        glider
+        gliderClassName="bg-primary/15"
         className="flex h-auto min-h-0 flex-wrap justify-start gap-1 border-0 bg-transparent p-0"
       >
         {([['posts', 'Публикации'], ['campaigns', 'Кампании']] as const).map(([key, label]) => (
@@ -85,7 +87,7 @@ export function Posts() {
             value={key}
             className={cn(
               'btn-pill px-3 py-1 text-xs font-medium transition-colors',
-              'bg-transparent text-muted-foreground hover:bg-muted/50 hover:text-foreground data-[state=active]:bg-primary/15 data-[state=active]:text-foreground',
+              'bg-transparent text-muted-foreground hover:bg-muted/50 hover:text-foreground data-[state=active]:bg-transparent data-[state=active]:text-foreground',
             )}
           >
             {label}

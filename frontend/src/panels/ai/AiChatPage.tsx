@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { LoaderDots } from '@/components/ui/loader';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useQueryClient } from '@tanstack/react-query';
@@ -600,12 +601,8 @@ function AiRichBlocks({ text }: { text: string }) {
 }
 
 function Spinner() {
-  return (
-    <svg viewBox="0 0 16 16" fill="none" className="h-3 w-3 animate-spin text-primary" aria-hidden="true">
-      <circle cx="8" cy="8" r="6" stroke="currentColor" strokeOpacity="0.25" strokeWidth="2" />
-      <path d="M14 8a6 6 0 0 0-6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-    </svg>
-  );
+  // Канон-лоадер (полировка 2026-07-28): стаггер-точки вместо вращающегося спиннера.
+  return <LoaderDots className="text-primary" />;
 }
 function CheckIcon() {
   return (

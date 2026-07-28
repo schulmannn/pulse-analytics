@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { DeltaPill } from '@/components/DeltaPill';
+import { ValueSwap } from '@/components/ValueSwap';
 import type { MetricDelta } from '@/lib/delta';
 
 /**
@@ -40,10 +41,10 @@ export function CompactStatHeadline({
           onClick={onDrill}
           className={`${numberClass} rounded text-left transition-colors hover:text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40`}
         >
-          {text}
+          <ValueSwap swapKey={text}>{text}</ValueSwap>
         </button>
       ) : (
-        <div className={numberClass}>{text}</div>
+        <div className={numberClass}><ValueSwap swapKey={text}>{text}</ValueSwap></div>
       )}
       {live ? <DeltaPill delta={delta} /> : null}
     </div>

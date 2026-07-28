@@ -223,6 +223,21 @@
   width: 100%;
   overflow-x: auto;
   overscroll-behavior-inline: contain;
+  /* Scroll-edge fade (полировка 2026-07-28): маска-подсказка «дальше есть контент». Ширины краёв
+     живут в --scroll-fade-l/r и ставятся ТОЛЬКО хуком useScrollEdgeFade по реальному скроллу;
+     без хука обе 0px → маска — no-op. Это mask видимости, а не декоративный градиент (канон). */
+  mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    black var(--scroll-fade-l, 0px),
+    black calc(100% - var(--scroll-fade-r, 0px)),
+    transparent 100%
+  );
+  /* ПЕЧАТЬ (ревью, high): inline --scroll-fade-* переживают window.print(), а в PDF скролла нет —
+     протухшая 20px-маска растворяла ПОСЛЕДНЮЮ КОЛОНКУ таблиц отчёта. В печати маска всегда прочь. */
+  @media print {
+    mask-image: none;
+  }
 }
 
 @utility data-table {
@@ -1924,6 +1939,59 @@
     animation: chart-fade-in var(--motion-fast) var(--ease-standard) both;
     transition: transform var(--motion-base) var(--ease-standard);
     will-change: transform;
+  }
+
+  /* ── Value swap (полировка 2026-07-28) ─────────────────────────────────────────────────────
+     Снап-кроссфейд чисел: значение меняется мгновенно (канон «числа снапают»), но обёртка мягко
+     проявляется через keyed-ремаунт (components/ValueSwap). Reduced-motion сеть глушит. */
+  @keyframes value-swap-in {
+    from {
+      opacity: 0;
+      transform: translateY(2px);
+    }
+  }
+  .value-swap {
+    animation: value-swap-in var(--motion-fast) var(--ease-standard);
+  }
+
+  /* ── Loader canon (полировка 2026-07-28) ───────────────────────────────────────────────────
+     ЕДИНАЯ индетерминантная загрузка: hairline-бар с бегающим сегментом + три стаггер-точки
+     (components/ui/loader). Один цвет, без градиентов/glow. Под reduced-motion остаётся статичная
+     приглушённая форма (сеть режет анимации до 0.01ms). */
+  @keyframes loader-sweep {
+    from {
+      transform: translateX(-100%);
+    }
+    to {
+      transform: translateX(400%);
+    }
+  }
+  .loader-bar::after {
+    content: '';
+    position: absolute;
+    inset-block: 0;
+    inline-size: 25%;
+    border-radius: inherit;
+    background: hsl(var(--chart-role-primary));
+    animation: loader-sweep 1.4s var(--ease-standard) infinite;
+  }
+  @keyframes loader-dot-pulse {
+    0%,
+    100% {
+      opacity: 0.25;
+    }
+    35% {
+      opacity: 1;
+    }
+  }
+  .loader-dots > span {
+    animation: loader-dot-pulse 1.2s var(--ease-standard) infinite;
+  }
+  .loader-dots > span:nth-child(2) {
+    animation-delay: 0.2s;
+  }
+  .loader-dots > span:nth-child(3) {
+    animation-delay: 0.4s;
   }
   @media (prefers-reduced-motion: reduce) {
     [data-chart-motion='reveal'],

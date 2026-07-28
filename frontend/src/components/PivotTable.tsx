@@ -36,7 +36,7 @@ export function PivotTable({ columns, rows, valueFmt }: PivotTableProps) {
       : { backgroundColor: `hsl(var(--chart-role-primary) / ${(0.06 + 0.42 * Math.min(v / globalMax, 1)).toFixed(3)})` };
 
   return (
-    <div data-pivot-table className="data-table-surface data-table-scroll">
+    <div data-pivot-table data-edge-fade-off className="data-table-surface data-table-scroll">
       <table className="data-table data-table--compact text-sm" style={{ minWidth: Math.max(columns.length * 76 + 112, 320) }}>
         <thead>
           <tr className="border-b border-border dark:border-white/6">
