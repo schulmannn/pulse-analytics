@@ -39,7 +39,8 @@ const BUDGETS = {
   moySkladMetricCode: 350 * KB,
   metrikaMetricCode: 325 * KB,
   telegramMetricCode: 335 * KB,
-  mentionsMetricCode: 315 * KB,
+  // 2026-07-28: +1KB — sync-hover графиков (chartHoverSync в LineChart/Sparkline, волна D).
+  mentionsMetricCode: 316 * KB,
 };
 
 const kb = (bytes) => (bytes / KB).toFixed(1);
