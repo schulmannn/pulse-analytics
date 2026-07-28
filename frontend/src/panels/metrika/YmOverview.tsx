@@ -5,6 +5,7 @@ import { PillSelect } from '@/components/PillSelect';
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
 import { ChartCardBody } from '@/components/chartWidget/ChartCardBody';
 import { ChartTooltip, useHeatmapTip } from '@/components/ChartTooltip';
+import { ChartHoverSyncProvider } from '@/lib/chartHoverSync';
 import { Sparkline } from '@/components/Sparkline';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
@@ -192,6 +193,8 @@ export function YmOverview() {
   const prev = previousPeriod != null ? previous.data : undefined;
 
   return (
+    // Синхронный hover (волна D): три дневных story-карточки делят одно окно и один форматтер дат.
+    <ChartHoverSyncProvider>
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-6">
       {metricCard('ym-visits', 'Визиты', 1, visits, prev?.visits.total)}
       {metricCard('ym-users', 'Посетители', 5, users, prev?.users.total, usersCaption)}
@@ -226,6 +229,7 @@ export function YmOverview() {
         </ChartWidget>
       ))}
     </div>
+    </ChartHoverSyncProvider>
   );
 }
 

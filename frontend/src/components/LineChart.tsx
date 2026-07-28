@@ -7,6 +7,7 @@ import { MorphingSeries, type MorphGeom } from '@/components/MorphingSeries';
 import type { MorphPoint } from '@/lib/chartMorph';
 import { detectAnomalies } from '@/lib/anomaly';
 import { nearestPointIndex } from '@/lib/chartHover';
+import { uniqueLabelIndex, useChartHoverSync } from '@/lib/chartHoverSync';
 import { axisLabelIndexes } from '@/lib/chartLabels';
 import { ChartTooltip, type TooltipRow, type TooltipState } from '@/components/ChartTooltip';
 import { ChartExpandedContext, ChartRefLinesContext, ExpandedChartHeightContext, WidgetTargetContext } from '@/components/ExpandableChart';
@@ -155,6 +156,28 @@ export function LineChart({
   // later keyboard focus discard coordinates left by an interrupted pointer gesture.
   const pointerDownRef = useRef(false);
   const [hover, setHover] = useState<Hover | null>(null);
+  // Синхронный hover страницы (Recharts syncId-паттерн): свой hover ПУБЛИКУЕТ подпись точки,
+  // чужой — рисует у нас crosshair той же даты. Один эффект на состоянии hover покрывает все
+  // источники (mousemove, клавиатура, фокус); cleanup гасит только СВОЮ публикацию.
+  const sync = useChartHoverSync();
+  const syncOwner = useId();
+  const publishedRef = useRef<string | null>(null);
+  const syncPublish = sync?.publish;
+  useEffect(() => {
+    if (!syncPublish) return;
+    const day = hover ? (labels?.[hover.i] ?? null) : null;
+    if (publishedRef.current !== day) {
+      publishedRef.current = day;
+      // Владельческая публикация: наш null не может затереть чужой живой hover (ревью).
+      syncPublish(day, syncOwner);
+    }
+  }, [hover, labels, syncPublish, syncOwner]);
+  useEffect(
+    () => () => {
+      if (syncPublish && publishedRef.current != null) syncPublish(null, syncOwner);
+    },
+    [syncPublish, syncOwner],
+  );
   // The comparison series can be toggled off via its legend chip (steep #9) — a decluttering
   // reading aid. Hidden, it also drops out of the y-domain below so the current series
   // reclaims the full height.
@@ -707,9 +730,15 @@ export function LineChart({
     setHover(null);
   };
 
-  const hovered = hover && hover.i < n ? points[hover.i] : null;
+  // Чужой hover той же даты (sync): рисуем crosshair/маркеры, но БЕЗ тултипа — тултип только у
+  // графика под курсором, иначе страница кричит. Приоритет у собственного hover. Совпадение —
+  // только ОДНОЗНАЧНОЕ (uniqueLabelIndex): дубль подписи на окнах >года честно молчит (ревью).
+  const followIdx =
+    !hover && sync?.day != null && labels ? uniqueLabelIndex(labels, sync.day) : -1;
+  const activeIdx = hover && hover.i < n ? hover.i : followIdx >= 0 && followIdx < n ? followIdx : null;
+  const hovered = activeIdx != null ? points[activeIdx] : null;
   // Ghost-точка под курсором: считаем локалом заранее — element-access в JSX TS не сужает.
-  const hoverGhostVal = hover && activeGhost ? activeGhost[hover.i] : null;
+  const hoverGhostVal = activeIdx != null && activeGhost ? activeGhost[activeIdx] : null;
   const hoverGhostY = hoverGhostVal != null ? yFor(hoverGhostVal) : null;
   // Пин на дыре: вертикаль остаётся (день-то выбран), solid-маркер — только у реальной точки.
   const pinnedPt = pinnedIndex != null && pinnedIndex >= 0 && pinnedIndex < n ? points[pinnedIndex] : null;
@@ -836,6 +865,21 @@ export function LineChart({
                 <circle data-chart-hover-marker cx={hovered.x} cy={hovered.y} r={rhea ? '3.5' : '4'} fill="hsl(var(--chart-role-selection))" stroke="hsl(var(--background))" strokeWidth={rhea ? '2' : '1.5'} vectorEffect="non-scaling-stroke" />
               </>
             )}
+            {/* Плашка даты на оси у crosshair (осевой режим; ресёрч 2026-07-28, приём Nivo):
+                mono = timestamp по канону. Поверх прореженных тиков — как «axis tooltip». */}
+            {hasXAxis && activeIdx != null && labels?.[activeIdx] && (() => {
+              const text = labels[activeIdx];
+              const halfW = (text.length * CHAR_W) / 2 + 7;
+              const cx = Math.min(Math.max(hovered.x, gutterW + halfW), W - halfW - 2);
+              return (
+                <g data-chart-axis-plate className="pointer-events-none">
+                  <rect x={cx - halfW} y={plotBottom + 5} width={halfW * 2} height={18} rx={4} fill="hsl(var(--popover))" stroke="hsl(var(--border))" strokeWidth="1" vectorEffect="non-scaling-stroke" />
+                  <text x={cx} y={h - 9} textAnchor="middle" className="select-none fill-foreground font-mono text-2xs tabular-nums">
+                    {text}
+                  </text>
+                </g>
+              );
+            })()}
           </>
         )}
       </svg>
@@ -924,7 +968,8 @@ export function LineChart({
       )}
 
       {/* Readout anchored to the snapped data point (not the cursor) so it stays inside the chart */}
-      <ChartTooltip tip={hovered ? buildTip(hover!.i) : null} appearance={appearance} />
+      {/* Тултип — ТОЛЬКО у собственного hover; sync-подсветка соседей живёт без читалки. */}
+      <ChartTooltip tip={hover && hover.i < n ? buildTip(hover.i) : null} appearance={appearance} />
     </div>
   );
 }

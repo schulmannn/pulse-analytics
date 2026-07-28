@@ -1,4 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { uniqueLabelIndex, useChartHoverSync } from '@/lib/chartHoverSync';
 import { seriesMotionKey } from '@/lib/chartMotion';
 import type { MorphPoint } from '@/lib/chartMorph';
 import { SparklineSeries } from '@/components/SparklineSeries';
@@ -72,6 +73,27 @@ export function Sparkline({
   const gradientId = `sl${useId().replace(/:/g, '')}`;
   const [hover, setHover] = useState<number | null>(null);
   const hoverSurfaceRef = useRef<HTMLDivElement>(null);
+  // Синхронный hover страницы (канон LineChart): свой hover публикует подпись точки, чужой —
+  // двигает нашу направляющую/точку/читалку на ту же дату. Только interactive-спарки.
+  const sync = useChartHoverSync();
+  const syncOwner = useId();
+  const publishedRef = useRef<string | null>(null);
+  const syncPublish = interactive ? sync?.publish : undefined;
+  useEffect(() => {
+    if (!syncPublish) return;
+    const day = hover != null ? (labels?.[hover] ?? null) : null;
+    if (publishedRef.current !== day) {
+      publishedRef.current = day;
+      // Владельческая публикация: наш null не затирает чужой живой hover (ревью).
+      syncPublish(day, syncOwner);
+    }
+  }, [hover, labels, syncPublish, syncOwner]);
+  useEffect(
+    () => () => {
+      if (syncPublish && publishedRef.current != null) syncPublish(null, syncOwner);
+    },
+    [syncPublish, syncOwner],
+  );
   // Target morph geometry, memoised on the VALUES reference: a hover rerender keeps the same `values`
   // ref (hover is local state — the parent doesn't re-render), so the morph layer sees a stable
   // `points` and never restarts; a period/filter swap hands down a new array → new geometry → morph.
@@ -113,7 +135,11 @@ export function Sparkline({
   const xPct = (i: number) => ((PAD + i * step) / VBW) * 100;
   const yPct = (v: number) => ((VBH - PAD - ((v - min) / range) * (VBH - PAD * 2)) / VBH) * 100;
 
-  const active = hover;
+  // Чужой sync-hover достаёт нам ту же дату; приоритет у собственного. Совпадение — только
+  // ОДНОЗНАЧНОЕ (uniqueLabelIndex): дубль подписи на окнах >года честно молчит (ревью).
+  const followIdx =
+    interactive && hover == null && sync?.day != null && labels ? uniqueLabelIndex(labels, sync.day) : -1;
+  const active = hover ?? (followIdx >= 0 && followIdx < n ? followIdx : null);
 
   // Read-out text: idle caption, or date · value · Δ-vs-previous-point while hovering.
   let readout = caption ?? '';

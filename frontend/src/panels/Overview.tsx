@@ -20,6 +20,7 @@ import { SubscriberHistoryChart, SubscriberHistoryBars } from '@/panels/Charts';
 import { TgViewsBody, TgAvgReachBody, TgReactionsBody, TgErBody, useTgKpis } from '@/panels/KpiGrid';
 import { NarrativeWeekBlock } from '@/panels/NarrativeWeek';
 import { TopPosts } from '@/panels/TopPosts';
+import { ChartHoverSyncProvider } from '@/lib/chartHoverSync';
 import { ChangeSummary } from '@/panels/ChangeSummary';
 
 /**
@@ -59,6 +60,9 @@ export function Overview() {
     <div>
       <HealthBanner source={channel?.source} />
 
+      {/* Синхронный hover (волна D): все карточки Обзора делят одно окно — наведение на дату в
+          одной подсвечивает её во всех (ключ = подпись точки, см. lib/chartHoverSync). */}
+      <ChartHoverSyncProvider>
       {/* Independent, source-honest widgets on the 6-col grid (the old aggregate «Показатели» hero
           split into five): row 1 = the two primary cards (Просмотры half + Подписчики half), row 2 =
           the three compact comparison cards (Ср. охват / Реакции / Вовлечённость, third each), each
@@ -117,6 +121,7 @@ export function Overview() {
           <TopPosts variant="cards" />
         </ChartSection>
       </WidgetGroup>
+      </ChartHoverSyncProvider>
     </div>
   );
 }

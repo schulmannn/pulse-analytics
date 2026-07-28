@@ -19,6 +19,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { CampaignFilterControl } from '@/components/campaigns/CampaignFilterControl';
 import { useTgCampaignScope, type TgCampaignScope } from '@/lib/campaignFilter';
+import { ChartHoverSyncProvider } from '@/lib/chartHoverSync';
 import { Hashtags } from '@/panels/Hashtags';
 import { ContentOpportunity } from '@/panels/ContentOpportunity';
 
@@ -94,6 +95,8 @@ export function Analytics() {
       </div>
 
       <TabsContent value="dynamics" className="mt-0">
+        {/* Синхронный hover (волна D): карточки динамики делят одно окно страницы. */}
+        <ChartHoverSyncProvider>
         <div className="space-y-10">
           {/* TgAnalytics derives its breakdowns in its OWN render (above every ChartSection), so a
               panel-level boundary keeps the app shell alive if a top-level derive throws; its
@@ -115,6 +118,7 @@ export function Analytics() {
             </WidgetErrorBoundary>
           </WidgetGroup>
         </div>
+        </ChartHoverSyncProvider>
       </TabsContent>
       <TabsContent value="content" className="mt-0">
         <FormatsTab />
