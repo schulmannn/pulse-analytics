@@ -1,5 +1,6 @@
 import autoAnimate from '@formkit/auto-animate';
 import { useEffect, useRef } from 'react';
+import { parseCssDurationMs } from '@/lib/chartMotionRuntime';
 
 /**
  * «Живой список» (волна C; ресёрч 2026-07-28): add/remove/move прямых детей контейнера
@@ -18,17 +19,17 @@ import { useEffect, useRef } from 'react';
  * divide-y живёт на родителе, а не на клоне.
  */
 
-// Числа, не var(): WAAPI-опции не читают CSS-переменные. Зеркала --motion-base/--ease-standard —
-// при смене токенов в index.css обновить и здесь (единственное место).
-const LIVE_LIST_DURATION_MS = 240;
-const LIVE_LIST_EASING = 'cubic-bezier(0.2, 0.7, 0.3, 1)';
-
 export function useLiveList<T extends HTMLElement>() {
   const ref = useRef<T | null>(null);
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const controller = autoAnimate(el, { duration: LIVE_LIST_DURATION_MS, easing: LIVE_LIST_EASING });
+    // WAAPI-опции не читают var() — токены СЧИТЫВАЮТСЯ из computed-стиля (канон readMorphMs):
+    // один источник правды в index.css, никаких зеркал-литералов.
+    const styles = getComputedStyle(document.documentElement);
+    const duration = parseCssDurationMs(styles.getPropertyValue('--motion-base')) ?? 240;
+    const easing = styles.getPropertyValue('--ease-standard').trim();
+    const controller = autoAnimate(el, easing ? { duration, easing } : { duration });
     return () => controller.disable();
   }, []);
   return ref;
