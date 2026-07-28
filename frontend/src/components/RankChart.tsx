@@ -62,16 +62,18 @@ export function RankChart({ items, valueFmt, compareLabel }: RankChartProps) {
             <div className="w-4 shrink-0 text-right text-2xs font-medium tabular-nums text-muted-foreground">{i + 1}</div>
             <div className="truncate text-sm text-foreground">{item.label}</div>
             <div className="min-w-0 space-y-1">
-              {/* Current period — accent fill over a hairline track, so a short bar still reads. */}
+              {/* Current period — accent fill over a hairline track, so a short bar still reads.
+                  Ширины ПЕРЕТЕКАЮТ при смене периода (канон Breakdown): key=label держит DOM-узел
+                  категории, так что переход честно идёт между её же значениями. */}
               <div className="h-4 overflow-hidden rounded-sm bg-muted/60">
                 <div
-                  className="h-full rounded-sm"
+                  className="h-full rounded-sm transition-[width] dur-base ease-house"
                   style={{ backgroundColor: 'hsl(var(--chart-role-primary) / 0.9)', width: `${Math.max((item.value / max) * 100, item.value > 0 ? 2 : 0)}%` }}
                 />
               </div>
               {showCompare && item.compare != null && (
                 <div
-                  className="h-2.5 rounded-sm"
+                  className="h-2.5 rounded-sm transition-[width] dur-base ease-house"
                   style={{ backgroundColor: 'hsl(var(--chart-role-comparison) / 0.4)', width: `${Math.max((item.compare / max) * 100, item.compare > 0 ? 2 : 0)}%` }}
                 />
               )}

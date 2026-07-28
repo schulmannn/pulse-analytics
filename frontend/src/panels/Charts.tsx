@@ -471,7 +471,7 @@ function HeatmapSurface({
                   return (
                     <div
                       key={hr}
-                      className={`relative h-4 cursor-crosshair rounded-sm${isBest ? ' border-2 border-verdant' : ''}`}
+                      className={`relative h-4 cursor-crosshair rounded-sm transition-opacity dur-base ease-house${isBest ? ' border-2 border-verdant' : ''}`}
                       data-heatmap-tip={titleText}
                       style={{
                         backgroundColor: 'hsl(var(--brand-iris))',

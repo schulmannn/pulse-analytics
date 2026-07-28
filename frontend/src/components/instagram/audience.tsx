@@ -156,7 +156,7 @@ export function BestTimeHeatmap({ online }: { online: IgOnline | undefined }) {
                     tabIndex={isBest ? 0 : -1}
                     aria-label={cellLabel}
                     aria-keyshortcuts="ArrowLeft ArrowRight ArrowUp ArrowDown"
-                    className={`flex h-4 cursor-pointer items-center justify-center rounded-sm p-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-primary${isBest ? ' border-2 border-verdant' : ' border-0'}`}
+                    className={`flex h-4 cursor-pointer items-center justify-center rounded-sm p-0 transition-[background-color] dur-base ease-house focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-primary${isBest ? ' border-2 border-verdant' : ' border-0'}`}
                     style={{
                       backgroundColor: `hsl(var(--brand-iris) / ${opacity})`,
                     }}

@@ -12,9 +12,11 @@ describe('DivergingBars accessibility contract', () => {
       />,
     );
 
+    // aria-label вместо svg <title> — канон LineChart/BarChart: у <title> есть побочный нативный
+    // браузерный тултип (нестилизуемый прямоугольник с острыми углами поверх ChartTooltip).
     expect(html).toContain('role="img"');
-    expect(html).toMatch(/aria-labelledby="[^"]+"/);
-    expect(html).toContain('<title');
+    expect(html).toMatch(/aria-label="[^"]+"/);
+    expect(html).not.toContain('<title');
     expect(html).toContain('Минимум -4; максимум 12.');
     expect(html).toContain('Последняя — 3 июл.: 0 (без изменений).');
   });
@@ -27,12 +29,12 @@ describe('DivergingBars accessibility contract', () => {
         labels={values.map((_, index) => `день ${index + 1}`)}
       />,
     );
-    const title = html.match(/<title[^>]*>([^<]+)<\/title>/)?.[1] ?? '';
+    const label = html.match(/aria-label="([^"]+)"/)?.[1] ?? '';
 
-    expect(title).toContain('Дельта по 365 точкам.');
-    expect(title).toContain('Минимум -180; максимум 184.');
-    expect(title).toContain('Последняя — день 365: 184.');
-    expect(title.length).toBeLessThan(220);
+    expect(label).toContain('Дельта по 365 точкам.');
+    expect(label).toContain('Минимум -180; максимум 184.');
+    expect(label).toContain('Последняя — день 365: 184.');
+    expect(label.length).toBeLessThan(220);
   });
 
   it('keeps non-finite samples out of SVG geometry and readouts', () => {
