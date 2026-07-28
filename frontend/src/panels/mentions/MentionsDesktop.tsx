@@ -35,6 +35,7 @@ import { ErrorState } from '@/components/ErrorState';
 import { Icon } from '@/components/nav-icons';
 import { Skeleton } from '@/components/ui/skeleton';
 import { MentionNotifyDialog } from '@/components/mentions/MentionNotifyDialog';
+import { useLiveList } from '@/lib/useLiveList';
 import { MentionRulesDialog } from '@/components/mentions/MentionRulesDialog';
 
 /**
@@ -606,6 +607,7 @@ function MentionsTable({
   hasArchive: boolean;
   hasPeriodRows: boolean;
 }) {
+  const liveListRef = useLiveList<HTMLTableSectionElement>();
   const toggleSort = (key: MentionsSort) =>
     onUpdate(
       key === filters.sort
@@ -695,7 +697,9 @@ function MentionsTable({
                 <th className="w-10 py-2.5 pl-3 pr-0 text-right"></th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-border">
+            {/* Живой список (волна C): сортировка/фильтры/приход fresh-упоминаний перестраивают
+                строки плавно (auto-animate на токенах, reduced-motion гасится библиотекой). */}
+            <tbody ref={liveListRef} className="divide-y divide-border">
               {rows.map((r, idx) => (
                 <tr key={`${r.channel_id ?? ''}-${r.msg_id ?? idx}`} className="group transition-colors hover:bg-hover-row">
                   <td className="py-2.5 pl-0 pr-3 align-top">

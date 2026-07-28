@@ -1,4 +1,5 @@
 import { useEffect, useId, useState } from 'react';
+import { LoaderDots } from '@/components/ui/loader';
 import { toast } from 'sonner';
 import {
   useMentionNotifyLink,
@@ -288,7 +289,14 @@ export function MentionNotifyDialog({ onClose }: { onClose: () => void }) {
                       disabled={testRun.isPending}
                       className="btn-pill border border-border bg-background px-3.5 py-1.5 text-xs font-medium text-foreground hover:bg-hover-row disabled:opacity-50"
                     >
-                      {testRun.isPending ? 'Прогоняем…' : 'Прислать сейчас'}
+                      {testRun.isPending ? (
+                        <span className="inline-flex items-center gap-1.5">
+                          <LoaderDots />
+                          Прогоняем…
+                        </span>
+                      ) : (
+                        'Прислать сейчас'
+                      )}
                     </button>
                   </div>
                   {testResult && <p role="status" className="text-xs text-verdant">{testResult}</p>}

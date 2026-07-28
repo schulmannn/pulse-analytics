@@ -31,6 +31,7 @@ import {
 import { fmt } from '@/lib/format';
 import { markdownToPlainText } from '@/lib/markdown';
 import { cn } from '@/lib/utils';
+import { useLiveList } from '@/lib/useLiveList';
 import type { CampaignPostsQuery } from '@/panels/campaign/campaignView';
 
 const postKey = (p: CampaignPost) => `${p.network}:${p.channel_id}:${p.post_ref}`;
@@ -131,6 +132,8 @@ function InteractivePostsTable({
   const [searchParams, setSearchParams] = useSearchParams();
   const tableState = useMemo(() => parseCampaignPostTableState(searchParams), [searchParams]);
   const { q: query, sort, order } = tableState;
+  // Живой список (волна C): сортировка/поиск/удаление перестраивают строки плавно.
+  const liveListRef = useLiveList<HTMLTableSectionElement>();
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   // Table view state (local, not URL-backed): which metric columns show + row density.
@@ -287,7 +290,7 @@ function InteractivePostsTable({
                     {canEdit && <th className="px-3 py-3 text-right last:pr-0"></th>}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-border">
+                <tbody ref={liveListRef} className="divide-y divide-border">
                   {rows.map((p) => {
                     const k = postKey(p);
                     const isOpen = k === openKey;
@@ -465,6 +468,8 @@ function SimplePostsTable({
   onRemovePost: (post: CampaignPost) => void;
   removePending: boolean;
 }) {
+  // Живой список (волна C): удаление поста из кампании схлопывает строку плавно.
+  const liveListRef = useLiveList<HTMLTableSectionElement>();
   return (
     <div className="data-table-surface data-table-scroll">
       <table className="data-table text-left text-sm" data-testid="campaign-posts-table">
@@ -480,7 +485,7 @@ function SimplePostsTable({
             {canEdit && <th className="px-3 py-3 text-right last:pr-0"></th>}
           </tr>
         </thead>
-        <tbody className="divide-y divide-border">
+        <tbody ref={liveListRef} className="divide-y divide-border">
           {posts.map((p) => (
             <tr key={postKey(p)} className="transition-colors hover:bg-hover-row">
               <SourceCell post={p} first />
