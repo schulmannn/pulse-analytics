@@ -1,6 +1,7 @@
 import { useContext, type ReactNode } from 'react';
 import { DeltaPill } from '@/components/DeltaPill';
 import { ChartExpandedContext } from '@/components/ExpandableChart';
+import { ValueSwap } from '@/components/ValueSwap';
 import type { MetricDelta } from '@/lib/delta';
 
 export interface ChartCardBodyProps {
@@ -47,6 +48,7 @@ export function ChartCardBody({
     <div className="flex h-full min-h-0 items-end gap-4" data-chart-card-body>
       <div className="flex shrink-0 flex-col items-start gap-1.5 pb-0.5" data-chart-card-headline>
         {label != null && <div className="text-xs tracking-wide text-muted-foreground">{label}</div>}
+        {/* ValueSwap: при смене периода число снапает (канон), обёртка мягко проявляется. */}
         {onValueClick ? (
           <button
             type="button"
@@ -55,10 +57,12 @@ export function ChartCardBody({
             onClick={onValueClick}
             className={`${numberClass} rounded text-left transition-colors hover:text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40`}
           >
-            {value}
+            <ValueSwap swapKey={value}>{value}</ValueSwap>
           </button>
         ) : (
-          <div className={numberClass}>{value}</div>
+          <div className={numberClass}>
+            <ValueSwap swapKey={value}>{value}</ValueSwap>
+          </div>
         )}
         <DeltaPill delta={delta} />
         {caption != null && <div className="text-2xs text-muted-foreground">{caption}</div>}

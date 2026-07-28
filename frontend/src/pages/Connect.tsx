@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
+import { LoaderDots } from '@/components/ui/loader';
 import { toast } from 'sonner';
 import { z } from 'zod';
 import QRCode from 'qrcode';
@@ -1788,7 +1789,8 @@ python collector/pulse_collector.py run      # дальше каждые 6 ч`}<
                 </>
               ) : (
                 <>
-                  <span aria-hidden="true" className="size-3 shrink-0 animate-pulse rounded-full bg-status-warn/70" />
+                  {/* Канон-лоадер (полировка 2026-07-28): стаггер-точки вместо одиночного пульса. */}
+                  <LoaderDots className="shrink-0 text-status-warn" />
                   <span>Ждём первый прогон агента… страница проверяет связь каждые 5 секунд.</span>
                 </>
               )}
@@ -1858,10 +1860,46 @@ function Code({ children }: { children: ReactNode }) {
 }
 
 function CodeBlock({ children }: { children: ReactNode }) {
+  // Copy-кнопка (полировка 2026-07-28, паттерн Kibo Snippet): команды коллектора копируются одним
+  // кликом вместо ручного выделения; иконка мягко подменяется галочкой через .value-swap.
+  const [copied, setCopied] = useState(false);
+  const text = typeof children === 'string' ? children : '';
+  const copy = () => {
+    if (!text) return;
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  };
   return (
-    <pre className="mt-2 overflow-x-auto rounded border border-border bg-muted px-3 py-2.5 font-mono text-xs leading-relaxed text-foreground">
-      {children}
-    </pre>
+    <div className="relative mt-2">
+      <pre className="overflow-x-auto rounded border border-border bg-muted px-3 py-2.5 pr-10 font-mono text-xs leading-relaxed text-foreground">
+        {children}
+      </pre>
+      {text && (
+        <button
+          type="button"
+          data-mobile-touch-target=""
+          aria-label={copied ? 'Скопировано' : 'Скопировать команды'}
+          title={copied ? 'Скопировано' : 'Скопировать'}
+          onClick={copy}
+          className="absolute right-1.5 top-1.5 inline-flex min-h-11 min-w-11 items-center justify-center rounded border border-border bg-background/80 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40 sm:min-h-0 sm:min-w-0 sm:size-7"
+        >
+          <span key={String(copied)} className="value-swap inline-flex">
+            {copied ? (
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="size-3.5 text-verdant" aria-hidden="true">
+                <path d="m5 13 4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            ) : (
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="size-3.5" aria-hidden="true">
+                <rect x="9" y="9" width="11" height="11" rx="2" />
+                <path d="M5 15V5a2 2 0 0 1 2-2h10" strokeLinecap="round" />
+              </svg>
+            )}
+          </span>
+        </button>
+      )}
+    </div>
   );
 }
 

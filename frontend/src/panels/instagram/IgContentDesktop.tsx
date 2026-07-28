@@ -549,6 +549,8 @@ export function IgContentDesktop({ ig }: { ig: IgData }) {
         <span className="text-2xs text-muted-foreground">Разборы</span>
         <TabsList
           aria-label="Дополнительные разборы контента"
+          glider
+          gliderClassName="bg-primary/15"
           className="flex h-auto min-h-0 flex-wrap justify-start gap-1 border-0 bg-transparent p-0"
         >
           {IG_SECONDARY_VIEWS.map((key) => (
@@ -557,7 +559,7 @@ export function IgContentDesktop({ ig }: { ig: IgData }) {
               value={key}
               className={cn(
                 'btn-pill px-3 py-1 text-xs font-medium transition-colors',
-                'bg-transparent text-muted-foreground hover:bg-muted/50 hover:text-foreground data-[state=active]:bg-primary/15 data-[state=active]:text-foreground',
+                'bg-transparent text-muted-foreground hover:bg-muted/50 hover:text-foreground data-[state=active]:bg-transparent data-[state=active]:text-foreground',
               )}
             >
               {SECONDARY_LABEL[key]}

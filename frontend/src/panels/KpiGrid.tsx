@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import type { ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { ValueSwap } from '@/components/ValueSwap';
 import { useChannels, useHistory, useTgFull } from '@/api/queries';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { lttbDownsample } from '@/lib/downsample';
@@ -404,8 +405,10 @@ function StatTile({ label, value, trend, deltaText, info, onDrill }: StatTilePro
       </div>
       <div className="mt-1.5 flex items-baseline gap-2">
         <DrillValue label={label} onDrill={onDrill} className="text-2xl font-medium tabular-nums tracking-tight">
-          {num}
-          {unit ? <span className="text-base font-medium text-muted-foreground">{unit}</span> : null}
+          <ValueSwap swapKey={value}>
+            {num}
+            {unit ? <span className="text-base font-medium text-muted-foreground">{unit}</span> : null}
+          </ValueSwap>
         </DrillValue>
         {deltaText ? (
           <span className={cn('shrink-0 text-xs font-medium tabular-nums', deltaColor)}>{deltaText}</span>

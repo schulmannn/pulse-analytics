@@ -1,5 +1,6 @@
-import { Suspense, lazy } from 'react';
+import { Suspense, lazy, useEffect } from 'react';
 import type { ComponentType, ReactNode } from 'react';
+import { installScrollEdgeFade } from '@/lib/scrollEdgeFade';
 import { Route, Routes } from 'react-router-dom';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { lazyWithReload } from '@/lib/lazyWithReload';
@@ -30,6 +31,11 @@ function lazyFrom<M extends Record<K, ComponentType<any>>, K extends keyof M & s
  * dashboard feeds, charts or navigation before they can become interactive.
  */
 export default function App() {
+  // Глобальный драйвер scroll-edge fade всех .data-table-scroll (см. lib/scrollEdgeFade):
+  // один вызов на всё приложение, идемпотентный.
+  useEffect(() => {
+    installScrollEdgeFade();
+  }, []);
   return (
     <ErrorBoundary>
       <Routes>
