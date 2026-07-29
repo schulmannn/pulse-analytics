@@ -23,8 +23,8 @@ export function WidgetPeriodPills({ days, onChange, hidden }: WidgetPeriodPillsP
   const customRange = pagePeriod?.range ?? null;
   const changePeriod = pagePeriod?.setDays ?? onChange;
 
-  // Presets ride the shared sliding-glider primitive. When a custom range is active the glider
-  // hides (value matches no preset) and the «Свой» indicator stands in — same custom-range display
+  // Presets ride the shared shadcn/Radix ToggleGroup. When a custom range is active every preset is
+  // off and the «Свой» indicator stands in — same custom-range display
   // semantics as before. Segments keep a ≥44px mobile hit area (compact desktop look returns at sm),
   // and this component owns the single public group so its dynamic label stays the sole labelled one.
   const touch = 'min-h-11 min-w-11 tabular-nums sm:min-h-0 sm:min-w-0';
@@ -35,7 +35,7 @@ export function WidgetPeriodPills({ days, onChange, hidden }: WidgetPeriodPillsP
       <legend className="sr-only">{groupLabel}</legend>
       {customRange && (
         <span
-          className={`inline-flex ${touch} items-center justify-center rounded-full bg-secondary px-2.5 py-1 text-2xs font-medium text-foreground`}
+          className={`inline-flex h-8 ${touch} items-center justify-center rounded-md border border-input bg-accent px-2.5 text-2xs font-medium text-accent-foreground`}
           title="Выбранный период страницы"
         >
           Свой

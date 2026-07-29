@@ -36,7 +36,7 @@ function DialogPeriodSegment({
   const pagePeriod = usePagePeriod();
   const following = prefs.period === undefined && pagePeriod != null;
   // «Стр.» (follow-page) + the presets are one mutually-exclusive set, so they ride the shared
-  // sliding-glider primitive.
+  // shared shadcn/Radix ToggleGroup primitive.
   const value = following ? 'follow' : String(prefs.period ?? DEFAULT_WIDGET_DAYS);
   const options = [
     ...(pagePeriod != null

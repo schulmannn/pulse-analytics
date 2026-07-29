@@ -11,14 +11,13 @@ const OPTIONS = [
 ];
 
 describe('SegmentedControl — keyboard contract', () => {
-  it('is one tab stop: only the selected segment is focusable', () => {
+  it('delegates the pressed state and roving-focus structure to Radix', () => {
     const html = markup(
       <SegmentedControl ariaLabel="Период" value="30" onChange={() => {}} options={OPTIONS} />,
     );
-    expect(html.match(/tabindex="0"/g) ?? []).toHaveLength(1);
-    expect(html.match(/tabindex="-1"/g) ?? []).toHaveLength(2);
-    // The focusable one is the selected one, so Tab lands on the current answer.
-    expect(html).toMatch(/data-segment-index="1"[^>]*aria-pressed="true"[^>]*tabindex="0"/);
+    expect(html).toContain('data-slot="toggle-group"');
+    expect(html).toMatch(/aria-pressed="true"[^>]*data-state="on"[^>]*data-slot="toggle-group-item"/);
+    expect(html).toMatch(/data-segment-index="1"[^>]*>30д<\/button>/);
   });
 
   it('announces a pattern where arrows are expected', () => {
@@ -32,14 +31,15 @@ describe('SegmentedControl — keyboard contract', () => {
     expect(html).toContain('aria-label="Тип графика"');
   });
 
-  it('keeps a track focusable when the value matches no segment', () => {
-    // Period tracks render with value='' once a custom range is picked (the glider hides). If the
-    // roving caret keyed off the selected value alone, nothing would be focusable and the control
-    // would drop out of the tab order entirely.
+  it('keeps the Radix roving-focus container when the value matches no segment', () => {
+    // Period tracks render with value='' once a custom range is picked. Radix keeps the group in
+    // its roving-focus model while every option correctly reports an unpressed state.
     const html = markup(
       <SegmentedControl ariaLabel="Период" value="" onChange={() => {}} options={OPTIONS} />,
     );
-    expect(html.match(/tabindex="0"/g) ?? []).toHaveLength(1);
+    expect(html).toContain('data-slot="toggle-group"');
+    expect(html.match(/aria-pressed="false"/g) ?? []).toHaveLength(OPTIONS.length);
+    expect(html).not.toContain('aria-pressed="true"');
   });
 
   it('leaves a disabled segment reachable and self-explaining', () => {

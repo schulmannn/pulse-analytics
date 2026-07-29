@@ -45,7 +45,8 @@ const BUDGETS = {
   // 2026-07-28: +1KB — та же волна B (см. выше).
   telegramMetricCode: 336 * KB,
   // 2026-07-28: +1KB — sync-hover графиков (chartHoverSync в LineChart/Sparkline, волна D).
-  mentionsMetricCode: 316 * KB,
+  // 2026-07-29: +1KB — официальный Radix ToggleGroup заменил самописную механику SegmentedControl.
+  mentionsMetricCode: 317 * KB,
 };
 
 const kb = (bytes) => (bytes / KB).toFixed(1);

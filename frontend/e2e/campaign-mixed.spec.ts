@@ -301,9 +301,12 @@ test.describe('Смешанная кампания TG+IG', () => {
     await expect(table).toHaveAttribute('data-density', 'compact');
     await densityTrack.getByRole('button', { name: 'Свободно', exact: true }).click();
     await expect(table).toHaveAttribute('data-density', 'spacious');
-    // Трек — один tab-stop: стрелки водят фокус, Space коммитит (роль toolbar это и обещает).
+    // Трек — один tab-stop: Radix ставит физический фокус после стрелки в следующей задаче,
+    // затем Space коммитит (роль toolbar это и обещает).
+    const balancedDensity = densityTrack.getByRole('button', { name: 'Обычно', exact: true });
     await densityTrack.getByRole('button', { name: 'Свободно', exact: true }).focus();
     await page.keyboard.press('ArrowLeft');
+    await expect(balancedDensity).toBeFocused();
     await page.keyboard.press('Space');
     await expect(table).toHaveAttribute('data-density', 'balanced');
 

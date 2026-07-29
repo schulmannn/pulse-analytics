@@ -6,7 +6,7 @@ test.beforeEach(async ({ page }, testInfo) => {
   await bootDemo(page, '/home', { theme: 'dark' });
 });
 
-test('full-screen widget editor uses labelled sliding segments for chart settings', async ({ page }) => {
+test('full-screen widget editor uses labelled shadcn toggle groups for chart settings', async ({ page }) => {
   const buildDefaults = page.getByRole('button', { name: 'Собрать по умолчанию' });
   if (await buildDefaults.isVisible()) await buildDefaults.click();
   await expandFirstWidget(page);
@@ -18,13 +18,12 @@ test('full-screen widget editor uses labelled sliding segments for chart setting
   await expect(editor.getByRole('toolbar', { name: 'Период', exact: true })).toBeVisible({ timeout: 20_000 });
 
   const period = editor.getByRole('toolbar', { name: 'Период', exact: true });
-  const periodIndicator = period.locator('[data-segmented-indicator]');
   await expect(period).toBeVisible();
-  await expect(periodIndicator).toHaveCount(1);
-  const before = await periodIndicator.evaluate((node) => getComputedStyle(node).transform);
+  await expect(period).toHaveAttribute('data-slot', 'toggle-group');
+  await expect(period.locator('[data-slot="toggle-group-item"]')).toHaveCount(4);
   await period.getByRole('button', { name: '7д', exact: true }).click();
   await expect(period.getByRole('button', { name: '7д', exact: true })).toHaveAttribute('aria-pressed', 'true');
-  await expect.poll(() => periodIndicator.evaluate((node) => getComputedStyle(node).transform)).not.toBe(before);
+  await expect(period.getByRole('button', { name: '30д', exact: true })).toHaveAttribute('aria-pressed', 'false');
 
   const viz = editor.getByRole('toolbar', { name: 'Визуализация', exact: true });
   await expect(viz).toBeVisible();
@@ -72,11 +71,14 @@ test('segmented controls have a real roving focus without changing selection on 
   await expect(segments.first()).toBeFocused();
   await page.keyboard.press('ArrowLeft');
   await expect(segments.last()).toBeFocused();
+  await page.keyboard.press('Space');
+  await expect(segments.last()).toHaveAttribute('aria-pressed', 'true');
+  await expect(segments.first()).toHaveAttribute('aria-pressed', 'false');
 
-  // A controlled value update that does not focus its target (DOM click()) must synchronize the
-  // single tab stop to the new selection; this is the external-value path, not onFocus bookkeeping.
+  // A controlled value update that does not focus its target (DOM click()) changes the pressed
+  // answer while Radix deliberately keeps the roving tab stop on the last keyboard-focused item.
   await segments.nth(1).evaluate((button: HTMLButtonElement) => button.click());
   await expect(segments.nth(1)).toHaveAttribute('aria-pressed', 'true');
-  await expect(segments.nth(1)).toHaveAttribute('tabindex', '0');
-  await expect(segments.nth(0)).toHaveAttribute('tabindex', '-1');
+  await expect(segments.nth(1)).toHaveAttribute('tabindex', '-1');
+  await expect(segments.last()).toHaveAttribute('tabindex', '0');
 });
