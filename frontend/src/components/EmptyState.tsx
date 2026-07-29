@@ -1,8 +1,16 @@
 import type { ReactNode } from 'react';
+import { Inbox } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { cn } from '@/lib/utils';
-import { Cartograph } from '@/components/Cartograph';
 import { Button } from '@/components/ui/button';
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from '@/components/ui/empty';
 
 /**
  * Reserve a coherent footprint so an in-card empty/error occupies the same band a loaded chart or
@@ -25,9 +33,9 @@ interface EmptyStateProps {
   reason?: ReactNode;
   /** Optional single call-to-action link. */
   action?: { to: string; label: string };
-  /** The «terra incognita» cartograph above the heading (default on; pass false for cramped rows). */
+  /** Show the shared muted icon tile above the heading (default on; pass false for cramped rows). */
   glyph?: boolean;
-  /** In-card variant: small glyph + heading (+ optional reason), no dashed box. */
+  /** In-card variant: small icon + heading (+ optional reason), no nested surface. */
   compact?: boolean;
   /** Reserve a chart-plot / table-rows footprint (compact only) instead of re-typing height classes. */
   size?: DataStateSize;
@@ -35,54 +43,60 @@ interface EmptyStateProps {
 }
 
 /**
- * The one empty-state pattern for the dashboard — a hairline dashed box on paper, NOT a Card.
- * The «terra incognita» cartograph (uncharted map + flag) + heading + optional reason + action
- * link. Use everywhere a panel has "no data yet" (keeps depth in hairlines, not card chrome —
- * see the index.css governance note).
+ * Product wrapper around the shadcn Empty primitive. Page-level states get one quiet, solid surface;
+ * compact states drop that surface because their card/table already supplies the chrome.
  */
 export function EmptyState({ title, reason, action, glyph = true, compact = false, size, className }: EmptyStateProps) {
-  if (compact) {
-    // In-card empties: the SAME line-art language as the page-level states, no dashed box (the card
-    // is already the frame) — replaces the bare grey strings (аудит). A bare title reads as one
-    // quiet line; a title + reason gain the two-step heading/subline hierarchy of the page states.
-    return (
-      <div
-        className={cn(
-          // tile-short:*: зеркало ErrorState.compact — в тесном фикс-тайле резерв и ритм ужимаются
-          // сами (CQ `tile`, index.css), пустое состояние не распирает 264px-слот.
-          'flex h-full min-h-24 flex-col items-center justify-center gap-1.5 py-4 text-center tile-short:min-h-0 tile-short:h-auto tile-short:flex-1 tile-short:gap-1 tile-short:py-2',
-          size && dataStateSizeClass[size],
-          className,
-        )}
-      >
-        {glyph ? <Cartograph name="terra" className="h-8 w-auto opacity-80 tile-short:h-6" /> : null}
-        <p className={cn('text-sm', reason ? 'font-medium text-foreground' : 'text-muted-foreground')}>{title}</p>
-        {reason ? <p className="mx-auto max-w-xs text-2xs text-muted-foreground">{reason}</p> : null}
-        {action ? (
-          <Button asChild size="sm" variant="outline" className="mt-1">
-            <Link to={action.to}>{action.label} →</Link>
-          </Button>
-        ) : null}
-      </div>
-    );
-  }
   return (
-    // tile-short:*: полный вариант в тесном фикс-тайле конвергирует к компактной иерархии
-    // (зеркало ErrorState) — рамка гаснет, ритм ужимается, ничего не клипается.
-    <div
+    <Empty
       className={cn(
-        'flex flex-col items-center rounded border border-dashed border-border bg-background px-4 py-8 text-center tile-short:flex-1 tile-short:min-h-0 tile-short:justify-center tile-short:gap-1 tile-short:rounded-none tile-short:border-0 tile-short:bg-transparent tile-short:px-3 tile-short:py-2',
+        compact
+          ? 'h-full min-h-24 gap-2 rounded-none border-0 bg-transparent px-3 py-4 md:p-4 tile-short:min-h-0 tile-short:h-auto tile-short:flex-1 tile-short:gap-0.5 tile-short:py-1.5'
+          : 'min-h-52 gap-4 border border-solid border-border/70 bg-muted/20 px-6 py-10 md:p-10 tile-short:flex-1 tile-short:min-h-0 tile-short:gap-1 tile-short:rounded-none tile-short:border-0 tile-short:bg-transparent tile-short:px-3 tile-short:py-2',
+        size && dataStateSizeClass[size],
         className,
       )}
     >
-      {glyph ? <Cartograph name="terra" className="mb-3 h-12 w-auto tile-short:mb-0 tile-short:h-6 tile-short:opacity-80" /> : null}
-      <p className="text-sm font-medium text-foreground">{title}</p>
-      {reason ? <p className="mx-auto mt-1 max-w-sm text-sm text-muted-foreground tile-short:mt-0 tile-short:max-w-xs tile-short:text-2xs tile-short:line-clamp-2">{reason}</p> : null}
+      <EmptyHeader className={cn(compact ? 'gap-1.5' : 'gap-2', 'tile-short:gap-0.5')}>
+        {glyph ? (
+          <EmptyMedia
+            variant="icon"
+            className={cn(
+              'mb-1 rounded-full bg-muted text-muted-foreground',
+              compact ? 'size-8 [&_svg]:size-4' : 'size-10 [&_svg]:size-5',
+              'tile-short:mb-0 tile-short:size-6 tile-short:[&_svg]:size-3.5',
+            )}
+          >
+            <Inbox aria-hidden="true" />
+          </EmptyMedia>
+        ) : null}
+        <EmptyTitle
+          className={cn(
+            'text-sm tracking-normal',
+            reason ? 'font-medium text-foreground' : 'font-normal text-muted-foreground',
+          )}
+        >
+          {title}
+        </EmptyTitle>
+        {reason ? (
+          <EmptyDescription
+            className={cn(
+              'max-w-sm',
+              compact && 'max-w-xs text-xs/relaxed',
+              'tile-short:max-w-xs tile-short:text-2xs tile-short:leading-tight tile-short:line-clamp-2',
+            )}
+          >
+            {reason}
+          </EmptyDescription>
+        ) : null}
+      </EmptyHeader>
       {action ? (
-        <Button asChild size="sm" className="mt-3 tile-short:mt-1">
-          <Link to={action.to}>{action.label} →</Link>
-        </Button>
+        <EmptyContent className={cn(compact ? 'gap-2' : 'gap-3', 'tile-short:gap-0.5')}>
+          <Button asChild size="sm" variant={compact ? 'outline' : 'default'}>
+            <Link to={action.to}>{action.label}</Link>
+          </Button>
+        </EmptyContent>
       ) : null}
-    </div>
+    </Empty>
   );
 }
