@@ -24,6 +24,7 @@ describe('parsePrefs', () => {
         },
       },
       widgetOrder: { overview: ['w2', 'w1'], home: [] },
+      savedFilters: { 'ms-channels:5': ['channel-a', 'channel-b'] },
       home: ['digest', 'custom:abc'],
       widgetConfigs: [{ id: 'cfg1', metricId: 'tg.views', viz: 'line', period: 30, size: 'half' }],
       futureTopKey: { survives: true },
@@ -48,6 +49,7 @@ describe('parsePrefs', () => {
         mixed: { color: 'bad', hidden: true, period: 'bad', futureWidgetKey: 'ok' },
       },
       widgetOrder: { overview: ['good', 7, 'mixed'], bad: 'not an array' },
+      savedFilters: { valid: ['channel-a', 7, 'channel-b'], bad: 'not an array' },
       home: ['digest', 9, 'history'],
       widgetConfigs: [
         { id: 'cfg1', metricId: 'tg.views', viz: 'line' },
@@ -63,6 +65,8 @@ describe('parsePrefs', () => {
     expect(parsed.widgets).not.toHaveProperty('bad');
     expect(jsonShape(parsed.widgetOrder)).toEqual({ overview: ['good', 'mixed'] });
     expect(parsed.widgetOrder).not.toHaveProperty('bad');
+    expect(jsonShape(parsed.savedFilters)).toEqual({ valid: ['channel-a', 'channel-b'] });
+    expect(parsed.savedFilters).not.toHaveProperty('bad');
     expect(parsed.home).toEqual(['digest', 'history']);
     expect(parsed.widgetConfigs).toEqual([{ id: 'cfg1', metricId: 'tg.views', viz: 'line' }]);
   });

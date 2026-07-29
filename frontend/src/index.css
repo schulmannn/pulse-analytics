@@ -2689,6 +2689,28 @@
   .starfield .shooting { display: none; }
 }
 
+/* Widget resize feedback: geometry still follows the pointer directly and snaps to the six-column
+   S/M/L grid. Only the card hairline/depth reacts while held; displaced neighbours keep the existing
+   near-critically-damped FLIP glide. No second RAF physics loop and no layout animation. */
+[data-widget-card] {
+  transition:
+    color var(--motion-fast) var(--ease-standard),
+    background-color var(--motion-fast) var(--ease-standard),
+    border-color var(--motion-fast) var(--ease-standard),
+    box-shadow var(--motion-fast) var(--ease-standard);
+}
+section[data-widget-resizing] [data-widget-card] {
+  border-color: hsl(var(--primary) / 0.42);
+  box-shadow:
+    0 14px 32px -28px hsl(0 0% 0% / 0.7),
+    0 0 0 1px hsl(var(--primary) / 0.08);
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-widget-card] {
+    transition-duration: 0.01ms;
+  }
+}
+
 /* Нарратив→виджет: ховер числа-ссылки в рассказе подсвечивает карточку ТОЙ ЖЕ метрики
    (section[data-drill-to] помечается data-narr-link из NarrativeProse). Значения зеркалят
    card-hover: hairline ярче + тинт-лифт через --card-tint-alpha (инлайн-градиент карточки

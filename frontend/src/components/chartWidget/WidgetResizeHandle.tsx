@@ -147,7 +147,7 @@ export function WidgetResizeHandle({
     >
       <span
         aria-hidden="true"
-        className="mb-0.5 mr-0.5 size-6 rounded-br-[14px] border-b-[5px] border-r-[5px] border-muted-foreground/65 transition-colors group-hover/resize:border-foreground/80 group-focus-visible/resize:border-primary group-data-[resizing]/resize:border-primary"
+        className="mb-0.5 mr-0.5 size-6 origin-bottom-right rounded-br-[14px] border-b-[5px] border-r-[5px] border-muted-foreground/65 transition-[border-color,transform] duration-(--motion-fast) group-hover/resize:border-foreground/80 group-focus-visible/resize:border-primary group-data-[resizing]/resize:scale-110 group-data-[resizing]/resize:border-primary"
       />
     </div>
   );

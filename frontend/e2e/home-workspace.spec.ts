@@ -209,6 +209,8 @@ test.describe('desktop /home workspace (dark, 1440)', () => {
     const cardBefore = await barCard.boundingBox();
     const handleBox = await barHandle.boundingBox();
     expect(cardBefore && handleBox).toBeTruthy();
+    const cardSurface = barCard.locator('[data-widget-card]');
+    const restingShadow = await cardSurface.evaluate((element) => getComputedStyle(element).boxShadow);
     await page.mouse.move(handleBox!.x + handleBox!.width / 2, handleBox!.y + handleBox!.height / 2);
     await page.mouse.down();
     await page.mouse.move(handleBox!.x + handleBox!.width / 2 + 220, handleBox!.y + handleBox!.height / 2, {
@@ -217,8 +219,12 @@ test.describe('desktop /home workspace (dark, 1440)', () => {
     const cardDuring = await barCard.boundingBox();
     expect(cardDuring!.width).toBeGreaterThan(cardBefore!.width + 150);
     await expect(barCard).toHaveAttribute('data-widget-resizing', '');
+    await expect.poll(() => cardSurface.evaluate((element) => getComputedStyle(element).boxShadow))
+      .not.toBe(restingShadow);
     await page.mouse.up();
     await expect(barCard).not.toHaveAttribute('data-widget-resizing', '');
+    await expect.poll(() => cardSurface.evaluate((element) => getComputedStyle(element).boxShadow))
+      .toBe(restingShadow);
     await expect(page).toHaveURL(/\/home$/);
     await expect(barCard).toHaveAttribute('data-widget-size', 'half');
     await expect(barHandle).toHaveAttribute('aria-valuetext', 'M');

@@ -1,4 +1,4 @@
-import { useContext, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useContext, useMemo, useRef, useState } from 'react';
 import { ShareTrack } from '@/components/ShareRows';
 import { useMsChannelSeries, useMsGeography, useMsSalesByChannel } from '@/api/queries';
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
@@ -13,7 +13,9 @@ import { ChartSkeleton, TableSkeleton } from '@/components/ui/dataSkeleton';
 import { fmt, pluralRu, smoothSvgPath } from '@/lib/format';
 import { usePagePeriod } from '@/lib/period';
 import { msPreviousPeriod, useMsPagePeriod, type MsPeriod } from '@/lib/msPeriod';
-import { MS_CHANNEL_SELECTION_LIMIT } from '@/lib/msMetricUrlState';
+import { useSelectedChannel } from '@/lib/channel-context';
+import { msChannelFilterKey, normalizeMsChannelFilter } from '@/lib/msChannelFilter';
+import { useSavedFilter } from '@/lib/widgetPrefsStore';
 import {
   buildMsChannelContributionItems,
   msChannelContributionCurrent,
@@ -47,6 +49,7 @@ import {
  */
 export function MsChannels() {
   const pp = usePagePeriod();
+  const { channelId } = useSelectedChannel();
   const period = useMsPagePeriod();
   const days = pp ? pp.days : 30;
   const windowLabel = pp?.range ? 'за выбранный период' : days === 0 ? 'за всё время' : `за ${days} дн.`;
@@ -57,6 +60,11 @@ export function MsChannels() {
   const channelOptions = useMemo(
     () => (channels.data?.rows ?? []).map((r) => ({ id: r.sales_channel_id, name: r.name ?? 'Канал без имени' })),
     [channels.data],
+  );
+  const savedFilter = useSavedFilter(msChannelFilterKey(channelId));
+  const selectedChannels = useMemo(
+    () => normalizeMsChannelFilter(savedFilter),
+    [savedFilter],
   );
 
   if (channels.isError) {
@@ -72,7 +80,12 @@ export function MsChannels() {
 
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-6">
-      <MsChannelDynamicsCard period={period} windowLabel={windowLabel} options={channelOptions} />
+      <MsChannelDynamicsCard
+        period={period}
+        windowLabel={windowLabel}
+        options={channelOptions}
+        selected={selectedChannels}
+      />
 
       <ChartWidget id="ms-channel-contribution" title="Что изменило результат" fixedSize="full" drillTo="/metrics/ms-sales-channels">
         {channels.isPending ? (
@@ -133,8 +146,6 @@ export type ChannelOption = { id: string; name: string };
 
 // Отдельные серии breakdown ограничены читаемым лимитом (steep: пёстрый частокол не читается).
 const MAX_BREAKDOWN_SERIES = 6;
-// Единый источник лимита выбора каналов — тот же, что применяет URL-парсер (bounded deep link).
-const MAX_SELECTED_CHANNELS = MS_CHANNEL_SELECTION_LIMIT;
 // Категориальная палитра канона (--chart-1..6, Okabe-Ito) — серия = идентичность, не оценка.
 const SERIES_COLORS = [1, 2, 3, 4, 5, 6].map((n) => `hsl(var(--chart-${n}))`);
 
@@ -143,35 +154,39 @@ function ListSkeleton({ rows }: { rows: number }) {
 }
 
 /**
- * «Выручка по каналу» — карточка с мультивыбором и разворотом в общий explorer. Держит metric/
- * view/selected СНАРУЖИ оверлея, чтобы свёрнутая карточка и развёрнутый режим делили одно
- * состояние; в explorer контролы прокидываются через shared `expand.extraControls`.
+ * «Выручка по каналу» — обзорная карточка с разворотом в общий explorer. Фильтр каналов намеренно
+ * не редактируется внутри карточки: она читает сохранённый source-scoped выбор полноэкранной
+ * страницы, а metric/view остаются быстрыми локальными переключателями представления.
  */
 function MsChannelDynamicsCard({
   period,
   windowLabel,
   options,
+  selected,
 }: {
   period: MsPeriod;
   windowLabel: string;
   options: ChannelOption[];
+  selected: string[];
 }) {
   const [metric, setMetric] = useState<Metric>('revenue');
   const [view, setView] = useState<View>('aggregate');
-  const [selected, setSelected] = useState<string[]>([]);
   const breakdown = view === 'breakdown';
+  const filterLabel = selected.length > 0 ? ` · ${selected.length} кан.` : '';
 
   return (
-    <ChartWidget id="ms-channel-series" title={`${METRIC_LABEL[metric]} по каналам ${windowLabel}`} fixedSize="full" drillTo="/metrics/ms-channels">
+    <ChartWidget
+      id="ms-channel-series"
+      title={`${METRIC_LABEL[metric]} по каналам ${windowLabel}${filterLabel}`}
+      fixedSize="full"
+      drillTo="/metrics/ms-channels"
+    >
       <div className="mb-3">
         <MsChannelControls
           metric={metric}
           onMetric={setMetric}
           view={view}
           onView={setView}
-          options={options}
-          selected={selected}
-          onSelected={setSelected}
         />
       </div>
       <MsChannelChart period={period} metric={metric} breakdown={breakdown} selected={selected} options={options} kind="line" />
@@ -179,25 +194,17 @@ function MsChannelDynamicsCard({
   );
 }
 
-/** MS-контролы (метрика · вид · каналы) — одни и те же в свёрнутой карточке и в explorer'е. */
+/** Быстрые MS-контролы представления. Фильтр данных живёт отдельно в fullscreen rail. */
 export function MsChannelControls({
   metric,
   onMetric,
   view,
   onView,
-  options,
-  selected,
-  onSelected,
-  inModal = false,
 }: {
   metric: Metric;
   onMetric: (m: Metric) => void;
   view: View;
   onView: (v: View) => void;
-  options: ChannelOption[];
-  selected: string[];
-  onSelected: (ids: string[]) => void;
-  inModal?: boolean;
 }) {
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -220,98 +227,6 @@ export function MsChannelControls({
           { value: 'breakdown', content: 'По каналам' },
         ]}
       />
-      <MsChannelPicker options={options} selected={selected} onChange={onSelected} inModal={inModal} />
-    </div>
-  );
-}
-
-/** Доступный мультивыбор каналов без сторонних зависимостей: триггер-пилюля + панель чекбоксов
-    (нативные inputs = доступность из коробки), Escape и клик-вне закрывают. Пусто = все каналы. */
-function MsChannelPicker({
-  options,
-  selected,
-  onChange,
-  inModal = false,
-}: {
-  options: ChannelOption[];
-  selected: string[];
-  onChange: (ids: string[]) => void;
-  inModal?: boolean;
-}) {
-  const [open, setOpen] = useState(false);
-  const wrapRef = useRef<HTMLDivElement>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const panelId = useId();
-  const label = selected.length === 0 ? 'Все каналы' : `Каналы: ${selected.length}`;
-
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: PointerEvent) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setOpen(false);
-        triggerRef.current?.focus();
-      }
-    };
-    document.addEventListener('pointerdown', onDown);
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('pointerdown', onDown);
-      document.removeEventListener('keydown', onKey);
-    };
-  }, [open]);
-
-  const toggle = (id: string) => {
-    if (selected.includes(id)) onChange(selected.filter((s) => s !== id));
-    else if (selected.length < MAX_SELECTED_CHANNELS) onChange([...selected, id]);
-  };
-
-  return (
-    <div ref={wrapRef} className="relative">
-      <button
-        ref={triggerRef}
-        type="button"
-        aria-expanded={open}
-        aria-controls={panelId}
-        onClick={() => setOpen((v) => !v)}
-        disabled={options.length === 0}
-        className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs text-foreground transition-colors hover:border-ink3/40 disabled:opacity-50"
-      >
-        <span className="truncate">{label}</span>
-        <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" className="size-3.5 text-muted-foreground">
-          <path d="m4 6 4 4 4-4" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      </button>
-      {open && (
-        <fieldset
-          id={panelId}
-          className={`absolute left-0 top-full m-0 mt-1 max-h-64 min-w-0 w-64 overflow-y-auto rounded-xl border border-border bg-popover p-1.5 shadow-[0_12px_32px_-16px_rgba(0,0,0,0.6)] ${inModal ? 'z-modal-popover' : 'z-popover'}`}
-        >
-          <legend className="sr-only">Каналы продаж</legend>
-          <div className="flex items-center justify-between px-1.5 pb-1.5">
-            <span className="text-2xs text-muted-foreground">{selected.length} из {MAX_SELECTED_CHANNELS}</span>
-            {selected.length > 0 && (
-              <button type="button" onClick={() => onChange([])} className="text-2xs text-primary hover:underline">
-                Сбросить
-              </button>
-            )}
-          </div>
-          {options.map((o) => (
-            <label key={o.id} className="flex cursor-pointer items-center gap-2 rounded-lg px-1.5 py-1.5 text-xs text-foreground hover:bg-foreground/6">
-              <input
-                type="checkbox"
-                checked={selected.includes(o.id)}
-                disabled={!selected.includes(o.id) && selected.length >= MAX_SELECTED_CHANNELS}
-                onChange={() => toggle(o.id)}
-                className="size-3.5 accent-[hsl(var(--primary))] disabled:opacity-50"
-              />
-              <span className="min-w-0 truncate">{o.name}</span>
-            </label>
-          ))}
-        </fieldset>
-      )}
     </div>
   );
 }

@@ -64,6 +64,7 @@ function normalizeWidgetOrderMap(raw: Record<string, unknown>): Record<string, s
 
 const WidgetPrefsMapSchema = z.record(z.string(), z.unknown()).catch({}).transform(normalizeWidgetPrefsMap);
 const WidgetOrderMapSchema = z.record(z.string(), z.unknown()).catch({}).transform(normalizeWidgetOrderMap);
+const SavedFiltersMapSchema = z.record(z.string(), z.unknown()).catch({}).transform(normalizeWidgetOrderMap);
 const HomeBlocksSchema = z.array(z.unknown()).catch([]).transform(normalizeStringArray);
 const WidgetConfigsSchema = z.array(z.unknown()).catch([]).transform(normalizeWidgets);
 
@@ -72,6 +73,7 @@ export const PrefsSchema = z
     version: z.number().catch(CURRENT_PREFS_VERSION),
     widgets: WidgetPrefsMapSchema.optional().catch(undefined),
     widgetOrder: WidgetOrderMapSchema.optional().catch(undefined),
+    savedFilters: SavedFiltersMapSchema.optional().catch(undefined),
     home: HomeBlocksSchema.optional().catch(undefined),
     widgetConfigs: WidgetConfigsSchema.optional().catch(undefined),
   })
@@ -80,6 +82,7 @@ export const PrefsSchema = z
 export type Prefs = z.infer<typeof PrefsSchema> & {
   widgets?: Record<string, WidgetPrefs>;
   widgetOrder?: Record<string, string[]>;
+  savedFilters?: Record<string, string[]>;
   home?: string[];
   widgetConfigs?: WidgetConfig[];
 };
