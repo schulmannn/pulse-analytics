@@ -1,30 +1,43 @@
-import { useCallback, useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
+import { ChevronDown, ListFilter } from 'lucide-react';
+import { toast } from 'sonner';
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
 
 import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { PeriodChips } from '@/components/PeriodChips';
+import { SearchField } from '@/components/SearchField';
 import { SourceIdentity } from '@/components/SourceIdentity';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
+import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { TableSkeleton } from '@/components/ui/dataSkeleton';
 import { Skeleton } from '@/components/ui/skeleton';
 import { fmt } from '@/lib/format';
 import { useExplorerChartHeight } from '@/lib/useExplorerChartHeight';
 import { usePeriod, type DateRange, type PeriodDays } from '@/lib/period';
+import { useSelectedChannel } from '@/lib/channel-context';
+import {
+  msChannelFilterKey,
+  normalizeMsChannelFilter,
+  sameMsChannelFilter,
+} from '@/lib/msChannelFilter';
 import { msPreviousPeriod, useMsResolvedPeriod, type MsPeriod } from '@/lib/msPeriod';
 import { metricTotal, type Grain, type Metric } from '@/lib/msSeries';
 import { customerMetricTotal, type MsCustomerMetric } from '@/lib/msCustomerSeries';
 import type { MsChannelContributionMetric } from '@/lib/msChannelContribution';
 import { MS_COHORT_MODES, type MsCohortMode } from '@/lib/msCohortMode';
 import {
+  MS_CHANNEL_SELECTION_LIMIT,
   applyMsMetricChannels,
   applyMsMetricEnum,
   parseMsMetricUrl,
   type MsMetricUrlSchema,
 } from '@/lib/msMetricUrlState';
+import { setSavedFilter, useSavedFilter } from '@/lib/widgetPrefsStore';
 import {
   useMsChannelSeries,
   useMsCustomers,
@@ -246,7 +259,13 @@ function useMsMetricUrlControls(schema: MsMetricUrlSchema) {
     setParams((prev) => applyMsMetricChannels(prev, ids), { replace: true });
   }, [setParams]);
 
-  return { values: parsed.values, channels: parsed.channels, setEnum, setChannels };
+  return {
+    values: parsed.values,
+    channels: parsed.channels,
+    hasChannelsParam: schema.channels === true && params.has('channels'),
+    setEnum,
+    setChannels,
+  };
 }
 
 // ── Shared shell ─────────────────────────────────────────────────────────────────────────────
@@ -268,6 +287,7 @@ function MsMetricShell({
   term,
   descriptor,
   comparison,
+  tools,
   children,
 }: {
   back: Back;
@@ -275,6 +295,8 @@ function MsMetricShell({
   descriptor?: string;
   about: AboutDef;
   comparison?: ReactNode;
+  /** Optional explorer controls: above the chart on phone, first in the right rail on desktop. */
+  tools?: ReactNode;
   children: ReactNode;
 }) {
   return (
@@ -287,9 +309,12 @@ function MsMetricShell({
         {descriptor && <MetricDescriptor>{descriptor}</MetricDescriptor>}
       </div>
 
+      {tools && <div className="lg:hidden">{tools}</div>}
+
       <MetricColumns
         rail={
           <>
+            {tools && <div className="hidden lg:block">{tools}</div>}
             <RailSection title="Сравнение">
               {comparison ?? (
                 <p className="text-xs leading-relaxed text-muted-foreground">
@@ -634,6 +659,7 @@ function MsCustomerPage({
 
 function MsChannelsPage() {
   const window = useMsMetricWindow();
+  const { channelId } = useSelectedChannel();
   const controls = useMsMetricUrlControls(CHANNELS_URL);
   const grain = controls.values.grain as Grain;
   const requestedKind = controls.values.chart as 'line' | 'bar';
@@ -641,6 +667,13 @@ function MsChannelsPage() {
   const view = controls.values.view as View;
   const compare = controls.values.compare as 'off' | 'prev';
   const selected = controls.channels;
+  const savedFilterKey = msChannelFilterKey(channelId);
+  const rawSavedFilter = useSavedFilter(savedFilterKey);
+  const savedFilter = useMemo(
+    () => normalizeMsChannelFilter(rawSavedFilter),
+    [rawSavedFilter],
+  );
+  const seededFilterKey = useRef<string | null>(null);
   const comparisonPeriod = compare === 'prev' ? window.previousPeriod : null;
   const channels = useMsSalesByChannel(window.period);
   const options: ChannelOption[] = useMemo(() => (channels.data?.rows ?? []).map((r) => ({
@@ -663,6 +696,24 @@ function MsChannelsPage() {
   const valueOf = (data: typeof currentSeries.data) => data ? metricTotal(data.series, metric) : null;
   const format = (value: number) => metric === 'orders' ? fmt.num(value) : `${fmt.short(value)} ₽`;
 
+  // A normal drill from the compact card has no channels query: seed it once from the account-saved
+  // filter. An explicit deep link always wins and stays a preview until the user presses «Сохранить».
+  useEffect(() => {
+    if (seededFilterKey.current === savedFilterKey) return;
+    if (controls.hasChannelsParam) {
+      seededFilterKey.current = savedFilterKey;
+      return;
+    }
+    if (savedFilter.length === 0) return;
+    seededFilterKey.current = savedFilterKey;
+    controls.setChannels(savedFilter);
+  }, [
+    controls.hasChannelsParam,
+    controls.setChannels,
+    savedFilter,
+    savedFilterKey,
+  ]);
+
   // A multi-series breakdown is line-only. Direct incompatible links become canonical before the
   // user can share them; rendering is already line-only on the first frame.
   useEffect(() => {
@@ -674,6 +725,18 @@ function MsChannelsPage() {
   // Мультисерийные столбцы на 6×140 значений — нечитаемый частокол: в breakdown оставляем только
   // линии и прячем переключатель типа (как и в прежнем оверлее).
   const allowKind = !breakdown;
+  const filterEditor = (
+    <MsChannelFilterDisclosure
+      options={selectableOptions}
+      selected={selected}
+      saved={savedFilter}
+      onChange={controls.setChannels}
+      onSave={(ids) => {
+        setSavedFilter(savedFilterKey, normalizeMsChannelFilter(ids));
+        toast(ids.length > 0 ? 'Фильтр каналов сохранён' : 'Фильтр сброшен: все каналы');
+      }}
+    />
+  );
   return (
     <MsMetricShell
       back={BACK_CHANNELS}
@@ -684,6 +747,7 @@ function MsChannelsPage() {
           'Выручка / заказы / средний чек по каналу продаж заказа. Пустой фильтр — все каналы в агрегате; мультивыбор агрегирует выбранные; разбивка рисует до 6 каналов отдельными сериями.',
         source: 'Заказы МойСклада с salesChannel + дневной архив ms_daily.',
       }}
+      tools={filterEditor}
       comparison={
         <ComparisonReadout
           current={valueOf(currentSeries.data)}
@@ -724,15 +788,147 @@ function MsChannelsPage() {
                 onMetric={(value) => controls.setEnum('metric', value)}
                 view={view}
                 onView={(value) => controls.setEnum('view', value)}
-                options={selectableOptions}
-                selected={selected}
-                onSelected={controls.setChannels}
               />
             }
           />
         }
       />
     </MsMetricShell>
+  );
+}
+
+function MsChannelFilterDisclosure({
+  options,
+  selected,
+  saved,
+  onChange,
+  onSave,
+}: {
+  options: ChannelOption[];
+  selected: string[];
+  saved: string[];
+  onChange: (ids: string[]) => void;
+  onSave: (ids: string[]) => void;
+}) {
+  const [query, setQuery] = useState('');
+  // Match the explorer rail: an active filter is visible through its count, but does not push the
+  // chart below the fold every time the page opens (especially on the single-column mobile shell).
+  const [expanded, setExpanded] = useState(false);
+  const idPrefix = useId();
+  const normalizedQuery = query.trim().toLocaleLowerCase('ru-RU');
+  const visibleOptions = normalizedQuery
+    ? options.filter((option) => option.name.toLocaleLowerCase('ru-RU').includes(normalizedQuery))
+    : options;
+  const dirty = !sameMsChannelFilter(selected, saved);
+  const atLimit = selected.length >= MS_CHANNEL_SELECTION_LIMIT;
+
+  const toggle = (id: string) => {
+    if (selected.includes(id)) {
+      onChange(selected.filter((candidate) => candidate !== id));
+      return;
+    }
+    if (!atLimit) onChange([...selected, id]);
+  };
+
+  return (
+    <details
+      className="group/filter border-y border-border bg-background/40 lg:border-t-0"
+      open={expanded}
+      onToggle={(event) => setExpanded(event.currentTarget.open)}
+      data-testid="ms-channel-filter"
+    >
+      <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 py-2 text-sm font-medium text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring/50 [&::-webkit-details-marker]:hidden">
+        <ListFilter aria-hidden="true" className="size-4 text-muted-foreground" />
+        <span>Фильтр</span>
+        {selected.length > 0 && (
+          <span className="rounded-full bg-accent px-1.5 py-0.5 text-2xs tabular-nums text-accent-foreground">
+            {selected.length}
+          </span>
+        )}
+        {dirty && <span className="ml-auto text-2xs font-normal text-muted-foreground">Не сохранено</span>}
+        <ChevronDown
+          aria-hidden="true"
+          className="ml-auto size-4 text-muted-foreground transition-transform group-open/filter:rotate-180"
+        />
+      </summary>
+
+      <fieldset className="m-0 space-y-3 border-0 pb-4 pt-2">
+        <legend className="sr-only">Каналы продаж</legend>
+        <SearchField
+          value={query}
+          onChange={setQuery}
+          ariaLabel="Поиск каналов продаж"
+          placeholder="Найти канал"
+          resultsLabel={`${visibleOptions.length} из ${options.length} каналов`}
+          className="[&_input]:h-9"
+        />
+
+        <div className="flex items-center justify-between gap-3 text-2xs text-muted-foreground">
+          <span aria-live="polite">
+            {selected.length === 0
+              ? 'Все каналы'
+              : `${selected.length} из ${MS_CHANNEL_SELECTION_LIMIT}`}
+          </span>
+          {selected.length > 0 && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="xs"
+              onClick={() => onChange([])}
+              className="h-8 px-2 text-2xs"
+            >
+              Выбрать все
+            </Button>
+          )}
+        </div>
+
+        <div className="max-h-64 space-y-0.5 overflow-y-auto overscroll-contain pr-1">
+          {visibleOptions.map((option, index) => {
+            const checked = selected.includes(option.id);
+            const optionId = `${idPrefix}-${index}`;
+            return (
+              <div
+                key={option.id}
+                className="flex min-h-11 items-center gap-2 rounded-lg px-2 transition-colors hover:bg-foreground/6"
+              >
+                <Checkbox
+                  id={optionId}
+                  checked={checked}
+                  disabled={!checked && atLimit}
+                  onCheckedChange={() => toggle(option.id)}
+                />
+                <label
+                  htmlFor={optionId}
+                  className="min-w-0 flex-1 cursor-pointer truncate text-xs text-foreground"
+                  title={option.name}
+                >
+                  {option.name}
+                </label>
+              </div>
+            );
+          })}
+          {visibleOptions.length === 0 && (
+            <p className="px-2 py-6 text-center text-xs text-muted-foreground">
+              Каналы не найдены
+            </p>
+          )}
+        </div>
+
+        <div className="flex items-center justify-between gap-3 border-t border-border pt-3">
+          <span className="text-2xs text-muted-foreground">
+            {saved.length === 0 ? 'Сохранено: все' : `Сохранено: ${saved.length}`}
+          </span>
+          <Button
+            type="button"
+            size="sm"
+            disabled={!dirty}
+            onClick={() => onSave(selected)}
+          >
+            Сохранить
+          </Button>
+        </div>
+      </fieldset>
+    </details>
   );
 }
 

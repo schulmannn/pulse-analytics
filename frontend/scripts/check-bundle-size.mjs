@@ -40,10 +40,14 @@ const BUDGETS = {
   // useChartSectionModel; волна B). CI-сборка на ~0.3KB тяжелее локальной — с запасом.
   // 2026-07-29: +8KB — @tanstack/react-virtual (виртуализация RFM-аудитории и остатков склада;
   // manualChunks сознательно держит его ВНЕ shell-vendor — платит только этот маршрут).
-  moySkladMetricCode: 359 * KB,
-  metrikaMetricCode: 325 * KB,
+  // 2026-07-29: +5KB — source-scoped фильтр каналов в explorer rail: SearchField + официальный
+  // Radix Checkbox загружаются только вместе с полной страницей МойСклада, не с compact-карточкой.
+  moySkladMetricCode: 364 * KB,
+  // 2026-07-29: +1KB — общая token-based подсветка активного drag-resize входит в route CSS.
+  metrikaMetricCode: 326 * KB,
   // 2026-07-28: +1KB — та же волна B (см. выше).
-  telegramMetricCode: 336 * KB,
+  // 2026-07-29: +1KB — общая token-based подсветка активного drag-resize входит в route CSS.
+  telegramMetricCode: 337 * KB,
   // 2026-07-28: +1KB — sync-hover графиков (chartHoverSync в LineChart/Sparkline, волна D).
   // 2026-07-29: +1KB — официальный Radix ToggleGroup заменил самописную механику SegmentedControl.
   mentionsMetricCode: 317 * KB,

@@ -165,6 +165,7 @@ export function ChartSection(props: ChartSectionProps) {
         } ${reorder ? 'widget-jiggle' : 'widget-enter cursor-pointer'} ${dragging ? 'shadow-lg' : ''}`}
         style={model.layout.innerStyle}
         data-widget-accented={model.layout.activeColor ? '' : undefined}
+        data-widget-card
         data-drill-to={props.drillTo || undefined}
         data-widget-tinted={model.layout.activeTinted && model.layout.activeColor ? '' : undefined}
       >

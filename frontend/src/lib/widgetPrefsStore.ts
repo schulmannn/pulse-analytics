@@ -9,6 +9,9 @@ import type { PeriodDays } from '@/lib/period';
 
 const PREFS_KEY = 'pulse_widget_prefs';
 const ORDER_KEY = 'pulse_widget_order';
+/** Saved filter values for drill pages, keyed by a source-scoped view id. These live beside widget
+    prefs because the compact card and its full metric page must read one account-synced value. */
+const SAVED_FILTERS_KEY = 'pulse_saved_filters';
 /** Personal Home: the ordered list of pinned widget registry keys (steep «На главную»). Stored
     as an object `{keys:[]}` so it round-trips through the object-only store-row parser. */
 const HOME_KEY = 'pulse_home_blocks';
@@ -122,6 +125,17 @@ function orderSnapshot(): Record<string, string[]> {
   return orderCache;
 }
 
+let savedFiltersRaw: string | null | undefined;
+let savedFiltersCache: Record<string, string[]> = {};
+function savedFiltersSnapshot(): Record<string, string[]> {
+  const raw = readRaw(SAVED_FILTERS_KEY);
+  if (raw === savedFiltersRaw) return savedFiltersCache;
+  savedFiltersRaw = raw;
+  const next = parsePrefs({ savedFilters: parseObjectRow<unknown>(raw) }).savedFilters ?? {};
+  savedFiltersCache = preserveEntryIdentity(savedFiltersCache, next);
+  return savedFiltersCache;
+}
+
 export function getPrefs(id: string): WidgetPrefs {
   return prefsSnapshot()[id] ?? EMPTY_PREFS;
 }
@@ -169,6 +183,24 @@ export function setGroupOrder(groupId: string, ids: string[]) {
   schedulePush();
 }
 
+/** One source-scoped saved filter. Empty values mean «all» and remove the row. */
+export function getSavedFilter(id: string): string[] {
+  return savedFiltersSnapshot()[id] ?? EMPTY_ORDER;
+}
+
+export function setSavedFilter(id: string, values: string[]) {
+  try {
+    const map = { ...savedFiltersSnapshot() };
+    if (values.length === 0) delete map[id];
+    else map[id] = values;
+    localStorage.setItem(SAVED_FILTERS_KEY, JSON.stringify(map));
+  } catch {
+    /* storage blocked — the current URL still keeps the active filter */
+  }
+  notify();
+  schedulePush();
+}
+
 /** Subscribe to ONE widget's prefs: re-renders the caller only when THAT row changes. */
 export function useWidgetPrefs(id: string): WidgetPrefs {
   return useSyncExternalStore(
@@ -184,6 +216,15 @@ export function useGroupOrder(groupId: string): string[] {
     subscribeStore,
     () => getGroupOrder(groupId),
     () => getGroupOrder(groupId),
+  );
+}
+
+/** Subscribe to ONE saved filter without re-rendering consumers of unrelated views. */
+export function useSavedFilter(id: string): string[] {
+  return useSyncExternalStore(
+    subscribeStore,
+    () => getSavedFilter(id),
+    () => getSavedFilter(id),
   );
 }
 
@@ -288,6 +329,7 @@ function localBlob() {
   return {
     widgets: prefsSnapshot(),
     widgetOrder: orderSnapshot(),
+    savedFilters: savedFiltersSnapshot(),
     // The pinned-Home list rides the SAME account blob under `home` (a plain string[]) — no
     // new endpoint. Destructured OUT of `rest` in the hydrate below so serverExtra never
     // double-carries it.
@@ -333,7 +375,7 @@ export function useWidgetPrefsSync() {
     void apiGet('/api/prefs', PrefsBlobSchema)
       .then(({ prefs }) => {
         if (cancelled) return;
-        const { widgets, widgetOrder, home, widgetConfigs, ...rest } = parsePrefs(prefs);
+        const { widgets, widgetOrder, savedFilters, home, widgetConfigs, ...rest } = parsePrefs(prefs);
         serverExtra = rest;
         syncReady = true;
         const local = localBlob();
@@ -345,6 +387,11 @@ export function useWidgetPrefsSync() {
           else if (Object.keys(local.widgets).length) pushLocal = true;
           if (widgetOrder && typeof widgetOrder === 'object') localStorage.setItem(ORDER_KEY, JSON.stringify(widgetOrder));
           else if (Object.keys(local.widgetOrder).length) pushLocal = true;
+          if (savedFilters && typeof savedFilters === 'object') {
+            localStorage.setItem(SAVED_FILTERS_KEY, JSON.stringify(savedFilters));
+          } else if (Object.keys(local.savedFilters).length) {
+            pushLocal = true;
+          }
           // Home pinned list: same account-wins rule. Stored under `{keys}` so getHomeBlocks reads it.
           if (Array.isArray(home)) localStorage.setItem(HOME_KEY, JSON.stringify({ keys: home }));
           else if (local.home.length) pushLocal = true;
