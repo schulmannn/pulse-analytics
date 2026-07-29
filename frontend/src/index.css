@@ -756,11 +756,6 @@
     background: hsl(var(--muted) / 0.32);
     padding: 0.125rem;
   }
-  & [data-segmented-indicator] {
-    border-radius: 0.625rem;
-    background: hsl(var(--card));
-    box-shadow: 0 0 0 1px hsl(var(--foreground) / 0.08);
-  }
   & [data-segmented-control] > button {
     min-height: 1.75rem;
     border-right: 0;

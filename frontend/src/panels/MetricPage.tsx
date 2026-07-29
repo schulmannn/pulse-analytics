@@ -913,8 +913,8 @@ export function MetricPage() {
               }))}
             />
             <span className="flex-1" />
-            {/* Presets on the shared sliding-glider primitive; a picked custom range deselects every
-                preset (value matches nothing → the glider hides). */}
+            {/* Presets on the shared shadcn/Radix ToggleGroup; a picked custom range deselects every
+                preset. */}
             <SegmentedControl
               ariaLabel="Период"
               value={range ? '' : String(days)}

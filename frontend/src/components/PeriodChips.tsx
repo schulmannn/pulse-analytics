@@ -57,8 +57,8 @@ export function PeriodChips({
   return (
     <fieldset className={cn('relative m-0 flex min-w-0 flex-wrap items-center gap-1.5 border-0 p-0', className)}>
       <legend className="sr-only">{ariaLabel}</legend>
-      {/* Presets ride the shared sliding-glider primitive; a picked custom range deselects every
-          preset (value matches no segment → the glider hides). Rendered `groupless` so this one
+      {/* Presets ride the shared shadcn/Radix ToggleGroup; a picked custom range deselects every
+          preset. Rendered `groupless` so this one
           public «Период» group stays the sole labelled group (the «Свой период» pill lives in it). */}
       <SegmentedControl
         groupless
@@ -81,12 +81,13 @@ export function PeriodChips({
             <Button
               type="button"
               variant="outline"
-              size="xs"
+              size="default"
+              shape="rounded"
               className={cn(
-                'min-h-11 min-w-11 font-medium sm:min-h-7 sm:min-w-0',
+                'min-w-11 text-xs sm:min-w-0',
                 range
-                  ? 'border-primary/40 bg-primary/10 text-accent-foreground hover:bg-primary/10 hover:text-accent-foreground'
-                  : 'border-border bg-transparent text-muted-foreground hover:bg-transparent hover:text-foreground',
+                  ? 'bg-accent text-accent-foreground hover:bg-accent hover:text-accent-foreground'
+                  : 'bg-transparent text-muted-foreground hover:text-foreground',
               )}
             >
               {range

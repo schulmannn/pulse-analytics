@@ -357,7 +357,7 @@ function DisabledField({ label, reason }: { label: string; reason: string }) {
 
 /** A bounded segmented control (steep's Explore segments) — a thin, full-width adapter over the
     shared {@link SegmentedControl} so every `<Field>` segment (Период, Грануляция, Сравнение…) rides
-    the one sliding-glider primitive. */
+    the one shared shadcn/Radix ToggleGroup primitive. */
 function Segmented<T extends string>({
   ariaLabel,
   options,

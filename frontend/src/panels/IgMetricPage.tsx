@@ -184,7 +184,7 @@ function WindowBar({ value, onChange, allowAll = true }: { value: number; onChan
   return (
     <WindowBarShell>
       <span className="flex-1" />
-      {/* Presets on the shared sliding-glider primitive. */}
+      {/* Presets on the shared shadcn/Radix ToggleGroup primitive. */}
       <SegmentedControl
         ariaLabel="Окно"
         value={String(value)}
