@@ -15,11 +15,25 @@ import { useVirtualizer, type VirtualItem, type Virtualizer } from '@tanstack/re
  */
 export const VIRTUALIZE_FROM = 120;
 
-/** Первый прокручиваемый предок (overflow-y: auto|scroll); null — скроллер = окно. */
+/**
+ * Вертикальный скроллер для контейнера; null — скроллер = окно (mobile) → виртуализация спит.
+ * Сначала канонический [data-dashboard-scroll] (единственный вертикальный скроллер desktop-шелла;
+ * на mobile его overflow-y = visible → отвергается), затем универсальный обход вверх. ГРАБЛЯ
+ * обхода: по CSS-коэрции осей `overflow-x: auto` даёт computed overflow-y 'auto' — так
+ * горизонтальная обёртка .data-table-scroll прикидывается вертикальным скроллером. Поэтому
+ * кандидат обязан РЕАЛЬНО переполняться вертикально; вызов идёт из layout-эффекта после
+ * классического рендера ≥120 строк, когда настоящий скроллер заведомо переполнен, а
+ * контент-высотные обёртки — нет (запас 40px покрывает высоту горизонтального скроллбара).
+ */
 function findScrollParent(node: HTMLElement | null): HTMLElement | null {
-  for (let el = node?.parentElement ?? null; el; el = el.parentElement) {
+  const isVerticalScroller = (el: HTMLElement): boolean => {
     const overflowY = getComputedStyle(el).overflowY;
-    if (overflowY === 'auto' || overflowY === 'scroll') return el;
+    return (overflowY === 'auto' || overflowY === 'scroll') && el.scrollHeight - el.clientHeight > 40;
+  };
+  const canonical = node?.closest('[data-dashboard-scroll]');
+  if (canonical instanceof HTMLElement && isVerticalScroller(canonical)) return canonical;
+  for (let el = node?.parentElement ?? null; el; el = el.parentElement) {
+    if (isVerticalScroller(el)) return el;
   }
   return null;
 }

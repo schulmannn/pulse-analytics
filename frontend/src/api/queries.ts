@@ -1270,11 +1270,19 @@ const MsRfmCustomersSchema = z
 
 export type MsRfmCustomers = z.infer<typeof MsRfmCustomersSchema>;
 
-/** Размер страницы листинга покупателей сегмента. 2026-07-29: 50 → 200 (= серверный кэп
-    MS_RFM_CUST_LIMIT_MAX): с виртуализацией списка (useWindowVirtualRows) большая страница
-    ничего не стоит рендеру, а сегмент из тысяч клиентов собирается в 4 раза меньшим числом
-    «Показать ещё». */
+/** Первая страница листинга покупателей сегмента — 50: сервер обогащает каждую страницу
+    словарём контрагентов ПОСЛЕДОВАТЕЛЬНЫМИ чанками по 25, поэтому большой limit на первом
+    клике = долгий скелетон (и лишний расход rate-бюджета МС). */
+export const MS_RFM_CUSTOMERS_FIRST_PAGE = 50;
+/** Последующие страницы («Показать ещё») — 200 (= серверный кэп MS_RFM_CUST_LIMIT_MAX):
+    с виртуализацией списка (useVirtualRows) большая страница ничего не стоит рендеру, а
+    сегмент из тысяч клиентов собирается в 4 раза меньшим числом кликов. 2026-07-29. */
 export const MS_RFM_CUSTOMERS_PAGE = 200;
+
+/** Размер страницы по смещению: offset однозначно задаёт limit — ключи кэша менять не нужно. */
+export function msRfmCustomersLimit(offset: number): number {
+  return offset === 0 ? MS_RFM_CUSTOMERS_FIRST_PAGE : MS_RFM_CUSTOMERS_PAGE;
+}
 
 /** Страница покупателей выбранного RFM-сегмента; `segment == null` — сегмент не выбран, запрос не идёт. */
 export function useMsRfmSegmentCustomers(period: MsPeriod, segment: string | null, offset: number) {
@@ -1285,7 +1293,7 @@ export function useMsRfmSegmentCustomers(period: MsPeriod, segment: string | nul
     staleTime: STALE_LIVE,
     queryFn: ({ signal }) =>
       apiGet(
-        `/api/ms/rfm-customers?${msPeriodQuery(period)}&segment=${encodeURIComponent(segment ?? '')}&limit=${MS_RFM_CUSTOMERS_PAGE}&offset=${offset}`,
+        `/api/ms/rfm-customers?${msPeriodQuery(period)}&segment=${encodeURIComponent(segment ?? '')}&limit=${msRfmCustomersLimit(offset)}&offset=${offset}`,
         MsRfmCustomersSchema,
         { signal, channelId },
       ),
