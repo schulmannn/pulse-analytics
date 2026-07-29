@@ -7,7 +7,6 @@ import { MorphingSeries, type MorphGeom } from '@/components/MorphingSeries';
 import type { MorphPoint } from '@/lib/chartMorph';
 import { detectAnomalies } from '@/lib/anomaly';
 import { nearestPointIndex } from '@/lib/chartHover';
-import { uniqueLabelIndex, useChartHoverSync } from '@/lib/chartHoverSync';
 import { axisLabelIndexes } from '@/lib/chartLabels';
 import { ChartTooltip, type TooltipRow, type TooltipState } from '@/components/ChartTooltip';
 import { ChartExpandedContext, ChartRefLinesContext, ExpandedChartHeightContext, WidgetTargetContext } from '@/components/ExpandableChart';
@@ -156,28 +155,6 @@ export function LineChart({
   // later keyboard focus discard coordinates left by an interrupted pointer gesture.
   const pointerDownRef = useRef(false);
   const [hover, setHover] = useState<Hover | null>(null);
-  // Синхронный hover страницы (Recharts syncId-паттерн): свой hover ПУБЛИКУЕТ подпись точки,
-  // чужой — рисует у нас crosshair той же даты. Один эффект на состоянии hover покрывает все
-  // источники (mousemove, клавиатура, фокус); cleanup гасит только СВОЮ публикацию.
-  const sync = useChartHoverSync();
-  const syncOwner = useId();
-  const publishedRef = useRef<string | null>(null);
-  const syncPublish = sync?.publish;
-  useEffect(() => {
-    if (!syncPublish) return;
-    const day = hover ? (labels?.[hover.i] ?? null) : null;
-    if (publishedRef.current !== day) {
-      publishedRef.current = day;
-      // Владельческая публикация: наш null не может затереть чужой живой hover (ревью).
-      syncPublish(day, syncOwner);
-    }
-  }, [hover, labels, syncPublish, syncOwner]);
-  useEffect(
-    () => () => {
-      if (syncPublish && publishedRef.current != null) syncPublish(null, syncOwner);
-    },
-    [syncPublish, syncOwner],
-  );
   // The comparison series can be toggled off via its legend chip (steep #9) — a decluttering
   // reading aid. Hidden, it also drops out of the y-domain below so the current series
   // reclaims the full height.
@@ -730,12 +707,7 @@ export function LineChart({
     setHover(null);
   };
 
-  // Чужой hover той же даты (sync): рисуем crosshair/маркеры, но БЕЗ тултипа — тултип только у
-  // графика под курсором, иначе страница кричит. Приоритет у собственного hover. Совпадение —
-  // только ОДНОЗНАЧНОЕ (uniqueLabelIndex): дубль подписи на окнах >года честно молчит (ревью).
-  const followIdx =
-    !hover && sync?.day != null && labels ? uniqueLabelIndex(labels, sync.day) : -1;
-  const activeIdx = hover && hover.i < n ? hover.i : followIdx >= 0 && followIdx < n ? followIdx : null;
+  const activeIdx = hover && hover.i < n ? hover.i : null;
   const hovered = activeIdx != null ? points[activeIdx] : null;
   // Ghost-точка под курсором: считаем локалом заранее — element-access в JSX TS не сужает.
   const hoverGhostVal = activeIdx != null && activeGhost ? activeGhost[activeIdx] : null;
