@@ -69,22 +69,17 @@ export function Analytics() {
       {/* Grouped tabs break the 20-chart wall into Динамика / Аудитория / Контент / Сравнение —
           each tab renders only its section family (progressive disclosure). The desktop-only export
           control sits alongside the tabs and covers the whole analytics window regardless of tab. */}
-      {/* Пилюльные табы (steep-регистр): подчёркивание border-b-2 выбивалось из пилюльного
-          языка сегментов; активный таб — тихая secondary-заливка, никакой синей линии. */}
       <div className="flex items-center justify-between gap-3">
-        {/* Глайдер (канон SegmentedControl): активная пилюля ПЕРЕЕЗЖАЕТ к выбранному табу, сам
-            триггер заливки не несёт (data-[state=active]:bg-transparent гасит и дефолт ui-базы). */}
         <TabsList
           aria-label="Разделы аналитики"
-          glider
-          gliderClassName="bg-secondary"
-          className="flex h-auto min-h-0 justify-start gap-1 overflow-x-auto border-0 bg-transparent p-0"
+          variant="line"
+          className="min-w-0 max-w-full shrink justify-start overflow-x-auto"
         >
           {ANALYTICS_TABS.map((t) => (
             <TabsTrigger
               key={t.key}
               value={t.key}
-              className="shrink-0 bg-transparent px-3 py-1.5 text-sm font-medium text-muted-foreground hover:text-foreground data-[state=active]:bg-transparent data-[state=active]:text-foreground"
+              className="shrink-0"
             >
               {t.label}
             </TabsTrigger>
