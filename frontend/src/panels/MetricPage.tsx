@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { InspectorHandle } from '@/components/InspectorHandle';
 import { Link, Navigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
@@ -35,7 +35,6 @@ import { RankChart } from '@/components/RankChart';
 import { PivotTable } from '@/components/PivotTable';
 import { PostDetailModal } from '@/components/PostDetailModal';
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
-import { DateRangePicker } from '@/components/DateRangePicker';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { lttbDownsample } from '@/lib/downsample';
 import { DAY_MS, alignGhost, baselineCoveredByPosts, bucketKeyOf, bucketKeysInWindow, comparisonWindow } from '@/lib/metricSeries';
@@ -52,6 +51,11 @@ const AnnotationMutationSchema = z
   .object({ id: z.number(), day: z.string(), label: z.string() })
   .passthrough();
 const AnnotationDeleteSchema = z.object({ ok: z.boolean() }).passthrough();
+const DateRangePicker = lazy(() =>
+  import('@/components/DateRangePicker').then((module) => ({
+    default: module.DateRangePicker,
+  })),
+);
 
 // ── View state (all in the URL so links restore the exact view, like steep) ──────────────
 type ChartType = 'line' | 'bar' | 'rank' | 'pivot';
@@ -936,18 +940,20 @@ export function MetricPage() {
                   Свой диапазон
                 </button>
               </PopoverTrigger>
-              <PopoverContent align="end" sideOffset={8} className="w-auto p-3">
-                <DateRangePicker
-                  value={range}
-                  onApply={(nextRange) => {
-                    setRange(nextRange);
-                    setPickerOpen(false);
-                  }}
-                  onReset={() => {
-                    setRange(null);
-                    setPickerOpen(false);
-                  }}
-                />
+              <PopoverContent align="end" sideOffset={8} className="w-auto p-0">
+                <Suspense fallback={<Skeleton className="h-80 w-80 rounded-none" />}>
+                  <DateRangePicker
+                    value={range}
+                    onApply={(nextRange) => {
+                      setRange(nextRange);
+                      setPickerOpen(false);
+                    }}
+                    onReset={() => {
+                      setRange(null);
+                      setPickerOpen(false);
+                    }}
+                  />
+                </Suspense>
               </PopoverContent>
             </Popover>
             {range && (
