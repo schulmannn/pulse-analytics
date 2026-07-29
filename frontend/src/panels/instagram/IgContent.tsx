@@ -2,7 +2,6 @@ import { useSearchParams } from 'react-router-dom';
 import type { IgData } from '@/lib/useIgData';
 import { CampaignsView } from '@/components/campaigns/CampaignsView';
 import { useMediaQuery } from '@/lib/useMediaQuery';
-import { cn } from '@/lib/utils';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { IgContentDesktop } from '@/panels/instagram/IgContentDesktop';
 import { IgContentMobile } from '@/panels/instagram/IgContentMobile';
@@ -34,24 +33,12 @@ export function IgContent({ ig }: { ig: IgData }) {
       onValueChange={(next) => setView(next as 'posts' | 'campaigns')}
       className="space-y-6"
     >
-      <TabsList
-        aria-label="Раздел контента"
-        glider
-        gliderClassName="bg-primary/15"
-        className="flex h-auto min-h-0 flex-wrap justify-start gap-1 border-0 bg-transparent p-0"
-      >
-      {([['posts', 'Публикации'], ['campaigns', 'Кампании']] as const).map(([key, label]) => (
-        <TabsTrigger
-          key={key}
-          value={key}
-          className={cn(
-            'btn-pill px-3 py-1 text-xs font-medium transition-colors',
-            'bg-transparent text-muted-foreground hover:bg-muted/50 hover:text-foreground data-[state=active]:bg-transparent data-[state=active]:text-foreground',
-          )}
-        >
-          {label}
-        </TabsTrigger>
-      ))}
+      <TabsList aria-label="Раздел контента">
+        {([['posts', 'Публикации'], ['campaigns', 'Кампании']] as const).map(([key, label]) => (
+          <TabsTrigger key={key} value={key}>
+            {label}
+          </TabsTrigger>
+        ))}
       </TabsList>
       <TabsContent value="campaigns" className="mt-0">
         <CampaignsView />

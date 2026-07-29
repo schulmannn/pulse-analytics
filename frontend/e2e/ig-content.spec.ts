@@ -128,6 +128,11 @@ test.describe('Instagram Контент 2.0 (desktop)', () => {
     await page.goto('/instagram/content');
     const rows = page.locator('table tbody tr');
     await expect(rows).toHaveCount(6);
+    const routeTabs = page.getByRole('tablist', { name: 'Раздел контента' });
+    const breakdownTabs = page.getByRole('tablist', { name: 'Дополнительные разборы контента' });
+    await expect(routeTabs).toHaveAttribute('data-variant', 'default');
+    await expect(breakdownTabs).toHaveAttribute('data-variant', 'line');
+    await expect(page.locator('[data-tabs-glider]')).toHaveCount(0);
     await expect(page.getByTestId('ig-content-result-count')).toHaveText(/6 публ\./);
     // ≤ 25 rows → no pagination footer at all.
     await expect(page.getByTestId('ig-content-pagination')).toHaveCount(0);

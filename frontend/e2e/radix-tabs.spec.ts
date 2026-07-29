@@ -6,6 +6,9 @@ test('content route tabs use roving focus, arrows and linked tabpanels', async (
 
   const posts = page.getByRole('tab', { name: 'Публикации' });
   const campaigns = page.getByRole('tab', { name: 'Кампании' });
+  const tabList = page.getByRole('tablist', { name: 'Раздел контента' });
+  await expect(tabList).toHaveAttribute('data-variant', 'default');
+  await expect(tabList.locator('[data-tabs-glider]')).toHaveCount(0);
   await posts.focus();
   await page.keyboard.press('ArrowRight');
 
@@ -26,6 +29,9 @@ test('analytics tabs delegate Home/End and panel relationships to Radix', async 
   await bootDemo(page, '/analytics?tab=audience');
 
   const audience = page.getByRole('tab', { name: 'Аудитория' });
+  const tabList = page.getByRole('tablist', { name: 'Разделы аналитики' });
+  await expect(tabList).toHaveAttribute('data-variant', 'line');
+  await expect(tabList.locator('[data-tabs-glider]')).toHaveCount(0);
   await audience.focus();
   await page.keyboard.press('End');
   const compare = page.getByRole('tab', { name: 'Сравнение' });
@@ -38,4 +44,16 @@ test('analytics tabs delegate Home/End and panel relationships to Radix', async 
   await expect(dynamics).toBeFocused();
   await expect(dynamics).toHaveAttribute('aria-selected', 'true');
   await expect(page).not.toHaveURL(/[?&]tab=/);
+});
+
+test('settings mobile navigation uses the shared line tabs without shrinking touch targets', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'mobile-430', 'mobile settings tab row');
+  await bootDemo(page, '/settings');
+
+  const tabList = page.getByRole('tablist', { name: 'Разделы настроек' });
+  await expect(tabList).toHaveAttribute('data-variant', 'line');
+  await expect(tabList.locator('[data-tabs-glider]')).toHaveCount(0);
+  const profile = page.getByRole('tab', { name: 'Профиль' });
+  expect((await profile.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBeTruthy();
 });

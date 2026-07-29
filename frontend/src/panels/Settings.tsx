@@ -163,16 +163,14 @@ export function Settings() {
             <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-border px-3 md:hidden">
               <TabsList
                 aria-label="Разделы настроек"
-                className="flex h-auto shrink-0 justify-start gap-1 rounded-none border-0 bg-transparent p-0"
+                variant="line"
+                className="shrink-0 justify-start"
               >
                 {SECTIONS.map((item) => (
                   <TabsTrigger
                     key={item.key}
                     value={item.key}
-                    className={cn(
-                      'shrink-0 rounded-b-none rounded-t border-b-2 bg-transparent px-3 py-2 text-sm font-medium',
-                      'border-transparent text-muted-foreground hover:text-foreground data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-foreground',
-                    )}
+                    className="shrink-0"
                   >
                     {item.label}
                   </TabsTrigger>
