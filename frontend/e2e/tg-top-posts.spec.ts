@@ -53,8 +53,16 @@ test.describe('TG Обзор — карточки топ-постов + пери
     await periodGroup.getByRole('button', { name: 'Свой период' }).click();
     await page.getByRole('button', { name: 'Предыдущий месяц' }).click();
     await page.getByRole('button', { name: 'Предыдущий месяц' }).click();
-    await page.getByRole('button', { name: /^5\s/ }).click();
-    await page.getByRole('button', { name: /^15\s/ }).click();
+    const rangeStart = page.locator('button[data-day="05.05.2026"]');
+    const rangeMiddle = page.locator('button[data-day="10.05.2026"]');
+    const rangeEnd = page.locator('button[data-day="15.05.2026"]');
+    await rangeStart.click();
+    await rangeEnd.click();
+    // Standard range geometry: one continuous band, with semantic endpoints instead of three
+    // unrelated filled day buttons (the old custom calendar regression).
+    await expect(rangeStart).toHaveAttribute('data-range-start', 'true');
+    await expect(rangeMiddle).toHaveAttribute('data-range-middle', 'true');
+    await expect(rangeEnd).toHaveAttribute('data-range-end', 'true');
     await page.getByRole('button', { name: 'Применить' }).click();
 
     // Диапазон помечен: пресеты неактивны, а чип несёт сам диапазон в доступном имени (с «–»).

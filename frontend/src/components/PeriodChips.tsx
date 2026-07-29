@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { lazy, Suspense, useState } from 'react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
-import { DateRangePicker } from '@/components/DateRangePicker';
+import { Skeleton } from '@/components/ui/skeleton';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import {
   Popover,
@@ -9,6 +9,12 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover';
 import type { DateRange, PeriodDays } from '@/lib/period';
+
+const DateRangePicker = lazy(() =>
+  import('@/components/DateRangePicker').then((module) => ({
+    default: module.DateRangePicker,
+  })),
+);
 
 const PRESETS: { days: PeriodDays; label: string }[] = [
   { days: 7, label: '7д' },
@@ -88,18 +94,20 @@ export function PeriodChips({
                 : 'Свой период'}
             </Button>
           </PopoverTrigger>
-          <PopoverContent align="end" sideOffset={8} className="w-auto p-3">
-            <DateRangePicker
-              value={range ?? null}
-              onApply={(nextRange) => {
-                onRangeChange(nextRange);
-                setPickerOpen(false);
-              }}
-              onReset={() => {
-                onRangeChange(null);
-                setPickerOpen(false);
-              }}
-            />
+          <PopoverContent align="end" sideOffset={8} className="w-auto p-0">
+            <Suspense fallback={<Skeleton className="h-80 w-80 rounded-none" />}>
+              <DateRangePicker
+                value={range ?? null}
+                onApply={(nextRange) => {
+                  onRangeChange(nextRange);
+                  setPickerOpen(false);
+                }}
+                onReset={() => {
+                  onRangeChange(null);
+                  setPickerOpen(false);
+                }}
+              />
+            </Suspense>
           </PopoverContent>
         </Popover>
       )}

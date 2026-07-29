@@ -1,106 +1,53 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { DateRangePicker, monthWeeks, shiftMonths, weekdayIndex } from './DateRangePicker';
+import { DateRangePicker } from './DateRangePicker';
 
-const at = (y: number, m: number, d: number) => new Date(y, m, d).getTime();
-
-describe('DateRangePicker — calendar geometry', () => {
-  it('indexes weekdays Monday-first', () => {
-    // 1 июня 2026 — понедельник, 7 июня — воскресенье.
-    expect(weekdayIndex(at(2026, 5, 1))).toBe(0);
-    expect(weekdayIndex(at(2026, 5, 7))).toBe(6);
-  });
-
-  it('clamps a month step to the target month length instead of rolling over', () => {
-    // 31 января + 1 месяц НЕ должно давать 3 марта (нативное поведение Date).
-    const feb = new Date(shiftMonths(at(2026, 0, 31), 1));
-    expect(feb.getMonth()).toBe(1);
-    expect(feb.getDate()).toBe(28);
-
-    // Високосный февраль сохраняет 29-е.
-    const leapFeb = new Date(shiftMonths(at(2028, 0, 31), 1));
-    expect(leapFeb.getMonth()).toBe(1);
-    expect(leapFeb.getDate()).toBe(29);
-  });
-
-  it('steps a year with Shift+PageUp/PageDown semantics', () => {
-    const back = new Date(shiftMonths(at(2026, 5, 15), -12));
-    expect([back.getFullYear(), back.getMonth(), back.getDate()]).toEqual([2025, 5, 15]);
-  });
-
-  it('lays a month out in whole Monday-first weeks with padded blanks', () => {
-    // Июль 2026 начинается в среду → две ведущие пустышки (Пн, Вт).
-    const weeks = monthWeeks(new Date(2026, 6, 1));
-    for (const week of weeks) expect(week).toHaveLength(7);
-
-    expect(weeks[0][0]).toBeNull();
-    expect(weeks[0][1]).toBeNull();
-    expect(new Date(weeks[0][2] as number).getDate()).toBe(1);
-
-    const days = weeks.flat().filter((ts): ts is number => ts != null);
-    expect(days).toHaveLength(31);
-    // Каждый непустой день лежит в столбце своего дня недели — иначе сетка «съезжает» на день.
-    for (const week of weeks) {
-      week.forEach((ts, column) => {
-        if (ts != null) expect(weekdayIndex(ts)).toBe(column);
-      });
-    }
-  });
-});
-
-describe('DateRangePicker — calendar a11y contract', () => {
+describe('DateRangePicker — shadcn calendar contract', () => {
   afterEach(() => vi.useRealTimers());
 
   const render = () => {
     vi.useFakeTimers();
-    vi.setSystemTime(new Date(2026, 6, 15, 12, 0, 0)); // 15 июля 2026, середина месяца
+    vi.setSystemTime(new Date(2026, 6, 15, 12, 0, 0));
     return renderToStaticMarkup(
       <DateRangePicker value={null} onApply={() => {}} onReset={() => {}} />,
     );
   };
 
-  it('renders the month as a labelled native table, not a flat list of buttons', () => {
+  it('renders the React DayPicker grid with Russian Monday-first headings', () => {
     const html = render();
-    expect(html).toContain('<table aria-labelledby=');
-    expect(html).toContain('<thead');
-    expect(html).toContain('<tbody');
-    expect(html).toContain('<tr');
-    expect(html).toContain('<td');
-    expect(html).toContain('<th scope="col"');
-    expect(html).not.toContain('role="grid"');
-    // Заголовки столбцов озвучиваются полным днём недели, а не «Пн».
-    expect(html).toContain('aria-label="Понедельник"');
+    expect(html).toContain('<table role="grid"');
+    expect(html).toContain('aria-label="июль 2026"');
+    expect(html).toContain('aria-label="понедельник"');
+    expect(html).toContain('aria-label="воскресенье"');
+    expect(html).toContain('>Пн</th>');
+    expect(html).toContain('>Вс</th>');
   });
 
-  it('keeps exactly one day focusable (roving tabindex)', () => {
+  it('keeps one calendar day in the tab order', () => {
     const html = render();
-    const focusable = html.match(/data-day="\d+"\s+tabindex="0"/g) ?? [];
-    const unfocusable = html.match(/data-day="\d+"\s+tabindex="-1"/g) ?? [];
-    expect(focusable).toHaveLength(1);
-    // Остальные 30 дней июля вне tab-порядка — вход в сетку стоит одного Tab, а не тридцати одного.
-    expect(unfocusable).toHaveLength(30);
+    const dayButtons = html.match(/<button[^>]+data-day="\d{2}\.\d{2}\.\d{4}"[^>]*>/g) ?? [];
+    expect(dayButtons.length).toBeGreaterThanOrEqual(31);
+    expect(dayButtons.filter((button) => button.includes('tabindex="0"'))).toHaveLength(1);
   });
 
-  it('marks today and leaves future days reachable but announced as unavailable', () => {
+  it('marks today and disables future dates', () => {
     const html = render();
-    expect(html).toContain('aria-current="date"');
-    // aria-disabled, а НЕ нативный disabled: иначе стрелка упирается в дыру в конце месяца.
-    expect(html).toContain('aria-disabled="true"');
-    expect(html).not.toMatch(/data-day="\d+"[^>]*\sdisabled/);
-    expect(html).toContain(', недоступно');
+    expect(html).toContain('data-today="true"');
+    expect(html).toMatch(/data-day="16\.07\.2026"[^>]*disabled=""/);
+    expect(html).not.toMatch(/data-day="15\.07\.2026"[^>]*disabled=""/);
   });
 
-  it('announces the pick state politely and hides the decorative read-out', () => {
-    const html = render();
-    expect(html).toContain('Период не выбран. Выберите начало периода.');
-    expect(html).toContain('role="status"');
-    // «→» и «…» читаются мусором — визуальная строка скрыта от скринридера.
-    expect(html).toContain('aria-hidden="true"');
-  });
-
-  it('labels the preset row so it is not four loose buttons', () => {
+  it('announces the selection state and labels the preset group', () => {
     const html = render();
     expect(html).toContain('<fieldset');
     expect(html).toContain('<legend class="sr-only">Быстрый выбор периода</legend>');
+    expect(html).toContain('role="status"');
+    expect(html).toContain('Выберите начало и конец периода');
+  });
+
+  it('exposes standard month navigation labels', () => {
+    const html = render();
+    expect(html).toContain('aria-label="Предыдущий месяц"');
+    expect(html).toContain('aria-label="Следующий месяц"');
   });
 });
