@@ -277,18 +277,57 @@ function demoMsPayload(url: URL, opts: { max?: boolean } = {}): unknown | undefi
     return {
       window_days: days,
       as_of: new Date().toISOString().slice(0, 10),
-      customers: 100,
+      // «Чемпионы» = 300 — согласовано с листингом /api/ms/rfm-customers (порог виртуализации 120).
+      customers: 388,
       no_agent_orders: 3,
-      total_orders: 200,
-      total_sum: 1_500_000,
+      total_orders: 1_410,
+      total_sum: 13_500_000,
       segments: [
-        { key: 'champions', customers: 12, orders: 50, sum: 500_000, average_recency_days: 2, average_frequency: 4.2, average_monetary: 41_667 },
+        { key: 'champions', customers: 300, orders: 1_260, sum: 12_500_000, average_recency_days: 2, average_frequency: 4.2, average_monetary: 41_667 },
         { key: 'loyal', customers: 22, orders: 60, sum: 400_000, average_recency_days: 7, average_frequency: 2.7, average_monetary: 18_182 },
         { key: 'potential', customers: 25, orders: 35, sum: 250_000, average_recency_days: 12, average_frequency: 1.4, average_monetary: 10_000 },
         { key: 'new', customers: 20, orders: 20, sum: 100_000, average_recency_days: 3, average_frequency: 1, average_monetary: 5_000 },
         { key: 'at_risk', customers: 13, orders: 25, sum: 200_000, average_recency_days: 24, average_frequency: 1.9, average_monetary: 15_385 },
         { key: 'hibernating', customers: 8, orders: 10, sum: 50_000, average_recency_days: 28, average_frequency: 1.3, average_monetary: 6_250 },
       ],
+    };
+  }
+  if (path === '/api/ms/rfm-customers') {
+    // «Чемпионы» = 300 покупателей — заведомо больше порога виртуализации (VIRTUALIZE_FROM=120):
+    // спек virtual-tables проверяет оконный рендер длинного сегмента; остальные сегменты —
+    // числа своих карточек /api/ms/rfm. limit/offset — честная пагинация, как у сервера (кэп 200).
+    const SEGMENT_TOTALS: Record<string, number> = {
+      champions: 300, loyal: 22, potential: 25, new: 20, at_risk: 13, hibernating: 8,
+    };
+    const TOTAL = SEGMENT_TOTALS[url.searchParams.get('segment') ?? ''] ?? 20;
+    const limitRaw = Number.parseInt(url.searchParams.get('limit') ?? '', 10);
+    const limit = Number.isFinite(limitRaw) ? Math.min(200, Math.max(1, limitRaw)) : 50;
+    const offsetRaw = Number.parseInt(url.searchParams.get('offset') ?? '', 10);
+    const offset = Number.isFinite(offsetRaw) ? Math.max(0, offsetRaw) : 0;
+    const rows = Array.from({ length: Math.max(0, Math.min(limit, TOTAL - offset)) }, (_, index) => {
+      const n = offset + index + 1;
+      return {
+        agent_id: `rfm-agent-${n}`,
+        name: `Покупатель ${n}`,
+        address: n % 3 === 0 ? `ул. Складская, д. ${n}` : null,
+        phone: n % 2 === 0 ? `+7 900 ${String(1_000_000 + n).slice(1)}` : null,
+        email: n % 4 === 0 ? `client${n}@example.com` : null,
+        city: n % 3 === 0 ? 'Москва' : null,
+        orders: 1 + (n % 5),
+        sum: 10_000 + n * 500,
+        last_day: new Date(Date.now() - (n % 30) * DAY_MS).toISOString().slice(0, 10),
+        recency_days: n % 30,
+        r: 1 + (n % 5),
+        f: 1 + (n % 5),
+        m: 1 + (n % 5),
+      };
+    });
+    return {
+      window_days: days,
+      as_of: new Date().toISOString().slice(0, 10),
+      segment: url.searchParams.get('segment') ?? 'champions',
+      total_customers: TOTAL,
+      rows,
     };
   }
   if (path === '/api/ms/top-customers') {

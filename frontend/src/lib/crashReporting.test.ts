@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { __resetCrashReporting, reportCrashToServer } from './crashReporting';
+import { __resetCrashReporting, isBenignWindowError, reportCrashToServer } from './crashReporting';
 import type { WidgetErrorReport } from './widgetErrors';
 
 const mockFetch = vi.fn<
@@ -95,5 +95,16 @@ describe('reportCrashToServer', () => {
     mockFetch.mockResolvedValueOnce(Response.json({ accepted: true }));
     expect(() => reportCrashToServer(report({ message: 'drift' }))).not.toThrow();
     await Promise.resolve();
+  });
+
+  // Benign-шум Chrome от ResizeObserver-потребителей (react-virtual measureElement, edge-fade):
+  // не исключение, ничего не ломает — глобальный репортёр обязан его отфильтровать,
+  // а настоящие window.error — отправлять по-прежнему.
+  it('classifies «ResizeObserver loop…» as benign, real crashes as reportable', () => {
+    expect(isBenignWindowError('ResizeObserver loop completed with undelivered notifications.')).toBe(true);
+    expect(isBenignWindowError('ResizeObserver loop limit exceeded')).toBe(true);
+    expect(isBenignWindowError('TypeError: x is undefined')).toBe(false);
+    expect(isBenignWindowError(undefined)).toBe(false);
+    expect(isBenignWindowError(new Error('ResizeObserver loop limit exceeded'))).toBe(false);
   });
 });

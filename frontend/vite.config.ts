@@ -32,6 +32,9 @@ export default defineConfig({
           ) {
             return 'vendor';
           }
+          // react-virtual — нишевая виртуализация длинных таблиц (сегодня только МС-маршрут):
+          // в shell-vendor не тащим, пусть живёт в lazy-чанках потребителей.
+          if (/[\\/]node_modules[\\/]@tanstack[\\/](react-virtual|virtual-core)[\\/]/.test(id)) return undefined;
           if (/[\\/]node_modules[\\/]@tanstack[\\/]/.test(id)) return 'vendor';
           // Validation belongs to API route chunks; public boot/auth probing uses a tiny shape
           // guard and must not preload all of Zod before it knows which route graph is needed.

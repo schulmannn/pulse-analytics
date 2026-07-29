@@ -1270,8 +1270,11 @@ const MsRfmCustomersSchema = z
 
 export type MsRfmCustomers = z.infer<typeof MsRfmCustomersSchema>;
 
-/** Размер страницы листинга покупателей сегмента (совпадает с серверным дефолтом limit=50). */
-export const MS_RFM_CUSTOMERS_PAGE = 50;
+/** Размер страницы листинга покупателей сегмента. 2026-07-29: 50 → 200 (= серверный кэп
+    MS_RFM_CUST_LIMIT_MAX): с виртуализацией списка (useWindowVirtualRows) большая страница
+    ничего не стоит рендеру, а сегмент из тысяч клиентов собирается в 4 раза меньшим числом
+    «Показать ещё». */
+export const MS_RFM_CUSTOMERS_PAGE = 200;
 
 /** Страница покупателей выбранного RFM-сегмента; `segment == null` — сегмент не выбран, запрос не идёт. */
 export function useMsRfmSegmentCustomers(period: MsPeriod, segment: string | null, offset: number) {
