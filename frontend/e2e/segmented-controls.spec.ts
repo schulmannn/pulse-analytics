@@ -71,6 +71,9 @@ test('segmented controls have a real roving focus without changing selection on 
   await expect(segments.first()).toBeFocused();
   await page.keyboard.press('ArrowLeft');
   await expect(segments.last()).toBeFocused();
+  await page.keyboard.press('Space');
+  await expect(segments.last()).toHaveAttribute('aria-pressed', 'true');
+  await expect(segments.first()).toHaveAttribute('aria-pressed', 'false');
 
   // A controlled value update that does not focus its target (DOM click()) changes the pressed
   // answer while Radix deliberately keeps the roving tab stop on the last keyboard-focused item.

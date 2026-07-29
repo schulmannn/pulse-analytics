@@ -117,7 +117,7 @@ export function SegmentedControl<T extends string>({
           }}
           className={cn(
             'inline-flex h-9 w-full min-h-11 min-w-11 shrink-0 items-center justify-center whitespace-nowrap bg-background px-3 font-medium text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/50 sm:min-h-0 sm:min-w-0 data-[state=on]:bg-accent data-[state=on]:text-accent-foreground',
-            size === 'sm' ? 'h-8 px-2 text-2xs' : 'text-xs',
+            size === 'sm' ? 'h-7 px-2 text-2xs' : 'text-xs',
             option.disabled ? 'cursor-default opacity-40' : 'hover:text-foreground',
             segmentClassName,
           )}
