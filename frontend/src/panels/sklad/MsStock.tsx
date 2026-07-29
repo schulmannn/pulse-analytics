@@ -5,6 +5,7 @@ import { ErrorState } from '@/components/ErrorState';
 import { TableSkeleton } from '@/components/ui/dataSkeleton';
 import { fmt } from '@/lib/format';
 import type { MsPeriod } from '@/lib/msPeriod';
+import { useVirtualRows } from '@/lib/useVirtualRows';
 
 /**
  * «Остатки» — «что заканчивается»: живой отчёт остатков склада, обогащённый скоростью продаж
@@ -124,6 +125,10 @@ export function MsStockTable({ period, sort }: { period: MsPeriod; sort: MsStock
     if (sort === 'sold') return [...rows].sort((a, b) => b.sold_window - a.sold_window);
     return rows; // серверный порядок: days_left ASC NULLS LAST → stock ASC
   }, [rows, sort]);
+  // Таблица виртуализируется спейсер-строками (не absolute — семантика table сохраняется);
+  // оценка ~33px: py-1.5 + однострочный text-sm + border. Ширины колонок держат ЗАГОЛОВКИ
+  // (они всегда в DOM), поэтому подмена видимых строк не дёргает раскладку.
+  const virtual = useVirtualRows<HTMLTableSectionElement>({ count: sorted.length, estimateSize: 33 });
   if (stock.isPending) return <StockSkeleton rows={8} />;
   if (stock.isError) return <StockError state={stock} />;
   if (!rows || rows.length === 0) {
@@ -142,11 +147,15 @@ export function MsStockTable({ period, sort }: { period: MsPeriod; sort: MsStock
               <th className="py-1.5 text-right font-medium">~Дней до нуля</th>
             </tr>
           </thead>
-          <tbody>
-            {sorted.map((row, i) => {
+          <tbody ref={virtual.containerRef} data-virtualized={virtual.active ? 'true' : undefined}>
+            {virtual.active && virtual.items.length > 0 && virtual.items[0].start - virtual.scrollMargin > 0 && (
+              <tr style={{ height: virtual.items[0].start - virtual.scrollMargin }} />
+            )}
+            {(virtual.active ? virtual.items.map((vi) => [sorted[vi.index], vi.index] as const) : sorted.map((row, i) => [row, i] as const)).map(([row, i]) => {
+              if (!row) return null;
               const warn = isWarnRow(row);
               return (
-                <tr key={row.id ?? `${row.name}-${i}`}>
+                <tr key={row.id ?? `${row.name}-${i}`} data-index={i} ref={virtual.active ? virtual.measureElement : undefined}>
                   <td className="max-w-[280px] truncate border-t border-border py-1.5 pr-3 text-left text-foreground" title={row.name ?? undefined}>
                     {row.name ?? 'Товар без имени'}
                   </td>
@@ -163,6 +172,10 @@ export function MsStockTable({ period, sort }: { period: MsPeriod; sort: MsStock
                 </tr>
               );
             })}
+            {virtual.active && virtual.items.length > 0 && (() => {
+              const bottom = virtual.totalSize - (virtual.items[virtual.items.length - 1].end - virtual.scrollMargin);
+              return bottom > 0 ? <tr style={{ height: bottom }} /> : null;
+            })()}
           </tbody>
         </table>
       </div>

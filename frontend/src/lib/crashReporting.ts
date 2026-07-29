@@ -108,6 +108,13 @@ function reportGlobalCrash(error: unknown, kind: 'error' | 'unhandledrejection')
   reportCrashToServer(report, 'global');
 }
 
+/** Хрестоматийный benign-шум Chrome: «ResizeObserver loop …» — не исключение и ничего не
+    ломает, но штатно всплывает window.error-ом у ResizeObserver-потребителей (react-virtual
+    measureElement, edge-fade). В bugs/Notion такому не место. */
+export function isBenignWindowError(message: unknown): boolean {
+  return typeof message === 'string' && message.startsWith('ResizeObserver loop');
+}
+
 let globalInstalled = false;
 /** Arm the window-level catch-all: uncaught errors + unhandled promise rejections. Idempotent; a
  *  no-op outside a browser (SSR / node test env). Call once at app init (main.tsx). */
@@ -119,6 +126,7 @@ export function installGlobalErrorReporter(): void {
     // target — not real script exceptions.
     if (event.target && event.target !== window) return;
     if (event.error == null && !event.message) return;
+    if (isBenignWindowError(event.message)) return;
     reportGlobalCrash(event.error ?? event.message, 'error');
   });
   window.addEventListener('unhandledrejection', (event) => {

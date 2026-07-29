@@ -38,7 +38,9 @@ const BUDGETS = {
   instagramMetricCode: 345 * KB,
   // 2026-07-28: +1KB — View Transitions навигация (viewTransitionNavigate в замыкании
   // useChartSectionModel; волна B). CI-сборка на ~0.3KB тяжелее локальной — с запасом.
-  moySkladMetricCode: 351 * KB,
+  // 2026-07-29: +8KB — @tanstack/react-virtual (виртуализация RFM-аудитории и остатков склада;
+  // manualChunks сознательно держит его ВНЕ shell-vendor — платит только этот маршрут).
+  moySkladMetricCode: 359 * KB,
   metrikaMetricCode: 325 * KB,
   // 2026-07-28: +1KB — та же волна B (см. выше).
   telegramMetricCode: 336 * KB,
