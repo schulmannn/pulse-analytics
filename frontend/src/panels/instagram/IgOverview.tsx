@@ -10,7 +10,6 @@ import {
 import { TopPostsBlock } from '@/components/instagram/content';
 import { ChartSection } from '@/components/ChartWidget';
 import { WidgetGroup } from '@/components/widgets/WidgetGroup';
-import { ChartHoverSyncProvider } from '@/lib/chartHoverSync';
 import { IgNarrativeWeekBlock } from '@/panels/IgNarrativeWeek';
 import { InsightsBlock } from '@/components/instagram/insights';
 
@@ -27,8 +26,6 @@ import { InsightsBlock } from '@/components/instagram/insights';
  */
 export function IgOverview({ ig }: { ig: IgData }) {
   return (
-    // Синхронный hover (волна D): карточки Обзора делят одно окно — общая дата-подсветка.
-    <ChartHoverSyncProvider>
     <WidgetGroup id="ig-overview-v2" className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-6">
       {/* Row 1 — the two primary cards. Reach reuses the curated `ig-reach` Home key, so «На
           главную» pins the card it already knew; audience drills to /metrics/ig-follows. */}
@@ -68,6 +65,5 @@ export function IgOverview({ ig }: { ig: IgData }) {
         <TopPostsBlock posts={ig.postsInWindow} limit={3} showSort={false} />
       </ChartSection>
     </WidgetGroup>
-    </ChartHoverSyncProvider>
   );
 }
