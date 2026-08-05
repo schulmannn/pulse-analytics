@@ -20,6 +20,14 @@ describe('SegmentedControl — keyboard contract', () => {
     expect(html).toMatch(/data-segment-index="1"[^>]*>30д<\/button>/);
   });
 
+  it('keeps both the shared track and every selectable state rounded', () => {
+    const html = markup(
+      <SegmentedControl ariaLabel="Период" value="30" onChange={() => {}} options={OPTIONS} />,
+    );
+    expect(html.match(/\brounded-full\b/g) ?? []).toHaveLength(OPTIONS.length + 1);
+    expect(html).not.toContain('rounded-md');
+  });
+
   it('announces a pattern where arrows are expected', () => {
     const html = markup(
       <SegmentedControl ariaLabel="Тип графика" value="7" onChange={() => {}} options={OPTIONS} />,
