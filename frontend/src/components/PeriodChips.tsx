@@ -82,7 +82,7 @@ export function PeriodChips({
               type="button"
               variant="outline"
               size="default"
-              shape="rounded"
+              shape="pill"
               className={cn(
                 'min-w-11 text-xs sm:min-w-0',
                 range

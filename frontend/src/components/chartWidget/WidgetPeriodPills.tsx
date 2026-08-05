@@ -35,7 +35,7 @@ export function WidgetPeriodPills({ days, onChange, hidden }: WidgetPeriodPillsP
       <legend className="sr-only">{groupLabel}</legend>
       {customRange && (
         <span
-          className={`inline-flex h-8 ${touch} items-center justify-center rounded-md border border-input bg-accent px-2.5 text-2xs font-medium text-accent-foreground`}
+          className={`inline-flex h-8 ${touch} items-center justify-center rounded-full border border-input bg-accent px-2.5 text-2xs font-medium text-accent-foreground`}
           title="Выбранный период страницы"
         >
           Свой

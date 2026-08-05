@@ -24,13 +24,17 @@ test.describe('DateRangePicker — клавиатура', () => {
     await page.getByRole('button', { name: 'Предыдущий месяц' }).click();
   };
 
-  const focusedDay = (page: import('@playwright/test').Page) => page.locator('[data-day][tabindex="0"]');
+  // DayPicker keeps one stable tab entry for entering the grid, while its internal focus state moves
+  // the real DOM focus between days. Read these as two separate contracts: tabindex is not the live
+  // caret after Home/End/arrow navigation.
+  const tabTargetDay = (page: import('@playwright/test').Page) => page.locator('[data-day][tabindex="0"]');
+  const focusedDay = (page: import('@playwright/test').Page) => page.locator('button[data-day]:focus');
 
   test('вход в сетку стоит одного Tab, и один Tab из неё выводит', async ({ page }) => {
     await openPastMonth(page);
 
     // Ровно одна ячейка месяца фокусируема — это и есть roving tabindex.
-    await expect(focusedDay(page)).toHaveCount(1);
+    await expect(tabTargetDay(page)).toHaveCount(1);
     await expect(page.locator('[data-day][tabindex="-1"]').first()).toBeAttached();
 
     // Якорь — «Следующий месяц»: последний фокусируемый контрол ПЕРЕД сеткой. В прошлом месяце он
