@@ -3,6 +3,6 @@
 # (python 3.12, pip-tools):
 #   pip-compile --generate-hashes --output-file=mtproto/requirements.lock mtproto/requirements.txt
 telethon==1.43.2
-fastapi==0.140.0
+fastapi==0.141.1
 uvicorn==0.30.1
 python-dotenv==1.2.2
