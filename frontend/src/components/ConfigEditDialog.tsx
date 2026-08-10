@@ -198,7 +198,7 @@ export function WidgetConfigControls({
           />
         </Field>
       ) : (
-        spec.disabledReasons?.viz && <DisabledField label="Визуализация" reason={spec.disabledReasons.viz} />
+        null
       )}
 
       <Field label="Период">
@@ -220,7 +220,7 @@ export function WidgetConfigControls({
           />
         </Field>
       ) : (
-        spec.disabledReasons?.grain && <DisabledField label="Грануляция" reason={spec.disabledReasons.grain} />
+        null
       )}
 
       {cap.comparison ? (
@@ -250,13 +250,13 @@ export function WidgetConfigControls({
           )}
         </Field>
       ) : (
-        spec.disabledReasons?.comparison && <DisabledField label="Сравнение" reason={spec.disabledReasons.comparison} />
+        null
       )}
 
       {cap.target ? (
         <TargetField config={config} onChange={onChange} />
       ) : (
-        spec.disabledReasons?.target && <DisabledField label="Цель" reason={spec.disabledReasons.target} />
+        null
       )}
 
       {cap.filter && spec.filterDims.length > 0 ? (
@@ -268,7 +268,7 @@ export function WidgetConfigControls({
           />
         </Field>
       ) : (
-        spec.disabledReasons?.filter && <DisabledField label="Фильтр" reason={spec.disabledReasons.filter} />
+        null
       )}
 
       <SourceField config={config} onChange={onChange} />
@@ -320,6 +320,8 @@ export function WidgetConfigControls({
         </div>
       </div>
 
+      <UnavailableRow spec={spec} config={config} />
+
       {vizAllowsTonalSurface(config.viz) ? (
         <div className="mt-4 flex w-full items-center justify-between gap-2 text-sm text-muted-foreground">
           <label htmlFor="config-tinted">Цветной фон</label>
@@ -329,9 +331,7 @@ export function WidgetConfigControls({
             onCheckedChange={(checked) => onChange({ style: { ...config.style, tinted: checked } })}
           />
         </div>
-      ) : (
-        <DisabledField label="Цветной фон" reason="для сравнений и категорий фон остаётся нейтральным" />
-      )}
+      ) : null}
     </>
   );
 }
@@ -345,14 +345,45 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-/** A control the current metric doesn't support — shown greyed with the reason rather than silently
- *  omitted, so the full control vocabulary stays visible and the user learns WHY it is off (steep). */
-function DisabledField({ label, reason }: { label: string; reason: string }) {
+/**
+ * Недоступные для метрики контролы — ОДНОЙ строкой в конце, а не пятью отдельными блоками.
+ *
+ * Инвариант «словарь виден с причиной» (widgetCapabilities) сохраняется: перечислены все
+ * недоступные поля, причина каждого — в `title`. Но раньше каждое из пяти занимало полноценный блок
+ * с заголовком и курсивной строкой, и у value-метрики (tg.er недоступны viz, грануляция,
+ * сравнение, цель и фильтр) инспектор превращался в стену «Недоступно» вокруг одного живого
+ * «Периода». Сжатие в строку возвращает рейл под высоту графика — и заодно оживляет sticky.
+ */
+function UnavailableRow({ spec, config }: { spec: EditorSpec; config: WidgetConfig }) {
+  const reasons = spec.disabledReasons ?? {};
+  const items: Array<{ label: string; reason: string }> = [];
+  if (reasons.viz && !(spec.capabilities.viz && spec.supportedViz.length > 1)) {
+    items.push({ label: 'Визуализация', reason: reasons.viz });
+  }
+  if (reasons.grain && !spec.capabilities.grain) items.push({ label: 'Грануляция', reason: reasons.grain });
+  if (reasons.comparison && !spec.capabilities.comparison) {
+    items.push({ label: 'Сравнение', reason: reasons.comparison });
+  }
+  if (reasons.target && !spec.capabilities.target) items.push({ label: 'Цель', reason: reasons.target });
+  if (reasons.filter && !(spec.capabilities.filter && spec.filterDims.length > 0)) {
+    items.push({ label: 'Фильтр', reason: reasons.filter });
+  }
+  if (!vizAllowsTonalSurface(config.viz)) {
+    items.push({ label: 'Цветной фон', reason: 'для сравнений и категорий фон остаётся нейтральным' });
+  }
+  if (items.length === 0) return null;
   return (
-    <div className="mt-4 opacity-55" aria-disabled="true">
-      <span className="text-2xs tracking-wide text-muted-foreground">{label}</span>
-      <p className="mt-1 text-2xs italic text-muted-foreground">Недоступно · {reason}</p>
-    </div>
+    <p className="mt-4 text-2xs leading-relaxed text-muted-foreground" data-widget-unavailable="">
+      <span className="opacity-70">Недоступно для этой метрики: </span>
+      {items.map((item, index) => (
+        <span key={item.label}>
+          {index > 0 && ' · '}
+          <span title={item.reason} className="underline decoration-dotted underline-offset-2">
+            {item.label}
+          </span>
+        </span>
+      ))}
+    </p>
   );
 }
 

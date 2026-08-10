@@ -226,6 +226,32 @@ describe('resolveWidgetMetric — TG core series', () => {
     expect(r.seriesUnit).toBeUndefined(); // не задано → ряд форматируется как хедлайн
   });
 
+  // «Средний охват поста» — отношение: ряд обязан быть в единицах хедлайна. Раньше он был
+  // побитовой копией ряда просмотров (оба bucketPostField(...,'reach')), и карточка со словом
+  // «средний» показывала столбцы дневных СУММ: день с тремя постами втрое выше охвата любого.
+  it('gives tg.avgReach a per-bucket MEAN, not the daily sum it shared with tg.views', () => {
+    const r = resolveWidgetMetric(cfg('tg.avgReach'), ctx);
+    const observed = r.series!.filter((p) => p.value != null).map((p) => p.value);
+    // Посты окна: 1000 (день 1), 2000 (день 5), 500 (день 10) — по одному в день, среднее = сам пост.
+    expect(observed.sort((a, b) => (a as number) - (b as number))).toEqual([500, 1000, 2000]);
+  });
+
+  it('leaves a day without posts undefined — an average over nothing is not zero', () => {
+    const r = resolveWidgetMetric(cfg('tg.avgReach'), ctx);
+    expect(r.series!.filter((p) => p.value === null).length).toBe(27); // 30 дней окна − 3 дня с постами
+    expect(r.series!.some((p) => p.value === 0)).toBe(false);
+  });
+
+  it('averages WITHIN a bucket when a day carries several posts', () => {
+    const twoInADay = {
+      ...(full as object),
+      posts: [mkPost(3, 1000), { ...mkPost(3, 3000), id: 999 }],
+    } as unknown as TgFull;
+    const r = resolveWidgetMetric(cfg('tg.avgReach'), { ...ctx, tg: { ...ctx.tg!, full: twoInADay } });
+    const observed = r.series!.filter((p) => p.value != null).map((p) => p.value);
+    expect(observed).toEqual([2000]); // (1000 + 3000) / 2 постов, а не сумма 4000
+  });
+
   it('omits the ghost when no comparison is configured', () => {
     const r = resolveWidgetMetric(cfg('tg.views'), ctx);
     expect(r.ghost).toBeUndefined();

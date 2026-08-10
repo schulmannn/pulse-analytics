@@ -30,6 +30,7 @@ import {
   COMPARISON_LABEL,
   bucketChannelFlow,
   bucketPostField,
+  bucketPostMean,
   bucketSubscriberLevels,
   comparisonBaseline,
   effectiveGrain,
@@ -142,7 +143,12 @@ function resolveCoreTg(
           : derived.normPosts.reduce((sum, post) => sum + Number(post[field] ?? 0), 0);
   out.series = useChannelViews
     ? bucketChannelFlow(channelRows, winFrom, winTo, grain)
-    : bucketPostField(derived.normPosts, field, winFrom, winTo, grain);
+    : drillKey === 'avgReach'
+      // «Средний охват поста» — отношение: ряд обязан быть в единицах хедлайна (среднее на пост),
+      // а не суммой дня. Раньше это была побитовая копия ряда просмотров, и карточка со словом
+      // «средний» показывала столбцы дневных сумм.
+      ? bucketPostMean(derived.normPosts, field, winFrom, winTo, grain)
+      : bucketPostField(derived.normPosts, field, winFrom, winTo, grain);
   // ER — ОТНОШЕНИЕ, и дневного ряда у него нет: под хедлайном-процентом рисуется величина, из
   // которой он посчитан, — абсолютные вовлечения дня (FIELD.er = 'eng'). Единица хедлайна к этому
   // ряду неприменима: без явного seriesUnit тултип печатал «431.0%», а футер — «Макс 431.0%»,
