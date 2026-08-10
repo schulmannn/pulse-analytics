@@ -104,17 +104,25 @@ export function resolveWidgetMetric(config: WidgetConfig, ctx: DataContext): Wid
     result.series &&
     result.series.length >= 2
   ) {
-    const ghost =
-      comparison.mode === 'moving_average'
-        ? movingAverageGhost(
-            result.series.map((point) => point.value),
-            7,
-          )
+    // Скользящее среднее и «день недели» строятся ПО СЕРИИ, поэтому пропуск пришлось бы чем-то
+    // заместить — любой суррогат (0 или интерполяция) стал бы выдуманным сравнением. Честнее
+    // сравнение не строить и сказать об этом.
+    const values = result.series.map((point) => point.value);
+    const gapFree = values.every((value): value is number => value != null);
+    const ghost = !gapFree
+      ? null
+      : comparison.mode === 'moving_average'
+        ? movingAverageGhost(values, 7)
         : sameWeekdayGhost(
             result.series.map((point) => point.date),
-            result.series.map((point) => point.value),
+            values,
           );
-    if (ghost) {
+    if (!gapFree) {
+      result.meta = {
+        ...result.meta,
+        comparisonNote: 'сравнение недоступно — в периоде есть пропуски сбора',
+      };
+    } else if (ghost) {
       result.ghost = ghost;
       result.ghostLabel = COMPARISON_LABEL[comparison.mode];
       result.meta = { ...result.meta, comparisonNote: undefined };
@@ -141,13 +149,18 @@ export function resolveWidgetMetric(config: WidgetConfig, ctx: DataContext): Wid
   // плотность точек на линии. Один вызов здесь покрывает TG/IG/MS-резолверы разом.
   const fullSeries = result.series;
   if (fullSeries && fullSeries.length >= 2) {
+    // Пропуски в знаменатель НЕ идут: среднее считается по наблюдениям, а не по календарю —
+    // иначе неделя простоя сбора занижала бы «Среднее» ровно так же, как настоящий спад.
     let max = Number.NEGATIVE_INFINITY;
     let sum = 0;
+    let observed = 0;
     for (const point of fullSeries) {
+      if (point.value == null) continue;
       if (point.value > max) max = point.value;
       sum += point.value;
+      observed++;
     }
-    result.stats = { max, avg: sum / fullSeries.length };
+    if (observed > 0) result.stats = { max, avg: sum / observed };
   }
   return capResultSeries(result, config.viz, seriesAggOf(config.metricId));
 }

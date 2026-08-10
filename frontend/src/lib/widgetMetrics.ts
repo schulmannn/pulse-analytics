@@ -157,6 +157,7 @@ const TG_METRICS: MetricDef[] = [
   define({
     id: 'tg.subscribers', label: 'Подписчики', source: 'tg', kind: 'series', unit: 'number',
     category: 'growth', seriesAgg: 'level', drillKey: 'subscribers',
+    defaultViz: 'line', supportedViz: ['line'],
     formula: 'Текущее число подписчиков канала.',
     included: 'Δ — изменение за период (из дневного архива), а не разница «сейчас минус показанное».',
     sourceNote: 'Дневной архив channel_daily.',
@@ -276,7 +277,8 @@ const IG_METRICS: MetricDef[] = [
   }),
   define({
     id: 'ig.followers', label: 'Подписчики', source: 'ig', kind: 'series', unit: 'number', category: 'growth',
-    seriesAgg: 'level', formula: 'Текущее число подписчиков аккаунта.', sourceNote: 'Instagram Graph.',
+    seriesAgg: 'level', defaultViz: 'line', supportedViz: ['line'],
+    formula: 'Текущее число подписчиков аккаунта.', sourceNote: 'Instagram Graph.',
   }),
   define({
     id: 'ig.netFollowers', label: 'Прирост подписчиков', source: 'ig', kind: 'series', unit: 'number',

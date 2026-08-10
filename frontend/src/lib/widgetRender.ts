@@ -42,7 +42,8 @@ export function unitFormat(unit: MetricUnit): (n: number) => string {
 }
 
 export interface ChartSeries {
-  values: number[];
+  /** `null` = пропуск измерения: линия рвётся, столбец не рисуется. Не путать с нулём. */
+  values: Array<number | null>;
   labels: string[];
   titles: string[];
 }
@@ -50,13 +51,16 @@ export interface ChartSeries {
 /** Adapt a WidgetResult's series into the {values,labels,titles} the chart components take. */
 export function seriesToChart(result: WidgetResult): ChartSeries {
   const series = result.series ?? [];
-  const f = unitFormat(result.unit);
+  const f = unitFormat(result.seriesUnit ?? result.unit);
   // Недельная агрегация (длинные бары): дата точки — понедельник корзины, без « · неделя»
   // тултип «18 июл.: N» читался бы как один день.
   const suffix = result.meta?.seriesGrain === 'week' ? ' · неделя' : '';
   const labels = series.map((p) => bucketLabel(p.date));
   const values = series.map((p) => p.value);
-  const titles = series.map((p, i) => `${labels[i]}: ${f(p.value)}${suffix}`);
+  // Пропуск подписывается словами, а не «0»: тултип обязан отличать «сбор не прошёл» от нуля.
+  const titles = series.map((p, i) =>
+    p.value == null ? `${labels[i]}: данных нет` : `${labels[i]}: ${f(p.value)}${suffix}`,
+  );
   return { values, labels, titles };
 }
 
@@ -64,7 +68,7 @@ export function seriesToChart(result: WidgetResult): ChartSeries {
  *  beside a chart so a line reads as numbers too, not just a shape. Empty for <2 points (nothing to
  *  summarise beyond the hero). Formatted by the metric unit. */
 export function seriesStats(result: WidgetResult): { label: string; value: string }[] {
-  const f = unitFormat(result.unit);
+  const f = unitFormat(result.seriesUnit ?? result.unit);
   // result.stats — от ПОЛНОЙ серии до визуального капа (LTTB сохраняет экстремумы и смещает
   // среднее по выборке вверх); пересчёт по series — фолбэк для путей мимо resolveWidgetMetric.
   if (result.stats) {
@@ -73,7 +77,9 @@ export function seriesStats(result: WidgetResult): { label: string; value: strin
       { label: 'Среднее', value: f(Math.round(result.stats.avg)) },
     ];
   }
-  const vals = (result.series ?? []).map((p) => p.value);
+  const vals = (result.series ?? [])
+    .map((p) => p.value)
+    .filter((value): value is number => value != null);
   if (vals.length < 2) return [];
   const max = Math.max(...vals);
   const avg = vals.reduce((a, b) => a + b, 0) / vals.length;

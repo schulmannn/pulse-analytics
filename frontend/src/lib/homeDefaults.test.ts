@@ -21,6 +21,22 @@ describe('defaultHomeKeys', () => {
     expect(keys.every((k) => k.startsWith('ig-'))).toBe(true);
   });
 
+  // В HOME_REGISTRY нет кураторских карточек склада и Метрики, поэтому telegram-first сев на таком
+  // workspace давал четыре виджета, которым неоткуда взять источник.
+  it('seeds an empty board for a МойСклад-only workspace instead of dead Telegram widgets', () => {
+    expect(defaultHomeKeys([{ source: 'ms' }])).toEqual([]);
+  });
+
+  it('seeds an empty board for a Яндекс.Метрика-only workspace instead of dead Telegram widgets', () => {
+    expect(defaultHomeKeys([{ source: 'ym' }])).toEqual([]);
+  });
+
+  it('still seeds the Telegram default when a ym/ms source sits NEXT TO a Telegram channel', () => {
+    expect(defaultHomeKeys([{ source: 'ym' }, { source: 'collector' }])).toEqual([
+      'kpi', 'week', 'growth', 'top-posts',
+    ]);
+  });
+
   it('treats a mixed workspace (a TG channel + a linked IG account) as TG-first with IG reach', () => {
     const keys = defaultHomeKeys([
       { source: 'collector', ig_connected: false },

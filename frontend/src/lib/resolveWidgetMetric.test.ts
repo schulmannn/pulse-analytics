@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { pluralRu, resolveWidgetMetric, type DataContext } from '@/lib/resolveWidgetMetric';
+import { seriesStats, seriesToChart } from '@/lib/widgetRender';
 import type { WidgetConfig } from '@/lib/widgetConfig';
 import { WIDGET_METRICS } from '@/lib/widgetMetrics';
 import type {
@@ -109,27 +110,88 @@ const cfg = (metricId: string, extra: Partial<WidgetConfig> = {}): WidgetConfig 
   ...extra,
 });
 
+  // Канальный ряд сравнивается с канальным базисом, поэтому в архиве нужны строки и в предыдущем
+// окне: базовый период 30-дневного окна — это дни 30..59 назад.
+const archiveCtx: DataContext = {
+  ...ctx,
+  tg: {
+    ...ctx.tg!,
+    history: {
+      rows: [
+        { day: iso(45).slice(0, 10), subscribers: 43800, views: 2000, reactions: 100, forwards: 20 },
+        { day: iso(40).slice(0, 10), subscribers: 43850, views: 2500, reactions: 120, forwards: 25 },
+        { day: '2026-06-10', subscribers: 43900, views: 3000, reactions: 150, forwards: 30 },
+        { day: '2026-06-14', subscribers: 44000, views: 3500, reactions: 175, forwards: 35 },
+      ],
+    } as unknown as NonNullable<DataContext['tg']>['history'],
+  },
+};
+
 describe('resolveWidgetMetric — TG core series', () => {
-  it('resolves tg.views: value, valueRaw (sum of reach), full-window series', () => {
+  // «Просмотры» — КАНАЛЬНАЯ величина: и хедлайн, и ряд читают дневной архив channel_daily.views.
+  // Раньше число было канальным (6500), а ряд под ним — пост-производным (3500): одна карточка
+  // показывала две разные величины. Теперь они сходятся.
+  it('resolves tg.views from the CHANNEL archive — series reconciles with the headline', () => {
     const r = resolveWidgetMetric(cfg('tg.views'), ctx);
     expect(r.empty).toBeFalsy();
     expect(r.kind).toBe('series');
     expect(r.unit).toBe('views');
     expect(r.value).toBeTruthy();
-    expect(r.valueRaw).toBe(3500); // 1000 + 2000 + 500 (the 35-day post is out of window)
+    expect(r.valueRaw).toBe(6500); // 3000 + 3500 из архива, НЕ пост-сумма 3500
     expect(r.series).toBeDefined();
     expect(r.series!.length).toBe(30); // 30 day-buckets across the window
-    const sum = r.series!.reduce((s, p) => s + p.value, 0);
-    expect(sum).toBe(3500); // series reconciles with the headline sum
+    const sum = r.series!.reduce((s, p) => s + (p.value ?? 0), 0);
+    expect(sum).toBe(6500); // series reconciles with the headline sum
     // bucket keys are raw YYYY-MM-DD, not formatted labels
     expect(r.series!.every((p) => /^\d{4}-\d{2}-\d{2}$/.test(p.date))).toBe(true);
   });
 
+  // Дни без строки архива — ПРОПУСК СБОРА (null), а не нулевые сутки: канал не может набрать ровно
+  // ноль просмотров. Именно зануление этих дней и рисовало «пилу» на компактной карточке.
+  it('marks days without an archive row as gaps (null), not zero days', () => {
+    const r = resolveWidgetMetric(cfg('tg.views'), ctx);
+    const observed = r.series!.filter((p) => p.value != null);
+    expect(observed.map((p) => p.value)).toEqual([3000, 3500]);
+    expect(r.series!.filter((p) => p.value === null).length).toBe(28);
+    expect(r.series!.some((p) => p.value === 0)).toBe(false);
+  });
+
+  // «Макс/Среднее» считаются по НАБЛЮДЕНИЯМ: если делить на календарь, простой сбора занижал бы
+  // среднее ровно так же, как настоящий спад.
+  it('computes stats over observations only — gaps are not zeros in the denominator', () => {
+    const r = resolveWidgetMetric(cfg('tg.views'), ctx);
+    expect(r.stats!.max).toBe(3500);
+    expect(r.stats!.avg).toBe(3250); // (3000 + 3500) / 2 наблюдения, не / 30 дней
+  });
+
+  // Фильтр — свойство ПОСТА; канальный архив по формату не разрезать. Честный ответ — вернуться
+  // к пост-ряду, иначе «только видео» молча показывало бы весь канал.
+  it('falls back to the post-derived series when a per-post filter is active', () => {
+    const r = resolveWidgetMetric(
+      cfg('tg.views', { filters: [{ dimensionId: 'tg.format', op: 'in', values: ['Фото'] }] }),
+      ctx,
+    );
+    expect(r.valueRaw).toBe(3500); // пост-сумма окна, а не канальные 6500
+    expect(r.meta!.samplePosts).toBe(3);
+  });
+
+  // Без архива (нет БД / малый канал / первый день) хедлайн сам падает в пост-сумму — ряд обязан
+  // упасть туда же, иначе они снова разъедутся.
+  it('falls back to the post-derived series when the channel archive is empty', () => {
+    const noArchive: DataContext = {
+      ...ctx,
+      tg: { ...ctx.tg!, history: { rows: [] } as unknown as NonNullable<DataContext['tg']>['history'] },
+    };
+    const r = resolveWidgetMetric(cfg('tg.views'), noArchive);
+    expect(r.valueRaw).toBe(3500);
+    expect(r.series!.reduce((s, p) => s + (p.value ?? 0), 0)).toBe(3500);
+  });
+
   it('adds an aligned ghost series for previous_period comparison', () => {
-    const r = resolveWidgetMetric(cfg('tg.views', { comparison: { mode: 'previous_period', display: 'ghost_line' } }), ctx);
+    const r = resolveWidgetMetric(cfg('tg.views', { comparison: { mode: 'previous_period', display: 'ghost_line' } }), archiveCtx);
     expect(r.ghost).toBeDefined();
     expect(r.ghost!.length).toBe(r.series!.length); // aligned to the active series
-    expect(r.ghost!.some((v) => v > 0)).toBe(true); // the 35-day post lands in the baseline
+    expect(r.ghost!.some((v) => v != null && v > 0)).toBe(true); // the 35-day post lands in the baseline
     expect(r.ghostLabel).toBe('прошлый период');
   });
 
@@ -147,6 +209,23 @@ describe('resolveWidgetMetric — TG core series', () => {
     expect(r.ghost).toBeUndefined();
   });
 
+  // ER — отношение: хедлайн в процентах, а ряд под ним — абсолютные вовлечения, из которых он
+  // посчитан. Формат хедлайна к ряду неприменим, иначе тултип печатает «431.0%» — подпись, которой
+  // не соответствует ни одна точка графика.
+  it('does not label the ER series as percent — the line is the underlying engagement count', () => {
+    const r = resolveWidgetMetric(cfg('tg.er'), ctx);
+    expect(r.unit).toBe('percent'); // хедлайн — по-прежнему проценты
+    expect(r.seriesUnit).toBe('number'); // ряд — нет
+    const { titles } = seriesToChart(r);
+    expect(titles.some((t) => t.includes('%'))).toBe(false);
+    expect(seriesStats(r).every((stat) => !stat.value.includes('%'))).toBe(true);
+  });
+
+  it('keeps percent formatting for series whose own unit IS percent', () => {
+    const r = resolveWidgetMetric(cfg('tg.views'), ctx);
+    expect(r.seriesUnit).toBeUndefined(); // не задано → ряд форматируется как хедлайн
+  });
+
   it('omits the ghost when no comparison is configured', () => {
     const r = resolveWidgetMetric(cfg('tg.views'), ctx);
     expect(r.ghost).toBeUndefined();
@@ -154,14 +233,14 @@ describe('resolveWidgetMetric — TG core series', () => {
   });
 
   it('honours the comparison display: «delta» draws no ghost line (S8)', () => {
-    const line = resolveWidgetMetric(cfg('tg.views', { comparison: { mode: 'previous_period', display: 'ghost_line' } }), ctx);
+    const line = resolveWidgetMetric(cfg('tg.views', { comparison: { mode: 'previous_period', display: 'ghost_line' } }), archiveCtx);
     expect(line.ghost).toBeDefined();
-    const deltaOnly = resolveWidgetMetric(cfg('tg.views', { comparison: { mode: 'previous_period', display: 'delta' } }), ctx);
+    const deltaOnly = resolveWidgetMetric(cfg('tg.views', { comparison: { mode: 'previous_period', display: 'delta' } }), archiveCtx);
     expect(deltaOnly.ghost).toBeUndefined(); // «Дельта» is a real choice, not a no-op
   });
 
   it('supports the same_period_last_month baseline (S8)', () => {
-    const r = resolveWidgetMetric(cfg('tg.views', { comparison: { mode: 'same_period_last_month', display: 'ghost_line' } }), ctx);
+    const r = resolveWidgetMetric(cfg('tg.views', { comparison: { mode: 'same_period_last_month', display: 'ghost_line' } }), archiveCtx);
     expect(r.ghost).toBeDefined();
     expect(r.ghostLabel).toBe('прошлый месяц');
   });
@@ -177,7 +256,7 @@ describe('resolveWidgetMetric — TG core series', () => {
   it('buckets a flow metric by quarter — one bucket summing the whole window (S10)', () => {
     const r = resolveWidgetMetric(cfg('tg.views', { grain: 'quarter' }), ctx);
     // The 30-day window (May 17 → Jun 15 2026) is entirely within Q2 2026 → one bucket.
-    expect(r.series).toEqual([{ date: '2026-Q2', value: 3500 }]);
+    expect(r.series).toEqual([{ date: '2026-Q2', value: 6500 }]);
   });
 
   it('buckets a LEVEL metric by year — last value in the bucket, not a sum (S10)', () => {
@@ -190,16 +269,16 @@ describe('resolveWidgetMetric — TG core series', () => {
 
 describe('resolveWidgetMetric — target / progress (S9)', () => {
   it('a fixed target sets result.target + «% of target» progress', () => {
-    const r = resolveWidgetMetric(cfg('tg.views', { target: { type: 'fixed', value: 7000 } }), ctx);
-    expect(r.target).toBe(7000);
-    expect(r.targetPct).toBeCloseTo(50, 5); // 3500 / 7000
+    const r = resolveWidgetMetric(cfg('tg.views', { target: { type: 'fixed', value: 13000 } }), ctx);
+    expect(r.target).toBe(13000);
+    expect(r.targetPct).toBeCloseTo(50, 5); // 6500 (канальные просмотры окна) / 13000
   });
 
   it('a dynamic target resolves another metric’s current value', () => {
     // target = tg.reactions (valueRaw = 50+100+25 = 175 likes in window)
     const r = resolveWidgetMetric(cfg('tg.views', { target: { type: 'dynamic', metricId: 'tg.reactions' } }), ctx);
     expect(r.target).toBe(175);
-    expect(r.targetPct).toBeCloseTo((3500 / 175) * 100, 3);
+    expect(r.targetPct).toBeCloseTo((6500 / 175) * 100, 3);
   });
 
   it('ignores a self-referential dynamic target and an unusable fixed value', () => {
@@ -315,7 +394,12 @@ describe('resolveWidgetMetric — per-post filters (S7)', () => {
       { ...mkPost(3, 500), media_type: 'video' },
     ],
   } as unknown as TgFull;
-  const mixedCtx: DataContext = { ...ctx, tg: { ...ctx.tg!, full: mixedFull } };
+  // Архив пуст намеренно: блок проверяет ПОСТОВУЮ фильтрацию, а канальный ряд просмотров по
+  // свойствам постов не режется и в этих кейсах только маскировал бы проверяемое.
+  const mixedCtx: DataContext = {
+    ...ctx,
+    tg: { ...ctx.tg!, full: mixedFull, history: { rows: [] } as unknown as NonNullable<DataContext['tg']>['history'] },
+  };
 
   it('filters a series metric (tg.views) to a single format', () => {
     const r = resolveWidgetMetric(
@@ -490,7 +574,7 @@ describe('resolveWidgetMetric — Instagram (S11)', () => {
     expect(r.kind).toBe('series');
     expect(r.unit).toBe('views');
     expect(r.valueRaw).toBe(3000); // 1000 + 2000 in window
-    expect(r.series!.reduce((s, p) => s + p.value, 0)).toBe(3000);
+    expect(r.series!.reduce((s, p) => s + (p.value ?? 0), 0)).toBe(3000);
   });
 
   it('wires the comparison ghost for IG series (S8) + honours «delta»', () => {
@@ -520,7 +604,7 @@ describe('resolveWidgetMetric — Instagram (S11)', () => {
     expect(r.empty).toBeFalsy();
     expect(r.valueRaw).toBe(44000); // герой — живое число профиля
     expect(r.series && r.series.length).toBeGreaterThanOrEqual(2);
-    const values = r.series!.map((p) => p.value);
+    const values = r.series!.map((p) => p.value ?? 0);
     expect(values[0]).toBe(43000); // уровни (последний в бакете), не суммы потока
     expect(Math.max(...values)).toBeLessThanOrEqual(44000);
   });
@@ -613,7 +697,9 @@ describe('resolveWidgetMetric — Instagram (S11)', () => {
 
 describe('resolveWidgetMetric — unified meta (source + data-quality caption)', () => {
   it('attaches network / period / sample / freshness to a post-derived metric', () => {
-    const r = resolveWidgetMetric(cfg('tg.views'), ctx);
+    // tg.reactions — пост-производная: у неё samplePosts осмыслен. У tg.views ряд канальный, и
+    // «· N постов» там был бы ложной атрибуцией (см. отдельный тест ниже).
+    const r = resolveWidgetMetric(cfg('tg.reactions'), ctx);
     expect(r.meta).toBeDefined();
     expect(r.meta!.network).toBe('tg');
     expect(r.meta!.periodLabel).toBe('за 30 дн.');
@@ -641,13 +727,13 @@ describe('resolveWidgetMetric — unified meta (source + data-quality caption)',
       ...ctx,
       tg: { ...ctx.tg!, full: { ...(full as object), posts: many } as unknown as TgFull },
     };
-    const r = resolveWidgetMetric(cfg('tg.views', { comparison: { mode: 'previous_period', display: 'ghost_line' } }), cappedCtx);
+    const r = resolveWidgetMetric(cfg('tg.reactions', { comparison: { mode: 'previous_period', display: 'ghost_line' } }), cappedCtx);
     expect(r.ghost).toBeUndefined();
     expect(r.meta!.comparisonNote).toBe('сравнение скрыто — недостаточно истории постов');
   });
 
   it('keeps the note absent when the comparison IS drawn', () => {
-    const r = resolveWidgetMetric(cfg('tg.views', { comparison: { mode: 'previous_period', display: 'ghost_line' } }), ctx);
+    const r = resolveWidgetMetric(cfg('tg.views', { comparison: { mode: 'previous_period', display: 'ghost_line' } }), archiveCtx);
     expect(r.ghost).toBeDefined();
     expect(r.meta!.comparisonNote).toBeUndefined();
   });
@@ -724,7 +810,9 @@ describe('resolveWidgetMetric — визуальный кап длинных с�
     days: 0,
     range: null,
     inRange: inRange400,
-    tg: { full: fullLong, history, channels, graphs, channelId: 1 },
+    // Архив пуст: блок проверяет ОБЩИЙ слой капа на длинной ДНЕВНОЙ серии, а её даёт пост-ряд.
+    // С архивом tg.views вернул бы две канальные точки, и капать было бы нечего.
+    tg: { full: fullLong, history: { rows: [] } as unknown as typeof history, channels, graphs, channelId: 1 },
   };
   const fullSum = manyPosts.reduce((s, p) => s + p.views, 0);
 
@@ -756,7 +844,7 @@ describe('resolveWidgetMetric — визуальный кап длинных с�
     expect(weekly.length).toBeLessThanOrEqual(140); // CHART_MAX_POINTS
     // Monday-anchored корзины: date каждой = понедельник, flow-сумма недель = сумма дней.
     expect(weekly.every((p) => new Date(`${p.date}T00:00:00Z`).getUTCDay() === 1)).toBe(true);
-    expect(weekly.reduce((sum, p) => sum + p.value, 0)).toBe(fullSum);
+    expect(weekly.reduce((sum, p) => sum + (p.value ?? 0), 0)).toBe(fullSum);
     expect(r.valueRaw).toBe(fullSum); // хедлайн по-прежнему от полной дневной серии
     expect(r.meta?.periodLabel).toBe('за всё время · по неделям'); // честный маркер агрегации
   });

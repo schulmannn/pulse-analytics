@@ -17,13 +17,19 @@ import {
 import { ChartExpandedContext, ChartRefLinesContext, ExpandedChartHeightContext, WidgetTargetContext } from '@/components/ExpandableChart';
 
 interface BarChartProps {
-  values: number[];
+  /**
+   * `null` = пропуск измерения. Столбец пропуска не рисуется (высота 0) — визуально это то же,
+   * что честный ноль, потому что «отсутствующий столбец» в столбчатой диаграмме одну форму и
+   * имеет. Различие несёт ПОДПИСЬ: `titles` для пропуска говорит «данных нет» (seriesToChart).
+   * Настоящий разрыв показывает {@link LineChart} — там для него есть геометрия.
+   */
+  values: Array<number | null>;
   labels?: string[];
   titles?: string[];
   height?: number;
   /** Comparison series (previous period / baseline), drawn as a dashed --chart-2 overlay
       line across the bar tops, with a legend row — the visual delta for bar charts. */
-  ghost?: number[];
+  ghost?: Array<number | null>;
   /** Legend/tooltip name for the primary series when ghost is a parallel category, not a period. */
   primaryLabel?: string;
   /** Show a percentage delta between primary and ghost. Disable for parallel categories. */
@@ -83,11 +89,11 @@ function stackSegmentPath(box: BarBox, roundTop: boolean, roundBottom: boolean):
 }
 
 export function BarChart({
-  values,
+  values: rawValues,
   labels,
   titles,
   height = 200,
-  ghost,
+  ghost: rawGhost,
   primaryLabel = 'Текущий',
   ghostLabel = 'Прошлый период',
   comparisonDelta = true,
@@ -98,6 +104,14 @@ export function BarChart({
   comparisonStyle = 'grouped',
   appearance = 'default',
 }: BarChartProps) {
+  // Геометрия столбцов числовая, а пропуск в ней невыразим — сводим его к нулевой высоте ОДИН
+  // раз, на входе. Честность при этом не теряется: `titles` уже несёт «данных нет» для пропуска,
+  // а «Макс/Среднее» считаются выше по потоку, до этого приведения, и пропуск в них не попадает.
+  const values = useMemo(() => (rawValues ?? []).map((value) => value ?? 0), [rawValues]);
+  const ghost = useMemo(
+    () => (rawGhost == null ? undefined : rawGhost.map((value) => value ?? 0)),
+    [rawGhost],
+  );
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   // Press position (client px) for the drag guard: the svg-level onClick would otherwise drill on

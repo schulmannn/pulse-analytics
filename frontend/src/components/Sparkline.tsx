@@ -5,7 +5,14 @@ import { SparklineSeries } from '@/components/SparklineSeries';
 import { cn } from '@/lib/utils';
 
 interface SparklineProps {
-  values: number[];
+  /**
+   * `null` = пропуск измерения. Компактная искра БЕЗ ОСИ показывает только наблюдения: пропуски
+   * отбрасываются вместе со своими подписями, а не заполняются нулём. Это канон проекта для
+   * компактных искр (kpiDerive: «Sparse by construction — no fabricated zero days»): рисовать
+   * разрыв в 200×32 без оси некуда, а ноль вместо пропуска — прямая ложь. Полноразмерный
+   * {@link LineChart} разрывы показывает по-настоящему.
+   */
+  values: Array<number | null>;
   /** Per-point labels (e.g. dates), same length as values — used in the hover read-out. */
   labels?: string[];
   /** Full hsl() stroke/fill colour, e.g. 'hsl(var(--brand-iris))'. */
@@ -58,8 +65,8 @@ function computeSparkPoints(values: number[]): MorphPoint[] {
  * read-out. Renders nothing for <2 points (skeleton/empty stays clean).
  */
 export function Sparkline({
-  values,
-  labels,
+  values: rawValues,
+  labels: rawLabels,
   color = 'hsl(var(--brand-iris))',
   area = false,
   strokeWidth = 1.6,
@@ -68,6 +75,25 @@ export function Sparkline({
   caption,
   formatValue = String,
 }: SparklineProps) {
+  // Отбрасываем пропуски вместе с их подписями ОДИН раз, до всей геометрии и морфа: дальше по
+  // компоненту `values` — это уже только наблюдения, и ни min/max, ни ховер-читалка, ни
+  // aria-label не могут случайно наткнуться на null. Мемо по ссылке входного массива, чтобы
+  // ховер-перерисовка не порождала новый `values` и не перезапускала морф.
+  const { values, labels } = useMemo(() => {
+    const source = rawValues ?? [];
+    if (!source.some((value) => value == null)) {
+      return { values: source as number[], labels: rawLabels };
+    }
+    const kept: number[] = [];
+    const keptLabels: string[] = [];
+    source.forEach((value, index) => {
+      if (value == null) return;
+      kept.push(value);
+      if (rawLabels) keptLabels.push(rawLabels[index] ?? '');
+    });
+    return { values: kept, labels: rawLabels ? keptLabels : undefined };
+  }, [rawValues, rawLabels]);
+
   // Strip colons from useId — they're valid in ids but break SVG url(#…) refs in some browsers.
   const gradientId = `sl${useId().replace(/:/g, '')}`;
   const [hover, setHover] = useState<number | null>(null);

@@ -17,7 +17,14 @@ import type { WidgetConfig } from '@/lib/widgetConfig';
 
 export interface WidgetSeriesPoint {
   date: string;
-  value: number;
+  /**
+   * `null` = ИЗМЕРЕНИЯ НЕТ (пропуск сбора в дневном архиве) — линия несёт разрыв, тултип честно
+   * говорит «данных нет». Это НЕ то же самое, что ноль: реальный ноль (день без публикаций у
+   * post-derived метрики) остаётся нулём и разрывом не считается (инвариант PROJECT_MEMORY).
+   * Все производные — «Макс/Среднее», ghost, target, недельные корзины, LTTB — обязаны пропуск
+   * ПРОПУСКАТЬ, а не подставлять 0, иначе он вернётся ложным нулём через чёрный ход.
+   */
+  value: number | null;
 }
 
 export interface WidgetBreakdownItem {
@@ -48,12 +55,22 @@ export interface WidgetResult {
   metricId: string;
   kind: MetricKind;
   unit: MetricUnit;
+  /**
+   * Единица РЯДА, когда она отличается от единицы хедлайна. Так бывает у метрик-отношений: у
+   * `tg.er` хедлайн — проценты, а под ним рисуется величина, ИЗ КОТОРОЙ он посчитан (абсолютные
+   * вовлечения). Без этого поля формат хедлайна применялся к ряду и тултип печатал «431.0%» —
+   * подпись, которой не соответствует ни одно число на графике. Тот же приём давно применяет
+   * MetricPage («ratio metrics … chart shows that underlying sum, not the ratio itself»).
+   * Не задано — ряд форматируется как `unit`.
+   */
+  seriesUnit?: MetricUnit;
   value?: string;
   valueRaw?: number;
   delta?: MetricDelta | null;
   caption?: string | null;
   series?: WidgetSeriesPoint[];
-  ghost?: number[];
+  /** Сравнительная серия. Как и `series`, `null` = пропуск, а не ноль (LineChart рисует разрыв). */
+  ghost?: Array<number | null>;
   ghostLabel?: string;
   /** «Макс/Среднее» от ПОЛНОЙ серии, посчитанные до визуального капа (LTTB оставляет экстремумы —
    *  среднее по прореженной выборке смещено вверх). Рендер предпочитает их пересчёту по series. */
