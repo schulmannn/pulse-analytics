@@ -6,6 +6,7 @@ import { ConfigEditDialog } from '@/components/ConfigEditDialog';
 import { LEGACY_RENDER } from '@/components/legacyAdapters';
 import { ChannelScope, useSelectedChannel } from '@/lib/channel-context';
 import { useWidgetSourceChannel } from '@/lib/useWidgetSource';
+import { ErrorState } from '@/components/ErrorState';
 import { useWidgetData } from '@/lib/useWidgetData';
 import { useIgWidgetData } from '@/lib/useIgWidgetData';
 import { useMsWidgetData } from '@/lib/useMsWidgetData';
@@ -162,26 +163,50 @@ function LegacyWidgetBody({ legacyKey, config }: { legacyKey: LegacyKey; config:
   );
 }
 
+/**
+ * Тело виджета в состоянии сбоя. Отдельный компонент, потому что все четыре источника обязаны
+ * говорить об ошибке ОДИНАКОВО: раньше упавший запрос доходил до резолвера как пустые данные, и
+ * карточка печатала «Нет данных за период» — выдавала сбой сети за достоверный ответ, да ещё и
+ * без единого способа повторить. `size="chart"` держит тот же footprint, что скелетон и график,
+ * поэтому подмена состояния не дёргает высоту плитки.
+ */
+function WidgetErrorBody({ isRetrying, onRetry }: { isRetrying: boolean; onRetry: () => void }) {
+  return (
+    <ErrorState
+      compact
+      size="chart"
+      title="Не удалось загрузить"
+      reason="Данные источника не пришли — это сбой запроса, а не пустой период."
+      onRetry={onRetry}
+      retrying={isRetrying}
+    />
+  );
+}
+
 function TgWidgetBody({ config, onDrill, drillLabel }: { config: WidgetConfig; onDrill?: () => void; drillLabel?: string }) {
-  const { result, isLoading } = useWidgetData(config);
+  const { result, isLoading, isError, isRetrying, retry } = useWidgetData(config);
   if (isLoading) return <WidgetSkeleton viz={config.viz} />;
+  if (isError) return <WidgetErrorBody isRetrying={isRetrying} onRetry={retry} />;
   return <WidgetRenderer result={result} viz={config.viz} onDrill={onDrill} drillLabel={drillLabel} />;
 }
 
 function IgWidgetBody({ config }: { config: WidgetConfig }) {
-  const { result, isLoading } = useIgWidgetData(config);
+  const { result, isLoading, isError, isRetrying, retry } = useIgWidgetData(config);
   if (isLoading) return <WidgetSkeleton viz={config.viz} />;
+  if (isError) return <WidgetErrorBody isRetrying={isRetrying} onRetry={retry} />;
   return <WidgetRenderer result={result} viz={config.viz} />;
 }
 
 function MsWidgetBody({ config, onDrill, drillLabel }: { config: WidgetConfig; onDrill?: () => void; drillLabel?: string }) {
-  const { result, isLoading } = useMsWidgetData(config);
+  const { result, isLoading, isError, isRetrying, retry } = useMsWidgetData(config);
   if (isLoading) return <WidgetSkeleton viz={config.viz} />;
+  if (isError) return <WidgetErrorBody isRetrying={isRetrying} onRetry={retry} />;
   return <WidgetRenderer result={result} viz={config.viz} onDrill={onDrill} drillLabel={drillLabel} />;
 }
 
 function YmWidgetBody({ config, onDrill, drillLabel }: { config: WidgetConfig; onDrill?: () => void; drillLabel?: string }) {
-  const { result, isLoading } = useYmWidgetData(config);
+  const { result, isLoading, isError, isRetrying, retry } = useYmWidgetData(config);
   if (isLoading) return <WidgetSkeleton viz={config.viz} />;
+  if (isError) return <WidgetErrorBody isRetrying={isRetrying} onRetry={retry} />;
   return <WidgetRenderer result={result} viz={config.viz} onDrill={onDrill} drillLabel={drillLabel} />;
 }
