@@ -54,7 +54,11 @@ export function ChartSection(props: ChartSectionProps) {
       { rootMargin: '600px 0px' },
     );
     io.observe(el);
-    // Скролл-фолбэк как в LazyBlock (useFeed): headless/frame-starved окружения, где IO молчит.
+    // Скролл-фолбэк как в LazyBlock (useFeed): headless/frame-starved окружения и фоновые вкладки,
+    // где IO молчит. ОБЯЗАТЕЛЬНО capture: scroll НЕ всплывает, а десктоп прокручивает не окно, а
+    // элемент [data-dashboard-scroll] (DashboardLayout) — без capture слушатель на window не
+    // получил бы НИ ОДНОГО события и фолбэк был бы мёртвым ровно там, где он нужен. Тот же приём
+    // уже используют ChartTooltip/LineChart для сброса подсказки.
     let lastRun = 0;
     const onScroll = () => {
       const now = Date.now();
@@ -62,10 +66,10 @@ export function ChartSection(props: ChartSectionProps) {
       lastRun = now;
       if (nearViewport()) setInView(true);
     };
-    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('scroll', onScroll, { passive: true, capture: true });
     return () => {
       io.disconnect();
-      window.removeEventListener('scroll', onScroll);
+      window.removeEventListener('scroll', onScroll, { capture: true });
     };
   }, [inView, sectionRef]);
   const { widgetId, label } = model.identity;
