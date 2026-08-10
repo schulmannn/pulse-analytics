@@ -28,6 +28,7 @@ import type { MetricResolver } from '@/lib/widgetMetrics';
 import type { WidgetConfig } from '@/lib/widgetConfig';
 import {
   COMPARISON_LABEL,
+  bucketChannelFlow,
   bucketPostField,
   bucketSubscriberLevels,
   comparisonBaseline,
@@ -113,18 +114,71 @@ function resolveCoreTg(
   }
 
   if (!field) return out;
+
+  // «Просмотры» — КАНАЛЬНАЯ величина: хедлайн берётся из дневного архива (drillMeta.views.total =
+  // channelViews), поэтому и ряд обязан быть канальным. Пост-ряд под тем же числом мерил другое —
+  // просмотры только тех постов, что опубликованы в окне, — и расходился в разы (на проде 63 246
+  // против 16 715), а зануление дней без публикаций делало из него «пилу». Обзор и /metrics/views
+  // канальный ряд рисовали всегда; расходилась только карточка Главной, с которой drill ведёт
+  // ровно на /metrics/views. Без архива (нет БД / малый канал / первый день) хедлайн сам падает
+  // в пост-сумму — тогда и ряд остаётся пост-производным, чтобы они по-прежнему сходились.
+  // Фильтр (формат / день недели) — величина ПОСТОВАЯ: канальный дневной архив разрезать по
+  // свойствам постов нечем. При активном фильтре ряд обязан остаться пост-производным, иначе
+  // пользователь выбрал бы «только фото», а линия молча показывала бы весь канал целиком.
+  const filtered = !!config.filters?.length;
+  const channelRows =
+    drillKey === 'views' && !filtered
+      ? derived.historyRows.filter((row) => row.views != null && ctx.inRange(row.day))
+      : [];
+  const useChannelViews = channelRows.length > 0;
+
   out.valueRaw =
     drillKey === 'avgReach'
       ? derived.avgViews
       : drillKey === 'er'
         ? derived.er
-        : derived.normPosts.reduce((sum, post) => sum + Number(post[field] ?? 0), 0);
-  out.series = bucketPostField(derived.normPosts, field, winFrom, winTo, grain);
-  out.meta = { ...out.meta, samplePosts: derived.normPosts.length };
+        : useChannelViews
+          ? channelRows.reduce((sum, row) => sum + Number(row.views), 0)
+          : derived.normPosts.reduce((sum, post) => sum + Number(post[field] ?? 0), 0);
+  out.series = useChannelViews
+    ? bucketChannelFlow(channelRows, winFrom, winTo, grain)
+    : bucketPostField(derived.normPosts, field, winFrom, winTo, grain);
+  // ER — ОТНОШЕНИЕ, и дневного ряда у него нет: под хедлайном-процентом рисуется величина, из
+  // которой он посчитан, — абсолютные вовлечения дня (FIELD.er = 'eng'). Единица хедлайна к этому
+  // ряду неприменима: без явного seriesUnit тултип печатал «431.0%», а футер — «Макс 431.0%»,
+  // хотя ни одна точка процентом не является. Тот же приём у MetricPage.
+  if (drillKey === 'er') out.seriesUnit = 'number';
+  // `samplePosts` печатается на карточке как «· N постов». Для канальных просмотров это ложная
+  // атрибуция (они по всему каналу, а не по постам окна) — kpiDerive этот же caption для них
+  // намеренно гасит, и здесь он тоже не должен появляться.
+  if (!useChannelViews) out.meta = { ...out.meta, samplePosts: derived.normPosts.length };
   const baseline = wantsGhostLine(comparison)
     ? comparisonBaseline(comparison, winFrom, winTo, grain)
     : null;
   const capped = derived.normPostsAll.length >= 100;
+  // Канальный ряд сравнивается с КАНАЛЬНЫМ базовым: пост-базис под канальной линией сопоставлял бы
+  // разные величины. Архив не имеет 100-постового капа, поэтому covered-эвристика тут не нужна —
+  // достаточно, чтобы в базовом окне вообще были строки.
+  if (useChannelViews && baseline) {
+    const baseRows = derived.historyRows.filter((row) => {
+      if (row.views == null) return false;
+      const timestamp = Date.parse(row.day);
+      return Number.isFinite(timestamp) && timestamp >= baseline.from && timestamp <= baseline.to;
+    });
+    const ghost = baseRows.length
+      ? alignGhost(
+          bucketChannelFlow(baseRows, baseline.from, baseline.to, grain).map((point) => point.value),
+          out.series.length,
+        )
+      : [];
+    if (ghost.some((value) => value != null && value > 0)) {
+      out.ghost = ghost;
+      out.ghostLabel = comparisonLabel;
+    } else {
+      out.meta = { ...out.meta, comparisonNote: 'сравнение скрыто — за базовый период нет архива' };
+    }
+    return out;
+  }
   if (
     baseline &&
     baselineCoveredByPosts(
@@ -142,7 +196,7 @@ function resolveCoreTg(
       (point) => point.value,
     );
     const ghost = alignGhost(values, out.series.length);
-    if (ghost.some((value) => value > 0)) {
+    if (ghost.some((value) => value != null && value > 0)) {
       out.ghost = ghost;
       out.ghostLabel = comparisonLabel;
     } else {

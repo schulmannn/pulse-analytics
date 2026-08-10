@@ -70,7 +70,10 @@ export function comparisonWindow(
 /** Fit a comparison (previous-period) series to the active series length: on odd windows the
  *  baseline can overshoot by a bucket at the tail — drop the extra tail (keep leading buckets
  *  aligned day-for-day); front-pad with zeros if short. */
-export function alignGhost(vals: number[], n: number): number[] {
+// ХВОСТ: front-pad нулями — это тот самый «ноль, которого не было» (базовый период, не покрывающий
+// начало окна, объявляется нулевым). Тип уже допускает `null`, так что замена padding'а на пропуск
+// технически возможна, но меняет вид всех сравнений разом — вынесено из волны честности рядов.
+export function alignGhost(vals: Array<number | null>, n: number): Array<number | null> {
   if (vals.length === n) return vals;
   if (vals.length > n) return vals.slice(0, n);
   return [...new Array(n - vals.length).fill(0), ...vals];

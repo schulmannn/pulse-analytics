@@ -365,7 +365,7 @@ export function MetricPage() {
     : false;
 
   let series: DailySeries;
-  let ghost: number[] | undefined;
+  let ghost: Array<number | null> | undefined;
   const viewsFromArchive = metricKey === 'views' && activeViewsRows.some((row) => row.views != null);
   if (metricKey === 'subscribers') {
     const inWin = historyRows.filter((r) => inRange(r.day));
@@ -389,7 +389,7 @@ export function MetricPage() {
     if (baseWin && baselineViewsRows.length > 0) {
       const base = bucketedHistoryFlow(baselineViewsRows, baseWin.from, baseWin.to, effGrain);
       const gv = alignGhost(base.values, series.values.length);
-      if (gv.some((v) => v > 0)) ghost = gv;
+      if (gv.some((v) => v != null && v > 0)) ghost = gv;
     }
   } else if (field) {
     series =
@@ -402,7 +402,7 @@ export function MetricPage() {
       // not silently drop the comparison): the previous period can overshoot by a day at the
       // tail, so keep the leading buckets; pad the front with zeros if short.
       const gv = alignGhost(base.values, series.values.length);
-      if (gv.some((v) => v > 0)) ghost = gv;
+      if (gv.some((v) => v != null && v > 0)) ghost = gv;
     }
   } else {
     series = { labels: [], values: [] };
@@ -627,7 +627,7 @@ export function MetricPage() {
           .map((r) => localDayKey(Date.parse(r.day)))
       )
     : null;
-  const gapAware = (vals: number[], fromMs: number | null): Array<number | null> => {
+  const gapAware = (vals: Array<number | null>, fromMs: number | null): Array<number | null> => {
     if (!archiveDays || effGrain !== 'day' || fromMs == null) return vals;
     return vals.map((v, i) => (archiveDays.has(localDayKey(fromMs + i * DAY_MS)) ? v : null));
   };
