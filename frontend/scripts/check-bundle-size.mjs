@@ -44,13 +44,19 @@ const BUDGETS = {
   // Radix Checkbox загружаются только вместе с полной страницей МойСклада, не с compact-карточкой.
   moySkladMetricCode: 364 * KB,
   // 2026-07-29: +1KB — общая token-based подсветка активного drag-resize входит в route CSS.
-  metrikaMetricCode: 326 * KB,
+  // 2026-08-11: +1KB — честность графиков: робастный домен искры (robustDomain) + подсветка
+  //   пропусков штриховкой в LineChart/BarChart. Замер: маршрут рос на 0.5KB, оба бюджета стояли
+  //   впритык (mentions 316.8/317.0). Берём 1KB, чтобы следующая правка снова не легла на кромку.
+  metrikaMetricCode: 327 * KB,
   // 2026-07-28: +1KB — та же волна B (см. выше).
   // 2026-07-29: +1KB — общая token-based подсветка активного drag-resize входит в route CSS.
   telegramMetricCode: 337 * KB,
   // 2026-07-28: +1KB — sync-hover графиков (chartHoverSync в LineChart/Sparkline, волна D).
   // 2026-07-29: +1KB — официальный Radix ToggleGroup заменил самописную механику SegmentedControl.
-  mentionsMetricCode: 317 * KB,
+  // 2026-08-11: +1KB — честность графиков: робастный домен искры (robustDomain) + подсветка
+  //   пропусков штриховкой в LineChart/BarChart. Замер: маршрут рос на 0.5KB, оба бюджета стояли
+  //   впритык (mentions 316.8/317.0). Берём 1KB, чтобы следующая правка снова не легла на кромку.
+  mentionsMetricCode: 318 * KB,
 };
 
 const kb = (bytes) => (bytes / KB).toFixed(1);

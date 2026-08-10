@@ -1,5 +1,6 @@
 import { useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
+import { ChartGapPattern } from '@/components/ChartGapPattern';
 import { EmptyState } from '@/components/EmptyState';
 import { fmt } from '@/lib/format';
 import { seriesMotionKey } from '@/lib/chartMotion';
@@ -193,6 +194,7 @@ export function LineChart({
   const chartId = useId().replace(/:/g, '');
   const gradientId = `lc${chartId}`;
   const comparisonGradientId = `lcg${chartId}`;
+  const gapPatternId = `lcgap${chartId}`;
 
   useLayoutEffect(() => {
     const el = containerRef.current;
@@ -350,6 +352,26 @@ export function LineChart({
       }
     }
     if (run.length > 0) segs.push(run);
+
+    // Полосы ПРОПУСКОВ: интервал между последней и следующей реальной точкой. Разрыв честен, но
+    // молчаливый разрыв читается как «график сломался» и СНИЖАЕТ доверие к данным (Song & Szafir);
+    // подсвеченный пропуск — повышает. Поэтому дыра получает штриховку и подпись, а не просто
+    // пустоту. Крайние пропуски (в начале/конце окна) не рисуем: там нет второй границы, и полоса
+    // до края плота выглядела бы как «данных нет вообще».
+    const gapBands: Array<{ x: number; w: number; from: number; to: number }> = [];
+    for (let i = 0; i < points.length; i++) {
+      if (points[i].y != null) continue;
+      const start = i;
+      while (i < points.length && points[i].y == null) i++;
+      const end = i - 1;
+      const prev = start - 1;
+      const next = i;
+      if (prev < 0 || next >= points.length) continue; // висячий пропуск у края окна
+      const x1 = points[prev].x;
+      const x2 = points[next].x;
+      if (x2 > x1) gapBands.push({ x: x1, w: x2 - x1, from: start, to: end });
+    }
+
     const baseY = h - padB;
     // Сегмент из одной точки: точка-кружок — единственное измерение между дырами всё равно факт,
     // а линия нулевой длины была бы невидима.
@@ -411,6 +433,7 @@ export function LineChart({
     const staticUnder = (
       <>
         <defs>
+          <ChartGapPattern id={gapPatternId} />
           {/* Default cards keep the flat Steep tint. The isolated Rhea treatment follows the
               shadcn area-chart recipe with a stronger top tint fading toward the baseline. */}
           <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
@@ -540,12 +563,12 @@ export function LineChart({
     );
 
     return {
-      W, h, gutterW, step, points, yFor, hasXAxis,
+      W, h, gutterW, step, points, yFor, hasXAxis, gapBands,
       plotTop: padY, plotBottom: h - padB,
       staticUnder, staticOver,
       morphGeom: { primary: primaryPoints, ghost: ghostPoints, baseY } as MorphGeom,
     };
-  }, [values, labels, activeGhost, hasGhostLegend, target, refLines, yMin, yMax, width, ctxHeight, height, expanded, showAxes, markExtremes, showPoints, anomalyIdx, gradientId, comparisonGradientId, rhea, comparison, richStyle]);
+  }, [values, labels, activeGhost, hasGhostLegend, target, refLines, yMin, yMax, width, ctxHeight, height, expanded, showAxes, markExtremes, showPoints, anomalyIdx, gradientId, comparisonGradientId, gapPatternId, rhea, comparison, richStyle]);
 
   // Hover-only lines remain one passive named graphic. Pointer scrubbing is supplementary to its
   // accessible summary and is registered on the DOM node. A drillable line instead uses the real
