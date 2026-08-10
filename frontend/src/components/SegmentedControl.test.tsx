@@ -72,4 +72,18 @@ describe('SegmentedControl — keyboard contract', () => {
   it('renders nothing rather than a malformed track when there are no options', () => {
     expect(markup(<SegmentedControl ariaLabel="Пусто" value="" onChange={() => {}} options={[]} />)).toBe('');
   });
+
+  it('wraps long option sets into the requested number of columns', () => {
+    const html = markup(
+      <SegmentedControl
+        ariaLabel="Сравнение"
+        value="7"
+        onChange={() => {}}
+        options={OPTIONS}
+        columns={2}
+      />,
+    );
+
+    expect(html).toContain('grid-template-columns:repeat(2, minmax(0, 1fr))');
+  });
 });

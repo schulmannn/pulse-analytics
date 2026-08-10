@@ -384,13 +384,13 @@ describe('resolveWidgetMetric — tg.netGrowth (S3c series-from-graphs)', () => 
   } as unknown as TgGraphs;
   const netCtx: DataContext = { ...ctx, tg: { ...ctx.tg!, graphs: netGraphs } };
 
-  it('resolves net growth as a flow series summing joined − left', () => {
+  it('resolves net growth as an accumulated curve ending at joined − left total', () => {
     const r = resolveWidgetMetric(cfg('tg.netGrowth'), netCtx);
     expect(r.empty).toBeFalsy();
     expect(r.kind).toBe('series');
     expect(r.valueRaw).toBe(55); // (30−10) + (40−5)
     expect(r.value).toBe('+55');
-    expect(r.series!.reduce((s, p) => s + p.value, 0)).toBe(55);
+    expect(r.series!.at(-1)?.value).toBe(55);
   });
 
   it('returns empty when the followers graph is absent', () => {
@@ -535,6 +535,7 @@ describe('resolveWidgetMetric — Instagram (S11)', () => {
     const r = resolveWidgetMetric(cfg('ig.netFollowers'), igCtx);
     expect(r.valueRaw).toBe(40); // 50 − 10
     expect(r.value).toMatch(/^\+/);
+    expect(r.series?.at(-1)?.value).toBe(40);
   });
 
   it('shows a genuine net-zero window (follows == unfollows) as «0», not empty', () => {

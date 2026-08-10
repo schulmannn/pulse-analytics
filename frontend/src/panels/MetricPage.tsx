@@ -28,7 +28,6 @@ import { SegmentedControl } from '@/components/SegmentedControl';
 import { SegSelect } from '@/components/metric/SegSelect';
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
-import { DivergingBars } from '@/components/DivergingBars';
 import { ChartExpandedContext } from '@/components/ExpandableChart';
 import { Breakdown } from '@/components/Breakdown';
 import { RankChart } from '@/components/RankChart';
@@ -296,7 +295,10 @@ export function MetricPage() {
   const metricKey = rawKey;
   const field = FIELD[metricKey];
   const chartType: ChartType =
-    rawChart === 'bar' || (field && (rawChart === 'rank' || rawChart === 'pivot')) ? (rawChart as ChartType) : 'line';
+    metricKey !== 'subscribers' &&
+    (rawChart === 'bar' || (field && (rawChart === 'rank' || rawChart === 'pivot')))
+      ? (rawChart as ChartType)
+      : 'line';
 
   if (isPending) return <MetricSkeleton />;
   if (isError) {
@@ -437,27 +439,6 @@ export function MetricPage() {
       byIndex.set(i, byIndex.has(i) ? `${byIndex.get(i)} · ${a.label}` : a.label);
     }
     return byIndex.size > 0 ? [...byIndex].map(([i, label]) => ({ i, label })) : undefined;
-  })();
-
-  // Уровневая метрика (Подписчики): бары УРОВНЯ от нуля почти все во всю высоту — падение
-  // визуально теряется (скриншот владельца: «непонятно, что происходит падение»). Как на
-  // домашней «Истории подписчиков», режим «Столбцы» рисует ДНЕВНОЕ ИЗМЕНЕНИЕ дивергентными
-  // барами вокруг нуля — так спад читается сразу. Поток-метрики (просмотры/реакции/…) — обычные
-  // столбцы от нуля (сумма имеет смысл).
-  // NB: обычное вычисление, НЕ useMemo — этот код ниже early-return'ов (Navigate/isError выше),
-  // а условный хук = React #310 «rendered more hooks». Цикл ≤~90 точек, дёшев на каждый рендер.
-  const isLevel = !ZERO_BASED[metricKey];
-  const levelDeltas = (() => {
-    const v: number[] = [], l: string[] = [], t: string[] = [];
-    if (isLevel) {
-      for (let i = 1; i < series.values.length; i++) {
-        const d = series.values[i] - series.values[i - 1];
-        v.push(d);
-        l.push(series.labels[i]);
-        t.push(`${series.labels[i]}: ${d >= 0 ? '+' : '−'}${fmt.num(Math.abs(d))}`);
-      }
-    }
-    return { values: v, labels: l, titles: t };
   })();
 
   // ── Rank + pivot data (dimension-aggregated) ──────────────────────────────────────────
@@ -717,13 +698,19 @@ export function MetricPage() {
   };
 
   const chartTitle =
-    chartType === 'rank'
+    metricKey === 'subscribers'
+      ? 'Динамика подписчиков'
+      : chartType === 'rank'
       ? `Рейтинг · ${DIM_LABEL[dim].toLowerCase()}`
       : chartType === 'pivot'
         ? `Сводная · ${DIM_LABEL[dim].toLowerCase()} × по ${GRAIN_WORD[effGrain]}`
         : `${SERIES_PREFIX[metricKey] ?? 'По '}${GRAIN_WORD[effGrain]}`;
 
-  const chartTypes: ChartType[] = field ? ['line', 'bar', 'rank', 'pivot'] : ['line', 'bar'];
+  const chartTypes: ChartType[] = metricKey === 'subscribers'
+    ? ['line']
+    : field
+      ? ['line', 'bar', 'rank', 'pivot']
+      : ['line', 'bar'];
 
   // ── Pinned point resolution ────────────────────────────────────────────────────────────
   // Posts are addressable only on the DAY grain of a bounded window (bucket keys run
@@ -737,9 +724,7 @@ export function MetricPage() {
     const pos = sampledLineIdx.indexOf(pinnedValid);
     return pos === -1 ? null : pos;
   })();
-  // Дельта-бары уровневой метрики (DivergingBars) кликов не несут — пин только для line и
-  // обычных столбцов потока.
-  const pinnedIsChart = chartType === 'line' || (chartType === 'bar' && !isLevel);
+  const pinnedIsChart = chartType === 'line' || chartType === 'bar';
   const canResolveDay = field != null && effGrain === 'day' && winFrom != null;
   const pinnedDayKey = pinnedValid != null && canResolveDay ? localDayKey(winFrom! + pinnedValid * DAY_MS) : null;
   const pinnedDayFlags = pinnedDayKey ? annotations.filter((a) => a.day === pinnedDayKey) : [];
@@ -805,7 +790,7 @@ export function MetricPage() {
             noExpand
             strip
             stripToolbar
-            action={
+            action={chartTypes.length > 1 ? (
               <SegmentedControl
                 ariaLabel="Тип графика"
                 className="shrink-0"
@@ -824,7 +809,7 @@ export function MetricPage() {
                   title: CHART_TYPE_LABEL[kind],
                 }))}
               />
-            }
+            ) : undefined}
           >
             {chartType === 'line' && (
               /* Expanded context: the metric page's big chart always renders the full y-axis
@@ -860,31 +845,20 @@ export function MetricPage() {
             {chartType === 'bar' && (
               /* Expanded context switches BarChart into its rich mode (y ticks + value labels). */
               <ChartExpandedContext.Provider value={true}>
-                {isLevel ? (
-                  // Уровень → дневное изменение (дивергентные бары вокруг нуля). Без ghost/пина —
-                  // DivergingBars их не несёт, паритет с домашней «Историей».
-                  <DivergingBars
-                    values={levelDeltas.values}
-                    labels={levelDeltas.labels}
-                    titles={levelDeltas.titles}
-                    height={chartH}
-                  />
-                ) : (
-                  <BarChart
-                    values={series.values}
-                    labels={series.labels}
-                    titles={titles}
-                    height={chartH}
-                    appearance="comparison"
-                    ghost={ghost}
-                    primaryLabel="Текущий период"
-                    ghostLabel={cmp !== 'off' ? CMP_CHIP[cmp] : undefined}
-                    comparisonStyle="stacked"
-                    legendToggle={false}
-                    onPointClick={(i) => setPinned((p) => (p === i ? null : i))}
-                    pinnedIndex={pinnedValid}
-                  />
-                )}
+                <BarChart
+                  values={series.values}
+                  labels={series.labels}
+                  titles={titles}
+                  height={chartH}
+                  appearance="comparison"
+                  ghost={ghost}
+                  primaryLabel="Текущий период"
+                  ghostLabel={cmp !== 'off' ? CMP_CHIP[cmp] : undefined}
+                  comparisonStyle="stacked"
+                  legendToggle={false}
+                  onPointClick={(i) => setPinned((p) => (p === i ? null : i))}
+                  pinnedIndex={pinnedValid}
+                />
               </ChartExpandedContext.Provider>
             )}
             {chartType === 'rank' && (

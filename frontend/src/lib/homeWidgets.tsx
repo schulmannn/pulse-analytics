@@ -71,7 +71,7 @@ export const HOME_REGISTRY: Record<string, HomeWidgetDef> = {
     render: () => <IgReachHomeCard id="home-ig-reach" homeKey="ig-reach" />,
   },
   'ig-follows': {
-    label: 'IG · Подписки по дням',
+    label: 'IG · Динамика подписчиков',
     network: 'ig',
     render: () => <IgFollowsHomeCard id="home-ig-follows" homeKey="ig-follows" />,
   },

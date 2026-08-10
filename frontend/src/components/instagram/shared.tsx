@@ -7,12 +7,10 @@ import { pctDelta, type MetricDelta } from '@/lib/delta';
 import { DeltaPill } from '@/components/DeltaPill';
 import { EmptyState } from '@/components/EmptyState';
 import { LineChart } from '@/components/LineChart';
-import { BarChart } from '@/components/BarChart';
 import { ChartCardBody, ChartSection as WidgetChartSection } from '@/components/ChartWidget';
 import { CompactStatHeadline } from '@/components/CompareStat';
 import { Sparkline } from '@/components/Sparkline';
 import type { WidgetSize } from '@/lib/widgetPrefsStore';
-import { bucketIgSeries } from '@/lib/igAggregations';
 import { fmtDay, pairDelta, windowIgSeries, type Point, type WindowPair } from '@/lib/igMetrics';
 import type { IgOverviewChart } from '@/lib/igWindowMetrics';
 import { calendarWindowForPeriod, periodDateTimestamp, splitCalendarRows } from '@/lib/period';
@@ -151,64 +149,6 @@ export function KpiHero({
   );
 }
 
-/** Daily gross-follows bars — full series in, resolved feed/Home calendar window out. */
-export function FollowsByDayCard({ data, drillTo, id, homeKey, title = 'Подписки по дням' }: { data: Point[]; drillTo?: string; id?: string; homeKey?: string; title?: string }) {
-  const pts = data.filter((p) => p.day !== 'total');
-  return (
-    <WidgetChartSection
-      id={id}
-      homeKey={homeKey}
-      title={title}
-      drillTo={drillTo}
-      periodControl
-      variants={(period: WidgetPeriodValue) => {
-        const selected = splitCalendarRows(
-          pts,
-          calendarWindowForPeriod(period),
-          (point) => periodDateTimestamp(point.day),
-        );
-        const w = selected.current;
-        const total = w.reduce((acc, p) => acc + p.value, 0);
-        const prev = selected.previous
-          ? selected.previous.reduce((acc, p) => acc + p.value, 0)
-          : null;
-        const delta = prev != null && prev > 0 ? pctDelta(total, prev) : null;
-        // Кап длинного окна (канон CLAUDE.md; бар-ветка — capResultSeries/windowGraphSeries):
-        // «Всё» отдаёт весь дневной архив (до ~400 строк) прямо в столбцы. Децимировать бары
-        // нельзя — пропущенные дни врут, — поэтому длинная серия честно схлопывается в
-        // Monday-anchored календарные недели (сумма: подписки — поток). total/delta — от дневных.
-        const weekly = w.length > CHART_MAX_POINTS;
-        const bars = weekly
-          ? bucketIgSeries(
-              w,
-              periodDateTimestamp(w[0].day),
-              periodDateTimestamp(w[w.length - 1].day),
-              'week',
-            ).map((b) => ({ day: b.date, value: b.value }))
-          : w;
-        return [
-          {
-            key: 'bar',
-            label: 'Столбцы',
-            render:
-              w.length > 0 ? (
-                <ChartCardBody value={`+${fmt.kpi(total)}`} delta={delta} caption={delta ? 'к пред. периоду' : period.days === 0 ? 'за всё время' : undefined}>
-                  <BarChart
-                    values={bars.map((d) => d.value)}
-                    labels={bars.map((d) => fmtDay(d.day))}
-                    titles={bars.map((d) => `${fmtDay(d.day)}${weekly ? ' · неделя' : ''}: +${fmt.num(d.value)}`)}
-                  />
-                </ChartCardBody>
-              ) : (
-                <EmptyChart />
-              ),
-          },
-        ];
-      }}
-    />
-  );
-}
-
 export function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div className="pt-2">
@@ -226,9 +166,25 @@ export function pickLabels(series: Point[]): string[] {
   return [first?.day ?? '', mid?.day ?? '', last?.day ?? ''].map(fmtDay);
 }
 
-/** A daily line chart for reach/new followers. Feed top bar owns its calendar window; a Home copy
-    uses the same code with its independently saved period. */
-export function TrendCard({ title, series, drillTo, id, homeKey, defaultSize }: { title: string; series: Point[]; drillTo?: string; id?: string; homeKey?: string; defaultSize?: WidgetSize }) {
+/** A dated trend line. Flow series show a period sum; level series show the latest audience total
+    and compare it with the first point in the same window. */
+export function TrendCard({
+  title,
+  series,
+  drillTo,
+  id,
+  homeKey,
+  defaultSize,
+  seriesKind = 'flow',
+}: {
+  title: string;
+  series: Point[];
+  drillTo?: string;
+  id?: string;
+  homeKey?: string;
+  defaultSize?: WidgetSize;
+  seriesKind?: 'flow' | 'level';
+}) {
   const pts = series.filter((p) => p.day !== 'total');
   return (
     <WidgetChartSection
@@ -251,7 +207,15 @@ export function TrendCard({ title, series, drillTo, id, homeKey, defaultSize }: 
         const prev = selected.previous
           ? selected.previous.reduce((acc, p) => acc + p.value, 0)
           : null;
-        const delta = prev != null && prev > 0 ? pctDelta(total, prev) : null;
+        const first = w[0]?.value ?? 0;
+        const last = w[w.length - 1]?.value ?? 0;
+        const delta = seriesKind === 'level'
+          ? first > 0 ? pctDelta(last, first) : null
+          : prev != null && prev > 0 ? pctDelta(total, prev) : null;
+        const value = seriesKind === 'level' ? last : total;
+        const caption = seriesKind === 'level'
+          ? 'к началу периода'
+          : delta ? 'к пред. периоду' : period.days === 0 ? 'за всё время' : undefined;
         // Кап линии (канон CLAUDE.md): «Всё» отдаёт многосотневный дневной архив — итог/дельта
         // выше посчитаны от ПОЛНОГО окна, прореживается только рисуемая линия.
         const line = lttbDownsample(w, CHART_MAX_POINTS, (p) => p.value);
@@ -261,7 +225,7 @@ export function TrendCard({ title, series, drillTo, id, homeKey, defaultSize }: 
             label: 'Линия',
             render:
               w.length > 1 ? (
-                <ChartCardBody value={fmt.kpi(total)} delta={delta} caption={delta ? 'к пред. периоду' : period.days === 0 ? 'за всё время' : undefined}>
+                <ChartCardBody value={fmt.kpi(value)} delta={delta} caption={caption}>
                   <LineChart
                     values={line.map((p) => p.value)}
                     labels={pickLabels(line)}

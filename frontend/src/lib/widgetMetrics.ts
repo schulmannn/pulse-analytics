@@ -197,8 +197,8 @@ const TG_METRICS: MetricDef[] = [
   // Growth flows.
   define({
     id: 'tg.netGrowth', label: 'Чистый прирост подписчиков', source: 'tg', kind: 'series', unit: 'number',
-    category: 'growth', defaultViz: 'bar', supportedViz: ['bar', 'line'],
-    formula: 'Подписавшиеся − отписавшиеся за каждый день.', sourceNote: 'График подписчиков (MTProto).',
+    category: 'growth', defaultViz: 'line', supportedViz: ['line'],
+    formula: 'Накопительная сумма подписавшихся − отписавшихся от начала периода.', sourceNote: 'График подписчиков (MTProto).',
   }),
   define({
     id: 'tg.churn', label: 'Динамика оттока', source: 'tg', kind: 'breakdown', unit: 'number',
@@ -280,8 +280,8 @@ const IG_METRICS: MetricDef[] = [
   }),
   define({
     id: 'ig.netFollowers', label: 'Прирост подписчиков', source: 'ig', kind: 'series', unit: 'number',
-    category: 'growth', defaultViz: 'bar', supportedViz: ['bar', 'line'],
-    formula: 'Дневной чистый прирост подписчиков (follower_count).',
+    category: 'growth', defaultViz: 'line', supportedViz: ['line'],
+    formula: 'Накопительный чистый прирост подписчиков от начала периода.',
   }),
   define({
     id: 'ig.erv', label: 'Вовлечённость (ER)', source: 'ig', kind: 'value', unit: 'percent',

@@ -119,6 +119,7 @@ function PlatformNav() {
   const channels = data?.channels ?? [];
   const nets = NETWORKS.filter((n) => !data || demo || channels.some((c) => n.hasChannel(c)));
   if (nets.length < 2) return null;
+  const compact = nets.length >= 4;
 
   // Segment count follows the connected-network count (same trick as MobileBottomNav's columns).
   const GRID_COLS: Record<number, string> = { 2: 'grid-cols-2', 3: 'grid-cols-3', 4: 'grid-cols-4' };
@@ -138,7 +139,8 @@ function PlatformNav() {
               onClick={() => navigate(p.home)}
               aria-current={active ? 'true' : undefined}
               className={cn(
-                'relative flex min-h-11 items-center justify-center gap-2 px-2 py-2 text-sm transition-colors',
+                'relative flex min-h-11 min-w-0 items-center justify-center py-2 transition-colors',
+                compact ? 'gap-1 px-1 text-xs' : 'gap-2 px-2 text-sm',
                 active ? 'bg-muted/60 font-medium text-foreground' : 'bg-background text-muted-foreground hover:text-foreground',
               )}
             >

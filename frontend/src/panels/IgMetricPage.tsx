@@ -40,10 +40,8 @@ import { ComparisonDeltaRow, MetricBackLink, MetricDescriptor, WindowBarShell, R
 /**
  * Instagram metric pages — the drill target the unified chart contract points IG cards at
  * (/metrics/ig-*), mirroring the TG explorer's steep layout. HONESTY over parity with the TG
- * page: Instagram only returns TWO genuine daily series (reach, daily follows) — those get the
- * full chart explorer; every other metric arrives as a PERIOD AGGREGATE, so its page compares
- * periods instead of fabricating a daily line. No post-level breakdown either (the API gives
- * fixed demographic dimensions, not per-post fields), so the rail is comparison + about only.
+ * page: follower analytics use the archived total-audience level, while genuine flow metrics use
+ * their dated series. Period-only metrics compare periods instead of fabricating a daily line.
  */
 
 interface IgDailyDef {
@@ -71,14 +69,14 @@ const DAILY_DEFS: Record<string, IgDailyDef> = {
     source: 'Instagram insights (reach) + дневной архив ig_daily.',
   },
   'ig-follows': {
-    term: 'Подписки',
-    genitive: 'подписок',
+    term: 'Подписчики',
+    genitive: 'подписчиков',
     seriesKey: 'follower',
     formula:
-      'График «Подписчики» — реальный уровень базы по дням (как у Telegram); заголовок — текущее количество и изменение за окно. «Подписки по дням» ниже — новые подписки за каждый день.',
+      'Реальный уровень аудитории по дням; заголовок — текущее количество и изменение за окно.',
     included:
-      'Уровень собирается из ежедневных фиксаций реального количества подписчиков; дни до начала фиксаций достроены назад от живого значения по чистому движению (подписки − отписки). «Подписки по дням» — только валовые подписки: отписки Instagram по дням не отдаёт.',
-    source: 'Профиль Instagram (followers_count, ежедневная фиксация в ig_daily) + insights (follows).',
+      'Уровень собирается из ежедневных фиксаций реального количества подписчиков; дни до начала фиксаций достроены назад от живого значения по чистому движению (подписки − отписки).',
+    source: 'Профиль Instagram (followers_count, ежедневная фиксация в ig_daily) + insights (follows и unfollows).',
   },
   'ig-views': {
     term: 'Просмотры',
@@ -339,12 +337,12 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
           (hero в шапке его дублировал), окно — в тайм-баре под графиком. На <lg rail уезжает под
           график, поэтому компактный итог остаётся в шапке только там. Для ig-follows при живом
           уровне страница ведёт «Подписчиками» (текущая база, как ТГ), а не суммой подписок. */}
-      {lvlNow != null ? (
+      {metricKey === 'ig-follows' ? (
         <div>
           <h1 className="text-2xl font-medium tracking-tight text-foreground">Подписчики</h1>
           <div className="mt-1 text-xs tracking-wide text-muted-foreground">{handle ? `Instagram ${handle}` : 'Instagram'}</div>
           <div className="mt-2 flex flex-wrap items-baseline gap-x-2.5 gap-y-1 lg:hidden">
-            <span className="text-3xl font-medium leading-none tabular-nums tracking-tight">{fmt.kpi(lvlNow)}</span>
+            <span className="text-3xl font-medium leading-none tabular-nums tracking-tight">{fmt.kpi(lvlNow ?? ig.followers)}</span>
             <DeltaPill delta={lvlTrend} />
             <span className="text-xs tracking-wide text-muted-foreground">{periodLabel}</span>
           </div>
@@ -357,8 +355,10 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
                   {fmt.num(Math.abs(lvlDiff))}
                 </span>
               </>
-            ) : (
+            ) : lvlDiff != null ? (
               'база без изменений за окно'
+            ) : (
+              'история общего числа подписчиков пока накапливается'
             )}
           </MetricDescriptor>
         </div>
@@ -425,24 +425,25 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
             </>
           )}
 
-          <ChartSection
-            id={`metric-${metricKey}`}
-            title={metricKey === 'ig-follows' ? 'Подписки по дням' : 'По дням'}
-            defaultSize="full"
-            noExpand
-            action={
-              <SegmentedControl
-                ariaLabel="Тип графика"
-                className="shrink-0"
-                value={kind}
-                onChange={setKind}
-                options={[
-                  { value: 'line', content: 'Линия', ariaLabel: 'Тип графика: Линия' },
-                  { value: 'bar', content: 'Столбцы', ariaLabel: 'Тип графика: Столбцы' },
-                ]}
-              />
-            }
-          >
+          {metricKey !== 'ig-follows' && (
+            <ChartSection
+              id={`metric-${metricKey}`}
+              title="По дням"
+              defaultSize="full"
+              noExpand
+              action={
+                <SegmentedControl
+                  ariaLabel="Тип графика"
+                  className="shrink-0"
+                  value={kind}
+                  onChange={setKind}
+                  options={[
+                    { value: 'line', content: 'Линия', ariaLabel: 'Тип графика: Линия' },
+                    { value: 'bar', content: 'Столбцы', ariaLabel: 'Тип графика: Столбцы' },
+                  ]}
+                />
+              }
+            >
             {n > 1 ? (
               <ChartExpandedContext.Provider value={true}>
                 {kind === 'line' ? (
@@ -488,13 +489,20 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
                 ))}
               </div>
             )}
-          </ChartSection>
+            </ChartSection>
+          )}
+
+          {metricKey === 'ig-follows' && lvl == null && (
+            <ChartSection id="metric-ig-followers-level" title="Подписчики" defaultSize="full" noExpand>
+              <EmptyState compact title="История подписчиков пока накапливается" />
+            </ChartSection>
+          )}
 
           {/* Тайм-бар принадлежит графику (v2): пресеты окна одной строкой сразу под канвасом,
               а не плавающей панелью у края экрана. Presets only: у архива пока нет своего диапазона. */}
           <WindowBar value={days} onChange={setDays} />
 
-          {pinnedValid != null && pinnedDay != null && (
+          {metricKey !== 'ig-follows' && pinnedValid != null && pinnedDay != null && (
             <PinnedDayPanel
               dateLabel={win.labels[pinnedValid] ?? pinnedDay}
               rows={[
@@ -536,49 +544,56 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
             <div className="flex items-baseline justify-between gap-3">
               <span className="text-xs text-muted-foreground">Текущее окно</span>
               <span className="text-base font-medium tabular-nums text-foreground">
-                {lvlNow != null ? fmt.kpi(lvlNow) : fmt.kpi(sumCur)}
+                {metricKey === 'ig-follows' ? fmt.kpi(lvlNow ?? ig.followers) : fmt.kpi(sumCur)}
               </span>
             </div>
-            {/* На ig-follows итог выше говорит про НЕТТО-изменение базы, а rail сравнивает серию
-                графика «Подписки по дням» (валовые) — одна строка контекста снимает конфликт
-                (дизайн-проход №3: рецидив gross-vs-net без подписи). */}
-            {metricKey === 'ig-follows' && lvlNow != null && (
-              <p className="text-xs text-muted-foreground">По графику «Подписки по дням» (валовые подписки).</p>
-            )}
-            <SegSelect
-              ariaLabel="База сравнения"
-              value={cmp}
-              onChange={setCmp}
-              options={[
-                { value: 'off' as const, label: 'Выкл' },
-                { value: 'prev' as const, label: 'Пред. период' },
-                { value: 'year' as const, label: 'Год назад' },
-              ]}
-            />
-            {cmp === 'off' ? (
-              <p className="text-xs text-muted-foreground">Выберите базу — пунктир прошлого окна ляжет на график.</p>
-            ) : days === 0 ? (
-              <p className="text-xs text-muted-foreground">Для окна «Всё» прошлого периода не существует.</p>
-            ) : ghostOk ? (
-              <div className="space-y-2 text-sm">
-                {/* v2: строку текущего значения не дублируем — итог уже стоит первой строкой секции.
-                    Исключение ig-follows: там итог = база, а здесь валовая сумма подписок окна. */}
-                {lvlNow != null && (
+            {metricKey === 'ig-follows' ? (
+              lvlNow != null && lvlStart != null && lvlDiff != null ? (
+                <div className="space-y-2 text-sm">
                   <div className="flex items-baseline justify-between gap-3">
-                    <span className="text-xs text-muted-foreground">Текущий период</span>
-                    <span className="font-medium tabular-nums">{fmt.kpi(sumCur)}</span>
+                    <span className="text-xs text-muted-foreground">В начале периода</span>
+                    <span className="tabular-nums">{fmt.kpi(lvlStart)}</span>
                   </div>
-                )}
-                <div className="flex items-baseline justify-between gap-3">
-                  <span className="text-xs text-muted-foreground">{cmpLabel}</span>
-                  <span className="tabular-nums">{sumPrev != null ? fmt.kpi(sumPrev) : '—'}</span>
+                  <div className="flex items-baseline justify-between gap-3">
+                    <span className="text-xs text-muted-foreground">Изменение</span>
+                    <span className={`font-medium tabular-nums ${lvlDiff > 0 ? 'text-verdant' : lvlDiff < 0 ? 'text-ember' : ''}`}>
+                      {`${lvlDiff > 0 ? '+' : lvlDiff < 0 ? '−' : ''}${fmt.num(Math.abs(lvlDiff))}`}
+                    </span>
+                  </div>
                 </div>
-                {compareDelta != null && <ComparisonDeltaRow delta={compareDelta} />}
-              </div>
-            ) : cmp === 'year' ? (
-              <p className="text-xs text-muted-foreground">Архив пока не достаёт до прошлого года — дневная история копится в ig_daily, сравнение включится само.</p>
+              ) : (
+                <p className="text-xs text-muted-foreground">История общего числа подписчиков пока накапливается.</p>
+              )
             ) : (
-              <p className="text-xs text-muted-foreground">В архиве недостаточно истории за прошлый период — сравнить не с чем.</p>
+              <>
+                <SegSelect
+                  ariaLabel="База сравнения"
+                  value={cmp}
+                  onChange={setCmp}
+                  options={[
+                    { value: 'off' as const, label: 'Выкл' },
+                    { value: 'prev' as const, label: 'Пред. период' },
+                    { value: 'year' as const, label: 'Год назад' },
+                  ]}
+                />
+                {cmp === 'off' ? (
+                  <p className="text-xs text-muted-foreground">Выберите базу — пунктир прошлого окна ляжет на график.</p>
+                ) : days === 0 ? (
+                  <p className="text-xs text-muted-foreground">Для окна «Всё» прошлого периода не существует.</p>
+                ) : ghostOk ? (
+                  <div className="space-y-2 text-sm">
+                    <div className="flex items-baseline justify-between gap-3">
+                      <span className="text-xs text-muted-foreground">{cmpLabel}</span>
+                      <span className="tabular-nums">{sumPrev != null ? fmt.kpi(sumPrev) : '—'}</span>
+                    </div>
+                    {compareDelta != null && <ComparisonDeltaRow delta={compareDelta} />}
+                  </div>
+                ) : cmp === 'year' ? (
+                  <p className="text-xs text-muted-foreground">Архив пока не достаёт до прошлого года — дневная история копится в ig_daily, сравнение включится само.</p>
+                ) : (
+                  <p className="text-xs text-muted-foreground">В архиве недостаточно истории за прошлый период — сравнить не с чем.</p>
+                )}
+              </>
             )}
           </RailSection>
 

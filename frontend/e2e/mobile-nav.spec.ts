@@ -86,6 +86,32 @@ for (const w of WIDTHS) {
   }
 }
 
+test('mobile 430: the four network labels and feed title are not clipped', async ({ page }) => {
+  await page.setViewportSize({ width: 430, height: 820 });
+  await bootDemo(page, '/analytics');
+
+  const clipped = await page
+    .getByRole('button', { name: /^(Telegram|Instagram|МойСклад|Метрика)$/ })
+    .evaluateAll((buttons) =>
+      buttons
+        .map((button) => {
+          const label = button.querySelector('span.whitespace-nowrap');
+          if (!label) return null;
+          const outer = button.getBoundingClientRect();
+          const inner = label.getBoundingClientRect();
+          return inner.left < outer.left - 0.5 || inner.right > outer.right + 0.5
+            ? label.textContent?.trim() ?? 'unknown'
+            : null;
+        })
+        .filter(Boolean),
+    );
+
+  expect(clipped).toEqual([]);
+  const heading = page.getByRole('heading', { name: 'Аналитика', level: 2 });
+  await expect(heading).toBeVisible();
+  expect(await heading.evaluate((element) => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1);
+});
+
 test('mobile 390: dialog, editor, post and pinned-point actions keep 44px targets', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 820 });
   await bootDemo(page, '/');

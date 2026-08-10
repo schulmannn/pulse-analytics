@@ -38,6 +38,8 @@ interface SegmentedControlBaseProps<T extends string> {
   segmentClassName?: string;
   /** `sm` is the compact per-card treatment; `md` is the regular toolbar treatment. */
   size?: 'sm' | 'md';
+  /** Limits the number of equal-width columns and lets long option sets wrap into rows. */
+  columns?: number;
 }
 
 type SegmentedControlProps<T extends string> = SegmentedControlBaseProps<T> & SegmentedGrouping;
@@ -60,6 +62,7 @@ export function SegmentedControl<T extends string>({
   className,
   segmentClassName,
   size = 'md',
+  columns,
   groupless = false,
 }: SegmentedControlProps<T>) {
   if (options.length === 0) return null;
@@ -97,7 +100,7 @@ export function SegmentedControl<T extends string>({
         'inline-grid w-auto items-center gap-px rounded-full border border-input bg-border p-px',
         className,
       )}
-      style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}
+      style={{ gridTemplateColumns: `repeat(${Math.min(columns ?? options.length, options.length)}, minmax(0, 1fr))` }}
     >
       {options.map((option, index) => (
         <ToggleGroupItem

@@ -186,7 +186,11 @@ const resolveNetGrowth: WidgetMetricResolver = (_metric, config, ctx, out) => {
     return Number.isFinite(timestamp) && timestamp >= since && timestamp <= winTo;
   });
   if (inWindow.length === 0) return { ...out, empty: true };
-  out.series = bucketIgSeries(points, since, winTo, effectiveGrain(config.grain));
+  let running = 0;
+  out.series = bucketIgSeries(points, since, winTo, effectiveGrain(config.grain)).map((point) => {
+    running += point.value;
+    return { ...point, value: running };
+  });
   const sum = inWindow.reduce((total, point) => total + point.value, 0);
   out.valueRaw = sum;
   out.value = `${sum > 0 ? '+' : sum < 0 ? '−' : ''}${fmt.num(Math.abs(sum))}`;
