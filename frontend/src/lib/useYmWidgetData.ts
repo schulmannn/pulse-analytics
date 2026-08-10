@@ -7,11 +7,16 @@ import { useMemo } from 'react';
 import { useYmSummary } from '@/api/queries';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { DEFAULT_WIDGET_DAYS, widgetPeriodValue } from '@/lib/period';
-import { resolveWidgetMetric, type DataContext, type WidgetResult } from '@/lib/resolveWidgetMetric';
+import { resolveWidgetMetric, type DataContext } from '@/lib/resolveWidgetMetric';
 import type { WidgetConfig } from '@/lib/widgetConfig';
+import { widgetDataStateOf, type WidgetDataState } from '@/lib/widgetDataState';
 import { useWidgetInView } from '@/lib/widgetViewport';
 
-export function useYmWidgetData(config: WidgetConfig): { result: WidgetResult; isLoading: boolean } {
+// Ошибка ≠ пустота. Если запрос упал, `isPending` становится false, данные остаются undefined,
+// резолвер честно отдаёт `empty`, и карточка печатала «Нет данных за период» — то есть выдавала
+// сбой сети за достоверный ответ «за этот период пусто». Отдаём ошибку отдельным флагом и даём
+// повтор: гейтим по ТЕМ ЖЕ запросам, что и `isLoading`, чтобы состояния были взаимоисключающими.
+export function useYmWidgetData(config: WidgetConfig): WidgetDataState {
   const days = config.period ?? DEFAULT_WIDGET_DAYS;
   const period = useMemo(() => widgetPeriodValue(days), [days]);
   // Прогрессивная загрузка Главной (зеркало useMsWidgetData): офскрин-карточка держит запрос
@@ -35,6 +40,14 @@ export function useYmWidgetData(config: WidgetConfig): { result: WidgetResult; i
 
   // Как в МС-хуке: скелет только пока канал выбран и summary реально грузится; отключённый запрос
   // (нет канала) — честная пустота, а не вечный скелет.
-  const isLoading = channelId != null && summaryQ.isPending;
-  return { result, isLoading };
+  const state = widgetDataStateOf({
+    channelId,
+    pending: [summaryQ.isPending],
+    errored: [summaryQ.isError],
+    fetching: [summaryQ.isFetching],
+  });
+  const retry = () => {
+    void summaryQ.refetch();
+  };
+  return { result, ...state, retry };
 }

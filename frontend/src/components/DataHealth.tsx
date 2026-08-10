@@ -6,6 +6,7 @@ import { freshness, latestHistoryDay } from '@/lib/freshness';
 import { fmt } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { Icon } from '@/components/nav-icons';
+import { NETWORKS } from '@/lib/networks';
 
 /**
  * "Состояние данных" keeps the selected channel's collection mode honest: managed MTProto,
@@ -30,6 +31,12 @@ export function DataHealth({ defaultOpen = false }: { defaultOpen?: boolean } = 
   const { channelId } = useSelectedChannel();
   const { data: channelsData } = useChannels();
   const current = channelsData?.channels.find((c) => c.id === channelId) ?? channelsData?.channels[0];
+  // Сеть выбранного канала — из общего реестра, а не из телеграм-центричных догадок ниже. Без
+  // этого канал МойСклада/Метрики проваливался во все три ветки (`isCentral`/`isQr`/`isCollector`
+  // ложны) и подписывался как «Telegram · Collector» — блок называл чужой источник телеграм-
+  // коллектором и предлагал «Настроить collector →», которого у него нет.
+  const network = current ? (NETWORKS.find((n) => n.hasChannel(current)) ?? NETWORKS[0]) : NETWORKS[0];
+  const isTelegram = network.key === 'tg';
   const isCentral = current?.source === 'central';
   const isQr = current?.source === 'qr';
   const isCollector = current?.source === 'collector' || current?.source == null;
@@ -44,12 +51,20 @@ export function DataHealth({ defaultOpen = false }: { defaultOpen?: boolean } = 
 
   const status = collector?.status;
   const qrState = qr?.connection_state;
-  const source = managed ? 'Telegram · QR' : isCentral ? 'Telegram · MTProto' : 'Telegram · Collector';
+  const source = !isTelegram
+    ? network.name
+    : managed
+      ? 'Telegram · QR'
+      : isCentral
+        ? 'Telegram · MTProto'
+        : 'Telegram · Collector';
   const lastSuccess = managed ? qr?.last_success_at : status?.last_success_at;
   const lastCollect = lastSuccess ? fmt.date(lastSuccess) : fresh?.label ?? '—';
-  const collectionMode = managed
+  const collectionMode = !isTelegram
     ? 'Atlavue'
-    : isCentral
+    : managed
+      ? 'Atlavue'
+      : isCentral
       ? 'MTProto'
       : status?.collector_version
         ? `Collector v${status.collector_version}`
@@ -87,13 +102,17 @@ export function DataHealth({ defaultOpen = false }: { defaultOpen?: boolean } = 
           : apiTone === 'warn'
             ? 'Данные устарели'
             : 'Ошибка сбора';
-  const connectionLink = managed
-    ? qrState === 'reauth_required'
-      ? '/connect?source=telegram&tab=qr&action=reconnect'
-      : '/connect?source=telegram&tab=qr'
-    : isCollector
-      ? '/connect?source=telegram&tab=agent'
-      : null;
+  // Телеграм-ссылки — только у телеграм-канала: «Настроить collector →» под МойСкладом вело бы
+  // чинить не тот источник.
+  const connectionLink = !isTelegram
+    ? null
+    : managed
+      ? qrState === 'reauth_required'
+        ? '/connect?source=telegram&tab=qr&action=reconnect'
+        : '/connect?source=telegram&tab=qr'
+      : isCollector
+        ? '/connect?source=telegram&tab=agent'
+        : null;
   const connectionLabel = managed && qrState === 'reauth_required'
     ? 'Переподключить Telegram →'
     : managed
