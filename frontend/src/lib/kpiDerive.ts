@@ -200,9 +200,25 @@ export function deriveKpis(
     labels: pubDayLabels,
     values: pubDays.map(([, b]) => b.reactions),
   };
+  // Знаменатель ER — аудитория ТОГО ДНЯ, из дневного архива, а не сегодняшнее число подписчиков.
+  // С константой в знаменателе ER выходил РОВНО пропорционален вовлечению: erSpark = reactions ×
+  // (100/members). А `Sparkline` нормализует ряд по min–max, поэтому постоянный множитель форму не
+  // меняет вообще — карточки «Реакции» и «Вовлечённость» рисовали одну и ту же кривую (замерено на
+  // проде: корреляция 0.996, расхождение нормализованных форм 5.4% высоты плота). Деление на
+  // аудиторию своего дня возвращает ряду собственный смысл: за 30 дней база менялась на сотни
+  // подписчиков, и ER растёт медленнее вовлечения, когда канал растёт. Дня нет в архиве — падаем
+  // на живое число (прежнее поведение), это честнее, чем выбросить точку.
+  const membersByDay = new Map<string, number>();
+  for (const row of historyRows) {
+    const value = Number(row.subscribers ?? 0);
+    if (value > 0) membersByDay.set(row.day, value);
+  }
   const erSpark: DailySeries = {
     labels: pubDayLabels,
-    values: pubDays.map(([, b]) => (members > 0 ? ((b.reactions + b.replies + b.forwards) / members) * 100 : 0)),
+    values: pubDays.map(([day, b]) => {
+      const base = membersByDay.get(day) ?? members;
+      return base > 0 ? ((b.reactions + b.replies + b.forwards) / base) * 100 : 0;
+    }),
   };
   // Sparkline matches the (channel-wide) headline: daily channel views from the archive when we
   // have it, else the post-derived daily series (fallback path).

@@ -3,6 +3,7 @@ import { seriesMotionKey } from '@/lib/chartMotion';
 import type { MorphPoint } from '@/lib/chartMorph';
 import { SparklineSeries } from '@/components/SparklineSeries';
 import { cn } from '@/lib/utils';
+import { sparkDomain } from '@/lib/robustDomain';
 
 interface SparklineProps {
   /**
@@ -45,16 +46,16 @@ const VBH = 32;
  * viewBox is fixed (200×32); geometry depends only on the values, never on container size, so a
  * resize can't change these points and never restarts the morph.
  */
-function computeSparkPoints(values: number[]): MorphPoint[] {
+function computeSparkPoints(values: number[], domain: { min: number; max: number }): MorphPoint[] {
   const n = values.length;
   if (n === 0) return [];
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const range = max - min || 1;
+  const range = domain.max - domain.min || 1;
   const step = (VBW - PAD * 2) / Math.max(n - 1, 1);
   return values.map((v, i) => ({
     x: PAD + i * step,
-    y: VBH - PAD - ((v - min) / range) * (VBH - PAD * 2),
+    // Клип по домену: точка выше окна упирается в верх и помечается карéткой — иначе один
+    // вирусный день снова заберёт всю высоту. Значение при этом не меняется, только геометрия.
+    y: VBH - PAD - ((Math.min(v, domain.max) - domain.min) / range) * (VBH - PAD * 2),
   }));
 }
 
@@ -101,7 +102,11 @@ export function Sparkline({
   // Target morph geometry, memoised on the VALUES reference: a hover rerender keeps the same `values`
   // ref (hover is local state — the parent doesn't re-render), so the morph layer sees a stable
   // `points` and never restarts; a period/filter swap hands down a new array → new geometry → morph.
-  const points = useMemo(() => computeSparkPoints(values ?? []), [values]);
+  // Домен считается ОДИН раз и делится между геометрией морфа и разметкой ниже: если посчитать
+  // его дважды, кадр морфа и статический рендер разъедутся. Мемо по той же ссылке `values`.
+  const domain = useMemo(() => sparkDomain(values ?? []), [values]);
+  const clippedSet = useMemo(() => new Set(domain.clipped), [domain]);
+  const points = useMemo(() => computeSparkPoints(values ?? [], domain), [values, domain]);
 
   // Pointer scrubbing is supplementary to the SVG's detailed accessible name, not an activation
   // action. Keep the surface passive and listen for its coordinates on the DOM node.
@@ -132,12 +137,13 @@ export function Sparkline({
   const motionKey = seriesMotionKey(values);
 
   const n = values.length;
-  const min = Math.min(...values);
-  const max = Math.max(...values);
+  const min = domain.min;
+  const max = domain.max;
   const range = max - min || 1;
   const step = (VBW - PAD * 2) / Math.max(n - 1, 1);
   const xPct = (i: number) => ((PAD + i * step) / VBW) * 100;
-  const yPct = (v: number) => ((VBH - PAD - ((v - min) / range) * (VBH - PAD * 2)) / VBH) * 100;
+  // Тот же клип, что в геометрии морфа, иначе ховер-точка уехала бы выше линии.
+  const yPct = (v: number) => ((VBH - PAD - ((Math.min(v, max) - min) / range) * (VBH - PAD * 2)) / VBH) * 100;
 
   const active = hover;
 
@@ -150,7 +156,9 @@ export function Sparkline({
     const diff = prev != null ? v - prev : null;
     const diffStr =
       diff != null && diff !== 0 ? ` ${diff > 0 ? '↑' : '↓'}${formatValue(Math.abs(diff))}` : '';
-    readout = `${label ? `${label} · ` : ''}${formatValue(v)}${diffStr}`;
+    // У клипнутой точки читалка обязана назвать НАСТОЯЩЕЕ число: домен режется, данные — нет.
+    const clipNote = clippedSet.has(active) ? ' · пик срезан' : '';
+    readout = `${label ? `${label} · ` : ''}${formatValue(v)}${diffStr}${clipNote}`;
   }
 
   // Ховер-точка — единственный HTML-оверлей: полюса (начало/конец) рисует SparklineSeries из
@@ -192,7 +200,8 @@ export function Sparkline({
           aria-label={
             interactive && values.length
               ? `График: ${values.length} точек, макс ${formatValue(Math.max(...values))}, ` +
-                `последнее ${formatValue(values[values.length - 1])}`
+                `последнее ${formatValue(values[values.length - 1])}` +
+                (domain.clipped.length > 0 ? `, ${domain.clipped.length} пик срезан по шкале` : '')
               : undefined
           }
           aria-hidden={interactive && values.length ? undefined : true}
@@ -230,6 +239,22 @@ export function Sparkline({
                 style={{ left: `${xPct(active)}%` }}
               />
             )}
+            {/* Карéтка на срезанной точке. Клип без пометки — та же ложь, что логарифм без оси
+                (Observable Plot: «Clamped values may need an annotation»). Настоящее число
+                показывает ховер-читалка, а в aria-label уходит счётчик срезанных пиков. */}
+            {/* CSS-треугольник, а не глиф и не SVG-path: глиф потребовал бы магического размера
+                шрифта мимо шкалы токенов (ловит lint:motion), а залитая фигура внутри растянутого
+                viewBox перекосилась бы вместе с ним — та же причина, по которой все обводки несут
+                non-scaling-stroke. HTML-оверлей от растяжения не зависит. */}
+            {domain.clipped.map((i) => (
+              <span
+                key={`clip${i}`}
+                aria-hidden="true"
+                title="пик срезан по шкале"
+                className="pointer-events-none absolute h-0 w-0 -translate-x-1/2 border-x-2 border-b-[3px] border-x-transparent border-b-muted-foreground"
+                style={{ left: `${xPct(i)}%`, top: 0 }}
+              />
+            ))}
             {active != null && dot(active)}
           </>
         )}

@@ -1,5 +1,6 @@
-import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useId } from 'react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
+import { ChartGapPattern } from '@/components/ChartGapPattern';
 import { EmptyState } from '@/components/EmptyState';
 import { fmt } from '@/lib/format';
 import { observeSize } from '@/lib/observeSize';
@@ -108,10 +109,18 @@ export function BarChart({
   // раз, на входе. Честность при этом не теряется: `titles` уже несёт «данных нет» для пропуска,
   // а «Макс/Среднее» считаются выше по потоку, до этого приведения, и пропуск в них не попадает.
   const values = useMemo(() => (rawValues ?? []).map((value) => value ?? 0), [rawValues]);
+  // «0 ≠ n/a»: честный ноль и пропуск измерения дают одинаково невидимый столбец, поэтому
+  // различие обязана нести колонка-подложка. Пропуск получает штриховку на всю высоту плота —
+  // видно, что день БЫЛ, но не измерен; ноль остаётся пустым местом, потому что он измерен.
+  const gapIdx = useMemo(
+    () => new Set((rawValues ?? []).flatMap((value, i) => (value == null ? [i] : []))),
+    [rawValues],
+  );
   const ghost = useMemo(
     () => (rawGhost == null ? undefined : rawGhost.map((value) => value ?? 0)),
     [rawGhost],
   );
+  const gapPatternId = `bcgap${useId().replace(/:/g, '')}`;
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   // Press position (client px) for the drag guard: the svg-level onClick would otherwise drill on
@@ -264,6 +273,9 @@ export function BarChart({
         h: val === 0 ? 0 : stacked ? barHeight : Math.max(barHeight, 2),
       };
     });
+    // Колонки-подложки для пропусков (см. gapIdx): та же геометрия бэнда, полная высота плота.
+    const gapCols = [...gapIdx].map((i) => ({ i, x: bandX(i), w: Math.max(barWidth, 1) }));
+
     const ghostBars = activeGhost
       ? activeGhost.map((v, i) => {
           const h = (v / max) * usable;
@@ -281,6 +293,28 @@ export function BarChart({
     // — пустое место вместо ряда на нуле. Столбчатой диаграмме нулевая база нужна и по канону.
     const underLayer = (
       <>
+        {/* «0 ≠ n/a» (канон Semrush Intergalactic: «Zero counts as data»). Нулевой и отсутствующий
+            столбец геометрически неразличимы — оба невидимы. Пропуск получает штрихованную
+            подложку на всю высоту плота: день был, но не измерен. Честный ноль подложки не
+            получает — он измерен. Декоративно для AT: смысл несёт подпись тултипа. */}
+        {gapCols.length > 0 && (
+          <>
+            <defs>
+              <ChartGapPattern id={gapPatternId} />
+            </defs>
+            {gapCols.map((col) => (
+              <rect
+                key={`gapcol${col.i}`}
+                x={col.x}
+                y={0}
+                width={col.w}
+                height={graphHeight}
+                fill={`url(#${gapPatternId})`}
+                className="pointer-events-none"
+              />
+            ))}
+          </>
+        )}
         <line
           x1={gutterW}
           y1={graphHeight}
@@ -381,7 +415,7 @@ export function BarChart({
     );
 
     return { chartWidth, chartHeight, graphHeight, offsetX, itemWidth, bars, ghostBars, stacked, barTop, barCenterX, underLayer, overLayer };
-  }, [values, labels, activeGhost, hasGhost, target, refLines, width, ctxHeight, height, expanded, comparisonStyle]);
+  }, [values, labels, activeGhost, hasGhost, target, refLines, width, ctxHeight, height, expanded, comparisonStyle, gapIdx, gapPatternId]);
 
   // ── UPDATE morph: the silhouette flows into the new shape on a data change ────────────────
   // Heights (the ONE dimension the data owns — x/width are layout) tween from the previously
@@ -482,7 +516,10 @@ export function BarChart({
     : Math.max(...values);
 
   const tipText = (i: number) => {
-    const base = titles?.[i] ?? `${labels?.[i] ?? ''}: ${values[i]}`;
+    // Пропуск обязан называться словами: подпись — единственное, чем «нет данных» отличается от
+    // измеренного нуля, когда столбца не видно в обоих случаях. `titles` от seriesToChart уже
+    // несут «данных нет»; фолбэк — для прямых вызовов BarChart без titles.
+    const base = titles?.[i] ?? `${labels?.[i] ?? ''}: ${gapIdx.has(i) ? 'данных нет' : values[i]}`;
     return activeGhost && activeGhost[i] != null ? `${base} · пред. ${fmt.num(activeGhost[i])}` : base;
   };
   // Structured readout (label · Текущий · comparison · Δ) when a ghost series is present; else the
