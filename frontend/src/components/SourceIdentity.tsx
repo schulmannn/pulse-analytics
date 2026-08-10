@@ -39,7 +39,6 @@ export function SourceIdentity({
         className,
       )}
       data-source-identity
-      aria-label={compact ? fullLabel : undefined}
       title={fullLabel}
     >
       {network === 'multi' ? (
@@ -55,9 +54,14 @@ export function SourceIdentity({
           <NetworkGlyph k={network} className="h-3 w-3" />
         </span>
       )}
-      <span className="truncate" aria-hidden={compact || undefined}>
-        {compact ? shortLabel : `${networkLabel} · ${channelLabel}`}
-      </span>
+      {compact ? (
+        <>
+          <span aria-hidden="true">{shortLabel}</span>
+          <span className="sr-only">{fullLabel}</span>
+        </>
+      ) : (
+        <span className="truncate">{fullLabel}</span>
+      )}
     </span>
   );
 }

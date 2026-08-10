@@ -507,7 +507,7 @@ test('legacy Home cards use one config path and preserve old prefs during migrat
     history: {
       id: 'legacy-history',
       metricId: 'legacy:history',
-      viz: 'bar',
+      viz: 'line',
       period: 90,
       size: 'full',
       title: 'Моя история',
