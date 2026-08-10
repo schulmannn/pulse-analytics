@@ -152,6 +152,17 @@ test('metric line chart flows from one period shape into the next', async ({ pag
   await expect(morphGroup).toHaveAttribute('data-chart-morph-state', 'idle');
 });
 
+test('subscriber metric always renders the total curve even for a stale bar deep-link', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop-1440', 'Desktop-only metric explorer contract');
+  await bootDemo(page, '/metrics/subscribers?chart=bar', { theme: 'dark' });
+
+  await expect(page.getByRole('heading', { name: 'Подписчики', level: 1 })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Динамика подписчиков' })).toBeVisible();
+  await expect(page.getByRole('toolbar', { name: 'Тип графика' })).toHaveCount(0);
+  await expect(page.locator('svg[data-chart-kind="bar"]')).toHaveCount(0);
+  await expect(page.locator('svg[data-chart-kind="line"][data-chart-expanded]').first()).toBeVisible();
+});
+
 test('metric explorer gives the plot desktop space and exposes a hover inspector', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop-1440', 'Desktop-only metric explorer contract');
   await bootDemo(page, '/metrics/views', { theme: 'dark' });

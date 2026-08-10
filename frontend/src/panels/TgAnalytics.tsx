@@ -14,7 +14,6 @@ import { WidgetGroup } from '@/components/widgets/WidgetGroup';
 import { breakdownVariants, seriesBarValuesVariant } from '@/components/widgets/variants';
 import { Breakdown } from '@/components/Breakdown';
 import { pctDelta } from '@/lib/delta';
-import { DivergingBars } from '@/components/DivergingBars';
 import { EmptyState } from '@/components/EmptyState';
 import {
   calendarWindowForDays,
@@ -429,6 +428,7 @@ export function deriveFollowerFlows(
 ) {
   const empty = {
     values: [] as number[],
+    labels: [] as string[],
     titles: [] as string[],
     total: 0,
     prevTotal: null as number | null,
@@ -455,6 +455,7 @@ export function deriveFollowerFlows(
   }
   const selected = splitCalendarRows(rows, win, (row) => row.timestamp);
   let values: number[];
+  let labels: string[];
   let titles: string[];
   if (opts?.grain === 'week') {
     const buckets = new Map<string, { sum: number; anchor: number }>();
@@ -470,11 +471,15 @@ export function deriveFollowerFlows(
     }
     const weekRows = [...buckets.values()].sort((a, b) => a.anchor - b.anchor);
     values = weekRows.map((r) => r.sum);
+    labels = weekRows.map((r) => formatMsDate(r.anchor));
     titles = weekRows.map(
       (r) => `${formatMsDate(r.anchor)}: ${r.sum >= 0 ? '+' : ''}${fmt.num(r.sum)} за неделю`,
     );
   } else {
     values = selected.current.map((row) => row.net);
+    labels = selected.current.map((row) =>
+      Number.isFinite(row.timestamp) ? formatMsDate(row.timestamp) : '',
+    );
     titles = selected.current.map((row) => {
       const label = Number.isFinite(row.timestamp) ? formatMsDate(row.timestamp) : '';
       return `${label}: ${row.net >= 0 ? '+' : ''}${fmt.num(row.net)} за день`;
@@ -482,6 +487,7 @@ export function deriveFollowerFlows(
   }
   return {
     values,
+    labels,
     titles,
     total: selected.current.reduce((sum, row) => sum + row.net, 0),
     prevTotal: selected.previous
@@ -492,14 +498,34 @@ export function deriveFollowerFlows(
   };
 }
 
-/** Backward-compatible focused shape used by the net-growth card and its tests. */
+/** Net movement as one accumulated curve from the start of the selected period. */
 export function deriveNetGrowth(
   graphs: TgGraphs | undefined,
   win: CalendarWindow | null,
   opts?: { grain?: 'day' | 'week' },
 ) {
-  const { values, titles, total, prevTotal } = deriveFollowerFlows(graphs, win, opts);
-  return { values, titles, total, prevTotal };
+  const flow = deriveFollowerFlows(graphs, win, opts);
+  if (flow.values.length === 0) {
+    return { values: [], labels: [], titles: [], total: flow.total, prevTotal: flow.prevTotal };
+  }
+  let running = 0;
+  const cumulative = flow.values.map((value) => {
+    running += value;
+    return running;
+  });
+  return {
+    values: [0, ...cumulative],
+    labels: ['Начало', ...flow.labels],
+    titles: [
+      'Начало периода: 0',
+      ...flow.labels.map((label, index) => {
+        const value = cumulative[index] ?? 0;
+        return `${label}: ${value >= 0 ? '+' : '−'}${fmt.num(Math.abs(value))} с начала периода`;
+      }),
+    ],
+    total: flow.total,
+    prevTotal: flow.prevTotal,
+  };
 }
 
 /** «Лучший день» reads the same resolved window as its chart. */
@@ -766,20 +792,21 @@ export function TgAnalytics({
   );
   const netGrowthVariants = useCallback(
     (period: WidgetPeriodValue) => {
-      // Кап длинного окна — паттерн соседних «Просмотров»/«Репостов» (строки выше): децимировать
-      // бары нельзя, длинная дневная серия честно сворачивается в календарные недели; headline и
-      // delta читаются от дневного деривата (тоталы по построению идентичны).
+      // Дневные плюс/минус столбцы скрывали главный ответ — как изменилась база за весь период.
+      // Поэтому ряд накапливает net от нуля; длинное окно честно сворачивается в календарные
+      // недели до накопления, а headline остаётся точным дневным итогом.
       const daily = deriveNetGrowth(graphs, calendarWindowForPeriod(period));
       const w =
         daily.values.length > CHART_MAX_POINTS
           ? deriveNetGrowth(graphs, calendarWindowForPeriod(period), { grain: 'week' })
           : daily;
       const delta = daily.prevTotal != null && daily.prevTotal > 0 && daily.total >= 0 ? pctDelta(daily.total, daily.prevTotal) : null;
-      const caption = delta ? 'к пред. периоду' : period.days === 0 && !period.range ? 'за всё время' : 'за период';
+      const scope = period.days === 0 && !period.range ? 'накопительно за всё время' : 'накопительно за период';
+      const caption = delta ? `${scope} · к пред. периоду` : scope;
       return [
         {
-          key: 'bar',
-          label: 'Столбцы',
+          key: 'line',
+          label: 'Линия',
           render:
             w.values.length > 0 ? (
               <ChartCardBody
@@ -787,7 +814,12 @@ export function TgAnalytics({
                 delta={delta}
                 caption={caption}
               >
-                <DivergingBars values={w.values} titles={w.titles} />
+                <LineChart
+                  values={w.values}
+                  labels={w.labels}
+                  titles={w.titles}
+                  markExtremes
+                />
               </ChartCardBody>
             ) : (
               <EmptyState title="Нет данных за выбранный период." />
@@ -1046,9 +1078,8 @@ export function TgAnalytics({
         )}
 
         {inGroup('dynamics') && netGrowthPresent && (
-          // Single-variant (no type switcher) so the diverging bars render THROUGH the widget's
-          // fill context and fill the tile — as bare children they'd sit at the fixed ~120px and
-          // leave dead space. The «прирост» total stays as the caption below.
+          // Single accumulated curve: the card answers how the whole audience changed through the
+          // period instead of exposing a noisy collection of day-over-day plus/minus bars.
           <ChartSection
             // The window lives in the CAPTION, not the title (аудит: «(30д)» в заголовке читался
             // как хардкод рядом с управляемыми окнами соседей). The body now follows the page top

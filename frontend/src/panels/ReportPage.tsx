@@ -383,7 +383,7 @@ function ReportDocumentBody({
         );
       case 'metric-subscribers':
         return (
-          <ReportMetricCard title="Подписчики по дням" total={drillMeta.subscribers.total} trend={drillMeta.subscribers.trend}
+          <ReportMetricCard title="Динамика подписчиков" total={drillMeta.subscribers.total} trend={drillMeta.subscribers.trend}
             series={subsSpark} valueFmt={fmt.num} to="/metrics/subscribers" />
         );
       case 'metric-reactions':
@@ -414,7 +414,7 @@ function ReportDocumentBody({
   const chartSpec = (metric: string): { series: DailySeries; valueFmt: (n: number) => string; zeroBase: boolean; label: string; drill: DrillKey } => {
     switch (metric) {
       case 'subscribers':
-        return { series: subsSpark, valueFmt: fmt.num, zeroBase: false, label: 'Подписчики по дням', drill: 'subscribers' };
+        return { series: subsSpark, valueFmt: fmt.num, zeroBase: false, label: 'Динамика подписчиков', drill: 'subscribers' };
       case 'reactions':
         return { series: dailyFor('likes'), valueFmt: fmt.short, zeroBase: true, label: 'Реакции по дням', drill: 'reactions' };
       case 'forwards':

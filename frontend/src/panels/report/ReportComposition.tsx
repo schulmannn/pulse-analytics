@@ -177,7 +177,7 @@ export function ReportComposition({ blocks, data, editable, onInsert, onMove, on
         );
       case 'metric-subscribers':
         return (
-          <ReportMetricCard title="Подписчики по дням" total={drillMeta.subscribers.total} trend={drillMeta.subscribers.trend}
+          <ReportMetricCard title="Динамика подписчиков" total={drillMeta.subscribers.total} trend={drillMeta.subscribers.trend}
             series={subsSpark} valueFmt={fmt.num} to="/metrics/subscribers" onOpen={openPinnedTelegramSource}
             chartAppearance="rhea" chartLabel="Подписчики" />
         );

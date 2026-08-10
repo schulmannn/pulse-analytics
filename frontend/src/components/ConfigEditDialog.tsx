@@ -227,6 +227,7 @@ export function WidgetConfigControls({
         <Field label="Сравнение">
           <Segmented
             ariaLabel="Сравнение"
+            columns={3}
             options={CMP_MODES.map((m) => ({ value: m.value, label: m.label }))}
             value={cmpMode}
             onChange={(v) => {
@@ -360,11 +361,13 @@ function DisabledField({ label, reason }: { label: string; reason: string }) {
     the one shared shadcn/Radix ToggleGroup primitive. */
 function Segmented<T extends string>({
   ariaLabel,
+  columns,
   options,
   value,
   onChange,
 }: {
   ariaLabel: string;
+  columns?: number;
   options: Array<{ value: T; label: string }>;
   value: T;
   onChange: (v: T) => void;
@@ -372,8 +375,9 @@ function Segmented<T extends string>({
   return (
     <SegmentedControl
       ariaLabel={ariaLabel}
-      className="w-full"
-      segmentClassName="px-2"
+      columns={columns}
+      className={columns ? 'w-full rounded-2xl' : 'w-full'}
+      segmentClassName={columns ? 'rounded-xl px-1.5' : 'px-2'}
       value={value}
       onChange={onChange}
       options={options.map((o) => ({ value: o.value, content: o.label }))}

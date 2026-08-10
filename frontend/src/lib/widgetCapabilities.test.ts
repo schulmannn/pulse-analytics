@@ -37,10 +37,10 @@ describe('editorSpec — capability model (U6)', () => {
     expect(capabilitiesFor(cfg('legacy:kpi'))).toEqual({ metric: false, viz: false, grain: false, comparison: false, target: false, filter: false });
   });
 
-  it('a chart legacy widget exposes only its supported presentation switch', () => {
+  it('subscriber history exposes only its canonical total-audience curve', () => {
     const s = editorSpec(cfg('legacy:history'));
-    expect(s.supportedViz).toEqual(['line', 'bar']);
-    expect(s.capabilities).toEqual({ metric: false, viz: true, grain: false, comparison: false, target: false, filter: false });
+    expect(s.supportedViz).toEqual(['line']);
+    expect(s.capabilities).toEqual({ metric: false, viz: false, grain: false, comparison: false, target: false, filter: false });
     expect(s.filterDims).toEqual([]);
   });
 

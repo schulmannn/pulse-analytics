@@ -174,7 +174,11 @@ export function ChartSection(props: ChartSectionProps) {
           action={
             props.homeKey && homeSource ? (
               <>
-                <SourceIdentity network={homeSource.network} channelId={homeSource.channelId} />
+                <SourceIdentity
+                  network={homeSource.network}
+                  channelId={homeSource.channelId}
+                  compact={effectiveSize === 'third'}
+                />
                 {props.action}
               </>
             ) : props.action

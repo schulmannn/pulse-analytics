@@ -3,7 +3,6 @@ import { useHistory, useVelocity, useTgFull } from '@/api/queries';
 import type { TgFull } from '@/api/schemas';
 import { lttbDownsample } from '@/lib/downsample';
 import { BarChart } from '@/components/BarChart';
-import { DivergingBars } from '@/components/DivergingBars';
 import { LineChart } from '@/components/LineChart';
 import { ChartTooltip, useHeatmapTip } from '@/components/ChartTooltip';
 import { fmt, ruAxisLabel, pluralRu } from '@/lib/format';
@@ -58,29 +57,6 @@ export function SubscriberHistoryChart({ rows }: { rows: SubscriberRow[] }) {
       markExtremes
     />
   );
-}
-
-/** Day-over-day deltas of the RAW archive rows, downsampled to ≤60 bars AFTER differencing.
-    The series is a LEVEL (~4800 подписчиков): zero-based bars of levels all render full
-    height and a decline disappears — the bar presentation plots the daily CHANGE instead. */
-function subscriberDeltas(rows: SubscriberRow[]) {
-  const deltas = rows.slice(1).map((row, i) => ({
-    day: row.day,
-    delta: Number(row.subscribers) - Number(rows[i]?.subscribers),
-  }));
-  const sampled = lttbDownsample(deltas, 60, (r) => r.delta);
-  return {
-    values: sampled.map((r) => r.delta),
-    labels: sampled.map((r) => ddmm(r.day)),
-    titles: sampled.map((r) => `${ddmm(r.day)}: ${r.delta >= 0 ? '+' : ''}${fmt.num(r.delta)} за день`),
-  };
-}
-
-/** Bar presentation of the same archive (widget «Тип: Столбцы») — diverging day-over-day deltas. */
-export function SubscriberHistoryBars({ rows }: { rows: SubscriberRow[] }) {
-  const d = subscriberDeltas(rows);
-  // 200 = the standard 1×-tile chart height, matching the line presentation.
-  return <DivergingBars values={d.values} labels={d.labels} titles={d.titles} height={200} />;
 }
 
 /**
@@ -156,10 +132,6 @@ export function HistoryChartBlock({ id, homeKey }: HomeBlockProps = {}) {
           const windowRows = days === 0 ? archiveRows : archiveRows.slice(-days);
           return <SubscriberHistoryChart rows={windowRows} />;
         },
-        renderExpandedBar: (days) => {
-          const windowRows = days === 0 ? archiveRows : archiveRows.slice(-days);
-          return <SubscriberHistoryBars rows={windowRows} />;
-        },
         statsFor: (days) =>
           (days === 0 ? archiveRows : archiveRows.slice(-days)).map((row) => Number(row.subscribers)),
         statsSum: false, // сумма УРОВНЕЙ подписчиков по дням не имеет смысла
@@ -177,7 +149,6 @@ export function HistoryChartBlock({ id, homeKey }: HomeBlockProps = {}) {
         }
         const isDownsampled = rows.length > 140;
         const periodCaption = `${rows.length} дн. в периоде${isDownsampled ? ' · сглажено' : ''}`;
-        const deltas = subscriberDeltas(rows);
         const last = Number(rows[rows.length - 1]?.subscribers ?? 0);
         const first = Number(rows[0]?.subscribers ?? 0);
         const levelDelta = first > 0 ? pctDelta(last, first) : null;
@@ -192,21 +163,6 @@ export function HistoryChartBlock({ id, homeKey }: HomeBlockProps = {}) {
               </ChartCardBody>
             ),
           },
-          {
-            key: 'bar',
-            label: 'Столбцы',
-            render: (
-              <ChartCardBody value={fmt.kpi(last)} delta={levelDelta} caption={caption}>
-                <SubscriberHistoryBars rows={rows} />
-              </ChartCardBody>
-            ),
-          },
-          seriesBarValuesVariant(deltas.values, deltas.labels, deltas.titles, {
-            diverging: true,
-            extraRows: [{ label: 'Сейчас', value: fmt.num(last) }],
-            sum: true,
-            sumLabel: 'Δ за период',
-          }),
         ];
       }}
     />
@@ -214,7 +170,7 @@ export function HistoryChartBlock({ id, homeKey }: HomeBlockProps = {}) {
 }
 
 /** Bare, config-driven history body for Home. The surrounding ConfigWidget owns all card chrome. */
-export function HistoryWidgetBody({ viz }: { viz: WidgetViz }) {
+export function HistoryWidgetBody() {
   // Прогрессивная загрузка Главной: офскрин-пин не фетчит (вне Главной контекст = true).
   const inView = useWidgetInView();
   const { data, isPending, isError, refetch } = useHistory(730, { enabled: inView });
@@ -235,7 +191,7 @@ export function HistoryWidgetBody({ viz }: { viz: WidgetViz }) {
 
   return (
     <ChartCardBody value={fmt.kpi(last)} delta={delta} caption={caption}>
-      {viz === 'bar' ? <SubscriberHistoryBars rows={rows} /> : <SubscriberHistoryChart rows={rows} />}
+      <SubscriberHistoryChart rows={rows} />
     </ChartCardBody>
   );
 }

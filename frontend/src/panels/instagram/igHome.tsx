@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom';
 import { useIgData } from '@/lib/useIgData';
 import { useDemo } from '@/lib/demo-context';
 import { ChartSection } from '@/components/ChartWidget';
-import { TrendCard, FollowsByDayCard, IgKpiBlock, SubscriberMovement, igPeriodRows } from '@/components/instagram/shared';
+import { TrendCard, IgKpiBlock, SubscriberMovement, igPeriodRows } from '@/components/instagram/shared';
 import { InsightsBlock, PeriodCompareBlock } from '@/components/instagram/insights';
 
 /**
@@ -38,8 +38,17 @@ export function IgReachHomeCard({ id, homeKey }: { id?: string; homeKey?: string
 export function IgFollowsHomeCard({ id, homeKey }: { id?: string; homeKey?: string }) {
   const ig = useIgData();
   const { demo } = useDemo();
-  if (ig.error || (ig.isMock && !demo)) return <IgConnectPrompt id={id} homeKey={homeKey} title="IG · Подписки по дням" />;
-  return <FollowsByDayCard id={id} homeKey={homeKey} title="IG · Подписки по дням" data={ig.series.follower} drillTo="/metrics/ig-follows" />;
+  if (ig.error || (ig.isMock && !demo)) return <IgConnectPrompt id={id} homeKey={homeKey} title="IG · Динамика подписчиков" />;
+  return (
+    <TrendCard
+      id={id}
+      homeKey={homeKey}
+      title="IG · Динамика подписчиков"
+      series={ig.series.followerLevel}
+      seriesKind="level"
+      drillTo="/metrics/ig-follows"
+    />
+  );
 }
 
 export function IgMovementHomeCard({ id, homeKey }: { id?: string; homeKey?: string }) {

@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import type { IgData } from '@/lib/useIgData';
-import { Section, TrendCard, FollowsByDayCard, SubscriberMovement, igPeriodRows } from '@/components/instagram/shared';
+import { Section, TrendCard, SubscriberMovement, igPeriodRows } from '@/components/instagram/shared';
 import { ChartSection } from '@/components/ChartWidget';
 import { WidgetGroup } from '@/components/widgets/WidgetGroup';
 import { InsightsBlock, PeriodCompareBlock } from '@/components/instagram/insights';
@@ -11,7 +11,7 @@ import { downloadAnalyticsCsv, exportFilename } from '@/lib/analyticsExport';
  * IG Аналитика — honest dynamics.
  * - Real subscriber movement: gross follows AND unfollows (follows_and_unfollows) → net. Instagram
  *   only gives these as a period total, so they're a summary, not a daily line.
- * - Daily charts ONLY where Instagram returns a real series (reach, daily follows).
+ * - Daily charts ONLY where Instagram returns a real series (reach and follower level).
  * - Aggregate metrics (views/saves/likes/…) → period comparison, not a fabricated daily graph.
  */
 export function IgAnalytics({ ig }: { ig: IgData }) {
@@ -71,10 +71,16 @@ export function IgAnalytics({ ig }: { ig: IgData }) {
         {/* A real WidgetGroup (TG parity): the cards gain Выше/Ниже/Переставить/Скрыть in the
             ⋯ menu — reorder/hide state persists per user, same as the TG feeds. */}
         <WidgetGroup id="ig-dynamics" className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-6">
-          {/* Daily metrics with a real page drill. The feed top bar windows the full archive-backed
+          {/* Dated metrics with a real page drill. The feed top bar windows the full archive-backed
               series; a pinned Home copy keeps its own saved period. */}
           <TrendCard title="Охват по дням" series={ig.series.reach} drillTo="/metrics/ig-reach" homeKey="ig-reach" defaultSize="half" />
-          <FollowsByDayCard data={ig.series.follower} drillTo="/metrics/ig-follows" homeKey="ig-follows" />
+          <TrendCard
+            title="Динамика подписчиков"
+            series={ig.series.followerLevel}
+            seriesKind="level"
+            drillTo="/metrics/ig-follows"
+            homeKey="ig-follows"
+          />
         </WidgetGroup>
       </Section>
 

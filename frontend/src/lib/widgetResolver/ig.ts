@@ -55,11 +55,19 @@ export const resolveIgMetric: WidgetMetricResolver = (metric, config, ctx, out) 
   const grain = effectiveGrain(config.grain);
   if (ctx.days === 0 && !ctx.range) out.meta = { ...out.meta, periodLabel: 'за 90 дн.' };
 
-  const applyGhost = (points: { day: string; value: number }[], allowZero = false) => {
+  const applyGhost = (
+    points: { day: string; value: number }[],
+    allowZero = false,
+    accumulate = false,
+  ) => {
     if (!out.series || !wantsGhostLine(config.comparison)) return;
     const baseline = comparisonBaseline(config.comparison, since, until, grain);
     if (!baseline) return;
-    const values = bucketIgSeries(points, baseline.from, baseline.to, grain).map((point) => point.value);
+    let running = 0;
+    const values = bucketIgSeries(points, baseline.from, baseline.to, grain).map((point) => {
+      running += point.value;
+      return accumulate ? running : point.value;
+    });
     const ghost = alignGhost(values, out.series.length);
     const show = allowZero
       ? igWindowValue(points, baseline.from, baseline.to).hasCur
@@ -88,10 +96,14 @@ export const resolveIgMetric: WidgetMetricResolver = (metric, config, ctx, out) 
     const points = igNetFollowerPoints(ig.insights);
     const { cur, hasCur } = igWindowValue(points, since, until);
     if (!hasCur) return { ...out, empty: true };
-    out.series = bucketIgSeries(points, since, until, grain);
+    let running = 0;
+    out.series = bucketIgSeries(points, since, until, grain).map((point) => {
+      running += point.value;
+      return { ...point, value: running };
+    });
     out.valueRaw = cur;
     out.value = `${cur > 0 ? '+' : cur < 0 ? '−' : ''}${fmt.num(Math.abs(cur))}`;
-    applyGhost(points, true);
+    applyGhost(points, true, true);
     return out;
   }
 
