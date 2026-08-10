@@ -157,6 +157,40 @@ export function capResultSeries(out: WidgetResult, viz: WidgetViz, kind: SeriesA
 }
 
 /**
+ * СРЕДНЕЕ значение пост-метрики за корзину: Σ поля ÷ число постов корзины. Для «Среднего охвата
+ * поста» это единственная честная форма ряда — {@link bucketPostField} даёт СУММУ дня, и на дне с
+ * тремя постами столбец втрое выше охвата любого из них, хотя карточка называется «средний».
+ *
+ * Корзина без постов — `null`, а не ноль: среднее по пустому множеству не определено. Это НЕ тот
+ * «честный ноль post-derived метрик», о котором говорит инвариант (у суммы реакций день без
+ * публикаций действительно нулевой) — у отношения знаменатель просто отсутствует.
+ */
+export function bucketPostMean(
+  posts: NormalizedPost[],
+  field: PostMetricField,
+  winFrom: number | null,
+  winTo: number,
+  grain: SeriesGrain,
+): WidgetSeriesPoint[] {
+  const by = new Map<string, { sum: number; count: number }>();
+  for (const post of posts) {
+    if (!post.date) continue;
+    const timestamp = Date.parse(post.date);
+    if (!Number.isFinite(timestamp)) continue;
+    const key = bucketKeyOf(timestamp, grain);
+    const cell = by.get(key) ?? { sum: 0, count: 0 };
+    cell.sum += Number(post[field] ?? 0);
+    cell.count += 1;
+    by.set(key, cell);
+  }
+  const keys = winFrom != null ? bucketKeysInWindow(winFrom, winTo, grain) : [...by.keys()].sort();
+  return keys.map((key) => {
+    const cell = by.get(key);
+    return { date: key, value: cell && cell.count > 0 ? cell.sum / cell.count : null };
+  });
+}
+
+/**
  * КАНАЛЬНЫЙ дневной поток (channel_daily.views) по корзинам окна — та же величина, что хедлайн
  * `deriveKpis().channelViews` и что рисуют Обзор и `/metrics/views`. В отличие от
  * {@link bucketPostField} меряет просмотры ВСЕГО канала за день, а не только постов, опубликованных

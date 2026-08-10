@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { WidgetConfigControls } from '@/components/ConfigEditDialog';
 import { WidgetBody } from '@/components/ConfigWidget';
 import { WidgetErrorBoundary } from '@/components/WidgetErrorBoundary';
@@ -41,6 +41,19 @@ export function WidgetExplorer({
 
   const patch = (p: Partial<WidgetConfig>) => setDraft((d) => normalizeWidget({ ...d, ...p }) ?? d);
   const changed = JSON.stringify(draft) !== JSON.stringify(config);
+
+  // Аккаунт-синк может подменить `config` под открытым эксплорером (правило account-wins в
+  // hydrateWidgetConfigs). Draft заморожен на mount, поэтому НЕ ТРОНУТЫЙ пользователем эксплорер
+  // после гидрации показывал бы «есть изменения» и по «Применить» откатывал бы аккаунтную версию
+  // обратно. Пока правок нет — следуем за config; как только пользователь что-то изменил, его
+  // draft приоритетнее и мы в него не лезем.
+  const configKey = JSON.stringify(config);
+  const changedRef = useRef(changed);
+  changedRef.current = changed;
+  useEffect(() => {
+    if (!changedRef.current) setDraft(config);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [configKey]);
 
   // The sandbox is where users deliberately push a widget into edge-case configs, so guard the live
   // preview: a throwing draft shows a calm fallback here instead of blanking the whole explorer
@@ -95,9 +108,22 @@ export function WidgetExplorer({
           )}
         </div>
         <aside className="min-w-0">
-          <div className="lg:sticky lg:top-4">
-            <div className="mb-1 text-2xs font-medium tracking-wider text-muted-foreground">Настройки</div>
-            <WidgetConfigControls config={draft} spec={spec} onChange={patch} />
+          {/* `lg:sticky` тут стоял и был МЁРТВЫМ: sticky ограничен containing block'ом, то есть самим
+              aside, а при `align-items: stretch` его высота равна высоте строки грида. Рейл выше
+              карточки графика → диапазон залипания нулевой → элемент не пиннится никогда (замер:
+              рейл 1020px в скроллпорте 652px уезжал вместе со страницей на весь скролл).
+              Лечит не sticky, а ОГРАНИЧЕНИЕ ВЫСОТЫ + собственный скроллпорт: список полей
+              прокручивается внутри, страница перестаёт быть длинной, и шапка с «Применить к
+              виджету» остаётся на виду сама.
+              Высота считается от ЭЛЕМЕНТА-скроллера `[data-dashboard-scroll]`, а не от `100dvh`:
+              панель вложена в `md:p-2.5` + рамку (DashboardLayout), поэтому её вьюпорт ниже окна
+              на ~22px; плюс 16px sticky-отступ сверху и столько же снизу. Всё под `lg:` —
+              одноколоночная мобильная раскладка не меняется. */}
+          <div className="lg:sticky lg:top-4 lg:flex lg:max-h-[calc(100vh-3.5rem)] lg:flex-col">
+            <div className="mb-1 shrink-0 text-2xs font-medium tracking-wider text-muted-foreground">Настройки</div>
+            <div className="lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:overscroll-contain lg:pr-1">
+              <WidgetConfigControls config={draft} spec={spec} onChange={patch} />
+            </div>
           </div>
         </aside>
       </div>
