@@ -171,7 +171,7 @@ export function CampaignDialog({
                     'size-6 rounded-full border border-transparent transition-transform',
                     color === preset
                       ? 'ring-2 ring-primary ring-offset-2 ring-offset-card'
-                      : 'hover:scale-110',
+                      : 'hover-fine:scale-110',
                   )}
                   style={{ backgroundColor: campaignColorCss(preset) }}
                 />

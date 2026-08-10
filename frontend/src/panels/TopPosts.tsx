@@ -354,7 +354,7 @@ function TopPostCard({ post, rank, onOpen }: { post: NormalizedPost; rank: numbe
             src={cover}
             alt=""
             referrerPolicy="no-referrer"
-            className="h-full w-full object-cover transition-transform group-hover:scale-[1.02]"
+            className="h-full w-full object-cover transition-transform group-hover-fine:scale-[1.02]"
           />
         ) : (
           <TgMediaPlaceholderGlyph video={isVideo} />

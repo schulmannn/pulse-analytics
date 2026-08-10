@@ -40,6 +40,26 @@
    поведение legacy-контролов. */
 @custom-variant hover (&:hover);
 
+/* Hover-driven MOTION only: a transform that fires on `:hover` sticks after a tap on a touch screen,
+   because the browser keeps the synthetic hover on the last-tapped element. Colour/ink hovers stay on
+   the v3-parity variant above (a stuck tint is invisible); anything that MOVES is gated to a real
+   pointer instead. Separate variants rather than flipping `hover:` back to the v4 default, so the
+   staged phone migration keeps its current semantics everywhere else. */
+@custom-variant hover-fine {
+  @media (hover: hover) and (pointer: fine) {
+    &:hover {
+      @slot;
+    }
+  }
+}
+@custom-variant group-hover-fine {
+  @media (hover: hover) and (pointer: fine) {
+    &:is(:where(.group):hover *) {
+      @slot;
+    }
+  }
+}
+
 @utility container {
   margin-inline: auto;
   padding-inline: 1.5rem;
@@ -1793,11 +1813,17 @@
      via the global 0.01ms cap below, so token-driven rules never need a per-rule duration guard.
      Full canon + usage: frontend/DESIGN_TOKENS.md. */
   :root {
-    --ease-standard: cubic-bezier(0.2, 0.7, 0.3, 1); /* entrance / settle ease-out — the house curve */
+    /* Strong ease-out (Emil Kowalski's curve, owner call 2026-08-11 — was the softer
+       cubic-bezier(0.2, 0.7, 0.3, 1)). Both control points ride the ceiling, so the motion is ~90%
+       done at a third of its duration and spends the rest settling: perceived speed lives in the
+       first third, not in the total. A half-strength ease-out reads as hesitation at any duration. */
+    --ease-standard: cubic-bezier(0.23, 1, 0.32, 1); /* entrance / settle ease-out — the house curve */
     /* The house curve mirrored (x₁,y₁,x₂,y₂ → 1-x₂,1-y₂,1-x₁,1-y₁): accelerating instead of
        settling. An element LEAVING should not decelerate into its own disappearance — ease-out on an
-       exit reads as hesitation. Same family, so enter and leave stay recognisably one system. */
-    --ease-exit: cubic-bezier(0.7, 0, 0.8, 0.3);
+       exit reads as hesitation. Same family, so enter and leave stay recognisably one system.
+       Re-derived with the house curve above; the visible delta from the previous
+       cubic-bezier(0.7, 0, 0.8, 0.3) is a few percent mid-flight. */
+    --ease-exit: cubic-bezier(0.68, 0, 0.77, 0);
     --ease-chart-morph: cubic-bezier(0.25, 0.1, 0.25, 1); /* Recharts `ease` update curve */
     /* Пружина с ПОЧТИ критическим дампингом (овершут ~1-2% — «вес», не bounce; канон не терпит
        отскоков). ТОЛЬКО для FLIP-glide реордера; у потребителей ОБЯЗАТЕЛЕН фолбэк двойным
@@ -2157,6 +2183,17 @@
     transition: width var(--motion-reveal) var(--ease-standard);
   }
 
+  /* Keyboard path (Ctrl+B) — snap, don't tween. A shortcut is pressed dozens of times a day by the
+     people who use it, and at that frequency an animation stops being polish and becomes latency the
+     user is waiting out. `Sidebar.tsx` writes `data-instant` for exactly one commit and clears it on
+     the next painted frame, so the pointer path keeps the full 300ms gesture.
+     Double attribute (`data-rail` is always present) puts this at (0,3,0) — above every
+     `.sidebar-shell .x` rule below, whatever the source order. */
+  .sidebar-shell[data-instant='true'][data-rail],
+  .sidebar-shell[data-instant='true'][data-rail] * {
+    transition-duration: 0s;
+  }
+
   /* The utility strip: Search holds the 32px rail axis; the toggle is pinned to the panel's right edge
    when open and slides back onto the axis as the surface collapses (it tracks the moving outer edge).
    Both are absolutely placed and animate transform on the shared beat, so the source card below
@@ -2212,15 +2249,26 @@
       opacity var(--motion-fast) var(--ease-standard),
       transform var(--motion-fast) var(--ease-standard);
   }
-  .sidebar-toggle-btn:hover .panel-divider,
+  /* :focus-visible is unconditional — a keyboard focus is a real intent on every device. The :hover
+     half is gated to a fine pointer: on a touch screen the synthetic hover sticks to the last-tapped
+     element, which would leave the glyph frozen mid-morph. */
   .sidebar-toggle-btn:focus-visible .panel-divider {
     opacity: 0.55;
     transform: translateX(-1px) scaleY(0.55);
   }
-  .sidebar-toggle-btn:hover .panel-chevron,
   .sidebar-toggle-btn:focus-visible .panel-chevron {
     opacity: 1;
     transform: translateX(0);
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .sidebar-toggle-btn:hover .panel-divider {
+      opacity: 0.55;
+      transform: translateX(-1px) scaleY(0.55);
+    }
+    .sidebar-toggle-btn:hover .panel-chevron {
+      opacity: 1;
+      transform: translateX(0);
+    }
   }
 
   /* Compact tooltip beside the toggle — a separate, non-interactive layer opening to the RIGHT of the
@@ -2244,10 +2292,15 @@
       opacity var(--motion-fast) var(--ease-standard),
       transform var(--motion-fast) var(--ease-standard);
   }
-  .sidebar-toggle-btn:hover ~ .sidebar-tooltip,
   .sidebar-toggle-btn:focus-visible ~ .sidebar-tooltip {
     opacity: 1;
     transform: translate(0, -50%);
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .sidebar-toggle-btn:hover ~ .sidebar-tooltip {
+      opacity: 1;
+      transform: translate(0, -50%);
+    }
   }
   .sidebar-tooltip::before {
     position: absolute;
