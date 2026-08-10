@@ -242,16 +242,18 @@ export function Sparkline({
             {/* Карéтка на срезанной точке. Клип без пометки — та же ложь, что логарифм без оси
                 (Observable Plot: «Clamped values may need an annotation»). Настоящее число
                 показывает ховер-читалка, а в aria-label уходит счётчик срезанных пиков. */}
+            {/* CSS-треугольник, а не глиф и не SVG-path: глиф потребовал бы магического размера
+                шрифта мимо шкалы токенов (ловит lint:motion), а залитая фигура внутри растянутого
+                viewBox перекосилась бы вместе с ним — та же причина, по которой все обводки несут
+                non-scaling-stroke. HTML-оверлей от растяжения не зависит. */}
             {domain.clipped.map((i) => (
               <span
                 key={`clip${i}`}
                 aria-hidden="true"
                 title="пик срезан по шкале"
-                className="pointer-events-none absolute -translate-x-1/2 text-[7px] leading-none text-muted-foreground"
+                className="pointer-events-none absolute h-0 w-0 -translate-x-1/2 border-x-2 border-b-[3px] border-x-transparent border-b-muted-foreground"
                 style={{ left: `${xPct(i)}%`, top: 0 }}
-              >
-                ▲
-              </span>
+              />
             ))}
             {active != null && dot(active)}
           </>
