@@ -6,6 +6,7 @@ import { ChartSection as ChartWidget } from '@/components/ChartWidget';
 import { ChartCardBody } from '@/components/chartWidget/ChartCardBody';
 import { ChartTooltip, useHeatmapTip } from '@/components/ChartTooltip';
 import { Sparkline } from '@/components/Sparkline';
+import { BarChart } from '@/components/BarChart';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { ChartSkeleton } from '@/components/ui/dataSkeleton';
@@ -30,6 +31,68 @@ import { YM_BREAKDOWNS } from '@/panels/metrika/ymBreakdowns';
  * Каждая карточка тянет свои данные сама и (deferData) откладывает запрос, пока не подойдёт к
  * вьюпорту: раньше все 17 запросов летели на каждый вход в /metrika и на каждую смену периода.
  */
+
+/** Тело story-карточки Обзора Метрики — hero слева, дневной ряд справа, «Линия»/«Столбцы». */
+function YmStoryBody({
+  windowLabel,
+  title,
+  total,
+  delta,
+  caption,
+  values,
+  labels,
+  onDrill,
+  viz = 'line',
+}: {
+  windowLabel: string;
+  title: string;
+  total: number | null;
+  delta: MetricDelta | null;
+  caption?: string;
+  values: number[];
+  labels: string[];
+  onDrill: () => void;
+  viz?: 'line' | 'bar';
+}) {
+  return (
+    <ChartCardBody
+      hero
+      label={windowLabel}
+      value={fmt.short(total)}
+      delta={delta}
+      caption={caption}
+      onValueClick={onDrill}
+      drillLabel={title}
+    >
+      {values.length <= 1 ? (
+        <EmptyState compact size="chart" title="Недостаточно дней для графика." />
+      ) : viz === 'bar' ? (
+        <div className="min-h-14 w-full flex-1">
+          <BarChart
+            values={values}
+            labels={labels}
+            titles={values.map((v, i) => `${labels[i] ?? ''}: ${fmt.num(v)}`)}
+            formatValue={fmt.num}
+          />
+        </div>
+      ) : (
+        <Sparkline
+          values={values}
+          labels={labels}
+          area
+          strokeWidth={2}
+          interactive
+          // caption включает hover-читалку «дата · значение · Δ» (Sparkline рисует её только
+          // при заданном caption) — значения по дням остаются читаемы прямо с карточки.
+          caption=""
+          formatValue={fmt.num}
+          className="h-full min-h-14 w-full"
+        />
+      )}
+    </ChartCardBody>
+  );
+}
+
 export function YmOverview() {
   const pp = usePagePeriod();
   const days = pp ? pp.days : 30;
@@ -148,35 +211,30 @@ export function YmOverview() {
       block.total != null && prevTotal != null && prevTotal > 0
         ? pctDelta(block.total, prevTotal)
         : null;
+    // Одна карточка в двух подачах — данные объявляются РАЗ, иначе «Линия» и «Столбцы»
+    // разъедутся при следующей правке.
+    const storyProps = {
+      windowLabel,
+      title,
+      total: block.total,
+      delta,
+      caption,
+      values: sampled.map((p) => p.value),
+      labels: sampled.map((p) => fmt.day(p.day)),
+      onDrill: () => navigate(`/metrics/${id}`),
+    };
     return (
-      <ChartWidget id={id} title={title} fixedSize="half" defaultColor={color} drillTo={`/metrics/${id}`}>
-        <ChartCardBody
-          hero
-          label={windowLabel}
-          value={fmt.short(block.total)}
-          delta={delta}
-          caption={caption}
-          onValueClick={() => navigate(`/metrics/${id}`)}
-          drillLabel={title}
-        >
-          {sampled.length > 1 ? (
-            <Sparkline
-              values={sampled.map((p) => p.value)}
-              labels={sampled.map((p) => fmt.day(p.day))}
-              area
-              strokeWidth={2}
-              interactive
-              // caption включает hover-читалку «дата · значение · Δ» (Sparkline рисует её только
-              // при заданном caption) — значения по дням остаются читаемы прямо с карточки.
-              caption=""
-              formatValue={fmt.num}
-              className="h-full min-h-14 w-full"
-            />
-          ) : (
-            <EmptyState compact size="chart" title="Недостаточно дней для графика." />
-          )}
-        </ChartCardBody>
-      </ChartWidget>
+      <ChartWidget
+        id={id}
+        title={title}
+        fixedSize="half"
+        defaultColor={color}
+        drillTo={`/metrics/${id}`}
+        variants={[
+          { key: 'line', label: 'Линия', render: <YmStoryBody {...storyProps} /> },
+          { key: 'bar', label: 'Столбцы', render: <YmStoryBody {...storyProps} viz="bar" /> },
+        ]}
+      />
     );
   };
 

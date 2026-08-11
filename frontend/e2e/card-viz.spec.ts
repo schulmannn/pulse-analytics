@@ -34,3 +34,23 @@ test('KPI-карточка Обзора даёт выбрать столбцы �
   // Хедлайн карточки на месте — меняется только примитив под ним, не анатомия.
   await expect(card.getByRole('heading', { name: 'Реакции', exact: true })).toBeVisible();
 });
+
+test('карточка IG-Обзора тоже даёт выбрать столбцы', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop-1440', 'редактор карточки — desktop-хром');
+  await bootDemo(page, '/instagram');
+
+  const card = page.locator('section[data-widget-size]').filter({
+    has: page.getByRole('heading', { name: 'Просмотры', exact: true }),
+  });
+  await expect(card).toBeVisible();
+  await expect(card.locator('svg rect')).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Меню виджета «Просмотры»' }).click();
+  await page.getByRole('menuitem', { name: 'Изменить' }).click();
+  const editor = page.getByRole('dialog', { name: 'Настройка виджета «Просмотры»' });
+  await editor.getByRole('button', { name: 'Тип виджета: Столбцы', exact: true }).click();
+  await page.keyboard.press('Escape');
+  await expect(editor).toHaveCount(0);
+
+  await expect.poll(async () => card.locator('svg rect').count()).toBeGreaterThan(0);
+});
