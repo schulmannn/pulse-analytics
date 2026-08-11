@@ -136,10 +136,11 @@ export async function apiGet<S extends z.ZodTypeAny>(
   schema: S,
   opts: ApiOptions = {},
 ): Promise<z.infer<S>> {
-  // Demo mode: serve bundled sample data for covered endpoints; anything not covered (Instagram,
-  // auth) falls through to the real server below.
+  // Demo mode: serve bundled sample data for covered endpoints; anything not covered (auth, media
+  // proxy) falls through to the real server below. await — IG-ветка фикстур лениво подгружает свой
+  // модуль отдельным чанком (bundle-size бюджеты роутов) и потому отвечает промисом.
   if (isDemoMode()) {
-    const fixture = demoFixture(path);
+    const fixture = await demoFixture(path);
     if (fixture !== undefined) return parseResponse('GET', path, schema, fixture);
   }
   const channelId = opts.channelId !== undefined ? opts.channelId : getSelectedChannel();

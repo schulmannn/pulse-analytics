@@ -6,7 +6,6 @@
 // identical on every render and never trips React's strict-mode double-invoke.
 
 import { DEMO_CHANNEL_ID } from '@/lib/demo';
-import { igDemoFixture } from '@/lib/demoIgFixtures';
 import { periodDateTimestamp } from '@/lib/period';
 
 const DAY_MS = 86_400_000;
@@ -292,7 +291,10 @@ export function demoFixture(path: string): unknown | undefined {
   const p = path.split('?')[0];
   // Весь IG-неймспейс — клиентские фикстуры (см. шапку файла: у публичного демо нет сессии,
   // серверный ig_mock за requireAuth недостижим). Query (days/limit/timeframe) разбирает сам модуль.
-  if (p.startsWith('/api/ig/')) return igDemoFixture(path);
+  // Импорт ДИНАМИЧЕСКИЙ: demoFixtures сидит в общем графе api/client, и статический импорт
+  // IG-модуля раздувал КАЖДУЮ роут-группу за bundle-size бюджет; ветка возвращает Promise,
+  // который apiGet прозрачно await'ит (для остальных путей ответ по-прежнему синхронный).
+  if (p.startsWith('/api/ig/')) return import('@/lib/demoIgFixtures').then((m) => m.igDemoFixture(path));
   if (p === '/api/channels') return CHANNELS;
   if (/^\/api\/channels\/\d+\/annotations$/.test(p)) return ANNOTATIONS();
   if (p === '/api/tg/full') return TG_FULL;

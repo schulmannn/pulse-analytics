@@ -68,20 +68,22 @@ const CASES: Array<[string, z.ZodTypeAny]> = [
 ];
 
 describe('demo fixtures', () => {
-  it.each(CASES)('fixture for %s parses through its schema', (path, schema) => {
-    const fixture = demoFixture(path);
+  // await: IG-ветка demoFixture отвечает промисом (ленивый чанк), TG-пути — синхронно; await
+  // прозрачен для обоих — ровно как в apiGet.
+  it.each(CASES)('fixture for %s parses through its schema', async (path, schema) => {
+    const fixture = await demoFixture(path);
     expect(fixture).toBeDefined();
     expect(() => schema.parse(fixture)).not.toThrow();
   });
 
-  it('lets uncovered paths (auth, media proxy) fall through to the server', () => {
+  it('lets uncovered paths (auth, media proxy) fall through to the server', async () => {
     expect(demoFixture('/api/auth/me')).toBeUndefined();
     // Подписанный превью-прокси грузится через <img>, а не apiGet — фикстура ему не нужна.
-    expect(demoFixture('/api/ig/thumb?t=token')).toBeUndefined();
+    expect(await demoFixture('/api/ig/thumb?t=token')).toBeUndefined();
   });
 
-  it('serves an Instagram cluster the IG shell can render without a server session', () => {
-    const insights = IgInsightsSchema.parse(demoFixture('/api/ig/insights?days=30'));
+  it('serves an Instagram cluster the IG shell can render without a server session', async () => {
+    const insights = IgInsightsSchema.parse(await demoFixture('/api/ig/insights?days=30'));
     const names = insights.data.map((m) => m.name);
     for (const required of ['reach', 'views', 'follower_count', 'total_interactions', 'likes', 'saves']) {
       expect(names).toContain(required);
@@ -91,12 +93,12 @@ describe('demo fixtures', () => {
     const reach = insights.data.find((m) => m.name === 'reach');
     expect(reach?.values).toHaveLength(90);
 
-    const posts = IgPostsSchema.parse(demoFixture('/api/ig/posts?limit=24'));
+    const posts = IgPostsSchema.parse(await demoFixture('/api/ig/posts?limit=24'));
     expect(posts.data.length).toBeGreaterThan(5);
     // CSV-слаг экспорта и source-identity закреплены за демо-брендом воркспейса.
-    const profile = IgProfileSchema.parse(demoFixture('/api/ig/profile'));
+    const profile = IgProfileSchema.parse(await demoFixture('/api/ig/profile'));
     expect(profile.username).toBe('demo_channel');
-    const breakdowns = IgBreakdownsSchema.parse(demoFixture('/api/ig/breakdowns?timeframe=last_30_days'));
+    const breakdowns = IgBreakdownsSchema.parse(await demoFixture('/api/ig/breakdowns?timeframe=last_30_days'));
     expect(breakdowns.data.length).toBeGreaterThan(0);
   });
 
