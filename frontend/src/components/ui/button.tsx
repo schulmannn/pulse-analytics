@@ -4,19 +4,31 @@ import { cva, type VariantProps } from 'class-variance-authority';
 
 import { cn } from '@/lib/utils';
 
+/**
+ * Tactile press feedback — the canon's 0.95–0.98 dip, here at 0.97 over `--motion-press` (140ms,
+ * inside the 100–160ms band). A control that reacts to being pressed feels connected to the finger;
+ * one that only changes colour on release feels like a picture of a button. Carried by the five
+ * SURFACE variants only: `link` is text, and text does not depress.
+ *
+ * Reduced motion drops the dip outright instead of letting the global 0.01ms net snap it — a scale
+ * that teleports is worse than no scale, and the canon's rule for reduced motion is «keep the
+ * colour half, drop the transform half». Disabled buttons never reach `:active`
+ * (`disabled:pointer-events-none` in the base).
+ */
+const PRESS_DIP = 'active:scale-[0.97] motion-reduce:active:scale-100';
+
 const buttonVariants = cva(
-  'inline-flex items-center justify-center gap-2 whitespace-nowrap text-sm font-medium transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/50 focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0',
+  // The property list is `transition-colors` spelled out plus `transform`, so the press dip rides the
+  // same beat as the colour change. Enumerated rather than blanket, so no layout property is swept in.
+  'inline-flex items-center justify-center gap-2 whitespace-nowrap text-sm font-medium transition-[color,background-color,border-color,text-decoration-color,fill,stroke,transform] dur-press ease-house focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/50 focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0',
   {
     variants: {
       variant: {
-        default: 'bg-primary text-primary-foreground hover:bg-primary/90',
-        destructive:
-          'border border-destructive/20 bg-background text-destructive hover:bg-destructive/5',
-        outline:
-          'border border-border bg-background text-foreground hover:bg-muted',
-        secondary:
-          'border border-border bg-background text-foreground hover:bg-muted',
-        ghost: 'text-muted-foreground hover:bg-muted hover:text-foreground',
+        default: `bg-primary text-primary-foreground hover:bg-primary/90 ${PRESS_DIP}`,
+        destructive: `border border-destructive/20 bg-background text-destructive hover:bg-destructive/5 ${PRESS_DIP}`,
+        outline: `border border-border bg-background text-foreground hover:bg-muted ${PRESS_DIP}`,
+        secondary: `border border-border bg-background text-foreground hover:bg-muted ${PRESS_DIP}`,
+        ghost: `text-muted-foreground hover:bg-muted hover:text-foreground ${PRESS_DIP}`,
         link: 'text-primary underline-offset-4 hover:underline',
       },
       size: {

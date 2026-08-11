@@ -50,7 +50,10 @@ const BUDGETS = {
   metrikaMetricCode: 327 * KB,
   // 2026-07-28: +1KB — та же волна B (см. выше).
   // 2026-07-29: +1KB — общая token-based подсветка активного drag-resize входит в route CSS.
-  telegramMetricCode: 337 * KB,
+  // 2026-08-11: +1KB — канон моторики P1: рунга --motion-exit + утилита anim-dur-exit на восьми
+  //   оверлеях и press-дип на общем Button. Общий route-CSS вырос на ~0.1KB, бюджет стоял впритык
+  //   (337.1/337.0). Берём килобайт, чтобы следующая правка снова не легла на кромку.
+  telegramMetricCode: 338 * KB,
   // 2026-07-28: +1KB — sync-hover графиков (chartHoverSync в LineChart/Sparkline, волна D).
   // 2026-07-29: +1KB — официальный Radix ToggleGroup заменил самописную механику SegmentedControl.
   // 2026-08-11: +1KB — честность графиков: робастный домен искры (robustDomain) + подсветка
