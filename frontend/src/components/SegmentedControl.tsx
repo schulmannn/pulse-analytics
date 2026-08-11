@@ -97,7 +97,16 @@ export function SegmentedControl<T extends string>({
       data-slot="toggle-group"
       data-segmented-control=""
       className={cn(
-        'inline-grid w-auto items-center gap-px rounded-full border border-input bg-border p-px',
+        // ОДНА поверхность на контрол: материал несёт трек, сегменты — нет. Раньше и трек, и
+        // каждый сегмент имели собственную непрозрачную заливку (bg-border под bg-background),
+        // поэтому читались четыре склеенные капсулы, а между их круглыми торцами шли перетяжки.
+        // Паддинг 3px вместо 1px: бегунку нужен видимый зазор, иначе «внутри трека» не читается.
+        'inline-grid w-auto items-center gap-0 rounded-full border border-input bg-muted/40',
+        // Зазор бегунка масштабируется РАЗМЕРОМ. `md` (тулбар) получает 3px — без видимого зазора
+        // «внутри дорожки» не читается. `sm` — это компактная ВНУТРИКАРТОЧНАЯ подача, живущая в
+        // фикс-плитке 264px, где каждый пиксель посчитан: там 3px добавляли контролу 4px высоты и
+        // выталкивали содержимое карточки за край (гейт overflowingCards поймал «Товары» на +5px).
+        size === 'sm' ? 'p-px' : 'p-[3px]',
         className,
       )}
       style={{ gridTemplateColumns: `repeat(${Math.min(columns ?? options.length, options.length)}, minmax(0, 1fr))` }}
@@ -119,7 +128,10 @@ export function SegmentedControl<T extends string>({
             event.stopPropagation();
           }}
           className={cn(
-            'inline-flex h-9 w-full min-h-11 min-w-11 shrink-0 items-center justify-center whitespace-nowrap rounded-full bg-background px-3 font-medium text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/50 sm:min-h-0 sm:min-w-0 data-[state=on]:bg-accent data-[state=on]:text-accent-foreground',
+            // Невыбранный сегмент ПРОЗРАЧЕН. Выбранный получает бегунок (фон + hairline), радиус
+            // которого концентричен треку: внешний минус паддинг (правило Apple, ConcentricRectangle).
+            // Оба rounded-full, и при разнице высот ровно в 2·padding условие выполняется само.
+            'inline-flex h-9 w-full min-h-11 min-w-11 shrink-0 items-center justify-center whitespace-nowrap rounded-full bg-transparent px-3 font-medium text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/50 sm:min-h-0 sm:min-w-0 data-[state=on]:bg-background data-[state=on]:text-foreground data-[state=on]:ring-1 data-[state=on]:ring-border',
             size === 'sm' ? 'h-7 px-2 text-2xs' : 'text-xs',
             option.disabled ? 'cursor-default opacity-40' : 'hover:text-foreground',
             segmentClassName,
