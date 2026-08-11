@@ -36,7 +36,13 @@ function ddmm(dayStr: string) {
   return ruAxisLabel(`${Number(parts[2])} ${monthLabel}`);
 }
 
-export function SubscriberHistoryChart({ rows }: { rows: SubscriberRow[] }) {
+/**
+ * `expanded` — та же развилка, что у WidgetRenderer: числовые подписи максимума и последней точки
+ * это мебель ПОВЕРХНОСТИ ДОКАЗАТЕЛЬСТВА. На лице карточки они налезают на кривую и дублируют
+ * хедлайн (владелец: «показываются числа на графиках, убрать»); в развороте, где есть место и оси,
+ * они полезны. Один и тот же компонент рисует оба вида, поэтому это проп, а не удаление.
+ */
+export function SubscriberHistoryChart({ rows, expanded = false }: { rows: SubscriberRow[]; expanded?: boolean }) {
   const sampled = lttbDownsample(rows, 140, (row) => Number(row.subscribers));
   const values = sampled.map((row) => Number(row.subscribers));
   const titles = sampled.map((row) => `${ddmm(row.day)}: ${fmt.num(row.subscribers)} ${pluralRu(Number(row.subscribers), ['подписчик', 'подписчика', 'подписчиков'])}`);
@@ -54,7 +60,7 @@ export function SubscriberHistoryChart({ rows }: { rows: SubscriberRow[] }) {
       titles={titles}
       labels={labels}
       markAnomalies
-      markExtremes
+      markExtremes={expanded}
     />
   );
 }
@@ -130,7 +136,7 @@ export function HistoryChartBlock({ id, homeKey }: HomeBlockProps = {}) {
       expand={{
         renderExpanded: (days) => {
           const windowRows = days === 0 ? archiveRows : archiveRows.slice(-days);
-          return <SubscriberHistoryChart rows={windowRows} />;
+          return <SubscriberHistoryChart rows={windowRows} expanded />;
         },
         statsFor: (days) =>
           (days === 0 ? archiveRows : archiveRows.slice(-days)).map((row) => Number(row.subscribers)),

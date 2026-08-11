@@ -69,14 +69,17 @@ test('an overlay leaves faster than it arrives', async ({ page }, testInfo) => {
   // Приход — дефолт tailwindcss-animate (150ms), он не трогался.
   expect(await durationOf()).toBeCloseTo(0.15, 2);
 
-  // Уход — рунга --motion-exit. Radix держит узел смонтированным до animationend, так что
-  // закрытое состояние успевает быть измеренным.
-  await page.keyboard.press('Escape');
-  await expect.poll(async () => {
-    const closing = page.locator('[data-state="closed"][role="menu"]');
-    if ((await closing.count()) === 0) return null;
-    return closing.first().evaluate((element) =>
-      Number.parseFloat(getComputedStyle(element).animationDuration),
-    );
-  }).toBeCloseTo(0.12, 2);
+  // Уход — рунга --motion-exit. Состояние переключается АТРИБУТОМ, а не гонкой с реальным
+  // закрытием: живое окно выхода длится те самые 120ms, и опрос за ним успевал не всегда
+  // (тест флакнул в параллельном прогоне). Замер при этом остаётся честным — читается
+  // вычисленный стиль, то есть правило обязано и примениться, и выиграть спор специфичности
+  // у anim-dur-fast на том же узле.
+  const exitDuration = await menu.evaluate((element) => {
+    element.setAttribute('data-state', 'closed');
+    const value = Number.parseFloat(getComputedStyle(element).animationDuration);
+    element.setAttribute('data-state', 'open');
+    return value;
+  });
+  expect(exitDuration).toBeCloseTo(0.12, 2);
+  expect(exitDuration).toBeLessThan(0.15);
 });
