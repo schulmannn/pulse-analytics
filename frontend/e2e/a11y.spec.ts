@@ -38,6 +38,7 @@ const ROUTES = [
   { path: '/analytics', name: 'analytics' },
   { path: '/posts', name: 'posts' },
   { path: '/home', name: 'home' },
+  { path: '/settings', name: 'settings' },
   { path: '/connect?source=moysklad', name: 'connect-moysklad' },
   { path: '/connect?source=metrika', name: 'connect-metrika' },
 ];
@@ -141,6 +142,14 @@ test('axe: no serious violations — command palette open', async ({ page }, tes
   await page.keyboard.press('ControlOrMeta+k');
   await expect(page.getByRole('dialog', { name: 'Поиск' })).toBeVisible();
   await expectNoSeriousViolations(page, testInfo, 'palette');
+});
+
+test('axe: no serious violations — mobile settings section picker open', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'mobile-430', 'mobile settings sheet');
+  await bootDemo(page, '/settings');
+  await page.getByRole('button', { name: /Выбрать раздел настроек/ }).click();
+  await expect(page.getByRole('dialog', { name: 'Разделы настроек' })).toBeVisible();
+  await expectNoSeriousViolations(page, testInfo, 'settings-section-picker');
 });
 
 test('keyboard: widget edit dialog traps Tab and restores focus to the ⋯ trigger', async ({ page }) => {

@@ -34,11 +34,7 @@ import {
   type SettingsIconName,
 } from '@/components/settings/primitives';
 
-/**
- * The account panes — Профиль / Оформление / Безопасность. Each is its own dialog section
- * (left-nav item), so panes hold ONLY their rows: open hairline ledger, no inner rail,
- * no scroll-spy, no duplicated heading (the dialog header already names the pane).
- */
+/** Account settings: profile, appearance and security. */
 
 export function ProfileSection() {
   const me = useMe();
@@ -77,55 +73,58 @@ export function ProfileSection() {
   };
 
   return (
-    <SettingsGroup>
-      <SettingsRow
-        title="Фото профиля"
-        description="PNG, JPEG или WebP — уменьшим до 256 px."
-        control={
-          <>
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-avatar text-xs font-medium text-ink2">
-              {avatar ? (
-                <img
-                  src={avatar}
-                  alt=""
-                  className="h-full w-full object-cover"
-                />
-              ) : (
-                initials
-              )}
-            </span>
-            <label className={cn(BTN_SECONDARY, 'cursor-pointer')}>
-              {updateAvatar.isPending
-                ? 'Загрузка…'
-                : avatar
-                  ? 'Сменить фото'
-                  : 'Загрузить фото'}
-              <input
-                type="file"
-                accept="image/png,image/jpeg,image/webp"
-                className="hidden"
-                onChange={onFile}
-                disabled={updateAvatar.isPending}
-              />
-            </label>
-            {avatar && (
-              <button
-                type="button"
-                onClick={() => removeAvatar.mutate()}
-                disabled={removeAvatar.isPending}
-                className={BTN_DESTRUCTIVE}
-              >
-                Удалить
-              </button>
+    <SettingsGroup
+      title="Основные данные"
+      description="То, как ваш аккаунт выглядит в Atlavue."
+    >
+      <div className="py-5">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+          <span className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-full bg-avatar text-base font-medium text-ink2 ring-1 ring-border">
+            {avatar ? (
+              <img src={avatar} alt="" className="h-full w-full object-cover" />
+            ) : (
+              initials
             )}
-          </>
-        }
-        footer={
-          err ? (
-            <p className="mt-2 text-xs font-medium text-destructive">{err}</p>
-          ) : null
-        }
-      />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium text-foreground">Фото профиля</p>
+            <p className="mt-1 text-xs leading-relaxed text-ink3">
+              PNG, JPEG или WebP. Изображение автоматически уменьшается до 256 px.
+            </p>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <label className={cn(BTN_SECONDARY, 'cursor-pointer')}>
+                {updateAvatar.isPending
+                  ? 'Загрузка…'
+                  : avatar
+                    ? 'Сменить фото'
+                    : 'Загрузить фото'}
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  className="hidden"
+                  onChange={onFile}
+                  disabled={updateAvatar.isPending}
+                />
+              </label>
+              {avatar && (
+                <button
+                  type="button"
+                  onClick={() => removeAvatar.mutate()}
+                  disabled={removeAvatar.isPending}
+                  className={BTN_DESTRUCTIVE}
+                >
+                  Удалить
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+        {err ? (
+          <p role="alert" className="mt-3 text-xs font-medium text-destructive">
+            {err}
+          </p>
+        ) : null}
+      </div>
       <SettingsRow
         title="Email"
         description="Адрес, с которым вы входите в Atlavue."
@@ -149,21 +148,24 @@ const THEME_OPTIONS: Array<{
 
 export function AppearanceSection() {
   return (
-    <SettingsGroup>
+    <SettingsGroup
+      title="Интерфейс"
+      description="Выбор сохраняется только на этом устройстве."
+    >
       <SettingsRow
-        title="Тема"
-        description="Внешний вид интерфейса на этом устройстве."
-        control={<ThemeControl />}
+        title="Цветовая схема"
+        description="Светлая, тёмная или синхронизированная с настройками системы."
+        footer={<ThemeControl />}
       />
     </SettingsGroup>
   );
 }
 
-/** Pill segment Светлая | Системная | Тёмная — same store the account-menu segment uses. */
+/** Visual theme tiles adapted to the existing three-mode theme store. */
 function ThemeControl() {
   const { mode, setMode } = useTheme();
   return (
-    <fieldset className="m-0 flex min-w-0 items-center gap-0.5 rounded-full border border-border p-0.5">
+    <fieldset className="m-0 mt-4 grid min-w-0 grid-cols-3 gap-2">
       <legend className="sr-only">Тема интерфейса</legend>
       {THEME_OPTIONS.map((option) => {
         const active = mode === option.value;
@@ -174,14 +176,17 @@ function ThemeControl() {
             aria-pressed={active}
             onClick={() => setMode(option.value)}
             className={cn(
-              'flex items-center gap-1.5 rounded-full px-3 py-1 text-xs transition-colors',
+              'min-w-0 rounded-xl border p-2 text-left transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/50',
               active
-                ? 'bg-muted font-medium text-foreground'
-                : 'text-muted-foreground hover:text-foreground',
+                ? 'border-primary bg-primary/10 text-foreground'
+                : 'border-border bg-background text-muted-foreground hover:bg-muted/60 hover:text-foreground',
             )}
           >
-            <SettingsIcon name={option.icon} className="h-3.5 w-3.5" />
-            {option.label}
+            <ThemePreview mode={option.value} />
+            <span className="mt-2 flex min-w-0 items-center gap-1.5 px-0.5">
+              <SettingsIcon name={option.icon} className="h-3.5 w-3.5 shrink-0" />
+              <span className="truncate text-xs font-medium">{option.label}</span>
+            </span>
           </button>
         );
       })}
@@ -189,8 +194,68 @@ function ThemeControl() {
   );
 }
 
+function ThemePreview({ mode }: { mode: ThemeMode }) {
+  if (mode === 'system') {
+    return (
+      <span
+        aria-hidden="true"
+        className="grid h-14 grid-cols-2 overflow-hidden rounded-lg border border-border"
+      >
+        <ThemePreviewPanel className="force-light border-r" />
+        <ThemePreviewPanel className="dark" />
+      </span>
+    );
+  }
+  return (
+    <span
+      aria-hidden="true"
+      className={cn(
+        'block h-14 overflow-hidden rounded-lg border border-border',
+        mode === 'light' ? 'force-light' : 'dark',
+      )}
+      style={{ borderColor: 'hsl(var(--border))' }}
+    >
+      <ThemePreviewPanel />
+    </span>
+  );
+}
+
+function ThemePreviewPanel({ className }: { className?: string }) {
+  return (
+    <span
+      className={cn('flex h-full min-w-0 gap-1.5 p-2', className)}
+      style={{
+        backgroundColor: 'hsl(var(--background))',
+        borderColor: 'hsl(var(--border))',
+      }}
+    >
+      <span
+        className="w-2 shrink-0 rounded"
+        style={{ backgroundColor: 'hsl(var(--muted))' }}
+      />
+      <span className="min-w-0 flex-1 space-y-1.5">
+        <span
+          className="block h-1.5 w-3/4 rounded-full"
+          style={{ backgroundColor: 'hsl(var(--foreground))' }}
+        />
+        {[0, 1].map((line) => (
+          <span
+            key={line}
+            className="block h-2.5 rounded border"
+            style={{
+              backgroundColor: 'hsl(var(--card))',
+              borderColor: 'hsl(var(--border))',
+            }}
+          />
+        ))}
+      </span>
+    </span>
+  );
+}
+
 /** «Безопасность» — change the account password (POST /api/auth/change-password). */
 export function SecuritySection() {
+  const me = useMe();
   const changePassword = useChangePassword();
   const [current, setCurrent] = useState('');
   const [next, setNext] = useState('');
@@ -236,15 +301,19 @@ export function SecuritySection() {
   };
 
   return (
-    <SettingsGroup>
-      <SettingsRow
+    <div className="space-y-8">
+      <SettingsGroup
         title="Пароль"
-        description="Минимум 8 символов. После смены другие сессии завершаются."
-        footer={
-          <form
-            onSubmit={onSubmit}
-            className="mt-4 w-full max-w-[340px] space-y-3"
-          >
+        description="После изменения все остальные сессии будут завершены."
+      >
+        <SettingsRow
+          title="Сменить пароль"
+          description="Используйте не менее 8 символов."
+          footer={
+            <form
+              onSubmit={onSubmit}
+              className="mt-4 w-full max-w-[340px] space-y-3"
+            >
             <div>
               <Label htmlFor="pw-current" className="mb-1.5 block">
                 Текущий пароль
@@ -326,11 +395,19 @@ export function SecuritySection() {
                 <AlertDescription className="text-xs">{err}</AlertDescription>
               </Alert>
             )}
-          </form>
-        }
-      />
-      <DeleteAccountRow />
-    </SettingsGroup>
+            </form>
+          }
+        />
+      </SettingsGroup>
+      {me.data?.role !== 'superuser' && (
+        <SettingsGroup
+          title="Опасная зона"
+          description="Действия ниже необратимы и требуют отдельного подтверждения."
+        >
+          <DeleteAccountRow />
+        </SettingsGroup>
+      )}
+    </div>
   );
 }
 
