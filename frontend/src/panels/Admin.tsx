@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { useAdminDeleteUser, useAdminUsers, useUpdateUser } from '@/api/queries';
+import { useConfirm } from '@/components/ConfirmDialogProvider';
 import { ErrorState } from '@/components/ErrorState';
 import { PillSelect } from '@/components/PillSelect';
 import { fmt } from '@/lib/format';
@@ -55,16 +56,46 @@ interface UserRowCardProps {
 }
 
 function UserRowCard({ user, availableRoles, availableStatuses, isMe }: UserRowCardProps) {
+  const confirm = useConfirm();
   const updateUserMutation = useUpdateUser(user.id);
+  const [failed, setFailed] = useState<string | null>(null);
   const isDisabled = isMe || updateUserMutation.isPending;
 
-  const handleRoleChange = (role: string) => updateUserMutation.mutate({ role });
-  const handleStatusChange = (status: string) => updateUserMutation.mutate({ status });
+  // Провал PATCH раньше уходил в никуда: пилюля оставалась со старым значением, и админ был
+  // уверен, что роль сменилась. Теперь сбой виден в строке пользователя и озвучивается AT.
+  const apply = (patch: { role?: string; status?: string }, whatFailed: string) => {
+    setFailed(null);
+    updateUserMutation.mutate(patch, {
+      onError: (e) => setFailed(e instanceof Error ? e.message : whatFailed),
+    });
+  };
+
+  const handleRoleChange = (role: string) => {
+    // Выдача админских прав — самое привилегированное действие приложения; до сих пор оно
+    // совершалось одним выбором в выпадашке, без единого вопроса. Понижение и прочие роли
+    // подтверждения не требуют: они не расширяют доступ.
+    if (role === 'admin') {
+      void (async () => {
+        const ok = await confirm({
+          title: 'Выдать права администратора?',
+          reason: `${user.email || 'Этот пользователь'} получит доступ к списку пользователей, сможет менять роли и статусы других и удалять аккаунты. Смена роли также завершит все активные сессии пользователя.`,
+          actionLabel: 'Выдать права',
+        });
+        if (ok) apply({ role }, 'Не удалось сменить роль.');
+      })();
+      return;
+    }
+    apply({ role }, 'Не удалось сменить роль.');
+  };
+  const handleStatusChange = (status: string) => apply({ status }, 'Не удалось сменить статус.');
 
   return (
     <div className={isMe ? 'bg-muted/30' : 'bg-background'}>
       <div className="flex flex-col justify-between gap-4 p-4 md:flex-row md:items-center">
         <div className="space-y-0.5">
+          {failed && (
+            <p role="alert" className="text-2xs font-medium text-destructive">{failed}</p>
+          )}
           <div className="flex flex-wrap items-center gap-2">
             <span className="max-w-xs truncate text-sm font-medium text-foreground">
               {user.email || <span className="italic text-muted-foreground">без email</span>}
