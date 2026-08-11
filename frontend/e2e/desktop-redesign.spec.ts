@@ -125,11 +125,21 @@ test('desktop Overview keeps period context compact', async ({ page }, testInfo)
   expect(await overflowingCards(page)).toEqual([]);
 
   // Owner override 2026-07-27: idle-подпись «по датам публикаций» под спарклайном убрана (лишняя
-  // строка на лице карточки); сами три компакт-карточки с графиком остаются.
-  for (const card of ['Ср. охват', 'Реакции', 'Вовлечённость']) {
+  // строка на лице карточки); карточки с графиком остаются.
+  for (const card of ['Ср. охват', 'Реакции']) {
     const section = page.getByRole('heading', { name: card, exact: true }).locator('xpath=ancestor::section[1]');
     await expect(section.getByText('по датам публикаций')).toHaveCount(0);
     await expect(section.locator('svg[data-chart-kind="sparkline"]')).toBeVisible();
+  }
+
+  // «Вовлечённость» — БЕЗ искры, и это гейт, а не упущение. ER = вовлечение ÷ аудитория, а
+  // аудитория за окно меняется на проценты против десятков раз у вовлечения, поэтому
+  // нормализованная по min–max кривая ER повторяла кривую «Реакций» почти в точности (замер на
+  // проде: корреляция 0.996). Вместо копии соседнего графика карточка объясняет, из чего число.
+  {
+    const er = page.getByRole('heading', { name: 'Вовлечённость', exact: true }).locator('xpath=ancestor::section[1]');
+    await expect(er.locator('svg[data-chart-kind="sparkline"]')).toHaveCount(0);
+    await expect(er.getByText(/Реакции, репосты и комментарии/)).toBeVisible();
   }
 
   const compactTop = await page.getByRole('heading', { name: 'Ср. охват', exact: true }).evaluate((el) => el.closest('section')!.getBoundingClientRect().top);

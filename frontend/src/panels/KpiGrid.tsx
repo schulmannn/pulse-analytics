@@ -201,17 +201,28 @@ export function TgErBody({ state }: { state: TgKpiState }) {
   const navigate = useNavigate();
   if (isPending) return <CompactSkeleton />;
   if (isError) return <ErrorState title="Не удалось загрузить" reason="ошибка" />;
-  const { er, erTrend, erSpark, members, normPosts } = derived;
+  const { er, erTrend, members, normPosts } = derived;
+  const live = members > 0 && normPosts.length > 0 && er != null && Number.isFinite(er);
+  // БЕЗ искры. ER — это вовлечение, делённое на аудиторию, а аудитория за окно меняется на
+  // проценты, тогда как вовлечение — в десятки раз. Значит нормализованная по min–max кривая ER
+  // повторяет кривую «Реакций» почти в точности (замерено на проде: корреляция 0.996 при
+  // расхождении форм 5.4% высоты плота — меньше двух пикселей на искре 200×32). Соседняя карточка
+  // уже показывает эту форму; вторая копия занимала треть полосы под сигнал, которого нет.
+  // Освободившееся место отдано формуле — она отвечает на реальный вопрос «из чего это число».
   return (
-    <TgTrendStat
-      value={er}
-      delta={erTrend}
-      spark={erSpark}
-      format={(n) => `${n.toFixed(2)}%`}
-      hasValue={members > 0 && normPosts.length > 0}
-      onDrill={() => navigate('/metrics/er')}
-      drillLabel="Вовлечённость"
-    />
+    <div className="flex h-full min-h-0 flex-col justify-center gap-2">
+      <CompactStatHeadline
+        text={live ? `${(er as number).toFixed(2)}%` : '—'}
+        delta={erTrend}
+        onDrill={() => navigate('/metrics/er')}
+        drillLabel="Вовлечённость"
+        live={live}
+      />
+      <p className="text-2xs leading-relaxed text-muted-foreground">
+        Реакции, репосты и комментарии к постам периода — к текущей базе подписчиков.
+        {live && normPosts.length > 0 ? ` По ${normPosts.length} публикациям.` : ''}
+      </p>
+    </div>
   );
 }
 
