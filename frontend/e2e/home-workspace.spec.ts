@@ -251,9 +251,13 @@ test.describe('desktop /home workspace (dark, 1440)', () => {
     const weekHandle = weekCard.getByRole('slider', {
       name: 'Изменить размер виджета «Неделя канала»',
     });
+    // Ужимаем, а не растягиваем: «Неделя канала» теперь по умолчанию full (рассказ не влезает в
+    // 264px фикс-тайла), и ArrowRight с полной ширины никуда не ведёт — сохранять было бы нечего.
+    // Проверяемый контракт тот же: у curated/prefs-карточки размер уезжает в widget prefs, а не в
+    // configs.
     await weekHandle.focus();
-    await page.keyboard.press('ArrowRight');
-    await expect(weekCard).toHaveAttribute('data-widget-size', 'full');
+    await page.keyboard.press('ArrowLeft');
+    await expect(weekCard).toHaveAttribute('data-widget-size', 'half');
 
     const saved = await page.evaluate(() => {
       const configs = JSON.parse(localStorage.getItem('pulse_widget_configs') ?? '[]') as Array<{
@@ -270,7 +274,7 @@ test.describe('desktop /home workspace (dark, 1440)', () => {
       };
     });
     expect(saved.configs).toMatchObject({ 'resize-bar': 'full', 'resize-line': 'half' });
-    expect(saved.weekSize).toBe('full');
+    expect(saved.weekSize).toBe('half');
 
     await page.getByRole('heading', { name: 'Главная', exact: true }).click();
     const shot = testInfo.outputPath('home-widget-corner-resize-dark.png');
@@ -337,11 +341,13 @@ test.describe('desktop /home workspace (dark, 1440)', () => {
     const growth = byTitle('Рост подписчиков');
     const instagram = byTitle('IG · Охват по дням');
     const topPosts = byTitle('Топ постов');
-    expect(Math.abs(week.width - growth.width)).toBeLessThanOrEqual(2);
-    expect(week.top).toBe(growth.top);
-    expect(week.left).toBeLessThan(growth.left);
+    // «Неделя канала» больше не половинка рядом с «Ростом подписчиков»: рассказ не влезает в 264px
+    // фикс-тайла, поэтому карточка занимает ряд целиком и получает контентную высоту. Проверяем
+    // это, а не прежнее соседство: она шире соседа и стоит на своей строке НАД ним.
+    expect(week.width).toBeGreaterThan(growth.width * 1.8);
+    expect(week.top).toBeLessThan(growth.top);
     expect(instagram.top).toBeLessThan(topPosts.top);
-    expect(instagram.width).toBeGreaterThan(week.width * 1.8);
+    expect(Math.abs(instagram.width - week.width)).toBeLessThanOrEqual(2);
 
     await page.waitForTimeout(300);
     const defaultShot = testInfo.outputPath('home-default-dark.png');

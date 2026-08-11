@@ -45,9 +45,13 @@ export function TgSectionLayout() {
 
   // PagePeriodProvider persists the authoritative header period across TG page navigation
   // (Обзор ↔ Аналитика); every feed card resolves to this same window.
+  // ТОЛЬКО когда `?period=` реально стоит в ссылке. parseContentPeriod возвращает дефолтные 30 и
+  // при отсутствии параметра, поэтому передавать его безусловно значило бы, что /posts и /mentions
+  // вечно перебивают сохранённое окно тридцаткой — ровно тот сброс, который чинится общим store.
+  const periodParam = new URLSearchParams(location.search).get('period');
   const initialDays =
-    location.pathname === '/posts' || location.pathname === '/mentions'
-      ? parseContentPeriod(new URLSearchParams(location.search).get('period'))
+    periodParam != null && (location.pathname === '/posts' || location.pathname === '/mentions')
+      ? parseContentPeriod(periodParam)
       : undefined;
 
   return (

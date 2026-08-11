@@ -1,5 +1,12 @@
-import { createContext, useCallback, useContext, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { ReactNode } from 'react';
+// Импорт типов ОТСЮДА в pagePeriodStore — type-only, поэтому рантайм-цикла между модулями нет.
+import {
+  getPagePeriod,
+  setPagePeriodDays,
+  setPagePeriodRange,
+  subscribePagePeriod,
+} from '@/lib/pagePeriodStore';
 
 export type PeriodDays = 7 | 30 | 90 | 0;
 
@@ -325,20 +332,37 @@ export interface PagePeriodValue {
 
 const PagePeriodContext = createContext<PagePeriodValue | null>(null);
 
+/**
+ * Окно ленты читается из ОБЩЕГО store (lib/pagePeriodStore), а не из локального стейта: провайдер у
+ * каждой сети свой, и на локальном стейте переход TG → IG монтировал новый экземпляр, теряя выбор
+ * (владелец: «выбрал кастомный таймфрейм, перешёл на другой источник — сбросился»).
+ *
+ * `initialDays` = ЯВНОЕ намерение из ссылки (`?period=` на /posts и /mentions), а не «дефолт»: оно
+ * перебивает сохранённое и само становится сохранённым, иначе deep-link с периодом открывался бы в
+ * чужом окне. Когда параметра нет, TgFeed передаёт undefined — и выигрывает сохранённый выбор.
+ */
 export function PagePeriodProvider({
   children,
-  initialDays = DEFAULT_WIDGET_DAYS,
+  initialDays,
 }: {
   children: ReactNode;
   initialDays?: PeriodDays;
 }) {
-  const [days, setDaysState] = useState<PeriodDays>(initialDays);
-  const [range, setRangeState] = useState<DateRange | null>(null);
-  const setDays = useCallback((next: PeriodDays) => {
-    setRangeState(null);
-    setDaysState(next);
-  }, []);
-  const setRange = useCallback((next: DateRange | null) => setRangeState(next), []);
+  const stored = useSyncExternalStore(subscribePagePeriod, getPagePeriod, () => null);
+  // Применяем ссылку РОВНО один раз за монтирование: без гарда любой пользовательский клик по
+  // пилюле тут же откатывался бы обратно к значению из URL.
+  const linkApplied = useRef(false);
+  if (initialDays !== undefined && !linkApplied.current) {
+    linkApplied.current = true;
+    if (!stored || stored.days !== initialDays || stored.range) setPagePeriodDays(initialDays);
+  }
+  const days = stored?.days ?? initialDays ?? DEFAULT_WIDGET_DAYS;
+  const range = stored?.range ?? null;
+  const setDays = useCallback((next: PeriodDays) => setPagePeriodDays(next), []);
+  const setRange = useCallback(
+    (next: DateRange | null) => setPagePeriodRange(next, next ? days : DEFAULT_WIDGET_DAYS),
+    [days],
+  );
   const value = useMemo(() => ({ days, setDays, range, setRange }), [days, setDays, range, setRange]);
   return <PagePeriodContext.Provider value={value}>{children}</PagePeriodContext.Provider>;
 }

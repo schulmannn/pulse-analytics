@@ -291,8 +291,12 @@ export function NarrativeWeekBody() {
     <>
       {/* full-ширина = контентная высота (SIZE_HEIGHT.full пуст): рассказ больше не упирается в
           264px половинной карточки, поэтому ушли и внутренний скролл, и маска затухания снизу. */}
-      <div className="flex gap-6">
-        <div className="min-w-0 flex-1">
+      <div className="flex h-full gap-6">
+        {/* overflow-y-auto здесь — СТРАХОВКА, а не рабочий режим: на full-карточке родитель высоту
+            не ограничивает, и скроллер не появляется вовсе. Но размер правится руками, и сжатую до
+            half карточку (264px) текст обязан пережить читаемо, а не обрезаться посреди строки —
+            маска гасит нижние 28px как знак «ниже ещё есть». */}
+        <div className="min-w-0 flex-1 overflow-y-auto mask-[linear-gradient(180deg,#000_calc(100%-28px),transparent)]">
           <NarrativeProse paragraphs={nar.paragraphs} onPost={setOpenPost} />
           {change.headline && (
             <div className="mt-4 border-t border-border pt-3">
