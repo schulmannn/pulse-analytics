@@ -348,6 +348,19 @@ export function usePagePeriod(): PagePeriodValue | null {
   return useContext(PagePeriodContext);
 }
 
+/**
+ * Печатать ли окно в подписи карточки («Просмотры · 30 дн.», «за 30 дн.»).
+ *
+ * На ленте период стоит в шапке страницы одной полосой на всю доску, и та же строка, повторённая в
+ * каждой карточке, ничего не добавляет — только шумит (владелец). На Главной страничного периода
+ * НЕТ: там каждая карточка держит собственное сохранённое окно и свои пилюли, поэтому без подписи
+ * невозможно понять, за что число. Отсюда признак — не маршрут, а владение периодом: есть
+ * PagePeriodProvider (ленты) → не печатаем; нет (Главная, standalone) → печатаем.
+ */
+export function useCardShowsPeriod(): boolean {
+  return useContext(PagePeriodContext) == null;
+}
+
 // ── Channel recency → auto-widen an empty window ─────────────────────────────────────────────
 /**
  * The current channel's newest data timestamp (epoch ms), or null when unknown. Provided by the

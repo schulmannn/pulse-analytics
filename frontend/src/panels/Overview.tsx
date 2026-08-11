@@ -3,7 +3,7 @@ import { useChannels, useHistory, useTgFull, useTgQrStatus } from '@/api/queries
 import { useSelectedChannel } from '@/lib/channel-context';
 import { lttbDownsample } from '@/lib/downsample';
 import { CHART_MAX_POINTS } from '@/lib/msSeries';
-import { useWidgetPeriod } from '@/lib/period';
+import { useCardShowsPeriod, useWidgetPeriod } from '@/lib/period';
 import { useWidgetInView } from '@/lib/widgetViewport';
 import { pctDelta, subscriberChange } from '@/lib/delta';
 import { fmt } from '@/lib/format';
@@ -20,7 +20,6 @@ import { SubscriberHistoryChart } from '@/panels/Charts';
 import { TgViewsBody, TgAvgReachBody, TgReactionsBody, TgErBody, useTgKpis } from '@/panels/KpiGrid';
 import { NarrativeWeekBlock } from '@/panels/NarrativeWeek';
 import { TopPosts } from '@/panels/TopPosts';
-import { ChangeSummary } from '@/panels/ChangeSummary';
 
 /**
  * Overview — a focused summary, all of it widgets: KPI hero + ledger («Показатели»), then
@@ -121,18 +120,12 @@ export function Overview() {
         <ChartSection id="overview-er" title="Вовлечённость" defaultSize="third" defaultColor={6} drillTo="/metrics/er">
           <TgErBody state={kpis} />
         </ChartSection>
-        {/* The product grid supports S / M / L (33 / 50 / 100), so the narrative pairs honestly at
-            M / M with one strongest measured period change. An unsupported two-thirds footprint
-            would violate the widget contract. */}
-        <NarrativeWeekBlock id="overview-week" homeKey="week" fixedSize="half" />
-        <ChartSection
-          id="overview-change-summary"
-          title="Главное изменение"
-          fixedSize="half"
-          noExpand
-        >
-          <ChangeSummary compact />
-        </ChartSection>
+        {/* Рассказ занимает ВЕСЬ ряд, и это не про «побольше места»: у third/half высота заперта в
+            264px (SIZE_HEIGHT), из-за чего хвост текста уезжал во внутренний скролл с маской
+            затухания. У full высота контентная — скролл и маска стали не нужны. Соседняя карточка
+            «Главное изменение» свёрнута сюда же (владелец: «правый почти не несёт нагрузки»): её
+            медиана и лучшая публикация теперь в леджере рассказа, разбор причины — его абзацем. */}
+        <NarrativeWeekBlock id="overview-week" homeKey="week" fixedSize="full" />
         <ChartSection
           id="overview-top-posts"
           title="Лучшие публикации"
@@ -253,6 +246,9 @@ export function SubscriberGrowth() {
     ? (values.at(-1) ?? 0) - (values[0] ?? 0)
     : subscriberChange(history?.rows ?? [], days);
   const periodLabel = range ? 'выбранный период' : days === 0 ? 'всё время' : `${days} дн.`;
+  // Подпись этой карточки СОСТОИТ из окна, поэтому на ленте она уходит целиком: период уже в
+  // шапке. На Главной остаётся — там у карточки собственное сохранённое окно.
+  const showPeriod = useCardShowsPeriod();
 
   const navigate = useNavigate();
   // Steep anatomy (owner rule): label + number + delta + signed caption bottom-left, the
@@ -261,7 +257,7 @@ export function SubscriberGrowth() {
   return (
     <ChartCardBody
       hero
-      label={`за ${periodLabel}`}
+      label={showPeriod ? `за ${periodLabel}` : undefined}
       value={fmt.kpi(currentSubs)}
       delta={change != null ? pctDelta(currentSubs, currentSubs - change) : null}
       caption={

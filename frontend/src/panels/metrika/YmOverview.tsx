@@ -15,7 +15,7 @@ import { InlineSpark } from '@/components/InlineSpark';
 import { pctDelta, type MetricDelta } from '@/lib/delta';
 import { lttbDownsample } from '@/lib/downsample';
 import { fmt } from '@/lib/format';
-import { usePagePeriod } from '@/lib/period';
+import { usePagePeriod, useCardShowsPeriod } from '@/lib/period';
 import { msPreviousPeriod, useMsPagePeriod } from '@/lib/msPeriod';
 import { YM_BREAKDOWNS } from '@/panels/metrika/ymBreakdowns';
 
@@ -44,7 +44,7 @@ function YmStoryBody({
   onDrill,
   viz = 'line',
 }: {
-  windowLabel: string;
+  windowLabel?: string;
   title: string;
   total: number | null;
   delta: MetricDelta | null;
@@ -100,6 +100,8 @@ export function YmOverview() {
   // хелпер): «Всё» (0) берёт серии из ym_daily, живые окна — 7/30/90/точный диапазон.
   const period = useMsPagePeriod();
   const windowLabel = pp?.range ? 'за выбранный период' : days === 0 ? 'за всё время' : `за ${days} дн.`;
+  // На ленте окно уже в шапке страницы — карточка его не повторяет (владелец).
+  const periodInLabel = useCardShowsPeriod() ? windowLabel : undefined;
   // Словарь целей нужен САМОЙ доске (опции синхронных селекторов), поэтому единственный разрез,
   // который остаётся на уровне страницы. Карточка «Цели» читает тот же ключ — второго запроса нет.
   const goals = useYmGoals(period);
@@ -214,7 +216,7 @@ export function YmOverview() {
     // Одна карточка в двух подачах — данные объявляются РАЗ, иначе «Линия» и «Столбцы»
     // разъедутся при следующей правке.
     const storyProps = {
-      windowLabel,
+      windowLabel: periodInLabel,
       title,
       total: block.total,
       delta,

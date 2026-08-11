@@ -147,6 +147,24 @@ export function Sparkline({
 
   const active = hover;
 
+  /**
+   * Разметка оси: первая, последняя и середина — не больше трёх на компактной искре. Больше в
+   * ширину карточки в треть экрана не влезает без наложения, а прореживать «сколько поместится»
+   * без замера текста значит гадать: подписи здесь HTML, но кегль зависит от темы и шрифта.
+   * Три точки честно отвечают на «какой отрезок передо мной» — остальное берёт ховер-читалка.
+   * Ровно два лейбла (начало и конец) при коротком ряде — тоже валидная ось, поэтому середина
+   * добавляется, только если она НЕ совпадает с краями.
+   */
+  const axisTicks = useMemo(() => {
+    if (!labels || labels.length < 2) return [] as { i: number; text: string }[];
+    const last = labels.length - 1;
+    const mid = Math.floor(last / 2);
+    const idx = mid > 0 && mid < last ? [0, mid, last] : [0, last];
+    return idx
+      .map((i) => ({ i, text: labels[i] ?? '' }))
+      .filter((tick) => tick.text.length > 0);
+  }, [labels]);
+
   // Read-out text: idle caption, or date · value · Δ-vs-previous-point while hovering.
   let readout = caption ?? '';
   if (active != null) {
@@ -270,7 +288,22 @@ export function Sparkline({
         // min-h резервирует строку и при ПУСТОМ idle-caption (caption="" — читалка без idle-текста):
         // без резерва пустой div схлопывался в 0, ховер-текст раздувал ряд, и график «скакал»
         // (владелец, Метрика/МойСклад). Высота = line-box text-2xs.
-        <div className="mt-1 min-h-4 truncate text-2xs tabular-nums text-muted-foreground">{readout}</div>
+        //
+        // Ось X живёт в ЭТОЙ ЖЕ строке (владелец: «сделай подписи по оси X, в днях»). Строка и так
+        // зарезервирована и в покое пуста, поэтому ось не добавляет карточке ни пикселя высоты — на
+        // фикс-тайле 264px это решает, влезет она или нет. При наведении ось уступает место читалке
+        // «дата · значение · Δ»: та называет КОНКРЕТНЫЙ день, то есть точнее любой разметки.
+        <div className="mt-1 min-h-4 truncate text-2xs tabular-nums text-muted-foreground">
+          {active == null && axisTicks.length > 1 ? (
+            <span aria-hidden="true" className="flex justify-between gap-2">
+              {axisTicks.map((tick) => (
+                <span key={tick.i} className="truncate">{tick.text}</span>
+              ))}
+            </span>
+          ) : (
+            readout
+          )}
+        </div>
       )}
     </div>
   );

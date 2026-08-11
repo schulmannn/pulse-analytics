@@ -5,6 +5,8 @@ import { useHistory, useIgHistory, useIgInsights, useIgPosts, useIgProfile, useT
 import { useSelectedChannel } from '@/lib/channel-context';
 import { useDemo } from '@/lib/demo-context';
 import { postEr } from '@/lib/igMetrics';
+import { periodMedian } from '@/lib/postMedian';
+import { describeChange, explainChange } from '@/lib/whyChanged';
 import { igWeekGate } from '@/lib/igWeekGate';
 import { igWindowMetrics } from '@/lib/igWindowMetrics';
 import type { NormalizedPost } from '@/lib/posts';
@@ -31,6 +33,34 @@ import { Skeleton } from '@/components/ui/skeleton';
 
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * Бывшая карточка «Главное изменение», свёрнутая в часть этой (владелец: «правый почти не несёт
+ * нагрузки»). Считает по ТОЙ ЖЕ недельной выборке, что и рассказ, — прежняя карточка брала окно из
+ * `useWidgetPeriod()`, которого на ней было не выставить, поэтому её числа могли расходиться с
+ * соседним текстом. Пустой headline = разбор не сложился (мало данных или сдвиг ниже порога): тогда
+ * блок причины просто не рисуется, а медиана с лучшей публикацией всё равно едут в леджер.
+ */
+function weekChange(posts: NormalizedPost[], now = Date.now()): {
+  median: number | null;
+  best: number | null;
+  headline: string | null;
+  evidence: string[];
+} {
+  const week = posts.filter((post) => {
+    const t = post.date ? Date.parse(post.date) : Number.NaN;
+    return Number.isFinite(t) && now - t <= WEEK_MS;
+  });
+  const median = periodMedian(week.map((post) => post.reach));
+  const best = week.length ? Math.max(...week.map((post) => post.reach)) : null;
+  const dated = posts
+    .filter((post) => post.date && Number.isFinite(Date.parse(post.date)))
+    .sort((a, b) => Date.parse(a.date!) - Date.parse(b.date!));
+  const result = explainChange(dated.map((post) => ({ day: post.date!, v: post.reach })), 7, now);
+  if (result.insufficient) return { median, best, headline: null, evidence: [] };
+  const story = describeChange(result, 'Просмотры публикаций');
+  return { median, best, headline: story.headline, evidence: story.evidence };
+}
 
 function useWeekNarrativeInput(): { input: NarrativeInput | null; posts: NormalizedPost[]; loading: boolean; error: boolean; retry: () => void } {
   // Прогрессивная загрузка Главной: тело рендерится внутри ChartSection (Provider для homeKey-
@@ -237,9 +267,10 @@ export function NarrativeWeekBody() {
   }
   // TG-часть не ждёт Instagram: IG-абзац — кода текста, его догрузка ничего не сдвигает.
   const nar = buildWeekNarrative({ ...input, ig: igInput });
-  // Факт-колонка на очень широком desktop: короткий рассказ оставлял крупную карточку пустой — справа мини-леджер
-  // из ТОГО ЖЕ входа (никаких новых запросов): пик недели, постов за неделю, база. Числа сходятся
-  // с рассказом по построению — это те же ряды.
+  const change = weekChange(posts);
+  // Леджер собран из ТОГО ЖЕ входа (никаких новых запросов) — числа сходятся с рассказом по
+  // построению, это те же ряды. Раньше он показывался только на 2xl и был «добивкой пустоты»
+  // половинной карточки; на full-ширине это постоянная фактическая колонка рядом с текстом.
   const last7 = input.viewsDaily.slice(-7);
   const peak = last7.length ? last7.reduce((a, b) => (b.v > a.v ? b : a)) : null;
   const facts: { label: string; value: string }[] = [];
@@ -250,17 +281,30 @@ export function NarrativeWeekBody() {
       label: 'База',
       value: `${fmt.kpi(input.subsNow)}${input.subsD7 ? ` · ${input.subsD7 > 0 ? '+' : '−'}${fmt.num(Math.abs(input.subsD7))}` : ''}`,
     });
+  // Наследство «Главного изменения»: карточка была слита сюда (владелец — «правый почти не несёт
+  // нагрузки»). Её медиана и лучшая публикация переезжают в леджер, а разбор причины — абзацем
+  // рассказа ниже. Считается по ТОЙ ЖЕ недельной выборке, что и всё остальное на карточке: у
+  // прежней карточки окно бралось из useWidgetPeriod, которое на ней было не выставить.
+  if (change.median != null) facts.push({ label: 'Медианный охват', value: fmt.short(change.median) });
+  if (change.best != null) facts.push({ label: 'Лучшая публикация', value: `${fmt.short(change.best)} просмотров` });
   return (
     <>
-      <div className="flex h-full gap-6">
-        {/* Фикс. высота карточки клипала хвост рассказа посреди строки: колонка текста скроллится
-            (глобальный тонкий скроллбар), маска гасит нижние 28px как знак «ниже ещё есть», а pb-7
-            выводит последнюю строку из зоны затухания при доскролле. */}
-        <div className="min-w-0 flex-1 overflow-y-auto pb-7 mask-[linear-gradient(180deg,#000_calc(100%-28px),transparent)]">
+      {/* full-ширина = контентная высота (SIZE_HEIGHT.full пуст): рассказ больше не упирается в
+          264px половинной карточки, поэтому ушли и внутренний скролл, и маска затухания снизу. */}
+      <div className="flex gap-6">
+        <div className="min-w-0 flex-1">
           <NarrativeProse paragraphs={nar.paragraphs} onPost={setOpenPost} />
+          {change.headline && (
+            <div className="mt-4 border-t border-border pt-3">
+              <p className="text-sm font-medium text-foreground">{change.headline}</p>
+              {change.evidence[0] && (
+                <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{change.evidence[0]}</p>
+              )}
+            </div>
+          )}
         </div>
         {facts.length > 0 && (
-          <aside className="hidden w-44 shrink-0 space-y-3 border-l border-border pl-5 2xl:block">
+          <aside className="hidden w-48 shrink-0 space-y-3 border-l border-border pl-5 lg:block">
             {facts.map((f) => (
               <div key={f.label}>
                 <div className="text-2xs tracking-wide text-muted-foreground">{f.label}</div>
@@ -315,7 +359,11 @@ export function NarrativeProse({ paragraphs, onPost }: { paragraphs: NarrativePa
 export function NarrativeWeekBlock({
   id,
   homeKey,
-  defaultSize = 'half',
+  // full, а не half: у third/half высота заперта в 264px (SIZE_HEIGHT), и рассказ туда не влезает —
+  // раньше это прятал собственный скроллер с маской, теперь высота контентная. Дефолт живёт ЗДЕСЬ,
+  // а не только на Обзоре: пин Главной (homeWidgets) размер не задаёт и наследовал прежний half,
+  // из-за чего гейт «no inner scrollbars — home» честно падал.
+  defaultSize = 'full',
   fixedSize,
   title = 'Неделя канала',
 }: { id?: string; homeKey?: string; defaultSize?: WidgetSize; fixedSize?: WidgetSize; title?: string } = {}) {

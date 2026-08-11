@@ -14,7 +14,7 @@ import { Sparkline } from '@/components/Sparkline';
 import type { WidgetSize } from '@/lib/widgetPrefsStore';
 import { fmtDay, pairDelta, windowIgSeries, type Point, type WindowPair } from '@/lib/igMetrics';
 import type { IgOverviewChart } from '@/lib/igWindowMetrics';
-import { calendarWindowForPeriod, periodDateTimestamp, splitCalendarRows } from '@/lib/period';
+import { calendarWindowForPeriod, periodDateTimestamp, splitCalendarRows, useCardShowsPeriod } from '@/lib/period';
 import type { WidgetPeriodValue } from '@/lib/period';
 import type { IgData } from '@/lib/useIgData';
 
@@ -386,9 +386,11 @@ export function SubscriberMovement({
 /** «Охват» — the primary IG daily series (half width): area line + paired-window Δ. Число дриллится
     тихой кнопкой (TG-паритет FeaturedKpi); собственной ↗ у hero нет — она читалась дублем карточной. */
 export function IgReachBody({ ig, viz }: { ig: IgData; viz?: 'line' | 'bar' }) {
+  // См. useCardShowsPeriod: на ленте окно живёт в шапке страницы, дублировать его в подписи нечем.
+  const showPeriod = useCardShowsPeriod();
   return (
     <KpiHero
-      label={`Охват · ${ig.window.days} дн.`}
+      label={showPeriod ? `Охват · ${ig.window.days} дн.` : 'Охват'}
       value={fmt.kpi(ig.pairs.reach.cur)}
       delta={pairDelta(ig.pairs.reach)}
       series={ig.series.reach.filter((p) => ig.inWindow(p.day))}

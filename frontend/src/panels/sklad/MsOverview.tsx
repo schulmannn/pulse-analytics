@@ -20,7 +20,7 @@ import { Sparkline } from '@/components/Sparkline';
 import { pctDelta, type MetricDelta } from '@/lib/delta';
 import { lttbDownsample } from '@/lib/downsample';
 import { fmt } from '@/lib/format';
-import { usePagePeriod } from '@/lib/period';
+import { usePagePeriod, useCardShowsPeriod } from '@/lib/period';
 import { msPreviousPeriod, useMsPagePeriod, type MsPeriod } from '@/lib/msPeriod';
 import {
   aggregatePlotPoints,
@@ -61,7 +61,7 @@ function MsStoryBody({
   drillLabel,
   viz = 'line',
 }: {
-  label: string;
+  label?: string;
   value: string;
   delta?: MetricDelta | null;
   caption?: string;
@@ -118,6 +118,7 @@ export function MsOverview() {
   const days = pp ? pp.days : 30;
   const period = useMsPagePeriod();
   const windowLabel = pp?.range ? 'за выбранный период' : days === 0 ? 'за всё время' : `за ${days} дн.`;
+  const showPeriod = useCardShowsPeriod();
   const summary = useMsSummary(period);
   // Канон карточки-метрики: число + дельта к ПРЕДЫДУЩЕМУ равному окну (паттерн YmOverview).
   // У «Всё» честного предшественника нет (msPreviousPeriod → null) — запрос не уходит, и
@@ -206,11 +207,14 @@ export function MsOverview() {
   const prevAvg = prev && prev.orders.totalCount > 0 ? prev.orders.totalSum / prev.orders.totalCount : null;
   const avgDelta = avgTotal != null && prevAvg != null ? pctDelta(avgTotal, prevAvg) : null;
 
+  // На ленте окно уже стоит полосой в шапке страницы — подпись карточки его не повторяет
+  // (владелец). На Главной страничного периода нет, там подпись вернётся сама.
+  const periodInLabel = showPeriod ? windowLabel : undefined;
   // Пропсы story-тел вынесены: «Линия» и «Столбцы» это ОДНА карточка в двух подачах,
   // дублировать её данные в двух вариантах — прямой путь к их расхождению.
-  const revStory = { label: windowLabel, value: `${fmt.short(revenue.total)} ₽`, delta: revenueDelta, values: revValues, labels: revLabels, formatValue: (v: number) => `${fmt.num(Math.round(v))} ₽`, emptyTitle: 'Недостаточно дней для графика.', drillTo: '/metrics/ms-revenue', drillLabel: 'Выручка' };
-  const ordStory = { label: windowLabel, value: fmt.num(orders.totalCount), delta: ordersDelta, caption: `на ${fmt.short(orders.totalSum)} ₽`, values: ordValues, labels: ordLabels, formatValue: fmt.num, emptyTitle: 'Недостаточно дней для графика.', drillTo: '/metrics/ms-orders', drillLabel: 'Заказы' };
-  const avgStory = { label: windowLabel, value: avgTotal != null ? `${fmt.short(avgTotal)} ₽` : '—', delta: avgDelta, caption: 'по дням с заказами', values: avgValues, labels: avgLabels, formatValue: (v: number) => `${fmt.num(Math.round(v))} ₽`, emptyTitle: 'Недостаточно дней с заказами для графика.', drillTo: '/metrics/ms-aov', drillLabel: 'Средний чек' };
+  const revStory = { label: periodInLabel, value: `${fmt.short(revenue.total)} ₽`, delta: revenueDelta, values: revValues, labels: revLabels, formatValue: (v: number) => `${fmt.num(Math.round(v))} ₽`, emptyTitle: 'Недостаточно дней для графика.', drillTo: '/metrics/ms-revenue', drillLabel: 'Выручка' };
+  const ordStory = { label: periodInLabel, value: fmt.num(orders.totalCount), delta: ordersDelta, caption: `на ${fmt.short(orders.totalSum)} ₽`, values: ordValues, labels: ordLabels, formatValue: fmt.num, emptyTitle: 'Недостаточно дней для графика.', drillTo: '/metrics/ms-orders', drillLabel: 'Заказы' };
+  const avgStory = { label: periodInLabel, value: avgTotal != null ? `${fmt.short(avgTotal)} ₽` : '—', delta: avgDelta, caption: 'по дням с заказами', values: avgValues, labels: avgLabels, formatValue: (v: number) => `${fmt.num(Math.round(v))} ₽`, emptyTitle: 'Недостаточно дней с заказами для графика.', drillTo: '/metrics/ms-aov', drillLabel: 'Средний чек' };
 
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-6">
