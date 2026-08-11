@@ -196,7 +196,7 @@ duration/easing.
 | `--motion-glide` | 260ms | FLIP reorder glide · icon stroke draw-on |
 | `--motion-reveal` | 300ms | larger reveals (add-widget rise) |
 | `--motion-entrance` | 300ms | card mount rise (was 350ms — over both the <300ms UI ceiling and the playbook's 200-300ms band for entering elements). Shares a value with `--motion-reveal` but stays a separate rung: mounting a card and revealing a panel are different intents and will drift apart again |
-| `--motion-morph` | 700ms | point interpolation after a data-window change (see note below) |
+| `--motion-morph` | 700ms | point interpolation after a data-window change (see note below). **Deliberately above the <300ms UI ceiling** — that ceiling governs *interface* motion, where the animation sits between the user and their goal. A shape morph is *explanatory*: the movement itself carries the comparison («this is the same series, re-windowed»), so it is read rather than waited out. Cutting it to 300ms turns the reading into a flicker. Interruptibility is what keeps it honest — a signature change mid-flight retargets from the currently visible values instead of restarting, so rapid period-flipping never queues a backlog of animation |
 
 ### Reaching the ladder from a component
 
@@ -233,6 +233,17 @@ layout cost is a visible decision rather than a side effect.
 
 CSS custom props resolve inside inline `style.transition` too, so JS-driven transitions use
 `var(--motion-glide) var(--ease-standard)` (see the reorder FLIP in `ChartWidget.tsx`).
+
+**The six `layout-anim-ok` sites were re-audited (2026-08-11) and all six stand.** The tempting one
+is `.sidebar-actions`, which tweens `height` and `margin-inline` — but neither converts to a
+transform. The height goes `1.75rem → 3.75rem` because the rail STACKS the two actions, and that
+height is what reserves the space the source card below moves into; a transform would slide the
+actions over it and leave a hole. The `margin-inline` step positions the well so both actions land
+on the 32px rail axis, and the toggle is anchored to the well's right EDGE — translating the
+container would drag it off the panel edge it exists to track. Decisive point: the parent
+`.sidebar-shell` tweens `width` in the same beat, which is irreducible for a rail that pushes rather
+than overlays, so the frame does a full layout pass regardless. Converting the smaller half buys
+nothing measurable. Don't re-raise this without a profile showing otherwise.
 
 **Chart motion.** The full-size `LineChart` (line + area, primary and comparison) and shared `Sparkline`
 follow the shadcn/Recharts update model: after a period or filter change, old point coordinates are
@@ -307,6 +318,22 @@ staged copy delay: labels ride the same beat instead of lagging a disconnected e
 occupy a fixed `40px` first track centred on the rail axis; only the second-track copy is
 masked/faded/translated. The global reduced-motion net collapses the duration to ~0, and since no rule
 carries a transition-delay the mode switch is immediate.
+
+**The frequency sweep beyond Ctrl+B (2026-08-11) came back clean.** Every control a user touches
+dozens of times a day was checked for MOTION, not for animation in general — colour is exempt, since
+a tint that lingers costs nothing and reads as nothing. The per-widget period pills carry no
+transition at all. Sidebar nav rows, the panel toggle and the source switcher rows carry
+`transition-colors` only. The single piece of motion on a high-frequency control is the tab glider,
+and it stays: the movement IS the mode indicator, which is a stated reason to animate rather than a
+decoration. `Ctrl+B` was the one real violation and it was fixed in #434. Re-run this sweep when a
+new frequent control ships — the question is «does it MOVE», not «does it transition».
+
+**Rapid re-open does not restart a keyframe mid-flight (measured 2026-08-11).** The concern was that
+`animate-in` / `animate-out` are keyframes, which resume from 0% instead of picking up where they
+were. Frame sampling on the account dropdown: the exit falls monotonically 1.00 → 0.00 over ~95ms,
+the node UNMOUNTS, and a re-open is a fresh mount fading in from zero. Radix does not hand the same
+node back mid-exit, so there is no backwards jump to see and no reason to convert these to
+transitions.
 
 **Frequency gate: the keyboard path does not animate.** `Ctrl+B` snaps the sidebar to its new width;
 only the pointer toggle plays the 300ms gesture. A shortcut is used dozens of times a day by whoever
