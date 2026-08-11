@@ -246,13 +246,19 @@ export function Sparkline({
                 шрифта мимо шкалы токенов (ловит lint:motion), а залитая фигура внутри растянутого
                 viewBox перекосилась бы вместе с ним — та же причина, по которой все обводки несут
                 non-scaling-stroke. HTML-оверлей от растяжения не зависит. */}
+            {/* Тише и на самой кривой (владелец: «странно смотрится»). Было: 4×3px цветом
+                muted-foreground, приколотые к `top: 0` — то есть на PAD выше зажатой точки, отчего
+                они читались как две самостоятельные крапины, висящие над графиком, а не как пометка
+                НА пике. Теперь 3×2px цветом ink3 (ступень вниз по иерархии чернил) с основанием
+                ровно на зажатой точке: yPct сам клампит значение к домену, так что это та самая
+                координата, где линия упёрлась в потолок шкалы. */}
             {domain.clipped.map((i) => (
               <span
                 key={`clip${i}`}
                 aria-hidden="true"
                 title="пик срезан по шкале"
-                className="pointer-events-none absolute h-0 w-0 -translate-x-1/2 border-x-2 border-b-[3px] border-x-transparent border-b-muted-foreground"
-                style={{ left: `${xPct(i)}%`, top: 0 }}
+                className="pointer-events-none absolute h-0 w-0 -translate-x-1/2 -translate-y-[2px] border-x-[1.5px] border-b-[2px] border-x-transparent border-b-ink3"
+                style={{ left: `${xPct(i)}%`, top: `${yPct(values[i])}%` }}
               />
             ))}
             {active != null && dot(active)}

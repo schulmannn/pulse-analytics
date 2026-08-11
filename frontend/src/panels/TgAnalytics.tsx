@@ -814,11 +814,12 @@ export function TgAnalytics({
                 delta={delta}
                 caption={caption}
               >
+                {/* Без markExtremes: на лице карточки подписи макс/последней налезали на кривую и
+                    дублировали хедлайн (владелец). Разворот ниже их сохраняет. */}
                 <LineChart
                   values={w.values}
                   labels={w.labels}
                   titles={w.titles}
-                  markExtremes
                 />
               </ChartCardBody>
             ) : (
@@ -954,7 +955,8 @@ export function TgAnalytics({
                 label: 'Линия',
                 render: (
                   <>
-                    <LineChart values={vbdValues} labels={[last14Dates[0] ?? '', last14Dates[Math.floor(last14Dates.length / 2)] ?? '', last14Dates[last14Dates.length - 1] ?? '']} titles={vbdTitles} markAnomalies markExtremes ghost={vbdPrev} />
+                    {/* Лицо карточки — без числовых подписей (см. «Чистый прирост» выше). */}
+                    <LineChart values={vbdValues} labels={[last14Dates[0] ?? '', last14Dates[Math.floor(last14Dates.length / 2)] ?? '', last14Dates[last14Dates.length - 1] ?? '']} titles={vbdTitles} markAnomalies ghost={vbdPrev} />
                   </>
                 ),
               },
