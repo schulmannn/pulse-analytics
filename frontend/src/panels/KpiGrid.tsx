@@ -16,7 +16,7 @@ import { DeltaPill } from '@/components/DeltaPill';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ChartCardBody } from '@/components/ChartWidget';
 import { CompactStatHeadline } from '@/components/CompareStat';
-import { usePagePeriod, useWidgetPeriod, widgetPeriodValue } from '@/lib/period';
+import { useCardShowsPeriod, usePagePeriod, useWidgetPeriod, widgetPeriodValue } from '@/lib/period';
 import { useWidgetInView } from '@/lib/widgetViewport';
 import type { MetricDelta } from '@/lib/delta';
 import { getDrillMetric, type MetricDef } from '@/lib/widgetMetrics';
@@ -138,6 +138,9 @@ export function KpiGrid() {
 export function TgViewsBody({ state, viz }: { state: TgKpiState; viz?: 'line' | 'bar' }) {
   const { derived, isPending, isError, error } = state;
   const navigate = useNavigate();
+  // На ленте окно уже стоит полосой в шапке страницы — повтор в подписи только шумит (владелец).
+  // На Главной страничного периода нет, там подпись остаётся единственным ответом «за что число».
+  const showPeriod = useCardShowsPeriod();
   if (isPending) return <ViewsSkeleton />;
   if (isError) {
     return <ErrorState title="Не удалось загрузить метрики" reason={error instanceof Error ? error.message : 'ошибка'} />;
@@ -145,7 +148,7 @@ export function TgViewsBody({ state, viz }: { state: TgKpiState; viz?: 'line' | 
   const { channelViews, viewsTrend, viewsCaption, viewsSpark, periodLabel } = derived;
   return (
     <FeaturedKpi
-      label={`Просмотры · ${periodLabel}`}
+      label={showPeriod ? `Просмотры · ${periodLabel}` : 'Просмотры'}
       value={fmt.kpi(channelViews)}
       trend={viewsTrend}
       caption={viewsCaption}
@@ -375,6 +378,11 @@ function FeaturedKpi({ label, value, trend, caption, spark, info, onDrill, viz =
           area
           strokeWidth={2}
           interactive
+          // caption="" включает зарезервированную строку под графиком: в покое там ось X, при
+          // наведении — читалка «дата · значение · Δ». Без пропа строки нет вовсе, и этот герой
+          // был единственной интерактивной искрой в продукте БЕЗ читалки — паритет с IG-твином
+          // KpiHero и компактными карточками восстановлен заодно.
+          caption=""
           formatValue={fmt.num}
           className="h-full min-h-28 w-full"
         />

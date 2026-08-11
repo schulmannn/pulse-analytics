@@ -59,19 +59,22 @@ test('overview has one authoritative top-bar period and no card-local controls',
 
   // The page default wins over every stale saved widget override without rendering duplicate UI.
   await expect(pagePeriod.getByRole('button', { name: '30д' })).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.getByText('Просмотры · 30 дн.')).toBeVisible();
   const periodToggleGroup = pagePeriod.locator('[data-slot="toggle-group"]');
   await expect(periodToggleGroup).toHaveCount(1);
   await expect(periodToggleGroup.locator('[data-state="on"]')).toHaveText('30д');
-  const contextCard = page.getByRole('heading', { name: 'Главное изменение', exact: true }).locator('..').locator('..');
-  const contextBefore = await contextCard.innerText();
+
+  // Наблюдаемое «окно применилось» — САМО ЧИСЛО героя, а не подпись «Просмотры · 30 дн.»: окно
+  // больше не печатается в подписях ленты (оно уже стоит в шапке — владелец), поэтому проверять
+  // надо результат, а не повтор контрола. Карточка «Главное изменение» здесь тоже больше не
+  // локатор — она слита в «Неделю канала», которая недельная по замыслу и на период НЕ реагирует.
+  const heroValue = page.getByRole('button', { name: 'Разбор: Просмотры' });
+  const heroBefore = await heroValue.innerText();
 
   // The sole top-bar control re-windows every card on the page.
   await pagePeriod.getByRole('button', { name: '7д' }).click();
   await expect(pagePeriod.getByRole('button', { name: '7д' })).toHaveAttribute('aria-pressed', 'true');
   await expect(periodToggleGroup.locator('[data-state="on"]')).toHaveText('7д');
-  await expect(page.getByText('Просмотры · 7 дн.')).toBeVisible();
-  await expect.poll(() => contextCard.innerText()).not.toBe(contextBefore);
+  await expect.poll(() => heroValue.innerText()).not.toBe(heroBefore);
 });
 
 test('overview sparkline flows from one period shape into the next', async ({ page }, testInfo) => {

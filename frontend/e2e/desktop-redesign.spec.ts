@@ -113,7 +113,11 @@ test('desktop Overview keeps period context compact', async ({ page }, testInfo)
   await bootDemo(page, '/', { theme: 'dark' });
 
   await expect(page.locator('[data-source-identity]')).toContainText('Telegram · @demo_channel');
-  await expect(page.getByRole('heading', { name: 'Главное изменение' })).toBeVisible();
+  // «Главное изменение» больше нет отдельной карточкой — она слита в «Неделю канала» (владелец:
+  // «правый почти не несёт нагрузки»): медиана и лучшая публикация уехали в её леджер, разбор
+  // причины — абзацем рассказа. Контекст периода на Обзоре теперь несёт именно она.
+  await expect(page.getByRole('heading', { name: 'Неделя канала' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Главное изменение' })).toHaveCount(0);
 
   await page.getByRole('button', { name: 'Меню виджета «Просмотры»' }).click();
   await page.getByRole('menuitem', { name: 'Изменить' }).click();
