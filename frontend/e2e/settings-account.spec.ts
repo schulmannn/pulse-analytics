@@ -31,14 +31,13 @@ async function bootSettings(page: Page, deleteStub: DeleteStub = {}) {
   });
   await page.addInitScript(() => {
   });
-  await page.goto('/settings');
-  // Danger-zone живёт в секции «Безопасность» (SecuritySection), а /settings открывается на «Профиле».
-  await page.getByRole('button', { name: 'Безопасность' }).click();
+  await page.goto('/settings?section=security');
+  await expect(page.getByRole('heading', { name: 'Безопасность', level: 3 })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Удалить аккаунт' })).toBeVisible();
   return deletes;
 }
 
-test.beforeEach(async ({ page }, testInfo) => {
+test.beforeEach(({ page: _page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop-1440', 'desktop settings surface');
 });
 

@@ -2,11 +2,11 @@ import type { ReactNode, SVGProps } from 'react';
 import { buttonVariants } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
-/** Shared settings building blocks: calm card-scale groups and responsive setting rows. */
+/** Shared settings building blocks: flat detail groups and container-responsive setting rows. */
 
 /**
- * A group is the only settings-level surface: card radius, one hairline and no shadow. Direct
- * children receive consistent horizontal padding so rows, loading states and custom blocks align.
+ * Groups deliberately avoid nested cards. Hairlines and spacing carry the hierarchy while the
+ * category page supplies the main layout and horizontal alignment.
  */
 export function SettingsGroup({
   title,
@@ -19,18 +19,18 @@ export function SettingsGroup({
 }) {
   const hasHeading = Boolean(title || description);
   return (
-    <section>
-      {title ? <h3 className="text-sm font-medium text-foreground">{title}</h3> : null}
+    <div>
+      {title ? <h4 className="text-sm font-medium text-foreground">{title}</h4> : null}
       {description ? <p className="mt-1 text-xs leading-relaxed text-ink3">{description}</p> : null}
       <div
         className={cn(
-          'overflow-hidden rounded-2xl border border-border bg-card divide-y divide-border [&>*]:px-4 sm:[&>*]:px-5',
+          '@container divide-y divide-border border-y border-border',
           hasHeading && 'mt-3',
         )}
       >
         {children}
       </div>
-    </section>
+    </div>
   );
 }
 
@@ -48,8 +48,8 @@ interface SettingsRowProps {
 /** One setting row: title and supporting copy on the left, control on the right; stacks on phones. */
 export function SettingsRow({ title, description, control, footer, className }: SettingsRowProps) {
   return (
-    <div className={cn('py-4 sm:py-5', className)}>
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
+    <div className={cn('py-4 @min-[32rem]:py-5', className)}>
+      <div className="flex flex-col gap-3 @min-[32rem]:flex-row @min-[32rem]:items-center @min-[32rem]:justify-between @min-[32rem]:gap-6">
         <div className="min-w-0">
           <div className="text-sm font-medium text-foreground">{title}</div>
           {description ? (

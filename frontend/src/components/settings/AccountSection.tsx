@@ -74,8 +74,8 @@ export function ProfileSection() {
 
   return (
     <SettingsGroup>
-      <div className="py-5 sm:py-6">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+      <div className="py-5 @min-[34rem]:py-6">
+        <div className="flex flex-col gap-4 @min-[34rem]:flex-row @min-[34rem]:items-center">
           <span className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-full bg-avatar text-base font-medium text-ink2 ring-1 ring-border">
             {avatar ? (
               <img src={avatar} alt="" className="h-full w-full object-cover" />
@@ -89,7 +89,7 @@ export function ProfileSection() {
               PNG, JPEG или WebP. Изображение автоматически уменьшается до 256 px.
             </p>
           </div>
-          <div className="flex flex-wrap items-center gap-2 sm:shrink-0">
+          <div className="flex flex-wrap items-center gap-2 @min-[34rem]:shrink-0">
             <label
               className={cn(
                 BTN_SECONDARY,
@@ -127,7 +127,7 @@ export function ProfileSection() {
           </p>
         ) : null}
       </div>
-      <div className="py-4 sm:py-5">
+      <div className="py-4 @min-[34rem]:py-5">
         <p className="text-sm font-medium text-foreground">Email</p>
         <p className="mt-1 break-all text-sm text-ink2">{email || '—'}</p>
         <p className="mt-1 text-xs leading-relaxed text-ink3">
@@ -150,10 +150,7 @@ const THEME_OPTIONS: Array<{
 
 export function AppearanceSection() {
   return (
-    <SettingsGroup
-      title="Интерфейс"
-      description="Выбор сохраняется только на этом устройстве."
-    >
+    <SettingsGroup>
       <SettingsRow
         title="Цветовая схема"
         description="Светлая, тёмная или синхронизированная с настройками системы."
@@ -303,7 +300,7 @@ export function SecuritySection() {
   };
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-7">
       <SettingsGroup
         title="Пароль"
         description="После изменения все остальные сессии будут завершены."

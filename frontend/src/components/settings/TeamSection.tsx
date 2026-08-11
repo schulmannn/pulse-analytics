@@ -84,7 +84,7 @@ function TeamRoster({ plan }: { plan: 'pro' | 'max' }) {
         description={`Занято ${team.length} из ${limit} мест на плане ${PLAN_LABEL[plan]}. Приглашения в предпросмотре — письмо не отправляется, доступ не выдаётся.`}
         footer={
           <>
-            <form onSubmit={onInvite} className="mt-3 flex flex-col gap-2 sm:flex-row">
+            <form onSubmit={onInvite} className="mt-3 flex flex-col gap-2 @min-[32rem]:flex-row">
             <Input
               type="email"
               value={email}

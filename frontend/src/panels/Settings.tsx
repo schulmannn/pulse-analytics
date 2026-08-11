@@ -1,14 +1,6 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useMe } from '@/api/queries';
-import {
-  Dialog,
-  DialogOverlay,
-  DialogPortal,
-  DialogSurface,
-  DialogTitle,
-  useRestoreOpenerFocus,
-} from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import {
   SettingsIcon,
@@ -26,10 +18,9 @@ import { ChannelsSection } from '@/components/settings/ChannelsSection';
 import { InstagramSection } from '@/components/settings/InstagramSection';
 
 /**
- * Settings is a first-class route inside the dashboard shell. The Kokonut-inspired pieces are
- * deliberately compositional: a calm active rail and a mobile bottom sheet. Account identity stays
- * in the dashboard shell instead of being repeated inside this route. The product keeps its own
- * tokens, Radix focus handling and URL state — no Motion, Vaul or copied demo state machines.
+ * Settings stays a first-class route in the dashboard shell. Three product-level categories keep
+ * navigation shallow; the smaller settings inside each category form one continuous page. Existing
+ * `?section=` links remain exact entry points and scroll to the requested section.
  */
 type SectionKey =
   | 'account'
@@ -41,6 +32,8 @@ type SectionKey =
   | 'channels'
   | 'instagram';
 
+type CategoryKey = 'account' | 'workspace' | 'connections';
+
 interface SectionItem {
   key: SectionKey;
   label: string;
@@ -48,37 +41,49 @@ interface SectionItem {
   description: string;
 }
 
-interface SectionGroup {
+interface SettingsCategory {
+  key: CategoryKey;
   label: string;
+  tabLabel: string;
+  description: string;
+  defaultSection: SectionKey;
   items: readonly SectionItem[];
 }
 
-const SECTION_GROUPS: readonly SectionGroup[] = [
+const CATEGORIES: readonly SettingsCategory[] = [
   {
+    key: 'account',
     label: 'Аккаунт',
+    tabLabel: 'Аккаунт',
+    description: 'Профиль, внешний вид и безопасность вашего аккаунта.',
+    defaultSection: 'account',
     items: [
       {
         key: 'account',
         label: 'Профиль',
         icon: 'user',
-        description: 'Фото, email и основные данные аккаунта.',
+        description: 'Фото и основные данные, с которыми вы входите в Atlavue.',
       },
       {
         key: 'appearance',
         label: 'Оформление',
         icon: 'sun',
-        description: 'Тема и внешний вид интерфейса на этом устройстве.',
+        description: 'Тема интерфейса на этом устройстве.',
       },
       {
         key: 'security',
         label: 'Безопасность',
         icon: 'lock',
-        description: 'Пароль и удаление аккаунта.',
+        description: 'Пароль и управление аккаунтом.',
       },
     ],
   },
   {
+    key: 'workspace',
     label: 'Рабочее пространство',
+    tabLabel: 'Пространство',
+    description: 'Тариф, команда и данные рабочего пространства.',
+    defaultSection: 'billing',
     items: [
       {
         key: 'billing',
@@ -90,53 +95,161 @@ const SECTION_GROUPS: readonly SectionGroup[] = [
         key: 'team',
         label: 'Команда',
         icon: 'users',
-        description: 'Участники, роли и доступ к рабочему пространству.',
+        description: 'Участники, роли и совместный доступ.',
       },
       {
         key: 'data',
         label: 'Данные',
         icon: 'database',
-        description: 'Экспорт, переносимость и управление данными.',
+        description: 'Состояние сбора, экспорт и переносимость данных.',
       },
     ],
   },
   {
+    key: 'connections',
     label: 'Подключения',
+    tabLabel: 'Подключения',
+    description: 'Источники данных и внешние подключения.',
+    defaultSection: 'channels',
     items: [
       {
         key: 'channels',
         label: 'Каналы',
         icon: 'signal',
-        description: 'Источники данных и ключи внешних коллекторов.',
+        description: 'Telegram-каналы, коллекторы и ключи доступа.',
       },
       {
         key: 'instagram',
         label: 'Instagram',
         icon: 'instagram',
-        description: 'OAuth-подключение и статус аккаунта Instagram.',
+        description: 'OAuth-подключение и состояние аккаунта Instagram.',
       },
     ],
   },
 ] as const;
 
-const SECTIONS: readonly SectionItem[] = SECTION_GROUPS.flatMap((group) => group.items);
+const SECTIONS = CATEGORIES.flatMap((category) => category.items);
 
 const isSection = (raw: string | null): raw is SectionKey =>
   SECTIONS.some((section) => section.key === raw);
 
+const categoryForSection = (section: SectionKey) =>
+  CATEGORIES.find((category) =>
+    category.items.some((item) => item.key === section),
+  ) ?? CATEGORIES[0];
+
 export function Settings() {
   const [params, setParams] = useSearchParams();
-  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const me = useMe();
-  const isSuperuser = me.data?.role === 'superuser';
   const rawSection = params.get('section');
   const section: SectionKey = isSection(rawSection) ? rawSection : 'account';
-  const active = SECTIONS.find((item) => item.key === section) ?? SECTIONS[0];
+  const activeCategory = categoryForSection(section);
+  const pendingSectionFocus = useRef<SectionKey | null>(null);
+  const pendingCategoryFocus = useRef<{
+    key: CategoryKey;
+    moveFocus: boolean;
+  } | null>(null);
 
-  // Section changes replace the current URL entry: Back returns to the previous product page
-  // instead of replaying every settings section the user inspected.
+  const revealSection = useCallback((target: SectionKey, moveFocus: boolean) => {
+    const region = document.querySelector<HTMLElement>(
+      `[data-settings-section="${target}"]`,
+    );
+    const heading = document.getElementById(`settings-${target}-title`);
+    if (!region || !heading) return;
+    region.scrollIntoView({ block: 'start' });
+    if (moveFocus) heading.focus({ preventScroll: true });
+  }, []);
+
+  const revealCategory = useCallback((target: CategoryKey, moveFocus: boolean) => {
+    const navigation = document.querySelector<HTMLElement>(
+      'nav[aria-label="Категории настроек"]',
+    );
+    const heading = document.getElementById(`settings-category-${target}-title`);
+    if (!navigation || !heading) return;
+    navigation.scrollIntoView({ block: 'start' });
+    if (moveFocus) heading.focus({ preventScroll: true });
+  }, []);
+
+  // Unknown values fall back safely and are removed without touching unrelated query params.
+  useEffect(() => {
+    if (rawSection === null || isSection(rawSection)) return;
+    setParams(
+      (previous) => {
+        const merged = new URLSearchParams(previous);
+        merged.delete('section');
+        return merged;
+      },
+      { replace: true },
+    );
+  }, [rawSection, setParams]);
+
+  // A direct deep link scrolls without stealing focus. Its category can still grow while async
+  // sections above the target resolve, so a bounded ResizeObserver keeps the anchor in view until
+  // layout settles or the user interacts. In-app actions move focus and do not need that follow-up.
+  useEffect(() => {
+    const categoryTarget = pendingCategoryFocus.current;
+    if (categoryTarget) {
+      const frame = requestAnimationFrame(() => {
+        revealCategory(categoryTarget.key, categoryTarget.moveFocus);
+        pendingCategoryFocus.current = null;
+      });
+      return () => cancelAnimationFrame(frame);
+    }
+
+    const target =
+      pendingSectionFocus.current ?? (isSection(rawSection) ? rawSection : null);
+    if (!target) return;
+    let stopFollowing: (() => void) | undefined;
+    const frame = requestAnimationFrame(() => {
+      const moveFocus = pendingSectionFocus.current === target;
+      revealSection(target, moveFocus);
+      if (moveFocus) pendingSectionFocus.current = null;
+      if (moveFocus || typeof ResizeObserver === 'undefined') return;
+
+      const region = document.querySelector<HTMLElement>(
+        `[data-settings-section="${target}"]`,
+      );
+      const category = region?.closest<HTMLElement>('[data-settings-category]');
+      if (!category) return;
+
+      let followFrame = 0;
+      let timeout = 0;
+      let stopped = false;
+      const observer = new ResizeObserver(() => {
+        if (stopped) return;
+        cancelAnimationFrame(followFrame);
+        followFrame = requestAnimationFrame(() => revealSection(target, false));
+      });
+      const stop = () => {
+        if (stopped) return;
+        stopped = true;
+        observer.disconnect();
+        cancelAnimationFrame(followFrame);
+        clearTimeout(timeout);
+        window.removeEventListener('pointerdown', stop, true);
+        window.removeEventListener('wheel', stop, true);
+        window.removeEventListener('touchstart', stop, true);
+        window.removeEventListener('keydown', stop, true);
+      };
+      stopFollowing = stop;
+      window.addEventListener('pointerdown', stop, true);
+      window.addEventListener('wheel', stop, { capture: true, passive: true });
+      window.addEventListener('touchstart', stop, { capture: true, passive: true });
+      window.addEventListener('keydown', stop, true);
+      observer.observe(category);
+      timeout = window.setTimeout(stop, 3_000);
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+      stopFollowing?.();
+    };
+  }, [rawSection, revealCategory, revealSection]);
+
+  // Category changes replace the current URL entry: Back returns to the product instead of
+  // replaying every settings category inspected in this session.
   const setSection = useCallback(
     (next: SectionKey) => {
+      pendingSectionFocus.current = next;
       setParams(
         (previous) => {
           const merged = new URLSearchParams(previous);
@@ -146,121 +259,158 @@ export function Settings() {
         },
         { replace: true },
       );
+
+      // React Router may elide a same-URL update. Re-selecting the active category still returns
+      // the user to its first section and makes that destination explicit to assistive tech.
+      if (next === section) {
+        requestAnimationFrame(() => {
+          revealSection(next, true);
+          pendingSectionFocus.current = null;
+        });
+      }
     },
-    [setParams],
+    [revealSection, section, setParams],
   );
 
-  const selectFromSheet = useCallback(
-    (next: SectionKey) => {
-      setMobileNavOpen(false);
-      setSection(next);
+  const setCategory = useCallback(
+    (next: SettingsCategory, moveFocus: boolean) => {
+      pendingCategoryFocus.current = { key: next.key, moveFocus };
+      setParams(
+        (previous) => {
+          const merged = new URLSearchParams(previous);
+          if (next.defaultSection === 'account') merged.delete('section');
+          else merged.set('section', next.defaultSection);
+          return merged;
+        },
+        { replace: true },
+      );
+
+      if (next.key === activeCategory.key) {
+        requestAnimationFrame(() => {
+          revealCategory(next.key, moveFocus);
+          pendingCategoryFocus.current = null;
+        });
+      }
     },
-    [setSection],
+    [activeCategory.key, revealCategory, setParams],
   );
 
   return (
-    <div className="mx-auto w-full max-w-[1040px]">
+    <div className="@container w-full max-w-[960px]">
       {/* Desktop already has the dashboard topbar; mobile needs its own page heading. */}
       <header className="mb-5 md:hidden">
         <h1 className="text-2xl font-medium tracking-tight text-foreground">
           Настройки
         </h1>
         <p className="mt-1 max-w-[56ch] text-sm leading-relaxed text-muted-foreground">
-          Управляйте аккаунтом, рабочим пространством и подключёнными источниками в одном месте.
+          Аккаунт, рабочее пространство и подключённые источники в одном месте.
         </p>
       </header>
 
-      <button
-        type="button"
-        data-mobile-touch-target=""
-        aria-label={`Выбрать раздел настроек, сейчас ${active.label}`}
-        onClick={() => setMobileNavOpen(true)}
-        className="mb-5 flex min-h-14 w-full items-center gap-3 rounded-2xl border border-border bg-card px-4 py-3 text-left transition-colors hover:bg-muted/60 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/50 xl:hidden"
+      <nav
+        aria-label="Категории настроек"
+        className="scroll-mt-16 border-b border-border"
       >
-        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-muted text-foreground">
-          <SettingsIcon name={active.icon} className="h-4 w-4" />
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="block text-2xs font-medium uppercase tracking-wide text-ink3">
-            Раздел настроек
-          </span>
-          <span className="mt-0.5 block truncate text-sm font-medium text-foreground">
-            {active.label}
-          </span>
-        </span>
-        <SettingsIcon name="arrow" className="h-4 w-4 shrink-0 text-muted-foreground" />
-      </button>
-
-      <div className="grid items-start gap-6 xl:grid-cols-[220px_minmax(0,760px)] xl:justify-center xl:gap-8">
-        <aside className="sticky top-20 hidden xl:block">
-          <nav
-            aria-label="Разделы настроек"
-            className="px-1"
-          >
-            {SECTION_GROUPS.map((group, groupIndex) => (
-              <div
-                key={group.label}
-                className={cn(groupIndex > 0 && 'mt-5')}
+        <div className="grid grid-cols-3 items-end">
+          {CATEGORIES.map((category) => {
+            const active = category.key === activeCategory.key;
+            return (
+              <button
+                key={category.key}
+                type="button"
+                data-settings-category-trigger={category.key}
+                aria-current={active ? 'page' : undefined}
+                onClick={(event) => setCategory(category, event.detail === 0)}
+                className={cn(
+                  '-mb-px flex min-h-12 flex-1 items-center justify-center border-b-2 px-2 pb-3 pt-2 text-xs font-medium transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/50 sm:text-sm',
+                  active
+                    ? 'border-primary text-foreground'
+                    : 'border-transparent text-muted-foreground hover:border-border hover:text-foreground',
+                )}
               >
-                <p className="px-2.5 pb-1 text-2xs font-medium uppercase tracking-wide text-ink3">
-                  {group.label}
-                </p>
-                <div className="space-y-0.5">
-                  {group.items.map((item) => (
-                    <SectionNavItem
-                      key={item.key}
-                      item={item}
-                      active={section === item.key}
-                      onSelect={() => setSection(item.key)}
-                    />
-                  ))}
-                </div>
-              </div>
-            ))}
-            {isSuperuser && (
-              <div className="mt-5">
-                <Link
-                  to="/admin"
-                  className="flex min-h-10 items-center gap-2.5 rounded-xl px-2.5 py-2 text-sm text-ink2 transition-colors hover:bg-muted/60 hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/50"
-                >
-                  <SettingsIcon name="shield" className="h-4 w-4 shrink-0" />
-                  <span className="flex-1">Админ</span>
-                  <SettingsIcon name="external" className="h-3.5 w-3.5 text-ink3" />
-                </Link>
-              </div>
-            )}
-          </nav>
-        </aside>
+                {category.tabLabel}
+              </button>
+            );
+          })}
+        </div>
+      </nav>
 
-        <section
-          aria-labelledby={`settings-${section}-title`}
-          className="min-w-0 max-w-[760px]"
-        >
-          <div className="mb-5 min-w-0">
+      <section
+        aria-labelledby={`settings-category-${activeCategory.key}-title`}
+        data-settings-category={activeCategory.key}
+      >
+        <header className="flex flex-wrap items-start justify-between gap-4 pb-7 pt-7 @min-[48rem]:pb-8 @min-[48rem]:pt-9">
+          <div className="min-w-0">
             <h2
-              id={`settings-${section}-title`}
-              className="text-xl font-medium tracking-tight text-foreground"
+              id={`settings-category-${activeCategory.key}-title`}
+              tabIndex={-1}
+              className="rounded-sm text-2xl font-medium tracking-tight text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
             >
-              {active.label}
+              {activeCategory.label}
             </h2>
-            <p className="mt-1 max-w-[56ch] text-sm leading-relaxed text-muted-foreground">
-              {active.description}
+            <p className="mt-1.5 max-w-[60ch] text-sm leading-relaxed text-muted-foreground">
+              {activeCategory.description}
             </p>
           </div>
+          {me.data?.role === 'superuser' && (
+            <Link
+              to="/admin"
+              className="flex min-h-11 shrink-0 items-center gap-2 rounded-lg border border-border px-3 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/50 sm:min-h-9"
+            >
+              <SettingsIcon name="shield" className="h-3.5 w-3.5" />
+              Админ
+              <SettingsIcon name="external" className="h-3 w-3" />
+            </Link>
+          )}
+        </header>
 
-          <div className="space-y-6">{renderSection(section, setSection)}</div>
-        </section>
-      </div>
-
-      {mobileNavOpen && (
-        <SettingsSectionSheet
-          section={section}
-          isSuperuser={isSuperuser}
-          onSelect={selectFromSheet}
-          onClose={() => setMobileNavOpen(false)}
-        />
-      )}
+        <div className="border-b border-border">
+          {activeCategory.items.map((item) => (
+            <SettingsCategorySection key={item.key} item={item}>
+              {renderSection(item.key, setSection)}
+            </SettingsCategorySection>
+          ))}
+        </div>
+      </section>
     </div>
+  );
+}
+
+function SettingsCategorySection({
+  item,
+  children,
+}: {
+  item: SectionItem;
+  children: ReactNode;
+}) {
+  return (
+    <section
+      id={`settings-section-${item.key}`}
+      data-settings-section={item.key}
+      aria-labelledby={`settings-${item.key}-title`}
+      className="scroll-mt-24 border-t border-border py-7 @min-[48rem]:grid @min-[48rem]:grid-cols-[200px_minmax(0,1fr)] @min-[48rem]:gap-10 @min-[48rem]:py-8"
+    >
+      <header className="mb-5 @min-[48rem]:mb-0">
+        <div className="flex items-start gap-3 @min-[48rem]:block">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground @min-[48rem]:mb-3">
+            <SettingsIcon name={item.icon} className="h-4 w-4" />
+          </span>
+          <div className="min-w-0">
+            <h3
+              id={`settings-${item.key}-title`}
+              tabIndex={-1}
+              className="rounded-sm text-base font-medium tracking-tight text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+            >
+              {item.label}
+            </h3>
+            <p className="mt-1 max-w-[34ch] text-xs leading-relaxed text-ink3">
+              {item.description}
+            </p>
+          </div>
+        </div>
+      </header>
+      <div className="min-w-0">{children}</div>
+    </section>
   );
 }
 
@@ -286,138 +436,4 @@ function renderSection(
     default:
       return <ProfileSection />;
   }
-}
-
-function SectionNavItem({
-  item,
-  active,
-  onSelect,
-}: {
-  item: SectionItem;
-  active: boolean;
-  onSelect: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onSelect}
-      aria-current={active ? 'page' : undefined}
-      className={cn(
-        'relative flex min-h-10 w-full items-center gap-2.5 overflow-hidden rounded-xl px-2.5 py-2 text-left text-sm transition-colors before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:rounded-full before:bg-primary before:opacity-0 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/50',
-        active
-          ? 'bg-card font-medium text-foreground before:opacity-100'
-          : 'text-ink2 hover:bg-muted/60 hover:text-foreground',
-      )}
-    >
-      <SettingsIcon name={item.icon} className="h-4 w-4 shrink-0" />
-      <span className="truncate">{item.label}</span>
-    </button>
-  );
-}
-
-function SettingsSectionSheet({
-  section,
-  isSuperuser,
-  onSelect,
-  onClose,
-}: {
-  section: SectionKey;
-  isSuperuser: boolean;
-  onSelect: (section: SectionKey) => void;
-  onClose: () => void;
-}) {
-  const restoreOpener = useRestoreOpenerFocus();
-
-  return (
-    <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogPortal>
-        <DialogOverlay className="detail-backdrop-in" />
-        <DialogSurface
-          aria-labelledby="settings-section-sheet-title"
-          onCloseAutoFocus={restoreOpener}
-          onPointerDown={(event) => {
-            if (event.target === event.currentTarget) onClose();
-          }}
-          className="fixed inset-0 z-modal flex flex-col justify-end"
-        >
-          <div className="sheet-in pointer-events-auto relative z-10 flex max-h-[85vh] w-full flex-col overflow-hidden rounded-t-2xl border-t border-border bg-popover pb-[env(safe-area-inset-bottom)] sm:mx-auto sm:mb-4 sm:max-w-lg sm:rounded-2xl sm:border">
-            <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-4 py-3">
-              <div>
-                <DialogTitle id="settings-section-sheet-title" className="text-base">
-                  Разделы настроек
-                </DialogTitle>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Выберите, что хотите изменить.
-                </p>
-              </div>
-              <button
-                type="button"
-                data-mobile-touch-target=""
-                onClick={onClose}
-                aria-label="Закрыть"
-                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/50 sm:h-8 sm:w-8"
-              >
-                <SettingsIcon name="close" className="h-4 w-4" />
-              </button>
-            </div>
-            <nav aria-label="Разделы настроек" className="min-h-0 flex-1 overflow-y-auto p-2">
-              {SECTION_GROUPS.map((group) => (
-                <div key={group.label} className="pb-2 last:pb-0">
-                  <p className="px-3 pb-1 pt-2 text-2xs font-medium uppercase tracking-wide text-ink3">
-                    {group.label}
-                  </p>
-                  {group.items.map((item) => {
-                    const active = item.key === section;
-                    return (
-                      <button
-                        key={item.key}
-                        type="button"
-                        data-mobile-touch-target=""
-                        aria-current={active ? 'page' : undefined}
-                        onClick={() => onSelect(item.key)}
-                        className={cn(
-                          'flex min-h-12 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/50',
-                          active
-                            ? 'bg-muted font-medium text-foreground'
-                            : 'text-ink2 hover:bg-muted/60 hover:text-foreground',
-                        )}
-                      >
-                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-border bg-background">
-                          <SettingsIcon name={item.icon} className="h-4 w-4" />
-                        </span>
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate text-sm">{item.label}</span>
-                          <span className="mt-0.5 block truncate text-2xs font-normal text-muted-foreground">
-                            {item.description}
-                          </span>
-                        </span>
-                        {active && (
-                          <SettingsIcon name="check" className="h-4 w-4 shrink-0 text-verdant" />
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-              ))}
-              {isSuperuser && (
-                <div className="border-t border-border pt-2">
-                  <Link
-                    to="/admin"
-                    data-mobile-touch-target=""
-                    className="flex min-h-12 items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-ink2 transition-colors hover:bg-muted/60 hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/50"
-                  >
-                    <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-border bg-background">
-                      <SettingsIcon name="shield" className="h-4 w-4" />
-                    </span>
-                    <span className="flex-1">Админ</span>
-                    <SettingsIcon name="external" className="h-3.5 w-3.5 text-ink3" />
-                  </Link>
-                </div>
-              )}
-            </nav>
-          </div>
-        </DialogSurface>
-      </DialogPortal>
-    </Dialog>
-  );
 }
