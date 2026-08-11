@@ -10,6 +10,7 @@ import { fmt } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { ErrorState } from '@/components/ErrorState';
 import { Sparkline } from '@/components/Sparkline';
+import { BarChart } from '@/components/BarChart';
 import { MetricInfo } from '@/components/InfoTooltip';
 import { DeltaPill } from '@/components/DeltaPill';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -134,7 +135,7 @@ export function KpiGrid() {
  * compact TG cards below carry their own active-window publication-date sparklines — see
  * TgTrendStat.)
  */
-export function TgViewsBody({ state }: { state: TgKpiState }) {
+export function TgViewsBody({ state, viz }: { state: TgKpiState; viz?: 'line' | 'bar' }) {
   const { derived, isPending, isError, error } = state;
   const navigate = useNavigate();
   if (isPending) return <ViewsSkeleton />;
@@ -149,6 +150,7 @@ export function TgViewsBody({ state }: { state: TgKpiState }) {
       trend={viewsTrend}
       caption={viewsCaption}
       spark={viewsSpark}
+      viz={viz}
       info={getDrillMetric('views')}
       onDrill={() => navigate('/metrics/views')}
     />
@@ -156,7 +158,7 @@ export function TgViewsBody({ state }: { state: TgKpiState }) {
 }
 
 /** «Ср. охват» — average views per post; the active-window publication-date sparkline below. */
-export function TgAvgReachBody({ state }: { state: TgKpiState }) {
+export function TgAvgReachBody({ state, viz }: { state: TgKpiState; viz?: 'line' | 'bar' }) {
   const { derived, isPending, isError } = state;
   const navigate = useNavigate();
   if (isPending) return <CompactSkeleton />;
@@ -167,6 +169,7 @@ export function TgAvgReachBody({ state }: { state: TgKpiState }) {
       value={avgViews}
       delta={avgReachTrend}
       spark={avgReachSpark}
+      viz={viz}
       format={(n) => fmt.short(Math.round(n))}
       hasValue={normPosts.length > 0}
       onDrill={() => navigate('/metrics/avgReach')}
@@ -176,7 +179,7 @@ export function TgAvgReachBody({ state }: { state: TgKpiState }) {
 }
 
 /** «Реакции» — total reactions; the active-window publication-date sparkline below. */
-export function TgReactionsBody({ state }: { state: TgKpiState }) {
+export function TgReactionsBody({ state, viz }: { state: TgKpiState; viz?: 'line' | 'bar' }) {
   const { derived, isPending, isError } = state;
   const navigate = useNavigate();
   if (isPending) return <CompactSkeleton />;
@@ -187,6 +190,7 @@ export function TgReactionsBody({ state }: { state: TgKpiState }) {
       value={totalReactions}
       delta={reactionsTrend}
       spark={reactionsSpark}
+      viz={viz}
       format={(n) => fmt.short(Math.round(n))}
       hasValue={normPosts.length > 0}
       onDrill={() => navigate('/metrics/reactions')}
@@ -234,6 +238,13 @@ export function TgErBody({ state }: { state: TgKpiState }) {
  * coverage. ≥2 publication-day buckets draw it (caption «по датам публикаций»); fewer keep the
  * headline and say so. NOT shared with Instagram — its CompareStat cards are untouched.
  */
+/**
+ * `viz` — то, что кормит «Линия»/«Столбцы» в редакторе карточки. Переключатель типа графика на
+ * карточках фида это НЕ отдельный контрол: `EditWidgetDialog` уже показывает VariantCarousel, как
+ * только карточка объявит два варианта, — до сих пор эти KPI-карточки не объявляли ни одного, и
+ * карусели нечего было показывать (владелец: «не любой график можно настроить на bar или line»).
+ * Анатомия карточки при смене не едет: меняется только примитив под хедлайном.
+ */
 function TgTrendStat({
   value,
   delta,
@@ -242,6 +253,7 @@ function TgTrendStat({
   onDrill,
   drillLabel,
   hasValue = true,
+  viz = 'line',
 }: {
   value: number | null;
   delta?: MetricDelta | null;
@@ -250,6 +262,7 @@ function TgTrendStat({
   onDrill?: () => void;
   drillLabel?: string;
   hasValue?: boolean;
+  viz?: 'line' | 'bar';
 }) {
   const live = hasValue && value != null && Number.isFinite(value);
   const hasChart = live && spark.values.length >= 2;
@@ -262,7 +275,17 @@ function TgTrendStat({
         drillLabel={drillLabel}
         live={live}
       />
-      {hasChart ? (
+      {hasChart && viz === 'bar' ? (
+        <div className="min-h-14 w-full flex-1">
+          <BarChart
+            values={spark.values}
+            labels={spark.labels}
+            // Тултип столбца несёт ту же пару «дата · значение», что ховер-читалка искры.
+            titles={spark.values.map((v, i) => `${spark.labels[i] ?? ''}: ${format(v)}`)}
+            formatValue={format}
+          />
+        </div>
+      ) : hasChart ? (
         <Sparkline
           values={spark.values}
           labels={spark.labels}
@@ -303,12 +326,14 @@ interface FeaturedKpiProps {
   spark?: DailySeries;
   info?: MetricDef;
   onDrill?: () => void;
+  /** «Линия» / «Столбцы» из карусели вариантов карточки — см. TgTrendStat. */
+  viz?: 'line' | 'bar';
 }
 
 /** Hero KPI — the steep card anatomy (owner rule): label + big number + comparison pinned
     bottom-LEFT, the area sparkline filling the width to the RIGHT of the number block. The ledger
     below is untouched — the hero zone just turned horizontal. */
-function FeaturedKpi({ label, value, trend, caption, spark, info, onDrill }: FeaturedKpiProps) {
+function FeaturedKpi({ label, value, trend, caption, spark, info, onDrill, viz = 'line' }: FeaturedKpiProps) {
   // Кап длинной серии перед рендером (канон CLAUDE.md): на окне «Всё» архивный viewsSpark несёт
   // до 730 дневных точек — в 200×32-спарклайне это суб-пиксельная мазня. Пары {value,label}
   // прореживаются ВМЕСТЕ, чтобы hover-читалка называла именно отобранные LTTB точки; хедлайн,
@@ -334,7 +359,16 @@ function FeaturedKpi({ label, value, trend, caption, spark, info, onDrill }: Fea
       onValueClick={onDrill}
       drillLabel={label}
     >
-      {sparkShown && sparkShown.values.length > 1 ? (
+      {sparkShown && sparkShown.values.length > 1 && viz === 'bar' ? (
+        <div className="min-h-28 w-full flex-1">
+          <BarChart
+            values={sparkShown.values}
+            labels={sparkShown.labels}
+            titles={sparkShown.values.map((v, i) => `${sparkShown.labels[i] ?? ''}: ${fmt.num(v)}`)}
+            formatValue={fmt.num}
+          />
+        </div>
+      ) : sparkShown && sparkShown.values.length > 1 ? (
         <Sparkline
           values={sparkShown.values}
           labels={sparkShown.labels}

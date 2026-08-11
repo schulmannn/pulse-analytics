@@ -71,22 +71,53 @@ export function Overview() {
             the SAME feed page — default title-ids would make them share prefs (hide one →
             both vanish). id kept as `overview-hero` (this IS the lead card now) so deep-links and
             the shared page-period plumbing keep resolving. */}
-        <ChartSection id="overview-hero" title="Просмотры" defaultSize="half" defaultColor={1} periodControl drillTo="/metrics/views">
-          {/* The one honest daily series at the lead: channel views over the period (area spark). */}
-          <TgViewsBody state={kpis} />
-        </ChartSection>
+        {/* The one honest daily series at the lead: channel views over the period. Линия/Столбцы —
+            через ту же карусель вариантов, что и компактные KPI-карточки ниже. */}
+        <ChartSection
+          id="overview-hero"
+          title="Просмотры"
+          defaultSize="half"
+          defaultColor={1}
+          periodControl
+          drillTo="/metrics/views"
+          variants={[
+            { key: 'line', label: 'Линия', render: <TgViewsBody state={kpis} /> },
+            { key: 'bar', label: 'Столбцы', render: <TgViewsBody state={kpis} viz="bar" /> },
+          ]}
+        />
         {/* Subscriber base + movement — the second primary channel signal (reuses the `growth`
             curated Home key, so «На главную» pins the same card it already knew). */}
         <GrowthChartBlock id="overview-growth" homeKey="growth" defaultColor={5} />
         {/* Row 2 — compact comparison cards at third width: headline value + honest Δ over an
             active-window publication-date sparkline (owner override 2026-07 — the previous non-temporal
             two-bar read is retired), each with its own title, menu and drill route. */}
-        <ChartSection id="overview-avg-reach" title="Ср. охват" defaultSize="third" defaultColor={2} drillTo="/metrics/avgReach">
-          <TgAvgReachBody state={kpis} />
-        </ChartSection>
-        <ChartSection id="overview-reactions" title="Реакции" defaultSize="third" defaultColor={4} drillTo="/metrics/reactions">
-          <TgReactionsBody state={kpis} />
-        </ChartSection>
+        <ChartSection
+          id="overview-avg-reach"
+          title="Ср. охват"
+          defaultSize="third"
+          defaultColor={2}
+          drillTo="/metrics/avgReach"
+          variants={[
+            { key: 'line', label: 'Линия', render: <TgAvgReachBody state={kpis} /> },
+            { key: 'bar', label: 'Столбцы', render: <TgAvgReachBody state={kpis} viz="bar" /> },
+          ]}
+        />
+        {/* Два варианта = переключатель типа графика в редакторе карточки: EditWidgetDialog
+            показывает VariantCarousel, как только вариантов больше одного. До этого карточка не
+            объявляла ни одного, и типа графика было не выбрать (владелец). Компактный «Столбцы»,
+            а не готовый seriesBarValuesVariant: тот требует minSize 'full' ради леджера справа и
+            раздул бы KPI-карточку в треть ширины на весь ряд. */}
+        <ChartSection
+          id="overview-reactions"
+          title="Реакции"
+          defaultSize="third"
+          defaultColor={4}
+          drillTo="/metrics/reactions"
+          variants={[
+            { key: 'line', label: 'Линия', render: <TgReactionsBody state={kpis} /> },
+            { key: 'bar', label: 'Столбцы', render: <TgReactionsBody state={kpis} viz="bar" /> },
+          ]}
+        />
         <ChartSection id="overview-er" title="Вовлечённость" defaultSize="third" defaultColor={6} drillTo="/metrics/er">
           <TgErBody state={kpis} />
         </ChartSection>
