@@ -346,7 +346,12 @@ function TopPostCard({ post, rank, onOpen }: { post: NormalizedPost; rank: numbe
       {/* Stable 4:5 cover keeps the 3-up row aligned; absent/failed media falls back to a glyph. */}
       <div
         data-testid="tg-top-post-media"
-        className="flex aspect-4/5 w-full items-center justify-center overflow-hidden rounded bg-muted text-muted-foreground"
+        // 12px, а не 4: `--radius` (4px) — ступень ИНПУТОВ и мелких контролов, а это крупный
+        // медиа-блок 4:5 внутри карточки с радиусом 16. Концентричность тут не применима —
+        // при паддинге карточки, равном её радиусу, правило «внешний минус паддинг» даёт 0, то
+        // есть обложка перестаёт быть вложенной формой и становится самостоятельным объектом.
+        // Для него берём следующую ступень лестницы канона (16 → 12 → 4 → pill).
+        className="flex aspect-4/5 w-full items-center justify-center overflow-hidden rounded-xl bg-muted text-muted-foreground"
       >
         {cover ? (
           <img
@@ -384,7 +389,7 @@ function TopPostsSkeleton({ variant = 'table' }: { variant?: 'table' | 'cards' }
                 <Skeleton className="h-3 w-6" />
                 <Skeleton className="h-3 w-12" />
               </div>
-              <Skeleton className="aspect-4/5 w-full rounded" />
+              <Skeleton className="aspect-4/5 w-full rounded-xl" />
               <Skeleton className="mt-3 h-4 w-full" />
               <Skeleton className="mt-2 h-4 w-3/4" />
               <Skeleton className="mt-3 h-10 w-full" />
