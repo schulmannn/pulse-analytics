@@ -2,67 +2,6 @@ import type { Locator, Page } from '@playwright/test';
 
 const DAY_MS = 86_400_000;
 
-const igDays = Array.from({ length: 60 }, (_, index) =>
-  new Date(Date.now() - (59 - index) * DAY_MS).toISOString(),
-);
-
-function igMetric(name: string, valueAt: (index: number) => number) {
-  return {
-    name,
-    period: 'day',
-    values: igDays.map((end_time, index) => ({ end_time, value: valueAt(index) })),
-  };
-}
-
-function demoIgPayload(path: string): unknown | undefined {
-  if (path === '/api/ig/profile') {
-    return { mock: true, username: 'demo_channel', name: 'Demo Instagram', followers_count: 12_840, synced_at: Date.now() };
-  }
-  if (path === '/api/ig/insights') {
-    const wave = (index: number, size: number) => ((index % 7) - 3) * size;
-    return {
-      mock: true,
-      data: [
-        igMetric('reach', (i) => 2_900 + i * 18 + wave(i, 85)),
-        igMetric('views', (i) => 4_800 + i * 24 + wave(i, 120)),
-        igMetric('total_interactions', (i) => 250 + i * 2 + wave(i, 8)),
-        igMetric('likes', (i) => 172 + i + wave(i, 5)),
-        igMetric('saves', (i) => 36 + Math.floor(i / 5) + wave(i, 1)),
-        igMetric('comments', (i) => 18 + Math.floor(i / 8) + Math.abs(wave(i, 1))),
-        igMetric('shares', (i) => 24 + Math.floor(i / 6) + Math.abs(wave(i, 1))),
-        igMetric('follows', (i) => 27 + Math.floor(i / 10) + Math.abs(wave(i, 1))),
-        igMetric('unfollows', (i) => 11 + Math.abs(wave(i, 1))),
-        igMetric('follower_count', (i) => 12_300 + i * 9),
-      ],
-    };
-  }
-  if (path === '/api/ig/posts') {
-    return {
-      mock: true,
-      data: Array.from({ length: 8 }, (_, index) => ({
-        id: `demo-ig-${index + 1}`,
-        timestamp: new Date(Date.now() - (index + 1) * DAY_MS).toISOString(),
-        media_type: index % 3 === 0 ? 'VIDEO' : 'IMAGE',
-        media_product_type: index % 3 === 0 ? 'REELS' : 'FEED',
-        reach: 4_900 - index * 280,
-        views: 7_200 - index * 310,
-        like_count: 260 - index * 14,
-        comments_count: 31 - index,
-        saved: 58 - index * 3,
-        shares: 37 - index * 2,
-        total_interactions: 386 - index * 20,
-        caption: `Demo publication ${index + 1}`,
-      })),
-    };
-  }
-  if (path === '/api/ig/breakdowns') return { mock: true, data: [] };
-  if (path === '/api/ig/online') return { mock: true, data: [] };
-  if (path === '/api/ig/stories') return { mock: true, data: [] };
-  if (path === '/api/ig/tags') return { mock: true, data: [] };
-  if (path === '/api/ig/oauth/status') return { connected: true, server_ready: true, env_fallback: false };
-  return undefined;
-}
-
 const MS_CHANNELS = [
   { id: '16f07379-8039-11ec-0a80-03970021e97d', name: 'Интернет-магазин', type: 'ECOMMERCE', orders: 48, sum: 428_000 },
   { id: '26f07379-8039-11ec-0a80-03970021e97e', name: 'Партнёры', type: 'DIRECT_SALES', orders: 17, sum: 206_000 },
@@ -480,18 +419,17 @@ export async function bootDemo(
   route = '/',
   opts: { theme?: 'light' | 'dark'; msMax?: boolean } = {},
 ): Promise<void> {
-  // Covered demo endpoints resolve inside api/client.ts and never reach the network. Any uncovered
-  // optional request (IG/media today, future integrations tomorrow) gets a deterministic response
-  // instead of leaking through Vite's proxy to a missing local backend and filling CI with ECONNREFUSED.
+  // Covered demo endpoints (TG + IG, см. lib/demoFixtures + lib/demoIgFixtures) resolve inside
+  // api/client.ts and never reach the network. Any uncovered optional request (media today, future
+  // integrations tomorrow) gets a deterministic response instead of leaking through Vite's proxy to
+  // a missing local backend and filling CI with ECONNREFUSED.
   await page.route(/^https?:\/\/[^/]+\/api\//, (r) => {
     const url = new URL(r.request().url());
-    const path = url.pathname;
-    const igPayload = demoIgPayload(path);
     const msPayload = demoMsPayload(url, { max: opts.msMax });
     return r.fulfill({
-      status: igPayload !== undefined || msPayload !== undefined ? 200 : 404,
+      status: msPayload !== undefined ? 200 : 404,
       contentType: 'application/json',
-      body: JSON.stringify(igPayload ?? msPayload ?? { error: 'not_available_in_demo' }),
+      body: JSON.stringify(msPayload ?? { error: 'not_available_in_demo' }),
     });
   });
   await page.addInitScript(

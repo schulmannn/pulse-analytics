@@ -1,10 +1,12 @@
-// Bundled sample data for demo mode. Only endpoints WITHOUT a server-side mock are covered here
-// (Telegram + channels); Instagram endpoints intentionally fall through to the server, which already
-// serves realistic ig_mock payloads for a no-account (demo) request. Shapes match the permissive
-// zod schemas in api/schemas.ts. All series are generated deterministically (no Math.random) so the
-// demo looks identical on every render and never trips React's strict-mode double-invoke.
+// Bundled sample data for demo mode: Telegram + channels here, Instagram in demoIgFixtures.ts.
+// The old contract «IG falls through to the server's ig_mock» only worked while demo required a
+// login; the PUBLIC demo boot has no session, so every /api/ig/* request dies on requireAuth with
+// 401 — the demo graph must serve IG client-side too. Shapes match the permissive zod schemas in
+// api/schemas.ts. All series are generated deterministically (no Math.random) so the demo looks
+// identical on every render and never trips React's strict-mode double-invoke.
 
 import { DEMO_CHANNEL_ID } from '@/lib/demo';
+import { igDemoFixture } from '@/lib/demoIgFixtures';
 import { periodDateTimestamp } from '@/lib/period';
 
 const DAY_MS = 86_400_000;
@@ -88,8 +90,8 @@ HISTORY_ROWS.slice(-30).forEach((r) => {
 const CHANNELS = {
   enabled: true,
   channels: [
-    // ig_connected: true so the demo keeps showcasing Instagram (its endpoints fall through to the
-    // server's ig_mock) — the switcher's IG-gating hides IG only for real unconnected channels.
+    // ig_connected: true so the demo keeps showcasing Instagram (served by demoIgFixtures.ts) —
+    // the switcher's IG-gating hides IG only for real unconnected channels.
     { id: DEMO_CHANNEL_ID, username: 'demo_channel', title: 'Демо-канал', status: 'active', source: 'central', memberCount: CURRENT_SUBS, owner_uid: 0, ig_connected: true },
   ],
   selected: DEMO_CHANNEL_ID,
@@ -288,6 +290,9 @@ const ANNOTATIONS = () => ({
 
 export function demoFixture(path: string): unknown | undefined {
   const p = path.split('?')[0];
+  // Весь IG-неймспейс — клиентские фикстуры (см. шапку файла: у публичного демо нет сессии,
+  // серверный ig_mock за requireAuth недостижим). Query (days/limit/timeframe) разбирает сам модуль.
+  if (p.startsWith('/api/ig/')) return igDemoFixture(path);
   if (p === '/api/channels') return CHANNELS;
   if (/^\/api\/channels\/\d+\/annotations$/.test(p)) return ANNOTATIONS();
   if (p === '/api/tg/full') return TG_FULL;
