@@ -92,14 +92,14 @@ export function ChannelsSection() {
   };
 
   return (
-    <>
+    <div className="space-y-7">
       <SettingsGroup title="Добавить канал">
         <div className="py-4">
           <div className="text-sm font-medium text-foreground">Telegram-канал</div>
           <p className="mt-0.5 max-w-[56ch] text-xs leading-relaxed text-ink3">
             Укажите @username публичного канала — начнём собирать статистику.
           </p>
-          <form onSubmit={handleAddChannel} className="mt-3 flex flex-col gap-3 sm:flex-row">
+          <form onSubmit={handleAddChannel} className="mt-3 flex flex-col gap-3 @min-[32rem]:flex-row">
             <div className="relative flex-1">
               <span className="absolute left-3 top-2.5 select-none font-mono text-sm text-muted-foreground">@</span>
               <input
@@ -141,7 +141,7 @@ export function ChannelsSection() {
             const keysOpen = activeChannelKeysId === channel.id && !isCentral;
             return (
               <div key={channel.id} className="py-4">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
+                <div className="flex flex-col gap-3 @min-[32rem]:flex-row @min-[32rem]:items-start @min-[32rem]:justify-between @min-[32rem]:gap-6">
                   <div className="flex min-w-0 items-start gap-3">
                     <ChannelAvatar
                       source={channel.source}
@@ -172,14 +172,15 @@ export function ChannelsSection() {
                     </div>
                   </div>
                   {!isCentral && (
-                    <div className="flex shrink-0 items-center gap-2 self-end sm:self-auto">
+                    <div className="flex shrink-0 items-center gap-2 self-end @min-[32rem]:self-auto">
                       <button
                         type="button"
+                        data-mobile-touch-target=""
                         onClick={() =>
                           setActiveChannelKeysId(activeChannelKeysId === channel.id ? null : channel.id)
                         }
                         className={cn(
-                          'btn-pill border px-3.5 py-1.5 text-xs font-medium transition-colors',
+                          'btn-pill min-h-11 border px-3.5 py-1.5 text-xs font-medium transition-colors sm:min-h-0',
                           activeChannelKeysId === channel.id
                             ? 'border-border bg-secondary text-foreground'
                             : 'bg-background text-muted-foreground hover:bg-muted hover:text-foreground',
@@ -209,7 +210,7 @@ export function ChannelsSection() {
           })}
         </SettingsGroup>
       )}
-    </>
+    </div>
   );
 }
 
@@ -258,22 +259,24 @@ function ChannelKeysPanel({ channelId }: { channelId: number }) {
   const ingestUrl = `${window.location.origin}/api/collector/ingest`;
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between gap-4">
-        <div className="flex items-baseline gap-3">
+    <div data-settings-key-panel="" className="space-y-4">
+      <div className="flex flex-col items-start gap-3 @min-[32rem]:flex-row @min-[32rem]:items-center @min-[32rem]:justify-between @min-[32rem]:gap-4">
+        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
           <h4 className="text-xs font-medium tracking-wider text-muted-foreground">Ключи внешних коллекторов</h4>
           <Link
             to="/connect"
-            className="text-2xs text-primary underline decoration-primary/40 underline-offset-2 hover:decoration-primary"
+            data-mobile-touch-target=""
+            className="inline-flex min-h-11 items-center text-2xs text-primary underline decoration-primary/40 underline-offset-2 hover:decoration-primary sm:min-h-0"
           >
             Что делать с ключом? →
           </Link>
         </div>
         <button
           type="button"
+          data-mobile-touch-target=""
           onClick={handleCreateKey}
           disabled={createKeyMutation.isPending}
-          className="rounded bg-primary px-2.5 py-1 text-2xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+          className="min-h-11 rounded bg-primary px-3 py-1 text-2xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50 sm:min-h-0"
         >
           {createKeyMutation.isPending ? 'Генерация…' : 'Создать ключ'}
         </button>
@@ -302,12 +305,13 @@ function ChannelKeysPanel({ channelId }: { channelId: number }) {
               </svg>
               <span>Скопируйте токен сейчас — он показывается ОДИН раз:</span>
             </div>
-            <div className="relative flex items-center gap-2 break-all rounded bg-muted/60 p-2 font-mono text-xs text-foreground">
-              <span className="flex-1 select-all pr-16">{oneTimeKey}</span>
+            <div className="relative flex min-h-14 items-center gap-2 break-all rounded bg-muted/60 p-2 font-mono text-xs text-foreground sm:min-h-0">
+              <span className="flex-1 select-all pr-24">{oneTimeKey}</span>
               <button
                 type="button"
+                data-mobile-touch-target=""
                 onClick={() => handleCopy(oneTimeKey)}
-                className="absolute right-2 top-1.5 rounded border bg-background px-2 py-1 font-sans text-2xs font-medium transition-colors hover:bg-secondary"
+                className="absolute right-2 top-1.5 min-h-11 rounded border bg-background px-2 py-1 font-sans text-2xs font-medium transition-colors hover:bg-secondary sm:min-h-0"
               >
                 {copied ? 'Скопировано' : 'Копировать'}
               </button>
@@ -346,6 +350,7 @@ function ChannelKeysPanel({ channelId }: { channelId: number }) {
                 ) : (
                   <button
                     type="button"
+                    data-mobile-touch-target=""
                     onClick={async () => {
                       const ok = await confirm({
                         title: 'Отозвать ключ?',
@@ -355,7 +360,7 @@ function ChannelKeysPanel({ channelId }: { channelId: number }) {
                       if (ok) revokeKeyMutation.mutate(k.id);
                     }}
                     disabled={revokeKeyMutation.isPending}
-                    className="font-sans text-2xs text-destructive hover:underline disabled:opacity-50"
+                    className="min-h-11 px-2 font-sans text-2xs text-destructive hover:underline disabled:opacity-50 sm:min-h-0"
                   >
                     Отозвать
                   </button>

@@ -311,34 +311,35 @@ test('mobile 390: source switcher opens as a dismissable bottom sheet', async ({
   await expect(sheet).toHaveCount(0);
 });
 
-// ── Settings = one compact selector, not an eight-item horizontal tab strip ────────────────────
-test('mobile 390: settings section picker is reachable, URL-backed and restores focus', async ({ page }) => {
+// ── Settings = three stable categories with continuous sections ───────────────────────────────
+test('mobile 390: settings categories fit, keep URL state and focus the destination', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 820 });
   await bootDemo(page, '/settings');
 
-  const trigger = page.getByRole('button', {
-    name: 'Выбрать раздел настроек, сейчас Профиль',
-  });
-  await expect(trigger).toBeVisible();
-  expect((await trigger.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+  const categories = page.getByRole('navigation', { name: 'Категории настроек' });
+  const triggers = categories.getByRole('button');
+  await expect(triggers).toHaveCount(3);
+  for (const trigger of await triggers.all()) {
+    await expect(trigger).toBeVisible();
+    expect((await trigger.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+  }
+  await expect(categories.getByRole('button', { name: 'Аккаунт' })).toHaveAttribute(
+    'aria-current',
+    'page',
+  );
 
-  await trigger.click();
-  const sheet = page.getByRole('dialog', { name: 'Разделы настроек' });
-  await expect(sheet).toBeVisible();
-  const security = sheet.getByRole('button', { name: /Безопасность/ });
-  expect((await security.boundingBox())?.height).toBeGreaterThanOrEqual(44);
-  await security.click();
+  await categories.getByRole('button', { name: 'Подключения' }).click();
+  await expect(page).toHaveURL(/[?&]section=channels(?:&|$)/);
+  await expect(page.getByRole('heading', { name: 'Подключения', level: 2 })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Instagram', level: 3 })).toBeVisible();
 
-  await expect(sheet).toHaveCount(0);
-  await expect(page).toHaveURL(/[?&]section=security/);
-  await expect(page.getByRole('heading', { name: 'Безопасность', level: 2 })).toBeVisible();
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBeTruthy();
+  await expect(page.locator('button[aria-label^="Выбрать раздел настроек"]')).toHaveCount(0);
+  await expect(page.getByRole('dialog', { name: 'Разделы настроек' })).toHaveCount(0);
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1),
+  ).toBeTruthy();
 
-  const securityTrigger = page.getByRole('button', {
-    name: 'Выбрать раздел настроек, сейчас Безопасность',
-  });
-  await securityTrigger.click();
-  await page.keyboard.press('Escape');
-  await expect(sheet).toHaveCount(0);
-  await expect(securityTrigger).toBeFocused();
+  await categories.getByRole('button', { name: 'Аккаунт' }).click();
+  await expect(page).toHaveURL(/\/settings(?:\?[^#]*)?$/);
+  expect(new URL(page.url()).searchParams.has('section')).toBe(false);
 });
