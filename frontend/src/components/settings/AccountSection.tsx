@@ -73,11 +73,8 @@ export function ProfileSection() {
   };
 
   return (
-    <SettingsGroup
-      title="Основные данные"
-      description="То, как ваш аккаунт выглядит в Atlavue."
-    >
-      <div className="py-5">
+    <SettingsGroup>
+      <div className="py-5 sm:py-6">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
           <span className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-full bg-avatar text-base font-medium text-ink2 ring-1 ring-border">
             {avatar ? (
@@ -91,32 +88,37 @@ export function ProfileSection() {
             <p className="mt-1 text-xs leading-relaxed text-ink3">
               PNG, JPEG или WebP. Изображение автоматически уменьшается до 256 px.
             </p>
-            <div className="mt-3 flex flex-wrap items-center gap-2">
-              <label className={cn(BTN_SECONDARY, 'cursor-pointer')}>
-                {updateAvatar.isPending
-                  ? 'Загрузка…'
-                  : avatar
-                    ? 'Сменить фото'
-                    : 'Загрузить фото'}
-                <input
-                  type="file"
-                  accept="image/png,image/jpeg,image/webp"
-                  className="hidden"
-                  onChange={onFile}
-                  disabled={updateAvatar.isPending}
-                />
-              </label>
-              {avatar && (
-                <button
-                  type="button"
-                  onClick={() => removeAvatar.mutate()}
-                  disabled={removeAvatar.isPending}
-                  className={BTN_DESTRUCTIVE}
-                >
-                  Удалить
-                </button>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 sm:shrink-0">
+            <label
+              className={cn(
+                BTN_SECONDARY,
+                'cursor-pointer bg-secondary text-secondary-foreground hover:bg-secondary/80',
               )}
-            </div>
+            >
+              {updateAvatar.isPending
+                ? 'Загрузка…'
+                : avatar
+                  ? 'Сменить фото'
+                  : 'Загрузить фото'}
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                className="hidden"
+                onChange={onFile}
+                disabled={updateAvatar.isPending}
+              />
+            </label>
+            {avatar && (
+              <button
+                type="button"
+                onClick={() => removeAvatar.mutate()}
+                disabled={removeAvatar.isPending}
+                className={BTN_DESTRUCTIVE}
+              >
+                Удалить
+              </button>
+            )}
           </div>
         </div>
         {err ? (
@@ -125,13 +127,13 @@ export function ProfileSection() {
           </p>
         ) : null}
       </div>
-      <SettingsRow
-        title="Email"
-        description="Адрес, с которым вы входите в Atlavue."
-        control={
-          <span className="font-mono text-xs text-ink2">{email || '—'}</span>
-        }
-      />
+      <div className="py-4 sm:py-5">
+        <p className="text-sm font-medium text-foreground">Email</p>
+        <p className="mt-1 break-all text-sm text-ink2">{email || '—'}</p>
+        <p className="mt-1 text-xs leading-relaxed text-ink3">
+          Адрес, с которым вы входите в Atlavue.
+        </p>
+      </div>
     </SettingsGroup>
   );
 }

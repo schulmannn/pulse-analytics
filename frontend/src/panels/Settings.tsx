@@ -1,7 +1,6 @@
 import { useCallback, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useMe } from '@/api/queries';
-import { avatarInitials } from '@/components/layout/AccountMenu';
 import {
   Dialog,
   DialogOverlay,
@@ -10,7 +9,6 @@ import {
   DialogTitle,
   useRestoreOpenerFocus,
 } from '@/components/ui/dialog';
-import { PLAN_LABEL, usePlan } from '@/lib/plan';
 import { cn } from '@/lib/utils';
 import {
   SettingsIcon,
@@ -29,9 +27,9 @@ import { InstagramSection } from '@/components/settings/InstagramSection';
 
 /**
  * Settings is a first-class route inside the dashboard shell. The Kokonut-inspired pieces are
- * deliberately compositional: a compact identity card, a calm active rail indicator and a mobile
- * bottom sheet. The product keeps its own tokens, Radix focus handling and URL state — no Motion,
- * Vaul or copied demo state machines.
+ * deliberately compositional: a calm active rail and a mobile bottom sheet. Account identity stays
+ * in the dashboard shell instead of being repeated inside this route. The product keeps its own
+ * tokens, Radix focus handling and URL state — no Motion, Vaul or copied demo state machines.
  */
 type SectionKey =
   | 'account'
@@ -130,7 +128,6 @@ export function Settings() {
   const [params, setParams] = useSearchParams();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const me = useMe();
-  const plan = usePlan();
   const isSuperuser = me.data?.role === 'superuser';
   const rawSection = params.get('section');
   const section: SectionKey = isSection(rawSection) ? rawSection : 'account';
@@ -162,13 +159,13 @@ export function Settings() {
   );
 
   return (
-    <div className="mx-auto w-full max-w-[1120px]">
-      <header className="mb-6">
-        {/* Desktop already has the dashboard topbar h1; the mobile shell does not render a title. */}
-        <h1 className="text-2xl font-medium tracking-tight text-foreground md:hidden">
+    <div className="mx-auto w-full max-w-[1040px]">
+      {/* Desktop already has the dashboard topbar; mobile needs its own page heading. */}
+      <header className="mb-5 md:hidden">
+        <h1 className="text-2xl font-medium tracking-tight text-foreground">
           Настройки
         </h1>
-        <p className="mt-1 max-w-[64ch] text-sm leading-relaxed text-muted-foreground md:mt-0">
+        <p className="mt-1 max-w-[56ch] text-sm leading-relaxed text-muted-foreground">
           Управляйте аккаунтом, рабочим пространством и подключёнными источниками в одном месте.
         </p>
       </header>
@@ -194,24 +191,18 @@ export function Settings() {
         <SettingsIcon name="arrow" className="h-4 w-4 shrink-0 text-muted-foreground" />
       </button>
 
-      <div className="grid items-start gap-6 xl:grid-cols-[240px_minmax(0,1fr)]">
-        <aside className="sticky top-20 hidden space-y-3 xl:block">
-          <AccountIdentity
-            email={me.data?.email ?? undefined}
-            avatar={me.data?.avatar ?? undefined}
-            role={me.data?.role}
-            planLabel={PLAN_LABEL[plan]}
-          />
+      <div className="grid items-start gap-6 xl:grid-cols-[220px_minmax(0,760px)] xl:justify-center xl:gap-8">
+        <aside className="sticky top-20 hidden xl:block">
           <nav
             aria-label="Разделы настроек"
-            className="rounded-2xl border border-border bg-card p-2"
+            className="px-1"
           >
             {SECTION_GROUPS.map((group, groupIndex) => (
               <div
                 key={group.label}
-                className={cn(groupIndex > 0 && 'mt-3 border-t border-border pt-3')}
+                className={cn(groupIndex > 0 && 'mt-5')}
               >
-                <p className="px-2.5 pb-1.5 text-2xs font-medium uppercase tracking-wide text-ink3">
+                <p className="px-2.5 pb-1 text-2xs font-medium uppercase tracking-wide text-ink3">
                   {group.label}
                 </p>
                 <div className="space-y-0.5">
@@ -227,7 +218,7 @@ export function Settings() {
               </div>
             ))}
             {isSuperuser && (
-              <div className="mt-3 border-t border-border pt-3">
+              <div className="mt-5">
                 <Link
                   to="/admin"
                   className="flex min-h-10 items-center gap-2.5 rounded-xl px-2.5 py-2 text-sm text-ink2 transition-colors hover:bg-muted/60 hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/50"
@@ -243,26 +234,21 @@ export function Settings() {
 
         <section
           aria-labelledby={`settings-${section}-title`}
-          className="min-w-0"
+          className="min-w-0 max-w-[760px]"
         >
-          <div className="mb-5 flex items-start gap-3">
-            <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-border bg-card text-foreground">
-              <SettingsIcon name={active.icon} className="h-4 w-4" />
-            </span>
-            <div className="min-w-0">
-              <h2
-                id={`settings-${section}-title`}
-                className="text-lg font-medium tracking-tight text-foreground"
-              >
-                {active.label}
-              </h2>
-              <p className="mt-1 max-w-[64ch] text-sm leading-relaxed text-muted-foreground">
-                {active.description}
-              </p>
-            </div>
+          <div className="mb-5 min-w-0">
+            <h2
+              id={`settings-${section}-title`}
+              className="text-xl font-medium tracking-tight text-foreground"
+            >
+              {active.label}
+            </h2>
+            <p className="mt-1 max-w-[56ch] text-sm leading-relaxed text-muted-foreground">
+              {active.description}
+            </p>
           </div>
 
-          <div className="space-y-8">{renderSection(section, setSection)}</div>
+          <div className="space-y-6">{renderSection(section, setSection)}</div>
         </section>
       </div>
 
@@ -302,46 +288,6 @@ function renderSection(
   }
 }
 
-function AccountIdentity({
-  email,
-  avatar,
-  role,
-  planLabel,
-}: {
-  email?: string;
-  avatar?: string;
-  role?: string;
-  planLabel: string;
-}) {
-  return (
-    <div className="rounded-2xl border border-border bg-card p-4">
-      <div className="flex items-center gap-3">
-        <span className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-avatar text-xs font-medium text-ink2">
-          {avatar ? (
-            <img src={avatar} alt="" className="h-full w-full object-cover" />
-          ) : (
-            avatarInitials(email)
-          )}
-        </span>
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium text-foreground">
-            {email?.replace(/@.*/, '') || 'Аккаунт'}
-          </p>
-          <p className="mt-0.5 truncate text-2xs text-muted-foreground">{email || '—'}</p>
-        </div>
-      </div>
-      <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-border pt-3">
-        <span className="rounded-full border border-border px-2 py-1 text-2xs font-medium text-ink2">
-          План {planLabel}
-        </span>
-        <span className="rounded-full bg-muted px-2 py-1 text-2xs font-medium text-ink2">
-          {role === 'superuser' ? 'Администратор' : 'Владелец'}
-        </span>
-      </div>
-    </div>
-  );
-}
-
 function SectionNavItem({
   item,
   active,
@@ -357,9 +303,9 @@ function SectionNavItem({
       onClick={onSelect}
       aria-current={active ? 'page' : undefined}
       className={cn(
-        'relative flex min-h-10 w-full items-center gap-2.5 overflow-hidden rounded-xl px-2.5 py-2 text-left text-sm transition-colors before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:rounded-full before:bg-primary before:opacity-0',
+        'relative flex min-h-10 w-full items-center gap-2.5 overflow-hidden rounded-xl px-2.5 py-2 text-left text-sm transition-colors before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:rounded-full before:bg-primary before:opacity-0 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/50',
         active
-          ? 'bg-muted/60 font-medium text-foreground before:opacity-100'
+          ? 'bg-card font-medium text-foreground before:opacity-100'
           : 'text-ink2 hover:bg-muted/60 hover:text-foreground',
       )}
     >

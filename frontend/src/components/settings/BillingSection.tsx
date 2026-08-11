@@ -68,8 +68,8 @@ export function BillingSection() {
           </span>
         }
       />
-      <div className="py-4">
-        <div className="grid gap-3 sm:grid-cols-3">
+      <div className="@container py-4">
+        <div className="grid gap-3 @min-[40rem]:grid-cols-3">
           {PLANS.map((p) => (
             <PlanCard key={p.id} plan={p} active={p.id === plan} />
           ))}
@@ -86,6 +86,7 @@ export function BillingSection() {
 function PlanCard({ plan, active }: { plan: PlanDef; active: boolean }) {
   return (
     <div
+      data-settings-plan-card=""
       className={cn(
         'flex flex-col rounded-lg border p-4',
         active ? 'border-primary' : 'border-border',
