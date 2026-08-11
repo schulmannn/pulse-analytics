@@ -20,6 +20,7 @@ import { InlineSpark } from '@/components/InlineSpark';
 import { PostDetailModal } from '@/components/PostDetailModal';
 import { ErrorState } from '@/components/ErrorState';
 import { Skeleton } from '@/components/ui/skeleton';
+import { cn } from '@/lib/utils';
 
 /**
  * «НЕДЕЛЯ КАНАЛА» — первая поверхность нарративного слоя (roadmap card, фазы 1–2; тон утверждён
@@ -289,26 +290,29 @@ export function NarrativeWeekBody() {
   if (change.best != null) facts.push({ label: 'Лучшая публикация', value: `${fmt.short(change.best)} просмотров` });
   return (
     <>
-      {/* full-ширина = контентная высота (SIZE_HEIGHT.full пуст): рассказ больше не упирается в
-          264px половинной карточки, поэтому ушли и внутренний скролл, и маска затухания снизу. */}
-      <div className="flex h-full gap-6">
-        {/* overflow-y-auto здесь — СТРАХОВКА, а не рабочий режим: на full-карточке родитель высоту
-            не ограничивает, и скроллер не появляется вовсе. Но размер правится руками, и сжатую до
-            half карточку (264px) текст обязан пережить читаемо, а не обрезаться посреди строки —
-            маска гасит нижние 28px как знак «ниже ещё есть». */}
-        <div className="min-w-0 flex-1 overflow-y-auto mask-[linear-gradient(180deg,#000_calc(100%-28px),transparent)]">
-          <NarrativeProse paragraphs={nar.paragraphs} onPost={setOpenPost} />
+      {/* full-ширина = контентная высота (SIZE_HEIGHT.full пуст): рассказ не упирается в 264px
+          половинной карточки. Леджер — ГОРИЗОНТАЛЬНАЯ полоса под текстом, а не правый рейл: рейл
+          задавал высоту пятью строками, тогда как рассказ (под max-w-prose ради читаемости) занимал
+          верхнюю треть — снизу слева зияла мёртвая зона во всю ширину ряда (владелец по скриншоту
+          прода). Полосой высоту диктует текст, и карточка сжимается до «рассказ + строка фактов». */}
+      <div className="flex h-full flex-col gap-4">
+        {/* overflow-y-auto — СТРАХОВКА на случай ручного сжатия до half (264px): текст доскроллится,
+            а не обрежется посреди строки. Маски затухания здесь НЕТ: она гасила нижние 28px
+            безусловно, и на влезающем контенте последний абзац выцветал без всякой причины —
+            «ниже есть ещё» подсказывает сам скроллбар, и только когда это правда. */}
+        <div className="min-w-0 flex-1 overflow-y-auto">
+          <NarrativeProse paragraphs={nar.paragraphs} onPost={setOpenPost} wide />
           {change.headline && (
-            <div className="mt-4 border-t border-border pt-3">
-              <p className="text-sm font-medium text-foreground">{change.headline}</p>
-              {change.evidence[0] && (
-                <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{change.evidence[0]}</p>
-              )}
-            </div>
+            <p className="mt-3 max-w-prose text-sm leading-relaxed text-ink2">
+              {change.headline}
+              {change.evidence[0] ? ` ${change.evidence[0]}` : ''}
+            </p>
           )}
         </div>
         {facts.length > 0 && (
-          <aside className="hidden w-48 shrink-0 space-y-3 border-l border-border pl-5 lg:block">
+          // Факты идут в ряд по естественной ширине: фикс-сетка растянула бы пять коротких пар
+          // «подпись/число» на 1600px ряда, и между ними встали бы дыры шире самих чисел.
+          <aside className="flex shrink-0 flex-wrap gap-x-10 gap-y-3 border-t border-border pt-3">
             {facts.map((f) => (
               <div key={f.label}>
                 <div className="text-2xs tracking-wide text-muted-foreground">{f.label}</div>
@@ -328,10 +332,23 @@ export function NarrativeWeekBody() {
 /** Общий рендерер «текста-с-данными»: абзацы сегментов + приклейка пунктуации к инлайн-элементам
  * (спарк/пилюля). Чип-пост: href (IG-медиа → permalink) или postIndex (TG → PostDetailModal через
  * onPost). Используют и TG-«Неделя канала», и IG-«Неделя». */
-export function NarrativeProse({ paragraphs, onPost }: { paragraphs: NarrativeParagraph[]; onPost?: (i: number) => void }) {
+export function NarrativeProse({
+  paragraphs,
+  onPost,
+  wide = false,
+}: { paragraphs: NarrativeParagraph[]; onPost?: (i: number) => void; wide?: boolean }) {
   const post = onPost ?? (() => {});
   return (
-    <div className="max-w-prose space-y-3.5 text-sm leading-relaxed text-ink2">
+    // `wide` — только для карточки во весь ряд: одна колонка под max-w-prose (≈65ch, канон
+    // читаемости) оставляла бы правую половину 1110px-ряда пустой. Две колонки заполняют ширину,
+    // НЕ трогая меру строки, а break-inside-avoid не даёт абзацу с инлайн-искрой разорваться по
+    // колонкам. Узкие карточки (IG-неделя) остаются одноколоночными.
+    <div
+      className={cn(
+        'space-y-3.5 text-sm leading-relaxed text-ink2',
+        wide ? 'lg:columns-2 lg:gap-10 lg:space-y-0 [&>p]:break-inside-avoid lg:[&>p]:mb-3.5' : 'max-w-prose',
+      )}
+    >
       {paragraphs.map((p, i) => (
         <p key={i}>
           {p.map((seg, j) => {
