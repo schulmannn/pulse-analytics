@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { LoaderDots } from '@/components/ui/loader';
+import { useConfirm } from '@/components/ConfirmDialogProvider';
 import { toast } from 'sonner';
 import { z } from 'zod';
 import QRCode from 'qrcode';
@@ -598,6 +599,7 @@ function MsBackfillBlock() {
 
 // ── МойСклад: подключение по токену API ──
 function MoySkladPanel() {
+  const confirm = useConfirm();
   const qc = useQueryClient();
   const status = useMsStatus();
   // Канал панели (ChannelScope на /connect = канал источника). Мутации обязаны слать ЕГО явно:
@@ -643,6 +645,14 @@ function MoySkladPanel() {
 
   const disconnect = async () => {
     if (busy) return;
+    // Отключение необратимо в том смысле, который важен пользователю: зашифрованный токен
+    // удаляется, и чтобы вернуться, надо снова идти за ним в кабинет МойСклада.
+    const ok = await confirm({
+      title: 'Отключить МойСклад?',
+      reason: 'Токен доступа будет удалён, сбор данных остановится. Уже загруженная история заказов сохранится, но для возобновления понадобится снова получить токен в кабинете МойСклада.',
+      actionLabel: 'Отключить',
+    });
+    if (!ok) return;
     setBusy(true);
     setError(null);
     try {
@@ -723,6 +733,7 @@ function MoySkladPanel() {
 
 // ── Яндекс.Метрика: подключение по OAuth-токену (+ выбор счётчика при нескольких) ──
 function MetrikaPanel() {
+  const confirm = useConfirm();
   const qc = useQueryClient();
   const status = useYmStatus();
   // Канал панели (ChannelScope на /connect = канал источника) — мутации шлют его явно
@@ -786,6 +797,12 @@ function MetrikaPanel() {
 
   const disconnect = async () => {
     if (busy) return;
+    const ok = await confirm({
+      title: 'Отключить Яндекс.Метрику?',
+      reason: 'OAuth-доступ к счётчику будет отозван, сбор остановится. Уже загруженный дневной архив сохранится, но для возобновления понадобится заново пройти авторизацию.',
+      actionLabel: 'Отключить',
+    });
+    if (!ok) return;
     setBusy(true);
     setError(null);
     try {
@@ -891,6 +908,7 @@ function MetrikaPanel() {
 
 // ── Instagram: real OAuth ──
 function InstagramPanel() {
+  const confirm = useConfirm();
   const { channelId } = useSelectedChannel();
   const status = useIgOauthStatus();
   const connect = useConnectIg();
@@ -932,7 +950,16 @@ function InstagramPanel() {
             <button
               type="button"
               data-mobile-touch-target=""
-              onClick={() => disconnect.mutate(undefined, { onSuccess: () => toast('Instagram отключён') })}
+              onClick={() => {
+                void (async () => {
+                  const ok = await confirm({
+                    title: 'Отключить Instagram?',
+                    reason: 'OAuth-доступ к аккаунту будет отозван, сбор остановится. Уже загруженная история сохранится, но для возобновления понадобится заново пройти авторизацию Instagram.',
+                    actionLabel: 'Отключить',
+                  });
+                  if (ok) disconnect.mutate(undefined, { onSuccess: () => toast('Instagram отключён') });
+                })();
+              }}
               disabled={disconnect.isPending}
               className="btn-pill inline-flex min-h-11 items-center border border-border px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-destructive disabled:opacity-50 sm:min-h-0"
             >
@@ -1069,6 +1096,7 @@ function TelegramPanel({
   queryTab?: 'qr' | 'agent' | null;
   reconnectRequested?: boolean;
 }) {
+  const confirm = useConfirm();
   const qc = useQueryClient();
   // Shared status (same ['tg-qr-status'] cache the Overview banner reads). The live login flow below
   // keeps LOCAL state (phase/qrImg/captured channels) — a scan-in-progress overrides the shared
@@ -1230,6 +1258,17 @@ function TelegramPanel({
   };
 
   const disconnect = async () => {
+    // Самое дорогое отключение в продукте: managed QR-сессия ОБЩАЯ для всех каналов владельца,
+    // и её нельзя восстановить — только войти заново по QR с телефона. Поэтому здесь не просто
+    // подтверждение, а type-to-confirm (тот же приём, что у удаления канала).
+    const ok = await confirm({
+      title: 'Отключить Telegram?',
+      reason: 'Сессия будет удалена, и сбор остановится СРАЗУ ПО ВСЕМ каналам этого подключения. Восстановить её нельзя — понадобится заново войти по QR-коду с телефона. Каналы и уже собранная история сохранятся.',
+      actionLabel: 'Отключить Telegram',
+      typeToConfirm: 'Telegram',
+      typeToConfirmLabel: 'Введите «Telegram», чтобы подтвердить',
+    });
+    if (!ok) return;
     setBusy(true);
     // Тост — только при удачном DELETE; провал молча игнорируется (сессия и так мертва), не тостить.
     try {
