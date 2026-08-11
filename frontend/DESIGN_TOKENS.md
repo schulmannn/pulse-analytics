@@ -189,6 +189,7 @@ duration/easing.
 | `--ease-exit` | `cubic-bezier(0.68, 0, 0.77, 0)` | the house curve **mirrored** — exits accelerate away instead of settling. An element leaving should not decelerate into its own disappearance; ease-out on an exit reads as hesitation |
 | `--ease-chart-morph` | `cubic-bezier(0.25, 0.1, 0.25, 1)` | Recharts `ease` parity for point-to-point chart updates |
 | `--motion-track` | 100ms | smoothing for a transform the JS rewrites every pointermove frame (dock magnification on Connect) — **not** a general «fast» rung |
+| `--motion-exit` | 120ms | overlay **dismissal**, ~0.8× the 150ms enter. `--ease-exit` gave exits an accelerating curve, but every overlay still left over exactly as many milliseconds as it took to arrive — so a dismissal had to be waited out. An entrance may take its time (it carries new content); a thing the user has decided to be rid of should be gone before it is missed |
 | `--motion-press` | 140ms | tactile press feedback (button dip) |
 | `--motion-fast` | 200ms | quick opacity / colour fades |
 | `--motion-base` | 240ms | standard control transition (mode swap · icon · hover→active) |
@@ -208,6 +209,7 @@ the gap — defined in `src/index.css`, enforced by `scripts/design-motion-lint.
 |---|---|---|
 | `dur-track` · `dur-press` · `dur-fast` · `dur-base` · `dur-reveal` | `transition-duration` | the matching `--motion-*` |
 | `anim-dur-fast` | `animation-duration` | `--motion-fast` (tailwindcss-animate enter/exit on dialogs) |
+| `anim-dur-exit` | `animation-duration` | `--motion-exit` — pair with `data-[state=closed]:`. Animation-duration, not transition-duration: the Radix overlays leave through tailwindcss-animate keyframes, which `dur-*` cannot reach |
 | `ease-house` | `transition-timing-function` + `animation-timing-function` | `--ease-standard` |
 | `ease-exit` | same two properties | `--ease-exit` — reach for it on a close/leave state (`data-[state=closed]:ease-exit`) |
 
@@ -262,6 +264,24 @@ defaults (`1500ms`, `ease`); the shorter house settle curve made most movement l
 The shared `ChartTooltip` fades in and glides between points via a tokenised
 `transform` transition (`--motion-base`, never `left`/`top`) — one `[data-chart-tooltip]` rule owns it
 for default/rhea/comparison alike.
+
+**A pressable control dips while held.** The shared `Button` carries `active:scale-[0.97]` over
+`--motion-press` on its five SURFACE variants; `link` is text and does not depress. A control that
+reacts to the finger feels connected to it, while one that only changes colour on release reads as a
+picture of a button. Under `prefers-reduced-motion` the dip is dropped outright
+(`motion-reduce:active:scale-100`) rather than left to the global 0.01ms net, which would turn it into
+a teleport — the reduced-motion rule is «keep the colour half, drop the transform half», the same split
+as the hover gate below. Disabled buttons never reach `:active` (`disabled:pointer-events-none`).
+Bespoke controls that predate this (`edit-toggle`, `add-widget-trigger`, `report-control`) keep their
+own `scale(0.98)` — same band, and they are not `Button` instances.
+Gated by `e2e/press-and-exit.spec.ts`, which measures computed `scale` under a held pointer: a
+class-name assertion would pass even if the rule lost a specificity tie.
+
+**Exits are shorter than entrances.** Every `data-[state=closed]` overlay carries
+`anim-dur-exit` alongside `ease-exit`, so it leaves in 120ms against the 150ms it took to arrive.
+Applied to all eight animated surfaces (dialog, alert-dialog, dropdown, context-menu, select,
+popover, tooltip, hover-card). The `data-*` variant compiles to an attribute selector, so the exit
+duration outranks a plain `anim-dur-fast` on the same element without `!important`.
 
 **Hover motion needs a real pointer.** A `:hover` rule that moves something must be gated to
 `@media (hover: hover) and (pointer: fine)`: on a touch screen the browser leaves a synthetic hover on

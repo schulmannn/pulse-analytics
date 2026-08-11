@@ -21,7 +21,7 @@ const ContextMenuContent = React.forwardRef<
       ref={ref}
       className={cn(
         'z-popover max-h-(--radix-context-menu-content-available-height) min-w-44 overflow-y-auto overflow-x-hidden rounded-xl border border-border bg-popover p-1.5 text-popover-foreground',
-        'data-[state=open]:animate-in data-[state=open]:ease-house data-[state=closed]:animate-out data-[state=closed]:ease-exit data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 motion-reduce:duration-0 origin-(--radix-context-menu-content-transform-origin)',
+        'data-[state=open]:animate-in data-[state=open]:ease-house data-[state=closed]:animate-out data-[state=closed]:ease-exit data-[state=closed]:anim-dur-exit data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 motion-reduce:duration-0 origin-(--radix-context-menu-content-transform-origin)',
         className,
       )}
       {...props}

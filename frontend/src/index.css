@@ -1369,6 +1369,13 @@
   animation-duration: var(--motion-fast);
 }
 
+/* Exit counterpart of anim-dur-fast — pair it with `data-[state=closed]:` so a surface leaves faster
+   than it arrived. Animation-duration, not transition-duration: the Radix overlays leave through
+   tailwindcss-animate keyframes (`animate-out`), which `dur-*` cannot reach. */
+@utility anim-dur-exit {
+  animation-duration: var(--motion-exit);
+}
+
 /* The house curve for both axes — `ease-out`/`ease-in-out` are off-canon (see DESIGN_TOKENS). */
 @utility ease-house {
   transition-timing-function: var(--ease-standard);
@@ -1832,6 +1839,11 @@
          transition-timing-function: var(--ease-spring); */
     --ease-spring: linear(0, 0.0637, 0.2105, 0.3963 18.2%, 0.7538 29.4%, 0.9243, 1.0126 47%, 1.0329, 1.0298 58.8%, 1.0034 70.6%, 0.9982, 1);
     --motion-track: 100ms;    /* smoothing for a transform written per pointermove frame   */
+    /* Leaving is shorter than arriving. --ease-exit already gives the exit an accelerating CURVE,
+       but until now every overlay left over exactly as many milliseconds as it took to arrive, so
+       the dismissal still had to be waited out. An element the user has decided to be rid of should
+       be gone before it is missed; an entrance may take its time because it carries new content. */
+    --motion-exit: 120ms;     /* overlay dismissal (~0.8× the 150ms enter)                  */
     --motion-press: 140ms;    /* tactile press feedback (button dip)                       */
     --motion-fast: 200ms;     /* quick opacity / colour fades                              */
     --motion-base: 240ms;     /* standard control transition (mode swap · icon · hover→active) */
