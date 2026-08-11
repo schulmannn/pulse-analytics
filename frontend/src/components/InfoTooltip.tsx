@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useSyncExternalStore } from 'react';
 import type { ReactNode } from 'react';
 import { Icon } from '@/components/nav-icons';
 import {
@@ -8,6 +8,12 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
+import {
+  isTooltipSkipActive,
+  openTooltipSkipWindow,
+  subscribeTooltipSkip,
+  tooltipDelayFor,
+} from '@/lib/tooltipSkip';
 import type { MetricDef } from '@/lib/widgetMetrics';
 
 interface InfoTooltipProps {
@@ -22,13 +28,26 @@ interface InfoTooltipProps {
 /**
  * Accessible "ⓘ" info affordance. shadcn/Radix owns collision-aware positioning, portal,
  * focus/hover semantics and Escape dismissal; the controlled click keeps it usable on touch.
+ *
+ * Провайдер остаётся ПОСВОЙ у каждой ⓘ (общий в корне тянет @radix-ui/react-tooltip в статическое
+ * замыкание каждого защищённого маршрута — замерено, +2.5KB gzip на каждый). Групповое поведение
+ * «первая ждёт, соседние мгновенно» даёт общее окно пропуска из lib/tooltipSkip: оно уведомляет
+ * подписчиков на ОБОИХ переходах, поэтому delayDuration не может протухнуть между рендерами.
  */
 export function InfoTooltip({ title, children, className }: InfoTooltipProps) {
   const [open, setOpen] = useState(false);
+  const skip = useSyncExternalStore(subscribeTooltipSkip, isTooltipSkipActive, () => false);
 
   return (
-    <TooltipProvider delayDuration={120}>
-      <Tooltip open={open} onOpenChange={setOpen}>
+    <TooltipProvider delayDuration={tooltipDelayFor(skip)}>
+      <Tooltip
+        open={open}
+        onOpenChange={(next) => {
+          setOpen(next);
+          // Закрытие — старт окна: следующая ⓘ под курсором откроется без задержки.
+          if (!next) openTooltipSkipWindow();
+        }}
+      >
         <TooltipTrigger asChild>
           <button
             type="button"
