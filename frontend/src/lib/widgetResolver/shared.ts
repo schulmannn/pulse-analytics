@@ -114,6 +114,7 @@ export function capResultSeries(out: WidgetResult, viz: WidgetViz, kind: SeriesA
     // не становится «последним значением». Корзина, где ВСЕ дни — пропуск, сама остаётся пропуском,
     // иначе агрегация тихо родила бы ноль, которого не было.
     const by = new Map<string, number | null>();
+    const meanAcc = new Map<string, { sum: number; n: number }>();
     for (const point of points) {
       const timestamp = Date.parse(point.date);
       if (!Number.isFinite(timestamp)) return out;
@@ -121,7 +122,19 @@ export function capResultSeries(out: WidgetResult, viz: WidgetViz, kind: SeriesA
       if (!by.has(key)) by.set(key, null);
       if (point.value == null) continue;
       const prev = by.get(key) ?? null;
-      by.set(key, kind === 'level' ? point.value : (prev ?? 0) + point.value);
+      if (kind === 'level') {
+        by.set(key, point.value);
+      } else if (kind === 'mean') {
+        // Точка ряда уже среднее (средний охват на пост) — суммировать средние нельзя, это
+        // завысило бы неделю в разы. Копим сумму и счётчик, делим в конце.
+        const cell = meanAcc.get(key) ?? { sum: 0, n: 0 };
+        cell.sum += point.value;
+        cell.n += 1;
+        meanAcc.set(key, cell);
+        by.set(key, cell.sum / cell.n);
+      } else {
+        by.set(key, (prev ?? 0) + point.value);
+      }
     }
     out.series = [...by.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
