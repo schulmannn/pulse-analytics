@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { NavLink } from 'react-router-dom';
 import { isPlainLeftClick, useViewTransitionNavigate } from '@/lib/viewTransitionNavigate';
@@ -24,11 +24,35 @@ import { useActiveNetworkNav, type NavLinkDef } from './nav';
  * persisted (localStorage `pulse_sidebar`). No hover-expand overlay: the rail stays a rail
  * until toggled. Until the user chooses, the default is responsive — expanded at ≥lg, rail
  * on md–lg. <md the sidebar is hidden (MobileHeader + MobileBottomNav take over).
+ *
+ * The mode switch animates on the POINTER path only. A keyboard shortcut is fired dozens of times a
+ * day by the people who know it, and a repeated 300ms tween on a shortcut stops reading as polish and
+ * starts reading as lag — so Ctrl+B snaps (see `toggleFromKeyboard`).
  */
 export function Sidebar({ email, role, avatar }: { email?: string; role?: string; avatar?: string | null }) {
   const isMd = useMediaQuery('(min-width: 768px)');
   const isLg = useMediaQuery('(min-width: 1024px)');
   const { rail, toggle } = useSidebarMode(isLg);
+  const shellRef = useRef<HTMLElement>(null);
+
+  /**
+   * Toggle with the width/copy tween suppressed for exactly this switch. `data-instant` is written
+   * imperatively BEFORE the state update so the attribute and the new width land in the same commit
+   * (a React state flag would race the paint); a double rAF clears it once the new layout has been
+   * painted, so the next pointer toggle animates normally.
+   */
+  const toggleFromKeyboard = useCallback(() => {
+    const el = shellRef.current;
+    if (el) {
+      el.dataset.instant = 'true';
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          delete el.dataset.instant;
+        });
+      });
+    }
+    toggle();
+  }, [toggle]);
 
   // Global Ctrl+B / ⌘B toggle. Skipped while typing (input / textarea / contenteditable) and
   // below md (no sidebar to toggle). ⌘K stays with the command palette — no key overlap.
@@ -39,14 +63,15 @@ export function Sidebar({ email, role, avatar }: { email?: string; role?: string
       const t = e.target;
       if (t instanceof HTMLElement && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
       e.preventDefault();
-      toggle();
+      toggleFromKeyboard();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [isMd, toggle]);
+  }, [isMd, toggleFromKeyboard]);
 
   return (
     <aside
+      ref={shellRef}
       aria-label="Боковая панель"
       data-rail={rail ? 'true' : 'false'}
       className={cn(

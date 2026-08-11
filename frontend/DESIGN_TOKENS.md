@@ -185,8 +185,8 @@ duration/easing.
 
 | Token | Value | Use |
 |---|---|---|
-| `--ease-standard` | `cubic-bezier(0.2, 0.7, 0.3, 1)` | the house entrance / settle ease-out |
-| `--ease-exit` | `cubic-bezier(0.7, 0, 0.8, 0.3)` | the house curve **mirrored** — exits accelerate away instead of settling. An element leaving should not decelerate into its own disappearance; ease-out on an exit reads as hesitation |
+| `--ease-standard` | `cubic-bezier(0.23, 1, 0.32, 1)` | the house entrance / settle **strong** ease-out. Both control points ride the ceiling, so ~90% of the distance is covered in the first third of the duration and the rest is settle. Perceived speed is set by that first third, not by the total — which is why the previous half-strength `cubic-bezier(0.2, 0.7, 0.3, 1)` read as hesitation at the same durations |
+| `--ease-exit` | `cubic-bezier(0.68, 0, 0.77, 0)` | the house curve **mirrored** — exits accelerate away instead of settling. An element leaving should not decelerate into its own disappearance; ease-out on an exit reads as hesitation |
 | `--ease-chart-morph` | `cubic-bezier(0.25, 0.1, 0.25, 1)` | Recharts `ease` parity for point-to-point chart updates |
 | `--motion-track` | 100ms | smoothing for a transform the JS rewrites every pointermove frame (dock magnification on Connect) — **not** a general «fast» rung |
 | `--motion-press` | 140ms | tactile press feedback (button dip) |
@@ -263,6 +263,16 @@ The shared `ChartTooltip` fades in and glides between points via a tokenised
 `transform` transition (`--motion-base`, never `left`/`top`) — one `[data-chart-tooltip]` rule owns it
 for default/rhea/comparison alike.
 
+**Hover motion needs a real pointer.** A `:hover` rule that moves something must be gated to
+`@media (hover: hover) and (pointer: fine)`: on a touch screen the browser leaves a synthetic hover on
+the last-tapped element, so the transform sticks there until something else is tapped. Hand-written CSS
+writes the media query directly (see the sidebar toggle glyph / tooltip); Tailwind utilities use the
+**`hover-fine:` / `group-hover-fine:`** variants declared at the top of `index.css`. This covers motion
+ONLY — colour and ink hovers keep the plain `hover:` variant, whose v3-parity override stays in place
+for the staged phone migration, because a stuck tint is invisible. Same split as reduced motion: keep
+the opacity/colour half, drop the transform half. An affordance whose *reveal* is the opacity change
+(the IG row chevron) gates only its slide, so touch still gets the hint.
+
 **Reduced motion.** A global safety net in `index.css` collapses every animation/transition to 0.01ms
 under `prefers-reduced-motion: reduce`, so token-driven rules never need a per-rule guard. Infinite
 loops (reorder jiggle, starfield twinkle) and readability-critical reveals additionally carry explicit
@@ -277,6 +287,15 @@ staged copy delay: labels ride the same beat instead of lagging a disconnected e
 occupy a fixed `40px` first track centred on the rail axis; only the second-track copy is
 masked/faded/translated. The global reduced-motion net collapses the duration to ~0, and since no rule
 carries a transition-delay the mode switch is immediate.
+
+**Frequency gate: the keyboard path does not animate.** `Ctrl+B` snaps the sidebar to its new width;
+only the pointer toggle plays the 300ms gesture. A shortcut is used dozens of times a day by whoever
+learned it, and at that frequency an animation stops reading as polish and becomes latency the user
+waits out — the same reasoning that keeps motion off any other high-frequency, keyboard-initiated
+action. `Sidebar.tsx` writes `data-instant` on the shell for exactly the one commit that changes the
+width and clears it on the next painted frame; the `.sidebar-shell[data-instant]` rule zeroes the
+duration for that frame only. Gated by `e2e/smoke.spec.ts` («Ctrl+B snaps the sidebar…»), which also
+asserts the pointer path is still mid-flight two frames in.
 
 The **toggle** rides the sidebar's moving outer edge — pinned to the panel's right edge when open,
 sliding back onto the `32px` rail axis as it collapses (Search holds the left axis, dropping below the

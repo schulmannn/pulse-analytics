@@ -3,7 +3,7 @@
 // ad-hoc per component instead of pulling from a token:
 //   node scripts/design-motion-lint.mjs      → report + exit 1 on canon violations
 // Canon (see frontend/DESIGN_TOKENS.md):
-//   • the house easing cubic-bezier(0.2, 0.7, 0.3, 1) must be var(--ease-standard), never inlined
+//   • the house easing cubic-bezier(0.23, 1, 0.32, 1) must be var(--ease-standard), never inlined
 //   • UI durations come from the --motion-* ladder. In .ts/.tsx that means the dur-* / ease-house
 //     utilities (index.css) — never a numeric `duration-300` or a bare `ease-out`. Raw ms/s live in
 //     index.css only: the :root ladder and the allow-listed bespoke illustration/landing keyframes.
@@ -21,7 +21,7 @@ import { dirname, join, relative } from 'node:path';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const srcDir = join(root, 'src');
-const HOUSE_CURVE = 'cubic-bezier(0.2, 0.7, 0.3, 1)';
+const HOUSE_CURVE = 'cubic-bezier(0.23, 1, 0.32, 1)';
 
 function* walk(dir) {
   for (const name of readdirSync(dir)) {

@@ -821,7 +821,10 @@ export function IgContentDesktop({ ig }: { ig: IgData }) {
                           'mx-auto size-4 transition-[opacity,transform,color] dur-fast ease-house',
                           isOpen
                             ? 'text-primary opacity-100'
-                            : 'translate-x-1 text-muted-foreground opacity-0 group-hover:translate-x-0 group-hover:opacity-100 group-focus-within:translate-x-0 group-focus-within:opacity-100',
+                            // Only the slide is pointer-gated: the opacity reveal IS the affordance
+                            // («эта строка открывается»), so on a touch tablet it still appears —
+                            // just without the 4px nudge that would otherwise stick after a tap.
+                            : 'translate-x-1 text-muted-foreground opacity-0 group-hover:opacity-100 group-hover-fine:translate-x-0 group-focus-within:translate-x-0 group-focus-within:opacity-100',
                         )}
                       />
                     )}

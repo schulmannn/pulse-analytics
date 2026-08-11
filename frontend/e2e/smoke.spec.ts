@@ -278,6 +278,43 @@ test('desktop sidebar glides between open and rail without moving the icon axis'
   expect(await page.evaluate(() => localStorage.getItem('pulse_sidebar'))).toBe('rail');
 });
 
+test('Ctrl+B snaps the sidebar while the pointer toggle keeps the tween', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop-1440', 'desktop sidebar motion');
+  await page.addInitScript(() => localStorage.setItem('pulse_sidebar', 'open'));
+  await bootDemo(page, '/');
+
+  const sidebar = page.getByRole('complementary', { name: 'Боковая панель' });
+  expect((await requireBox(sidebar)).width).toBeCloseTo(240, 0);
+
+  // Keyboard path: a shortcut fires dozens of times a day, so the mode switch is painted at its
+  // target width on the very next frame instead of being tweened (Sidebar's `data-instant`).
+  await page.keyboard.press('Control+b');
+  const afterShortcut = await sidebar.evaluate(
+    (element) =>
+      new Promise<number>((resolve) => {
+        requestAnimationFrame(() => resolve(element.getBoundingClientRect().width));
+      }),
+  );
+  expect(afterShortcut).toBeCloseTo(64, 0);
+
+  // Pointer path is untouched: two frames into a 300ms tween the rail is still mid-flight.
+  await page.getByRole('button', { name: 'Показать панель' }).click();
+  const midFlight = await sidebar.evaluate(
+    (element) =>
+      new Promise<number>((resolve) => {
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() => resolve(element.getBoundingClientRect().width)),
+        );
+      }),
+  );
+  expect(midFlight).toBeGreaterThan(64);
+  expect(midFlight).toBeLessThan(240);
+  await expect.poll(async () => (await sidebar.boundingBox())?.width ?? 0).toBeCloseTo(240, 0);
+
+  // …and `data-instant` never survives the switch that used it — the next pointer toggle animates.
+  expect(await sidebar.evaluate((element) => element.hasAttribute('data-instant'))).toBe(false);
+});
+
 test('reduced motion removes sidebar duration and staged copy delay', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop-1440', 'desktop sidebar motion');
   await page.emulateMedia({ reducedMotion: 'reduce' });
