@@ -2,17 +2,11 @@ import type { ReactNode, SVGProps } from 'react';
 import { buttonVariants } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
-/**
- * Shared building blocks for the settings dialog ("Refined Technical"):
- * a settings GROUP is the sanctioned bordered form container (rounded border + divide-y rows),
- * a ROW is title + muted description on the left and the control on the right.
- * Depth stays in hairlines — no shadows, no card chrome.
- */
+/** Shared settings building blocks: calm card-scale groups and responsive setting rows. */
 
 /**
- * Settings group — an OPEN hairline ledger (Claude/steep): optional small heading, then rows
- * separated by divide-y. No box around the group; with a heading, a top hairline opens the
- * ledger. Panes whose dialog header already names them skip the heading entirely.
+ * A group is the only settings-level surface: card radius, one hairline and no shadow. Direct
+ * children receive consistent horizontal padding so rows, loading states and custom blocks align.
  */
 export function SettingsGroup({
   title,
@@ -28,7 +22,12 @@ export function SettingsGroup({
     <section>
       {title ? <h3 className="text-sm font-medium text-foreground">{title}</h3> : null}
       {description ? <p className="mt-1 text-xs leading-relaxed text-ink3">{description}</p> : null}
-      <div className={cn('divide-y divide-border', hasHeading && 'mt-3 border-t border-border')}>
+      <div
+        className={cn(
+          'overflow-hidden rounded-2xl border border-border bg-card divide-y divide-border [&>*]:px-4 sm:[&>*]:px-5',
+          hasHeading && 'mt-3',
+        )}
+      >
         {children}
       </div>
     </section>
@@ -46,16 +45,15 @@ interface SettingsRowProps {
   className?: string;
 }
 
-/** One setting row: title (sm, medium) + desc (xs, ink3) left, control right (vertically
-    centered against the text block, Claude-style); stacks on mobile. Open ledger — no inset. */
+/** One setting row: title and supporting copy on the left, control on the right; stacks on phones. */
 export function SettingsRow({ title, description, control, footer, className }: SettingsRowProps) {
   return (
-    <div className={cn('py-4', className)}>
+    <div className={cn('py-4 sm:py-5', className)}>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
         <div className="min-w-0">
           <div className="text-sm font-medium text-foreground">{title}</div>
           {description ? (
-            <div className="mt-0.5 max-w-[56ch] text-xs leading-relaxed text-ink3">{description}</div>
+            <div className="mt-1 max-w-[56ch] text-xs leading-relaxed text-ink3">{description}</div>
           ) : null}
         </div>
         {control ? <div className="flex shrink-0 flex-wrap items-center gap-2">{control}</div> : null}

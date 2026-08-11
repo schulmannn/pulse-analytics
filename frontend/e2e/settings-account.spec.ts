@@ -75,7 +75,7 @@ test('подтверждённое удаление шлёт DELETE c confirm и
   expect(deletes).toEqual([{ confirm: 'user@example.com' }]);
 });
 
-test('ошибка сервера остаётся в диалоге и не уводит со страницы', async ({ page }) => {
+test('ошибка сервера остаётся в подтверждении и не уводит со страницы', async ({ page }) => {
   await bootSettings(page, {
     status: 400,
     body: JSON.stringify({ error: 'Подтверждение не совпадает с email аккаунта' }),

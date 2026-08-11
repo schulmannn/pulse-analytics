@@ -45,15 +45,3 @@ test('analytics tabs delegate Home/End and panel relationships to Radix', async 
   await expect(dynamics).toHaveAttribute('aria-selected', 'true');
   await expect(page).not.toHaveURL(/[?&]tab=/);
 });
-
-test('settings mobile navigation uses the shared line tabs without shrinking touch targets', async ({ page }, testInfo) => {
-  test.skip(testInfo.project.name !== 'mobile-430', 'mobile settings tab row');
-  await bootDemo(page, '/settings');
-
-  const tabList = page.getByRole('tablist', { name: 'Разделы настроек' });
-  await expect(tabList).toHaveAttribute('data-variant', 'line');
-  await expect(tabList.locator('[data-tabs-glider]')).toHaveCount(0);
-  const profile = page.getByRole('tab', { name: 'Профиль' });
-  expect((await profile.boundingBox())?.height).toBeGreaterThanOrEqual(44);
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBeTruthy();
-});

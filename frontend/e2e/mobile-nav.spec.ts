@@ -20,6 +20,7 @@ const PHONE_ROUTES = [
   { path: '/instagram/content', label: 'instagram content' },
   { path: '/mentions', label: 'mentions' },
   { path: '/connect', label: 'connect' },
+  { path: '/settings', label: 'settings' },
 ] as const;
 
 /** Обмер один на оба теста ниже: горизонтальный скролл и размер основных контролов гейтятся вместе. */
@@ -308,4 +309,36 @@ test('mobile 390: source switcher opens as a dismissable bottom sheet', async ({
   await expect(sheet).toBeVisible();
   await page.mouse.click(195, 30);
   await expect(sheet).toHaveCount(0);
+});
+
+// ── Settings = one compact selector, not an eight-item horizontal tab strip ────────────────────
+test('mobile 390: settings section picker is reachable, URL-backed and restores focus', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 820 });
+  await bootDemo(page, '/settings');
+
+  const trigger = page.getByRole('button', {
+    name: 'Выбрать раздел настроек, сейчас Профиль',
+  });
+  await expect(trigger).toBeVisible();
+  expect((await trigger.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+
+  await trigger.click();
+  const sheet = page.getByRole('dialog', { name: 'Разделы настроек' });
+  await expect(sheet).toBeVisible();
+  const security = sheet.getByRole('button', { name: /Безопасность/ });
+  expect((await security.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+  await security.click();
+
+  await expect(sheet).toHaveCount(0);
+  await expect(page).toHaveURL(/[?&]section=security/);
+  await expect(page.getByRole('heading', { name: 'Безопасность', level: 2 })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBeTruthy();
+
+  const securityTrigger = page.getByRole('button', {
+    name: 'Выбрать раздел настроек, сейчас Безопасность',
+  });
+  await securityTrigger.click();
+  await page.keyboard.press('Escape');
+  await expect(sheet).toHaveCount(0);
+  await expect(securityTrigger).toBeFocused();
 });

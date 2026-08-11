@@ -1,14 +1,17 @@
-import { useCallback } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { useCallback, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useMe } from '@/api/queries';
-import { cn } from '@/lib/utils';
+import { avatarInitials } from '@/components/layout/AccountMenu';
 import {
   Dialog,
-  DialogContent,
-  DialogDescription,
+  DialogOverlay,
+  DialogPortal,
+  DialogSurface,
   DialogTitle,
+  useRestoreOpenerFocus,
 } from '@/components/ui/dialog';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { PLAN_LABEL, usePlan } from '@/lib/plan';
+import { cn } from '@/lib/utils';
 import {
   SettingsIcon,
   type SettingsIconName,
@@ -25,47 +28,121 @@ import { ChannelsSection } from '@/components/settings/ChannelsSection';
 import { InstagramSection } from '@/components/settings/InstagramSection';
 
 /**
- * Настройки — a full-screen settings DIALOG over the dashboard (Claude-desktop style), not a page.
- * The /settings route stays; the component renders a fixed overlay: left mini-nav (pane switcher)
- * + one active section of setting rows. The active section lives in ?section= (replace-written,
- * default «account» = Профиль keeps the URL clean), so section clicks never pollute history and
- * closing is a single Back. Closing returns to the page the dialog was opened from; a deep-link
- * close lands on the overview.
+ * Settings is a first-class route inside the dashboard shell. The Kokonut-inspired pieces are
+ * deliberately compositional: a compact identity card, a calm active rail indicator and a mobile
+ * bottom sheet. The product keeps its own tokens, Radix focus handling and URL state — no Motion,
+ * Vaul or copied demo state machines.
  */
-const ACCOUNT_SECTIONS = [
-  { key: 'account', label: 'Профиль', icon: 'user' },
-  { key: 'appearance', label: 'Оформление', icon: 'sun' },
-  { key: 'security', label: 'Безопасность', icon: 'lock' },
-  { key: 'billing', label: 'Подписка', icon: 'card' },
-  { key: 'team', label: 'Команда', icon: 'users' },
+type SectionKey =
+  | 'account'
+  | 'appearance'
+  | 'security'
+  | 'billing'
+  | 'team'
+  | 'data'
+  | 'channels'
+  | 'instagram';
+
+interface SectionItem {
+  key: SectionKey;
+  label: string;
+  icon: SettingsIconName;
+  description: string;
+}
+
+interface SectionGroup {
+  label: string;
+  items: readonly SectionItem[];
+}
+
+const SECTION_GROUPS: readonly SectionGroup[] = [
+  {
+    label: 'Аккаунт',
+    items: [
+      {
+        key: 'account',
+        label: 'Профиль',
+        icon: 'user',
+        description: 'Фото, email и основные данные аккаунта.',
+      },
+      {
+        key: 'appearance',
+        label: 'Оформление',
+        icon: 'sun',
+        description: 'Тема и внешний вид интерфейса на этом устройстве.',
+      },
+      {
+        key: 'security',
+        label: 'Безопасность',
+        icon: 'lock',
+        description: 'Пароль и удаление аккаунта.',
+      },
+    ],
+  },
+  {
+    label: 'Рабочее пространство',
+    items: [
+      {
+        key: 'billing',
+        label: 'Подписка',
+        icon: 'card',
+        description: 'Текущий тариф, возможности и лимиты.',
+      },
+      {
+        key: 'team',
+        label: 'Команда',
+        icon: 'users',
+        description: 'Участники, роли и доступ к рабочему пространству.',
+      },
+      {
+        key: 'data',
+        label: 'Данные',
+        icon: 'database',
+        description: 'Экспорт, переносимость и управление данными.',
+      },
+    ],
+  },
+  {
+    label: 'Подключения',
+    items: [
+      {
+        key: 'channels',
+        label: 'Каналы',
+        icon: 'signal',
+        description: 'Источники данных и ключи внешних коллекторов.',
+      },
+      {
+        key: 'instagram',
+        label: 'Instagram',
+        icon: 'instagram',
+        description: 'OAuth-подключение и статус аккаунта Instagram.',
+      },
+    ],
+  },
 ] as const;
-const DATA_SECTIONS = [
-  { key: 'data', label: 'Данные', icon: 'database' },
-  { key: 'channels', label: 'Каналы', icon: 'signal' },
-  { key: 'instagram', label: 'Instagram', icon: 'instagram' },
-] as const;
-const SECTIONS = [...ACCOUNT_SECTIONS, ...DATA_SECTIONS];
-type SectionKey = (typeof SECTIONS)[number]['key'];
+
+const SECTIONS: readonly SectionItem[] = SECTION_GROUPS.flatMap((group) => group.items);
 
 const isSection = (raw: string | null): raw is SectionKey =>
-  SECTIONS.some((s) => s.key === raw);
+  SECTIONS.some((section) => section.key === raw);
 
 export function Settings() {
   const [params, setParams] = useSearchParams();
-  const navigate = useNavigate();
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const me = useMe();
+  const plan = usePlan();
   const isSuperuser = me.data?.role === 'superuser';
   const rawSection = params.get('section');
   const section: SectionKey = isSection(rawSection) ? rawSection : 'account';
-  const active = SECTIONS.find((s) => s.key === section) ?? SECTIONS[0];
+  const active = SECTIONS.find((item) => item.key === section) ?? SECTIONS[0];
 
-  // Replace-write (mirrors /analytics ?tab=): switching panes must not stack history entries,
-  // so Back/Escape closes the dialog instead of unwinding section clicks.
+  // Section changes replace the current URL entry: Back returns to the previous product page
+  // instead of replaying every settings section the user inspected.
   const setSection = useCallback(
     (next: SectionKey) => {
       setParams(
-        (prev) => {
-          const merged = new URLSearchParams(prev);
+        (previous) => {
+          const merged = new URLSearchParams(previous);
           if (next === 'account') merged.delete('section');
           else merged.set('section', next);
           return merged;
@@ -76,148 +153,192 @@ export function Settings() {
     [setParams],
   );
 
-  // Close = leave /settings. Opened in-app → back to the page underneath; direct deep-link
-  // (this history entry is the first in-app one) → the overview. React-router keeps its entry
-  // index in history.state.idx; section switches replace-write the URL, which regenerates
-  // location.key but PRESERVES idx — so idx>0 (not key !== 'default') is the reliable
-  // "there is an in-app page behind this dialog" signal even after section clicks.
-  const close = useCallback(() => {
-    const idx = (window.history.state as { idx?: number } | null)?.idx ?? 0;
-    if (window.history.length > 1 && idx > 0) navigate(-1);
-    else navigate('/');
-  }, [navigate]);
+  const selectFromSheet = useCallback(
+    (next: SectionKey) => {
+      setMobileNavOpen(false);
+      setSection(next);
+    },
+    [setSection],
+  );
 
   return (
-    <Dialog open onOpenChange={(open) => !open && close()}>
-      <DialogContent className="flex h-full max-h-none w-full max-w-none flex-col gap-0 overflow-hidden rounded-none border-0 bg-background p-0 md:h-[min(85vh,720px)] md:w-[calc(100%-3rem)] md:max-w-4xl md:flex-row md:rounded md:border md:border-border">
-        <DialogDescription className="sr-only">
-          Настройки аккаунта, данных и подключений
-        </DialogDescription>
-        <Tabs
-          value={section}
-          onValueChange={(value) => setSection(value as SectionKey)}
-          className="flex h-full min-h-0 w-full flex-col md:flex-row"
-        >
-          {/* Left mini-nav — pane switcher (md+). */}
+    <div className="mx-auto w-full max-w-[1120px]">
+      <header className="mb-6">
+        {/* Desktop already has the dashboard topbar h1; the mobile shell does not render a title. */}
+        <h1 className="text-2xl font-medium tracking-tight text-foreground md:hidden">
+          Настройки
+        </h1>
+        <p className="mt-1 max-w-[64ch] text-sm leading-relaxed text-muted-foreground md:mt-0">
+          Управляйте аккаунтом, рабочим пространством и подключёнными источниками в одном месте.
+        </p>
+      </header>
+
+      <button
+        type="button"
+        data-mobile-touch-target=""
+        aria-label={`Выбрать раздел настроек, сейчас ${active.label}`}
+        onClick={() => setMobileNavOpen(true)}
+        className="mb-5 flex min-h-14 w-full items-center gap-3 rounded-2xl border border-border bg-card px-4 py-3 text-left transition-colors hover:bg-muted/60 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/50 xl:hidden"
+      >
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-muted text-foreground">
+          <SettingsIcon name={active.icon} className="h-4 w-4" />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-2xs font-medium uppercase tracking-wide text-ink3">
+            Раздел настроек
+          </span>
+          <span className="mt-0.5 block truncate text-sm font-medium text-foreground">
+            {active.label}
+          </span>
+        </span>
+        <SettingsIcon name="arrow" className="h-4 w-4 shrink-0 text-muted-foreground" />
+      </button>
+
+      <div className="grid items-start gap-6 xl:grid-cols-[240px_minmax(0,1fr)]">
+        <aside className="sticky top-20 hidden space-y-3 xl:block">
+          <AccountIdentity
+            email={me.data?.email ?? undefined}
+            avatar={me.data?.avatar ?? undefined}
+            role={me.data?.role}
+            planLabel={PLAN_LABEL[plan]}
+          />
           <nav
             aria-label="Разделы настроек"
-            className="hidden w-[200px] shrink-0 flex-col overflow-y-auto border-r border-border p-3 md:flex"
+            className="rounded-2xl border border-border bg-card p-2"
           >
-            <div className="px-2.5 pb-3 pt-1 text-sm font-medium tracking-tight text-foreground">
-              Настройки
-            </div>
-            <div className="space-y-0.5">
-              {ACCOUNT_SECTIONS.map((item) => (
-                <SectionNavItem
-                  key={item.key}
-                  item={item}
-                  active={section === item.key}
-                  onSelect={() => setSection(item.key)}
-                />
-              ))}
-            </div>
-            <p className="px-2.5 pb-1.5 pt-4 text-2xs font-medium tracking-wider text-muted-foreground">
-              Данные и подключения
-            </p>
-            <div className="space-y-0.5">
-              {DATA_SECTIONS.map((item) => (
-                <SectionNavItem
-                  key={item.key}
-                  item={item}
-                  active={section === item.key}
-                  onSelect={() => setSection(item.key)}
-                />
-              ))}
-            </div>
+            {SECTION_GROUPS.map((group, groupIndex) => (
+              <div
+                key={group.label}
+                className={cn(groupIndex > 0 && 'mt-3 border-t border-border pt-3')}
+              >
+                <p className="px-2.5 pb-1.5 text-2xs font-medium uppercase tracking-wide text-ink3">
+                  {group.label}
+                </p>
+                <div className="space-y-0.5">
+                  {group.items.map((item) => (
+                    <SectionNavItem
+                      key={item.key}
+                      item={item}
+                      active={section === item.key}
+                      onSelect={() => setSection(item.key)}
+                    />
+                  ))}
+                </div>
+              </div>
+            ))}
             {isSuperuser && (
-              <>
-                <div
-                  className="mx-1 my-3 border-t border-border"
-                  aria-hidden="true"
-                />
+              <div className="mt-3 border-t border-border pt-3">
                 <Link
                   to="/admin"
-                  className="flex items-center gap-2.5 rounded px-2.5 py-1.5 text-sm text-ink2 transition-colors hover:bg-hover-row/60 hover:text-foreground"
+                  className="flex min-h-10 items-center gap-2.5 rounded-xl px-2.5 py-2 text-sm text-ink2 transition-colors hover:bg-muted/60 hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/50"
                 >
                   <SettingsIcon name="shield" className="h-4 w-4 shrink-0" />
                   <span className="flex-1">Админ</span>
-                  <SettingsIcon
-                    name="external"
-                    className="h-3.5 w-3.5 shrink-0 text-ink3"
-                  />
+                  <SettingsIcon name="external" className="h-3.5 w-3.5 text-ink3" />
                 </Link>
-              </>
+              </div>
             )}
           </nav>
+        </aside>
 
-          {/* Right column: header (+ mobile tab row) + the scrollable content pane. */}
-          <div className="flex min-w-0 flex-1 flex-col">
-            <header className="flex items-center justify-between gap-3 border-b border-border px-4 py-3 md:px-8">
-              <DialogTitle className="min-w-0 truncate pr-8 text-lg font-medium tracking-tight">
-                <span className="md:hidden">Настройки</span>
-                <span className="hidden md:inline">{active.label}</span>
-              </DialogTitle>
-            </header>
-
-            {/* Mobile: the mini-nav becomes a horizontal scrollable tab row. */}
-            <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-border px-3 md:hidden">
-              <TabsList
-                aria-label="Разделы настроек"
-                variant="line"
-                className="shrink-0 justify-start"
+        <section
+          aria-labelledby={`settings-${section}-title`}
+          className="min-w-0"
+        >
+          <div className="mb-5 flex items-start gap-3">
+            <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-border bg-card text-foreground">
+              <SettingsIcon name={active.icon} className="h-4 w-4" />
+            </span>
+            <div className="min-w-0">
+              <h2
+                id={`settings-${section}-title`}
+                className="text-lg font-medium tracking-tight text-foreground"
               >
-                {SECTIONS.map((item) => (
-                  <TabsTrigger
-                    key={item.key}
-                    value={item.key}
-                    className="shrink-0"
-                  >
-                    {item.label}
-                  </TabsTrigger>
-                ))}
-              </TabsList>
-              {isSuperuser && (
-                <Link
-                  to="/admin"
-                  className="flex shrink-0 items-center gap-1 border-b-2 border-transparent px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
-                >
-                  Админ
-                  <SettingsIcon name="external" className="h-3 w-3" />
-                </Link>
-              )}
-            </div>
-
-            <div className="flex-1 overflow-y-auto px-4 py-5 md:px-8 md:py-6">
-              {SECTIONS.map((item) => (
-                <TabsContent
-                  key={item.key}
-                  value={item.key}
-                  forceMount
-                  className="mt-0 data-[state=inactive]:hidden"
-                >
-                  {section === item.key && (
-                    <div className="mx-auto w-full max-w-[640px] space-y-10">
-                      {item.key === 'account' && <ProfileSection />}
-                      {item.key === 'appearance' && <AppearanceSection />}
-                      {item.key === 'security' && <SecuritySection />}
-                      {item.key === 'billing' && <BillingSection />}
-                      {item.key === 'team' && (
-                        <TeamSection onOpenBilling={() => setSection('billing')} />
-                      )}
-                      {item.key === 'data' && (
-                        <DataSection onOpenChannels={() => setSection('channels')} />
-                      )}
-                      {item.key === 'channels' && <ChannelsSection />}
-                      {item.key === 'instagram' && <InstagramSection />}
-                    </div>
-                  )}
-                </TabsContent>
-              ))}
+                {active.label}
+              </h2>
+              <p className="mt-1 max-w-[64ch] text-sm leading-relaxed text-muted-foreground">
+                {active.description}
+              </p>
             </div>
           </div>
-        </Tabs>
-      </DialogContent>
-    </Dialog>
+
+          <div className="space-y-8">{renderSection(section, setSection)}</div>
+        </section>
+      </div>
+
+      {mobileNavOpen && (
+        <SettingsSectionSheet
+          section={section}
+          isSuperuser={isSuperuser}
+          onSelect={selectFromSheet}
+          onClose={() => setMobileNavOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+function renderSection(
+  section: SectionKey,
+  setSection: (section: SectionKey) => void,
+) {
+  switch (section) {
+    case 'appearance':
+      return <AppearanceSection />;
+    case 'security':
+      return <SecuritySection />;
+    case 'billing':
+      return <BillingSection />;
+    case 'team':
+      return <TeamSection onOpenBilling={() => setSection('billing')} />;
+    case 'data':
+      return <DataSection onOpenChannels={() => setSection('channels')} />;
+    case 'channels':
+      return <ChannelsSection />;
+    case 'instagram':
+      return <InstagramSection />;
+    default:
+      return <ProfileSection />;
+  }
+}
+
+function AccountIdentity({
+  email,
+  avatar,
+  role,
+  planLabel,
+}: {
+  email?: string;
+  avatar?: string;
+  role?: string;
+  planLabel: string;
+}) {
+  return (
+    <div className="rounded-2xl border border-border bg-card p-4">
+      <div className="flex items-center gap-3">
+        <span className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-avatar text-xs font-medium text-ink2">
+          {avatar ? (
+            <img src={avatar} alt="" className="h-full w-full object-cover" />
+          ) : (
+            avatarInitials(email)
+          )}
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium text-foreground">
+            {email?.replace(/@.*/, '') || 'Аккаунт'}
+          </p>
+          <p className="mt-0.5 truncate text-2xs text-muted-foreground">{email || '—'}</p>
+        </div>
+      </div>
+      <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-border pt-3">
+        <span className="rounded-full border border-border px-2 py-1 text-2xs font-medium text-ink2">
+          План {planLabel}
+        </span>
+        <span className="rounded-full bg-muted px-2 py-1 text-2xs font-medium text-ink2">
+          {role === 'superuser' ? 'Администратор' : 'Владелец'}
+        </span>
+      </div>
+    </div>
   );
 }
 
@@ -226,7 +347,7 @@ function SectionNavItem({
   active,
   onSelect,
 }: {
-  item: { key: SectionKey; label: string; icon: SettingsIconName };
+  item: SectionItem;
   active: boolean;
   onSelect: () => void;
 }) {
@@ -234,16 +355,123 @@ function SectionNavItem({
     <button
       type="button"
       onClick={onSelect}
-      aria-current={active ? 'true' : undefined}
+      aria-current={active ? 'page' : undefined}
       className={cn(
-        'flex w-full items-center gap-2.5 rounded px-2.5 py-1.5 text-left text-sm transition-colors',
+        'relative flex min-h-10 w-full items-center gap-2.5 overflow-hidden rounded-xl px-2.5 py-2 text-left text-sm transition-colors before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:rounded-full before:bg-primary before:opacity-0',
         active
-          ? 'bg-hover-row font-medium text-foreground'
-          : 'text-ink2 hover:bg-hover-row/60 hover:text-foreground',
+          ? 'bg-muted/60 font-medium text-foreground before:opacity-100'
+          : 'text-ink2 hover:bg-muted/60 hover:text-foreground',
       )}
     >
       <SettingsIcon name={item.icon} className="h-4 w-4 shrink-0" />
       <span className="truncate">{item.label}</span>
     </button>
+  );
+}
+
+function SettingsSectionSheet({
+  section,
+  isSuperuser,
+  onSelect,
+  onClose,
+}: {
+  section: SectionKey;
+  isSuperuser: boolean;
+  onSelect: (section: SectionKey) => void;
+  onClose: () => void;
+}) {
+  const restoreOpener = useRestoreOpenerFocus();
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogPortal>
+        <DialogOverlay className="detail-backdrop-in" />
+        <DialogSurface
+          aria-labelledby="settings-section-sheet-title"
+          onCloseAutoFocus={restoreOpener}
+          onPointerDown={(event) => {
+            if (event.target === event.currentTarget) onClose();
+          }}
+          className="fixed inset-0 z-modal flex flex-col justify-end"
+        >
+          <div className="sheet-in pointer-events-auto relative z-10 flex max-h-[85vh] w-full flex-col overflow-hidden rounded-t-2xl border-t border-border bg-popover pb-[env(safe-area-inset-bottom)] sm:mx-auto sm:mb-4 sm:max-w-lg sm:rounded-2xl sm:border">
+            <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-4 py-3">
+              <div>
+                <DialogTitle id="settings-section-sheet-title" className="text-base">
+                  Разделы настроек
+                </DialogTitle>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Выберите, что хотите изменить.
+                </p>
+              </div>
+              <button
+                type="button"
+                data-mobile-touch-target=""
+                onClick={onClose}
+                aria-label="Закрыть"
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/50 sm:h-8 sm:w-8"
+              >
+                <SettingsIcon name="close" className="h-4 w-4" />
+              </button>
+            </div>
+            <nav aria-label="Разделы настроек" className="min-h-0 flex-1 overflow-y-auto p-2">
+              {SECTION_GROUPS.map((group) => (
+                <div key={group.label} className="pb-2 last:pb-0">
+                  <p className="px-3 pb-1 pt-2 text-2xs font-medium uppercase tracking-wide text-ink3">
+                    {group.label}
+                  </p>
+                  {group.items.map((item) => {
+                    const active = item.key === section;
+                    return (
+                      <button
+                        key={item.key}
+                        type="button"
+                        data-mobile-touch-target=""
+                        aria-current={active ? 'page' : undefined}
+                        onClick={() => onSelect(item.key)}
+                        className={cn(
+                          'flex min-h-12 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/50',
+                          active
+                            ? 'bg-muted font-medium text-foreground'
+                            : 'text-ink2 hover:bg-muted/60 hover:text-foreground',
+                        )}
+                      >
+                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-border bg-background">
+                          <SettingsIcon name={item.icon} className="h-4 w-4" />
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-sm">{item.label}</span>
+                          <span className="mt-0.5 block truncate text-2xs font-normal text-muted-foreground">
+                            {item.description}
+                          </span>
+                        </span>
+                        {active && (
+                          <SettingsIcon name="check" className="h-4 w-4 shrink-0 text-verdant" />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              ))}
+              {isSuperuser && (
+                <div className="border-t border-border pt-2">
+                  <Link
+                    to="/admin"
+                    data-mobile-touch-target=""
+                    className="flex min-h-12 items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-ink2 transition-colors hover:bg-muted/60 hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/50"
+                  >
+                    <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-border bg-background">
+                      <SettingsIcon name="shield" className="h-4 w-4" />
+                    </span>
+                    <span className="flex-1">Админ</span>
+                    <SettingsIcon name="external" className="h-3.5 w-3.5 text-ink3" />
+                  </Link>
+                </div>
+              )}
+            </nav>
+          </div>
+        </DialogSurface>
+      </DialogPortal>
+    </Dialog>
   );
 }
