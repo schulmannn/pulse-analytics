@@ -34,13 +34,15 @@ const unavailable: WidgetMetricResolver = (_metric, _config, _ctx, out) => ({ ..
  * Вид агрегации серии для недельного капа баров (capResultSeries): канон — `seriesAgg` каталога
  * (widgetMetrics), где 'level' = last-of-bucket, остальное — поток (сумма корзины).
  * Классификация ВСЕХ series-метрик каталога:
- *  - flow (сумма): tg.views, tg.avgReach (его СЕРИЯ — дневные суммы охвата bucketPostField,
- *    среднее живёт только в хедлайне), tg.reactions, tg.forwards, tg.netGrowth (сумма дневных
+ *  - flow (сумма): tg.views, tg.reactions, tg.forwards, tg.netGrowth (сумма дневных
  *    нетто = нетто недели), ig.reach, ig.netFollowers, ig.interactions, ms.revenue, ms.orders;
  *  - level (last-of-bucket): tg.subscribers, ig.followers — каталог (`seriesAgg: 'level'`,
  *    серии bucketSubscriberLevels), плюс докласифицированный здесь ms.avgCheck: средний чек —
  *    не поток (сумма дневных СРЕДНИХ за неделю завышала бы значение на порядок), last-of-bucket
- *    сохраняет масштаб честно.
+ *    сохраняет масштаб честно;
+ *  - mean (среднее корзины): tg.avgReach — его серия это СРЕДНЕЕ на пост за день
+ *    (bucketPostMean), и складывать средние нельзя: неделя завысилась бы кратно числу дней с
+ *    публикациями. Раньше метрика стояла в flow, потому что её ряд был дневными СУММАМИ охвата.
  */
 const SERIES_AGG_OVERRIDES: Record<string, SeriesAggregation> = { 'ms.avgCheck': 'level' };
 

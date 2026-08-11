@@ -112,3 +112,34 @@ describe('resolveWidgetMetric: kind для недельного капа бар�
     );
   });
 });
+
+
+describe('capResultSeries — mean-агрегация недельных корзин', () => {
+  // tg.avgReach: точка ряда — уже СРЕДНЕЕ на пост за день. Складывать средние нельзя: неделя
+  // завысилась бы кратно числу дней с публикациями (регрессия волны W4 — ряд стал средним, а тип
+  // агрегации остался flow).
+  const daily = (n: number, value: number | null) =>
+    Array.from({ length: n }, (_, i) => ({
+      date: new Date(Date.UTC(2026, 0, 5 + i)).toISOString().slice(0, 10),
+      value,
+    }));
+
+  it('усредняет корзину вместо суммирования', () => {
+    const out = capResultSeries({ metricId: 'tg.avgReach', kind: 'series', unit: 'views', series: daily(200, 100) }, 'bar', 'mean');
+    const values = (out.series ?? []).map((p) => p.value);
+    expect(values.every((v) => v === 100)).toBe(true); // среднее из сотен, а не 700 за неделю
+  });
+
+  it('flow по-прежнему суммирует — правило не поехало для потоков', () => {
+    const out = capResultSeries({ metricId: 'tg.views', kind: 'series', unit: 'views', series: daily(200, 100) }, 'bar', 'flow');
+    const values = (out.series ?? []).map((p) => p.value);
+    expect(Math.max(...values.map((v) => v ?? 0))).toBeGreaterThan(100);
+  });
+
+  it('пропуски не участвуют в среднем корзины', () => {
+    const mixed = daily(200, 100).map((p, i) => (i % 2 === 0 ? { ...p, value: null } : p));
+    const out = capResultSeries({ metricId: 'tg.avgReach', kind: 'series', unit: 'views', series: mixed }, 'bar', 'mean');
+    const observed = (out.series ?? []).map((p) => p.value).filter((v) => v != null);
+    expect(observed.every((v) => v === 100)).toBe(true);
+  });
+});
