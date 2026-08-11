@@ -101,7 +101,12 @@ export function SegmentedControl<T extends string>({
         // каждый сегмент имели собственную непрозрачную заливку (bg-border под bg-background),
         // поэтому читались четыре склеенные капсулы, а между их круглыми торцами шли перетяжки.
         // Паддинг 3px вместо 1px: бегунку нужен видимый зазор, иначе «внутри трека» не читается.
-        'inline-grid w-auto items-center gap-0 rounded-full border border-input bg-muted/40 p-[3px]',
+        'inline-grid w-auto items-center gap-0 rounded-full border border-input bg-muted/40',
+        // Зазор бегунка масштабируется РАЗМЕРОМ. `md` (тулбар) получает 3px — без видимого зазора
+        // «внутри дорожки» не читается. `sm` — это компактная ВНУТРИКАРТОЧНАЯ подача, живущая в
+        // фикс-плитке 264px, где каждый пиксель посчитан: там 3px добавляли контролу 4px высоты и
+        // выталкивали содержимое карточки за край (гейт overflowingCards поймал «Товары» на +5px).
+        size === 'sm' ? 'p-px' : 'p-[3px]',
         className,
       )}
       style={{ gridTemplateColumns: `repeat(${Math.min(columns ?? options.length, options.length)}, minmax(0, 1fr))` }}
