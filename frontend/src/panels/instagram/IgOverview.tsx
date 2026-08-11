@@ -29,22 +29,55 @@ export function IgOverview({ ig }: { ig: IgData }) {
     <WidgetGroup id="ig-overview-v2" className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-6">
       {/* Row 1 — the two primary cards. Reach reuses the curated `ig-reach` Home key, so «На
           главную» pins the card it already knew; audience drills to /metrics/ig-follows. */}
-      <ChartSection id="ig-overview-reach" title="Охват" defaultSize="half" defaultColor={1} homeKey="ig-reach" drillTo="/metrics/ig-reach">
-        <IgReachBody ig={ig} />
-      </ChartSection>
+      <ChartSection
+        id="ig-overview-reach"
+        title="Охват"
+        defaultSize="half"
+        defaultColor={1}
+        homeKey="ig-reach"
+        drillTo="/metrics/ig-reach"
+        variants={[
+          { key: 'line', label: 'Линия', render: <IgReachBody ig={ig} /> },
+          { key: 'bar', label: 'Столбцы', render: <IgReachBody ig={ig} viz="bar" /> },
+        ]}
+      />
       <ChartSection id="ig-overview-audience" title="Динамика аудитории" defaultSize="half" defaultColor={5} drillTo="/metrics/ig-follows">
         <IgAudienceBody ig={ig} />
       </ChartSection>
       {/* Row 2 — compact comparisons at third width. */}
-      <ChartSection id="ig-overview-views" title="Просмотры" defaultSize="third" defaultColor={2} drillTo="/metrics/ig-views">
-        <IgViewsBody ig={ig} />
-      </ChartSection>
-      <ChartSection id="ig-overview-interactions" title="Взаимодействия" defaultSize="third" defaultColor={4} drillTo="/metrics/ig-interactions">
-        <IgInteractionsBody ig={ig} />
-      </ChartSection>
-      <ChartSection id="ig-overview-engagement" title="Вовлечённость" defaultSize="third" defaultColor={6} drillTo="/metrics/ig-er">
-        <IgEngagementBody ig={ig} />
-      </ChartSection>
+      <ChartSection
+        id="ig-overview-views"
+        title="Просмотры"
+        defaultSize="third"
+        defaultColor={2}
+        drillTo="/metrics/ig-views"
+        variants={[
+          { key: 'line', label: 'Линия', render: <IgViewsBody ig={ig} /> },
+          { key: 'bar', label: 'Столбцы', render: <IgViewsBody ig={ig} viz="bar" /> },
+        ]}
+      />
+      <ChartSection
+        id="ig-overview-interactions"
+        title="Взаимодействия"
+        defaultSize="third"
+        defaultColor={4}
+        drillTo="/metrics/ig-interactions"
+        variants={[
+          { key: 'line', label: 'Линия', render: <IgInteractionsBody ig={ig} /> },
+          { key: 'bar', label: 'Столбцы', render: <IgInteractionsBody ig={ig} viz="bar" /> },
+        ]}
+      />
+      <ChartSection
+        id="ig-overview-engagement"
+        title="Вовлечённость"
+        defaultSize="third"
+        defaultColor={6}
+        drillTo="/metrics/ig-er"
+        variants={[
+          { key: 'line', label: 'Линия', render: <IgEngagementBody ig={ig} /> },
+          { key: 'bar', label: 'Столбцы', render: <IgEngagementBody ig={ig} viz="bar" /> },
+        ]}
+      />
       {/* The S/M/L grid pairs the narrative with one strongest rule-based insight at M/M;
           no unsupported footprint and no second wall of text. */}
       <IgNarrativeWeekBlock id="ig-overview-week" homeKey="ig-week" fixedSize="half" title="Неделя аккаунта" />

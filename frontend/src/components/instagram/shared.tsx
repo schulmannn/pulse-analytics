@@ -7,6 +7,7 @@ import { pctDelta, type MetricDelta } from '@/lib/delta';
 import { DeltaPill } from '@/components/DeltaPill';
 import { EmptyState } from '@/components/EmptyState';
 import { LineChart } from '@/components/LineChart';
+import { BarChart } from '@/components/BarChart';
 import { ChartCardBody, ChartSection as WidgetChartSection } from '@/components/ChartWidget';
 import { CompactStatHeadline } from '@/components/CompareStat';
 import { Sparkline } from '@/components/Sparkline';
@@ -112,6 +113,7 @@ export function KpiHero({
   delta,
   series,
   drillTo,
+  viz = 'line',
 }: {
   label: string;
   value: string;
@@ -120,6 +122,8 @@ export function KpiHero({
   /** Route of the metric's explorer page (/metrics/ig-*). ТОЛЬКО тихий клик по числу (паритет с
       TG-твином FeaturedKpi): своя ↗-обёртка графика читалась дублем карточной (визуальный аудит). */
   drillTo?: string;
+  /** «Линия» / «Столбцы» из карусели вариантов карточки — паритет с TG-твином FeaturedKpi. */
+  viz?: 'line' | 'bar';
 }) {
   const navigate = useNavigate();
   const daily = (series ?? []).filter((p) => p.day !== 'total');
@@ -129,18 +133,29 @@ export function KpiHero({
   // Канон hero-карточки Обзора — безосевой area-Sparkline (TG-твин FeaturedKpi): ряд дат на лице
   // не рисуем, значения по дням читаются hover-читалкой (caption обязателен — без него Sparkline
   // не рендерит читалку вовсе); полные оси живут на /metrics/ig-* (drillTo).
-  const chart = shown.length > 1 && (
-    <Sparkline
-      values={shown.map((p) => p.value)}
-      labels={shown.map((p) => fmtDay(p.day))}
-      area
-      strokeWidth={2}
-      interactive
-      caption=""
-      formatValue={fmt.num}
-      className="h-full min-h-28 w-full"
-    />
-  );
+  const chart =
+    shown.length > 1 &&
+    (viz === 'bar' ? (
+      <div className="h-full min-h-28 w-full">
+        <BarChart
+          values={shown.map((p) => p.value)}
+          labels={shown.map((p) => fmtDay(p.day))}
+          titles={shown.map((p) => `${fmtDay(p.day)}: ${fmt.num(p.value)}`)}
+          formatValue={fmt.num}
+        />
+      </div>
+    ) : (
+      <Sparkline
+        values={shown.map((p) => p.value)}
+        labels={shown.map((p) => fmtDay(p.day))}
+        area
+        strokeWidth={2}
+        interactive
+        caption=""
+        formatValue={fmt.num}
+        className="h-full min-h-28 w-full"
+      />
+    ));
   // Steep anatomy (owner rule): label + number + delta bottom-left, the chart inset to the RIGHT.
   return (
     <ChartCardBody hero label={label} value={value} delta={delta} onValueClick={drillTo ? () => navigate(drillTo) : undefined} drillLabel={label}>
@@ -370,7 +385,7 @@ export function SubscriberMovement({
 
 /** «Охват» — the primary IG daily series (half width): area line + paired-window Δ. Число дриллится
     тихой кнопкой (TG-паритет FeaturedKpi); собственной ↗ у hero нет — она читалась дублем карточной. */
-export function IgReachBody({ ig }: { ig: IgData }) {
+export function IgReachBody({ ig, viz }: { ig: IgData; viz?: 'line' | 'bar' }) {
   return (
     <KpiHero
       label={`Охват · ${ig.window.days} дн.`}
@@ -378,6 +393,7 @@ export function IgReachBody({ ig }: { ig: IgData }) {
       delta={pairDelta(ig.pairs.reach)}
       series={ig.series.reach.filter((p) => ig.inWindow(p.day))}
       drillTo="/metrics/ig-reach"
+      viz={viz}
     />
   );
 }
@@ -452,6 +468,7 @@ function IgTrendStat({
   onDrill,
   drillLabel,
   hasValue = true,
+  viz = 'line',
 }: {
   value: number | null;
   delta?: MetricDelta | null;
@@ -460,13 +477,24 @@ function IgTrendStat({
   onDrill?: () => void;
   drillLabel?: string;
   hasValue?: boolean;
+  /** «Линия» / «Столбцы» из карусели вариантов карточки — паритет с TG-твином TgTrendStat. */
+  viz?: 'line' | 'bar';
 }) {
   const live = hasValue && value != null && Number.isFinite(value);
   const hasChart = live && chart.values.length >= 2;
   return (
     <div className="flex h-full min-h-0 flex-col justify-between gap-4">
       <CompactStatHeadline text={live ? format(value as number) : '—'} delta={delta} onDrill={onDrill} drillLabel={drillLabel} live={live} />
-      {hasChart ? (
+      {hasChart && viz === 'bar' ? (
+        <div className="min-h-14 w-full flex-1">
+          <BarChart
+            values={chart.values}
+            labels={chart.labels}
+            titles={chart.values.map((v, i) => `${chart.labels[i] ?? ''}: ${format(v)}`)}
+            formatValue={format}
+          />
+        </div>
+      ) : hasChart ? (
         <Sparkline
           values={chart.values}
           labels={chart.labels}
@@ -485,7 +513,7 @@ function IgTrendStat({
 }
 
 /** «Просмотры» (third): daily account views over the active window. */
-export function IgViewsBody({ ig }: { ig: IgData }) {
+export function IgViewsBody({ ig, viz }: { ig: IgData; viz?: 'line' | 'bar' }) {
   const navigate = useNavigate();
   const live = isLive(ig.pairs.views);
   return (
@@ -493,6 +521,7 @@ export function IgViewsBody({ ig }: { ig: IgData }) {
       value={live ? ig.pairs.views.cur : null}
       delta={live ? pairDelta(ig.pairs.views) : null}
       chart={ig.overviewCharts.views}
+      viz={viz}
       format={(n) => fmt.short(Math.round(n))}
       hasValue={live}
       onDrill={() => navigate('/metrics/ig-views')}
@@ -502,7 +531,7 @@ export function IgViewsBody({ ig }: { ig: IgData }) {
 }
 
 /** «Взаимодействия» (third): daily total interactions over the active window. */
-export function IgInteractionsBody({ ig }: { ig: IgData }) {
+export function IgInteractionsBody({ ig, viz }: { ig: IgData; viz?: 'line' | 'bar' }) {
   const navigate = useNavigate();
   const live = isLive(ig.pairs.ti);
   return (
@@ -510,6 +539,7 @@ export function IgInteractionsBody({ ig }: { ig: IgData }) {
       value={live ? ig.pairs.ti.cur : null}
       delta={live ? pairDelta(ig.pairs.ti) : null}
       chart={ig.overviewCharts.interactions}
+      viz={viz}
       format={(n) => fmt.short(Math.round(n))}
       hasValue={live}
       onDrill={() => navigate('/metrics/ig-interactions')}
@@ -519,7 +549,7 @@ export function IgInteractionsBody({ ig }: { ig: IgData }) {
 }
 
 /** «Вовлечённость» (third): daily ER = 100·interactions ÷ reach, aligned by calendar day. */
-export function IgEngagementBody({ ig }: { ig: IgData }) {
+export function IgEngagementBody({ ig, viz }: { ig: IgData; viz?: 'line' | 'bar' }) {
   const navigate = useNavigate();
   const erTrend =
     ig.erReach > 0 && ig.pairs.reach.hasCur && ig.pairs.reach.hasPrev && ig.erReachPrev > 0
@@ -530,6 +560,7 @@ export function IgEngagementBody({ ig }: { ig: IgData }) {
       value={ig.erReach > 0 ? ig.erReach : null}
       delta={erTrend}
       chart={ig.overviewCharts.engagement}
+      viz={viz}
       format={(n) => `${n.toFixed(2)}%`}
       hasValue={ig.erReach > 0}
       onDrill={() => navigate('/metrics/ig-er')}

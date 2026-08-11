@@ -42,6 +42,75 @@ import {
  * для этой страницы не нужны. Величины (выручка ₽, заказы) — свои и никогда не смешиваются с
  * просмотрами/охватом соцсетей (канон TG-views ≠ IG-reach).
  */
+
+/**
+ * Тело story-карточки Обзора склада: hero-число слева, ряд по дням справа. Вынесено из трёх
+ * инлайновых копий, чтобы «Линия»/«Столбцы» объявлялись один раз. Контрол типа графика — не новый:
+ * EditWidgetDialog показывает карусель, как только карточка объявит больше одного варианта.
+ */
+function MsStoryBody({
+  label,
+  value,
+  delta,
+  caption,
+  values,
+  labels,
+  formatValue,
+  emptyTitle,
+  drillTo,
+  drillLabel,
+  viz = 'line',
+}: {
+  label: string;
+  value: string;
+  delta?: MetricDelta | null;
+  caption?: string;
+  values: number[];
+  labels: string[];
+  formatValue: (v: number) => string;
+  emptyTitle: string;
+  drillTo: string;
+  drillLabel: string;
+  viz?: 'line' | 'bar';
+}) {
+  const navigate = useNavigate();
+  return (
+    <ChartCardBody
+      hero
+      label={label}
+      value={value}
+      delta={delta}
+      caption={caption}
+      onValueClick={() => navigate(drillTo)}
+      drillLabel={drillLabel}
+    >
+      {values.length <= 1 ? (
+        <EmptyState compact size="chart" title={emptyTitle} />
+      ) : viz === 'bar' ? (
+        <div className="min-h-14 w-full flex-1">
+          <BarChart
+            values={values}
+            labels={labels}
+            titles={values.map((v, i) => `${labels[i] ?? ''}: ${formatValue(v)}`)}
+            formatValue={formatValue}
+          />
+        </div>
+      ) : (
+        <Sparkline
+          values={values}
+          labels={labels}
+          area
+          strokeWidth={2}
+          interactive
+          caption=""
+          formatValue={formatValue}
+          className="h-full min-h-14 w-full"
+        />
+      )}
+    </ChartCardBody>
+  );
+}
+
 export function MsOverview() {
   const pp = usePagePeriod();
   // «Всё» (0) обслуживается из нашего дневного архива ms_daily (слайс 2а), живые окна — 7/30/90;
@@ -137,90 +206,37 @@ export function MsOverview() {
   const prevAvg = prev && prev.orders.totalCount > 0 ? prev.orders.totalSum / prev.orders.totalCount : null;
   const avgDelta = avgTotal != null && prevAvg != null ? pctDelta(avgTotal, prevAvg) : null;
 
+  // Пропсы story-тел вынесены: «Линия» и «Столбцы» это ОДНА карточка в двух подачах,
+  // дублировать её данные в двух вариантах — прямой путь к их расхождению.
+  const revStory = { label: windowLabel, value: `${fmt.short(revenue.total)} ₽`, delta: revenueDelta, values: revValues, labels: revLabels, formatValue: (v: number) => `${fmt.num(Math.round(v))} ₽`, emptyTitle: 'Недостаточно дней для графика.', drillTo: '/metrics/ms-revenue', drillLabel: 'Выручка' };
+  const ordStory = { label: windowLabel, value: fmt.num(orders.totalCount), delta: ordersDelta, caption: `на ${fmt.short(orders.totalSum)} ₽`, values: ordValues, labels: ordLabels, formatValue: fmt.num, emptyTitle: 'Недостаточно дней для графика.', drillTo: '/metrics/ms-orders', drillLabel: 'Заказы' };
+  const avgStory = { label: windowLabel, value: avgTotal != null ? `${fmt.short(avgTotal)} ₽` : '—', delta: avgDelta, caption: 'по дням с заказами', values: avgValues, labels: avgLabels, formatValue: (v: number) => `${fmt.num(Math.round(v))} ₽`, emptyTitle: 'Недостаточно дней с заказами для графика.', drillTo: '/metrics/ms-aov', drillLabel: 'Средний чек' };
+
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-6">
       {/* Story-карточки — та же грамматика, что у Обзоров TG/IG/Метрики (steep story card):
           подпись окна, hero-число, дельта к прошлому периоду и area-спарклайн без осей. Полные
           оси и тултипы по датам живут на /metrics/ms-* (MsSummaryExplorer ниже в этом файле). */}
-      <ChartWidget id="ms-revenue" title="Выручка" fixedSize="half" defaultColor={1} drillTo="/metrics/ms-revenue">
-        <ChartCardBody
-          hero
-          label={windowLabel}
-          value={`${fmt.short(revenue.total)} ₽`}
-          delta={revenueDelta}
-          onValueClick={() => navigate('/metrics/ms-revenue')}
-          drillLabel="Выручка"
-        >
-          {revValues.length > 1 ? (
-            <Sparkline
-              values={revValues}
-              labels={revLabels}
-              area
-              strokeWidth={2}
-              interactive
-              caption=""
-              formatValue={(v) => `${fmt.num(Math.round(v))} ₽`}
-              className="h-full min-h-14 w-full"
-            />
-          ) : (
-            <EmptyState compact size="chart" title="Недостаточно дней для графика." />
-          )}
-        </ChartCardBody>
-      </ChartWidget>
+      <ChartWidget id="ms-revenue" title="Выручка" fixedSize="half" defaultColor={1} drillTo="/metrics/ms-revenue"
+        variants={[
+          { key: 'line', label: 'Линия', render: <MsStoryBody {...revStory} /> },
+          { key: 'bar', label: 'Столбцы', render: <MsStoryBody {...revStory} viz="bar" /> },
+        ]}
+      />
 
-      <ChartWidget id="ms-orders" title="Заказы" fixedSize="half" defaultColor={5} drillTo="/metrics/ms-orders">
-        <ChartCardBody
-          hero
-          label={windowLabel}
-          value={fmt.num(orders.totalCount)}
-          delta={ordersDelta}
-          caption={`на ${fmt.short(orders.totalSum)} ₽`}
-          onValueClick={() => navigate('/metrics/ms-orders')}
-          drillLabel="Заказы"
-        >
-          {ordValues.length > 1 ? (
-            <Sparkline
-              values={ordValues}
-              labels={ordLabels}
-              area
-              strokeWidth={2}
-              interactive
-              caption=""
-              formatValue={fmt.num}
-              className="h-full min-h-14 w-full"
-            />
-          ) : (
-            <EmptyState compact size="chart" title="Недостаточно дней для графика." />
-          )}
-        </ChartCardBody>
-      </ChartWidget>
+      <ChartWidget id="ms-orders" title="Заказы" fixedSize="half" defaultColor={5} drillTo="/metrics/ms-orders"
+        variants={[
+          { key: 'line', label: 'Линия', render: <MsStoryBody {...ordStory} /> },
+          { key: 'bar', label: 'Столбцы', render: <MsStoryBody {...ordStory} viz="bar" /> },
+        ]}
+      />
 
-      <ChartWidget id="ms-avg-check" title="Средний чек" fixedSize="half" defaultColor={2} drillTo="/metrics/ms-aov">
-        <ChartCardBody
-          hero
-          label={windowLabel}
-          value={avgTotal != null ? `${fmt.short(avgTotal)} ₽` : '—'}
-          delta={avgDelta}
-          caption="по дням с заказами"
-          onValueClick={() => navigate('/metrics/ms-aov')}
-          drillLabel="Средний чек"
-        >
-          {avgValues.length > 1 ? (
-            <Sparkline
-              values={avgValues}
-              labels={avgLabels}
-              area
-              strokeWidth={2}
-              interactive
-              caption=""
-              formatValue={(v) => `${fmt.num(Math.round(v))} ₽`}
-              className="h-full min-h-14 w-full"
-            />
-          ) : (
-            <EmptyState compact size="chart" title="Недостаточно дней с заказами для графика." />
-          )}
-        </ChartCardBody>
-      </ChartWidget>
+      <ChartWidget id="ms-avg-check" title="Средний чек" fixedSize="half" defaultColor={2} drillTo="/metrics/ms-aov"
+        variants={[
+          { key: 'line', label: 'Линия', render: <MsStoryBody {...avgStory} /> },
+          { key: 'bar', label: 'Столбцы', render: <MsStoryBody {...avgStory} viz="bar" /> },
+        ]}
+      />
 
       <ChartWidget id="ms-funnel" title="Статусы заказов" fixedSize="half" drillTo="/metrics/ms-funnel">
         <div className="mb-1 flex justify-end">
