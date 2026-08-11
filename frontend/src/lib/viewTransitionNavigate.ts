@@ -88,6 +88,12 @@ export function useViewTransitionNavigate() {
         }
       }, VT_COMMIT_TIMEOUT_MS);
       transition.finished.finally(() => clearTimeout(timeout)).catch(() => {});
+      // `ready` тоже ОБЯЗАН быть погашен, и это не перестраховка: skipTransition() выше отклоняет
+      // именно его с «AbortError: Transition was skipped». Без catch это необработанный промис —
+      // window-level крэш-нет ловил его и слал в телеметрию как [global] AbortError на /mentions и
+      // /posts (самые тяжёлые ленты: их коммит чаще прочих не укладывается в таймаут). Пропуск
+      // перехода — штатный путь, а не сбой, поэтому он не должен выглядеть падением.
+      transition.ready.catch(() => {});
     },
     [navigate, location],
   );
