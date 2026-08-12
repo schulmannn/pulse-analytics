@@ -6,6 +6,7 @@ import { ChartSection } from '@/components/ChartWidget';
 import { breakdownVariants } from '@/components/widgets/variants';
 import { ErrorState } from '@/components/ErrorState';
 import { useWidgetPeriod } from '@/lib/period';
+import { pluralRu } from '@/lib/format';
 import { Skeleton } from '@/components/ui/skeleton';
 
 interface TagStats {
@@ -65,10 +66,14 @@ export function deriveHashtags(full: TgFull | undefined, inRange: InRange, keep:
     .sort((a, b) => b.sortValue - a.sortValue)
     .slice(0, 10);
 
+  // Шкала `value` (длина бара) зависит от ветки: с базой — РАЗЫ (лифт), без базы — ПРОЦЕНТЫ ERV.
+  // Смешаться в одной колонке они не могут: `baseAvg` один на весь расчёт, поэтому либо лифт есть у
+  // всех строк, либо ни у одной — карта целиком переключает шкалу вместе с подписью («×1.43» против
+  // «4.8%»). Бар всегда меряется от максимума видимых строк, так что пропорции внутри ветки честные.
   const breakdownItems = items.map((item) => ({
     label: item.label.startsWith('#') ? item.label : `#${item.label}`,
     value: item.sortValue,
-    display: item.lift != null ? `×${item.lift.toFixed(2)} · ${item.count}п` : `${item.avgErv.toFixed(1)}% · ${item.count}п`,
+    display: `${item.lift != null ? `×${item.lift.toFixed(2)}` : `${item.avgErv.toFixed(1)}%`} · ${item.count} ${pluralRu(item.count, ['пост', 'поста', 'постов'])}`,
     color: item.lift != null ? (item.lift >= 1 ? 'hsl(var(--brand-verdant))' : 'hsl(var(--brand-ember))') : undefined,
   }));
 

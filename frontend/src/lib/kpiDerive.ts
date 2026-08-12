@@ -293,7 +293,10 @@ export function deriveKpis(
     avgReach: { total: fmt.short(avgViews), trend: avgReachTrend, caption: null },
     reactions: { total: fmt.short(totalReactions), trend: reactionsTrend, caption: reactionsCaption },
     forwards: { total: fmt.short(totalForwards), trend: forwardsTrend, caption: forwardsCaption },
-    er: { total: er > 0 ? er.toFixed(2) + '%' : '—', trend: erTrend, caption: erCaption },
+    // Единый абсолютный процент (fmt.pctAbs): drillMeta кормит хедлайн /metrics/er, строку сверки,
+    // KPI отчёта и config-виджеты — карточка Обзора обязана печатать ровно то же число тем же
+    // форматом, иначе клик по «28.9%» приводит на страницу с «28.92%».
+    er: { total: er > 0 ? fmt.pctAbs(er) : '—', trend: erTrend, caption: erCaption },
   };
 
   // Previous-window absolutes for the compact Overview comparison cards (avg reach / reactions /

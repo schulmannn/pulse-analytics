@@ -117,7 +117,7 @@ export function KpiGrid() {
         <StatTile label="Реакции" value={fmt.kpi(totalReactions)} trend={reactionsTrend} deltaText={reactionsDelta} info={getDrillMetric('reactions')} onDrill={() => openMetric('reactions')} />
         <StatTile
           label="Вовлечённость"
-          value={er > 0 ? er.toFixed(2) + '%' : '—'}
+          value={er > 0 ? fmt.pctAbs(er) : '—'}
           trend={erTrend}
           deltaText={erCaption}
           info={getDrillMetric('er')}
@@ -149,6 +149,9 @@ export function TgViewsBody({ state, viz }: { state: TgKpiState; viz?: 'line' | 
   return (
     <FeaturedKpi
       label={showPeriod ? `Просмотры · ${periodLabel}` : 'Просмотры'}
+      // Без периода подпись схлопывается в голое «Просмотры» — дубль заголовка карточки. Текст
+      // уходит в sr-only (имя для скринридера остаётся), слот держит ⓘ на прежнем месте.
+      labelHidden={!showPeriod}
       value={fmt.kpi(channelViews)}
       trend={viewsTrend}
       caption={viewsCaption}
@@ -219,7 +222,7 @@ export function TgErBody({ state }: { state: TgKpiState }) {
   return (
     <div className="flex h-full min-h-0 flex-col justify-center gap-2">
       <CompactStatHeadline
-        text={live ? `${(er as number).toFixed(2)}%` : '—'}
+        text={live ? fmt.pctAbs(er as number) : '—'}
         delta={erTrend}
         onDrill={() => navigate('/metrics/er')}
         drillLabel="Вовлечённость"
@@ -323,6 +326,8 @@ function ViewsSkeleton() {
 
 interface FeaturedKpiProps {
   label: string;
+  /** Подпись остаётся только для AT (визуально скрыта) — когда она дублирует заголовок карточки. */
+  labelHidden?: boolean;
   value: string;
   trend?: MetricDelta | null;
   caption?: string | null;
@@ -336,7 +341,7 @@ interface FeaturedKpiProps {
 /** Hero KPI — the steep card anatomy (owner rule): label + big number + comparison pinned
     bottom-LEFT, the area sparkline filling the width to the RIGHT of the number block. The ledger
     below is untouched — the hero zone just turned horizontal. */
-function FeaturedKpi({ label, value, trend, caption, spark, info, onDrill, viz = 'line' }: FeaturedKpiProps) {
+function FeaturedKpi({ label, labelHidden = false, value, trend, caption, spark, info, onDrill, viz = 'line' }: FeaturedKpiProps) {
   // Кап длинной серии перед рендером (канон CLAUDE.md): на окне «Всё» архивный viewsSpark несёт
   // до 730 дневных точек — в 200×32-спарклайне это суб-пиксельная мазня. Пары {value,label}
   // прореживаются ВМЕСТЕ, чтобы hover-читалка называла именно отобранные LTTB точки; хедлайн,
@@ -352,10 +357,14 @@ function FeaturedKpi({ label, value, trend, caption, spark, info, onDrill, viz =
       hero
       label={
         <span className="flex items-center gap-1">
-          {label}
-          {info && <MetricInfo def={info} />}
+          {/* sr-only абсолютно спозиционирован — из flex-потока выпадает, gap перед ⓘ не растёт. */}
+          <span className={labelHidden ? 'sr-only' : undefined}>{label}</span>
+          {/* При скрытой подписи ⓘ переезжает к числу (valueAdornment) — одна в пустой строке
+              над числом она читалась как случайный артефакт. */}
+          {info && !labelHidden && <MetricInfo def={info} />}
         </span>
       }
+      valueAdornment={info && labelHidden ? <MetricInfo def={info} /> : undefined}
       value={value}
       delta={trend}
       caption={caption ?? undefined}

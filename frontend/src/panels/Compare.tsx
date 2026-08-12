@@ -167,7 +167,9 @@ export function Compare() {
     { label: 'Репосты', cur: a.forwards, prev: b.forwards, render: fmt.short },
     { label: 'Комментарии', cur: a.replies, prev: b.replies, render: fmt.short },
     { label: 'Постов', cur: a.count, prev: b.count, render: fmt.num },
-    { label: 'ER', cur: a.er, prev: b.er, render: (n) => `${n.toFixed(2)}%` },
+    // Тот же абсолютный процент, что на карточке Обзора и /metrics/er (fmt.pctAbs) — одно число
+    // одним форматом на всех поверхностях.
+    { label: 'ER', cur: a.er, prev: b.er, render: fmt.pctAbs },
   ];
 
   // By weekday (avg reach per post over the current window) and by format (total views per format)

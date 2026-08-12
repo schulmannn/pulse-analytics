@@ -12,6 +12,10 @@ export interface ChartCardBodyProps {
   onValueClick?: () => void;
   /** Accessible metric name for the clickable headline value. */
   drillLabel?: string;
+  /** Affordance, стоящая рядом с числом (ⓘ). Нужна, когда подпись скрыта: иначе иконка остаётся
+      одна в пустой строке над числом. Сиблинг кнопки, а не её содержимое — клик по ⓘ не должен
+      уводить в разбор. */
+  valueAdornment?: ReactNode;
   hero?: boolean;
   children: ReactNode;
 }
@@ -24,6 +28,7 @@ export function ChartCardBody({
   caption,
   onValueClick,
   drillLabel,
+  valueAdornment,
   hero = false,
   children,
 }: ChartCardBodyProps) {
@@ -49,21 +54,24 @@ export function ChartCardBody({
       <div className="flex shrink-0 flex-col items-start gap-1.5 pb-0.5" data-chart-card-headline>
         {label != null && <div className="text-xs tracking-wide text-muted-foreground">{label}</div>}
         {/* ValueSwap: при смене периода число снапает (канон), обёртка мягко проявляется. */}
-        {onValueClick ? (
-          <button
-            type="button"
-            aria-label={drillLabel ? `Разбор: ${drillLabel}` : undefined}
-            title="Подробный разбор"
-            onClick={onValueClick}
-            className={`${numberClass} rounded text-left transition-colors hover:text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40`}
-          >
-            <ValueSwap swapKey={value}>{value}</ValueSwap>
-          </button>
-        ) : (
-          <div className={numberClass}>
-            <ValueSwap swapKey={value}>{value}</ValueSwap>
-          </div>
-        )}
+        <div className="flex items-center gap-1.5">
+          {onValueClick ? (
+            <button
+              type="button"
+              aria-label={drillLabel ? `Разбор: ${drillLabel}` : undefined}
+              title="Подробный разбор"
+              onClick={onValueClick}
+              className={`${numberClass} rounded text-left transition-colors hover:text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40`}
+            >
+              <ValueSwap swapKey={value}>{value}</ValueSwap>
+            </button>
+          ) : (
+            <div className={numberClass}>
+              <ValueSwap swapKey={value}>{value}</ValueSwap>
+            </div>
+          )}
+          {valueAdornment}
+        </div>
         <DeltaPill delta={delta} />
         {caption != null && <div className="text-2xs text-muted-foreground">{caption}</div>}
       </div>
