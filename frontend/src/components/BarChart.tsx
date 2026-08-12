@@ -28,8 +28,10 @@ interface BarChartProps {
   labels?: string[];
   titles?: string[];
   height?: number;
-  /** Comparison series (previous period / baseline), drawn as a dashed --chart-2 overlay
-      line across the bar tops, with a legend row — the visual delta for bar charts. */
+  /** Comparison series (previous period / baseline). В СТОЛБЦАХ призрак рисуется столбцами же —
+      приглушённым `--chart-role-comparison` (см. GHOST_FILL и владельческий комментарий у
+      geometry ниже), а не пунктиром: пунктир поверх баров — смешение языков форм. Пунктирный
+      канон прошлого периода живёт в {@link LineChart}. Плюс строка легенды. */
   ghost?: Array<number | null>;
   /** Legend/tooltip name for the primary series when ghost is a parallel category, not a period. */
   primaryLabel?: string;
@@ -65,6 +67,17 @@ const MAX_BAR_W = 48;
 const BAR_RATIO = 0.7;
 // Approximate glyph width of the 11px tabular numerals used for tick/value labels.
 const CHAR_W = 6.6;
+// ОДНА альфа призрачных столбцов на все подачи: grouped-пара, stacked-сегмент, hover-хайлайт,
+// свотчи легенды и точка в тултипе. Раньше grouped жил на /0.35, а stacked и хайлайт — в полную
+// непрозрачность, из-за чего «прошлый период» звучал то тише, то громче текущего.
+// ЗНАЧЕНИЕ 0.8 НЕ ПРОИЗВОЛЬНОЕ — это та же альфа, на которой уже нарисован пунктирный призрак
+// линейного хоста (LineChart/MorphingSeries strokeOpacity 0.8), и единственный диапазон, проходящий
+// non-text 3.0 на БЕЛОЙ карточке светлой темы: chart-2 @0.8 = 3.52, @0.5 = 2.07, @0.35 = 1.63
+// (тёмная тема мягче и прошла бы и на 0.5). Тише текущего периода призрак делает ЧУЖОЙ ТОН (амбра
+// против ириса), а не растворение в фоне. Менять только вместе со строкой «comparison ghost @0.8»
+// в scripts/contrast-tokens.mjs — гейт парсит эту константу отсюда и падает при рассинхроне.
+const GHOST_ALPHA = 0.8;
+const GHOST_FILL = `hsl(var(--chart-role-comparison) / ${GHOST_ALPHA})`;
 
 interface BarBox { x: number; y: number; w: number; h: number }
 
@@ -253,8 +266,11 @@ export function BarChart({
     const barCenterX = (i: number) => offsetX + i * itemWidth + itemWidth / 2;
 
     // Сравнение в СТОЛБЦАХ рисуется столбцами же (владелец: пунктирная линия поверх баров
-    // «странно смотрится» — смешение языков форм). Группированные пары: прошлое слева
-    // (приглушённый comparison-тон), текущее справа; 2px-зазор внутри пары (dataviz-канон).
+    // «странно смотрится» — смешение языков форм). Это ОСОЗНАННОЕ исключение из канона
+    // «previous-period stays dashed/no-fill»: канон про пунктир держит линейный хост (LineChart),
+    // а здесь тише звучит альфа (GHOST_FILL), а не форма. Форму не менять.
+    // Группированные пары: прошлое слева (приглушённый comparison-тон), текущее справа;
+    // 2px-зазор внутри пары (dataviz-канон).
     const GROUP_GAP = 2;
     const subW = activeGhost && !stacked ? Math.max((barWidth - GROUP_GAP) / 2, 1) : barWidth;
     const bandX = (i: number) => offsetX + i * itemWidth + (itemWidth - barWidth) / 2;
@@ -464,10 +480,10 @@ export function BarChart({
             key={`gb${i}`}
             data-chart-series="comparison"
             d={stackSegmentPath(b, true, (bars[i]?.h ?? 0) <= 0)}
-            fill="hsl(var(--chart-role-comparison))"
+            fill={GHOST_FILL}
           />
         ) : (
-          <rect key={`gb${i}`} data-chart-series="comparison" x={b.x} y={b.y} width={b.w} height={b.h} fill="hsl(var(--chart-role-comparison) / 0.35)" rx={2} />
+          <rect key={`gb${i}`} data-chart-series="comparison" x={b.x} y={b.y} width={b.w} height={b.h} fill={GHOST_FILL} rx={2} />
         ))}
       </>
     );
@@ -532,7 +548,9 @@ export function BarChart({
       const prev = activeGhost[i];
       const rows: TooltipRow[] = [
         { label: primaryLabel, value: formatValue(cur), color: 'hsl(var(--chart-role-primary))' },
-        { label: ghostLabel, value: formatValue(prev), color: 'hsl(var(--chart-role-comparison))' },
+        // Свотч сравнения повторяет ровно ту же альфу, что столбцы и чипы легенды (GHOST_FILL):
+        // один ряд не может звучать в трёх насыщенностях одновременно.
+        { label: ghostLabel, value: formatValue(prev), color: GHOST_FILL },
       ];
       const d = prev !== 0 ? ((cur - prev) / Math.abs(prev)) * 100 : null;
       if (comparisonDelta && d != null && Number.isFinite(d)) rows.push({ label: 'Δ', value: `${d >= 0 ? '+' : '−'}${Math.abs(d).toFixed(1)}%` });
@@ -649,7 +667,7 @@ export function BarChart({
             {ghostBars[hover.i] && (
               <path
                 d={stackSegmentPath(ghostBars[hover.i], true, bars[hover.i]?.h <= 0)}
-                fill="hsl(var(--chart-role-comparison))"
+                fill={GHOST_FILL}
               />
             )}
           </g>
@@ -762,13 +780,14 @@ export function BarChart({
               title={ghostHidden ? 'Показать сравнение' : 'Скрыть сравнение'}
               className={`flex select-none items-center gap-1.5 rounded transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40 ${ghostHidden ? 'opacity-40 line-through' : ''}`}
             >
-              {/* Свотч-прямоугольник: сравнение теперь рисуется столбцами, не пунктиром. */}
-              <span aria-hidden="true" className="h-2 w-3 rounded-sm" style={{ backgroundColor: stacked ? 'hsl(var(--chart-role-comparison))' : 'hsl(var(--chart-role-comparison) / 0.35)' }} />
+              {/* Свотч-прямоугольник: сравнение здесь рисуется столбцами, не пунктиром, и свотч
+                  повторяет ровно ту же альфу (GHOST_FILL), что и сами столбцы. */}
+              <span aria-hidden="true" className="h-2 w-3 rounded-sm" style={{ backgroundColor: GHOST_FILL }} />
               {ghostLabel}
             </button>
           ) : (
             <span className="flex select-none items-center gap-1.5">
-              <span aria-hidden="true" className="h-2 w-3 rounded-sm" style={{ backgroundColor: stacked ? 'hsl(var(--chart-role-comparison))' : 'hsl(var(--chart-role-comparison) / 0.35)' }} />
+              <span aria-hidden="true" className="h-2 w-3 rounded-sm" style={{ backgroundColor: GHOST_FILL }} />
               {ghostLabel}
             </span>
           )}

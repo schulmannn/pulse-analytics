@@ -10,7 +10,21 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
-const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'index.css'), 'utf8');
+const srcDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'src');
+const css = readFileSync(join(srcDir, 'index.css'), 'utf8');
+
+// Призрачные столбцы «прошлого периода» рисуются НЕ токеном, а токеном под альфой, которая живёт
+// константой в BarChart.tsx. Хардкодить её копию здесь бесполезно — гейт зеленел бы вхолостую,
+// пока код уезжает (ровно так /0.35 и /0.5 годами не проверялись). Поэтому альфа читается ИЗ
+// КОДА: рассинхрон кода и гейта физически невозможен, а понижение альфы ниже non-text 3.0 роняет
+// прогон.
+const barChartSrc = readFileSync(join(srcDir, 'components', 'BarChart.tsx'), 'utf8');
+const ghostAlphaMatch = barChartSrc.match(/const GHOST_ALPHA = ([\d.]+);/);
+if (!ghostAlphaMatch) {
+  console.error('contrast-tokens: GHOST_ALPHA не найдена в src/components/BarChart.tsx — гейт призрачных столбцов потерян');
+  process.exit(1);
+}
+const GHOST_ALPHA = Number(ghostAlphaMatch[1]);
 
 /** Extract `--name: H S% L%;` tokens from a css block (first block matching `selector`). */
 function palette(selectorRe) {
@@ -120,11 +134,15 @@ const PAIRS = [
   ['cat 6 slice on card', 'chart-6-cat', 'card', 3.0, 'stroke'],
 
   // Semantic chart SERIES roles (index.css --chart-role-*, resolved from their var() aliases above).
-  // Non-text 3.0 (WCAG 1.4.11) on the surfaces charts paint on; comparison also at its dashed 0.8.
+  // Non-text 3.0 (WCAG 1.4.11) on the surfaces charts paint on. Призрак прошлого периода рисуется
+  // под альфой в ОБОИХ хостах: линия — strokeOpacity 0.8 (LineChart/MorphingSeries), столбцы —
+  // GHOST_FILL (BarChart, альфа читается из кода выше). Обе подачи держат одну планку 3.0.
   ['chart role: primary on card', 'chart-role-primary', 'card', 3.0, 'stroke'],
   ['chart role: primary on canvas', 'chart-role-primary', 'background', 3.0, 'stroke'],
   ['chart role: comparison on card', 'chart-role-comparison', 'card', 3.0, 'stroke'],
-  ['chart role: comparison ghost @0.8 on card', 'chart-role-comparison', 'card', 3.0, 'stroke', 0.8],
+  ['chart role: comparison dashed line @0.8 on card', 'chart-role-comparison', 'card', 3.0, 'stroke', 0.8],
+  [`ghost bar fill (BarChart GHOST_ALPHA ${GHOST_ALPHA}) on card`, 'chart-role-comparison', 'card', 3.0, 'stroke', GHOST_ALPHA],
+  [`ghost bar fill (BarChart GHOST_ALPHA ${GHOST_ALPHA}) on canvas`, 'chart-role-comparison', 'background', 3.0, 'stroke', GHOST_ALPHA],
   ['chart role: positive on card', 'chart-role-positive', 'card', 3.0, 'stroke'],
   ['chart role: negative on card', 'chart-role-negative', 'card', 3.0, 'stroke'],
   ['chart role: warning on card', 'chart-role-warning', 'card', 3.0, 'stroke'],

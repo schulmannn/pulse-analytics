@@ -1865,7 +1865,7 @@
      gated in scripts/contrast-tokens.mjs; full canon in frontend/DESIGN_TOKENS.md. */
   :root {
     --chart-role-primary: var(--brand-iris);        /* main series — line · bars · area · default fill */
-    --chart-role-comparison: var(--chart-2);        /* baseline / previous-period ghost (dashed) */
+    --chart-role-comparison: var(--chart-2);        /* baseline / previous-period ghost — dashed no-fill line; bar hosts draw it as a quieter column (owner) */
     --chart-role-positive: var(--brand-verdant);    /* gains / up emphasis (delta text) */
     --chart-role-negative: var(--brand-ember);      /* losses / down (diverging bars · delta text) */
     --chart-role-warning: var(--status-warn);       /* anomaly / caution markers */
@@ -2079,8 +2079,10 @@
    • Status colours = the utilities `text-verdant` / `text-ember` / `text-status-warn` (+ `bg-*`
      tints), generated from --brand-* / --status-warn. Use these CLASSES in markup; raw
      `hsl(var(--brand-*))` is reserved for SVG chart fills / strokes / gradients (CSS classes can't
-     reach SVG paint). verdant / ember = deltas & up/down only; status-warn (amber) = caution /
-     demo / stale data — never the red ember for a non-error caution.
+     reach SVG paint). verdant / ember = up/down chart roles + the evaluated comparison Δ of a metric
+     page (`ComparisonDelta`); card and table deltas read muted and direction lives in the glyph —
+     see «One voice for deltas» in DESIGN_TOKENS.md. status-warn (amber) = caution / demo / stale
+     data — never the red ember for a non-error caution.
    • Chart area-gradient (Steep-restrained, deliberately quiet): cards = peak 0.2 → 0.05 @55% → fade 0
      (fast falloff so the fill hugs the line, never a heavy full-height wash); the expanded explorer is
      quieter still (0.06 → 0, ended at ~68% height). Fill is the primary role at low opacity. See the

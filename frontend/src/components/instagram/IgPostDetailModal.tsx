@@ -163,16 +163,9 @@ export function IgPostDetailModal({
               {/* DATA column: benchmark context + metrics */}
               <div className="contents lg:flex lg:flex-col lg:gap-4">
                 {reachComparison && (
-                  <p
-                    className={cn(
-                      'order-2 flex items-center gap-1.5 text-xs font-medium',
-                      reasonTone === 'positive'
-                        ? 'text-verdant'
-                        : reasonTone === 'negative'
-                          ? 'text-ember'
-                          : 'text-muted-foreground',
-                    )}
-                  >
+                  // Зеркало PostDetailModal: дельта «к медиане» читается MUTED и в ячейке таблицы,
+                  // и в модалке этой же строки — одно сравнение не может звучать двумя голосами.
+                  <p className="order-2 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
                     <span aria-hidden="true">
                       {reasonTone === 'positive' ? '▲' : reasonTone === 'negative' ? '▼' : '•'}
                     </span>

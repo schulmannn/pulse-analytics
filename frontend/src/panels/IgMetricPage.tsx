@@ -35,7 +35,7 @@ import { isIgChartMetricKey } from '@/panels/igMetricKeys';
 import { useIgScopedPosts } from '@/panels/instagram/igContentScope';
 import { useExplorerChartHeight } from '@/lib/useExplorerChartHeight';
 import type { ReactNode } from 'react';
-import { ComparisonDeltaRow, MetricBackLink, MetricDescriptor, WindowBarShell, RailSection } from '@/components/metric/shared';
+import { ComparisonDelta, ComparisonDeltaRow, MetricBackLink, MetricDescriptor, WindowBarShell, RailSection } from '@/components/metric/shared';
 
 /**
  * Instagram metric pages — the drill target the unified chart contract points IG cards at
@@ -556,9 +556,9 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
                   </div>
                   <div className="flex items-baseline justify-between gap-3">
                     <span className="text-xs text-muted-foreground">Изменение</span>
-                    <span className={`font-medium tabular-nums ${lvlDiff > 0 ? 'text-verdant' : lvlDiff < 0 ? 'text-ember' : ''}`}>
-                      {`${lvlDiff > 0 ? '+' : lvlDiff < 0 ? '−' : ''}${fmt.num(Math.abs(lvlDiff))}`}
-                    </span>
+                    {/* Уровень подписчиков меняется в ШТУКАХ, не в процентах — общая дельта с
+                        собственным форматом, чтобы глиф и цвет не расходились с рейлами. */}
+                    <ComparisonDelta delta={lvlDiff} format={(abs) => fmt.num(abs)} />
                   </div>
                 </div>
               ) : (
@@ -651,8 +651,12 @@ function IgAggregatePage({ def, pair, windowDays, handle }: { def: IgAggDef; pai
                 </div>
                 <div className="bg-card p-4">
                   <div className="text-xs tracking-wide text-muted-foreground">Изменение</div>
-                  <div className={`mt-2 text-3xl font-medium tabular-nums tracking-tight ${deltaPct == null ? 'text-ink3' : deltaPct >= 0 ? 'text-verdant' : 'text-ember'}`}>
-                    {deltaPct == null ? '—' : `${deltaPct >= 0 ? '▲' : '▼'}${Math.abs(deltaPct).toFixed(1)}%`}
+                  <div className="mt-2 text-3xl tracking-tight">
+                    {deltaPct == null ? (
+                      <span className="font-medium tabular-nums text-ink3">—</span>
+                    ) : (
+                      <ComparisonDelta delta={deltaPct} />
+                    )}
                   </div>
                 </div>
               </div>
@@ -760,8 +764,13 @@ function IgErPage({
                   </div>
                   <div className="bg-card p-4">
                     <div className="text-xs tracking-wide text-muted-foreground">Изменение</div>
-                    <div className={`mt-2 text-3xl font-medium tabular-nums tracking-tight ${deltaPp == null ? 'text-ink3' : deltaPp >= 0 ? 'text-verdant' : 'text-ember'}`}>
-                      {deltaPp == null ? '—' : `${deltaPp >= 0 ? '+' : '−'}${Math.abs(deltaPp).toFixed(2)} п.п.`}
+                    {/* ER сравнивается в ПУНКТАХ (п.п.), поэтому свой формат — глиф и цвет общие. */}
+                    <div className="mt-2 text-3xl tracking-tight">
+                      {deltaPp == null ? (
+                        <span className="font-medium tabular-nums text-ink3">—</span>
+                      ) : (
+                        <ComparisonDelta delta={deltaPp} format={(abs) => `${abs.toFixed(2)} п.п.`} />
+                      )}
                     </div>
                   </div>
                 </div>

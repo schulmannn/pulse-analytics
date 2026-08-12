@@ -4,12 +4,12 @@ import { prefersReducedMotion, readMorphMs } from '@/lib/chartMotionRuntime';
 
 /**
  * The UPDATE-morph data layer for {@link LineChart}. Isolated in its OWN component so the RAF loop's
- * per-frame setState re-renders only the four series paths — never the parent chart (axes, labels,
+ * per-frame setState re-renders only the series paths — never the parent chart (axes, labels,
  * gridlines, hover geometry all stay in the parent's memoized layers). On a data/period change the
- * primary + comparison line/area interpolate continuously from the previously rendered geometry to
- * the new geometry (Recharts-style, proportional point matching). An idle width-only reflow snaps;
- * one arriving during a data morph retargets that morph without restarting it. Reduced motion always
- * snaps. See frontend/DESIGN_TOKENS.md «Chart motion».
+ * primary line/area + the comparison line interpolate continuously from the previously rendered
+ * geometry to the new geometry (Recharts-style, proportional point matching). An idle width-only
+ * reflow snaps; one arriving during a data morph retargets that morph without restarting it. Reduced
+ * motion always snaps. See frontend/DESIGN_TOKENS.md «Chart motion».
  */
 export interface MorphGeom {
   /** Primary series points (length = values.length), `y === null` at gap days. */
@@ -26,8 +26,8 @@ interface MorphingSeriesProps {
       unchanged signature with new geometry = a resize → snap. */
   signature: string;
   primaryGradientId: string;
-  comparisonGradientId: string;
-  /** `comparison` appearance: comparison gets its own solid smooth area + solid stroke. */
+  /** `comparison` appearance: the ghost keeps the canonical dashed no-fill shape, just a touch
+      stronger (2px @0.95) than the legacy hosts' 1.8px @0.8. */
   comparison: boolean;
   /** Rich hosts (rhea/comparison) use a softer 2px primary stroke vs the 2.5px default. */
   richStyle: boolean;
@@ -38,7 +38,13 @@ interface MorphingSeriesProps {
 }
 
 type SeriesPaths = { line: string; area: string };
-type FramePaths = { primary: SeriesPaths; ghost: SeriesPaths | null; primaryPoints: MorphPoint[] };
+/** У призрака area НЕТ по канону («previous-period stays dashed/no-fill»), поэтому и строить её
+    незачем — тип это фиксирует, а `buildGhostPaths` не тратит на неё кадр морфа. */
+type GhostPaths = { line: string };
+type FramePaths = { primary: SeriesPaths; ghost: GhostPaths | null; primaryPoints: MorphPoint[] };
+
+const buildGhostPaths = (points: ReadonlyArray<MorphPoint>, baseY: number): GhostPaths =>
+  buildSeriesPaths(points, baseY, { lineOnly: true });
 
 function samePoints(a: ReadonlyArray<MorphPoint> | null, b: ReadonlyArray<MorphPoint> | null): boolean {
   if (a === b) return true;
@@ -54,7 +60,6 @@ export function MorphingSeries({
   geom,
   signature,
   primaryGradientId,
-  comparisonGradientId,
   comparison,
   richStyle,
   poles = false,
@@ -64,7 +69,7 @@ export function MorphingSeries({
   const targetPaths = useMemo<FramePaths>(
     () => ({
       primary: buildSeriesPaths(geom.primary, geom.baseY),
-      ghost: geom.ghost ? buildSeriesPaths(geom.ghost, geom.baseY) : null,
+      ghost: geom.ghost ? buildGhostPaths(geom.ghost, geom.baseY) : null,
       primaryPoints: geom.primary,
     }),
     [geom],
@@ -115,7 +120,7 @@ export function MorphingSeries({
     displayedRef.current = { primary: curP, ghost: curG };
     setFramePaths({
       primary: buildSeriesPaths(curP, target.baseY),
-      ghost: curG ? buildSeriesPaths(curG, target.baseY) : null,
+      ghost: curG ? buildGhostPaths(curG, target.baseY) : null,
       primaryPoints: curP,
     });
     if (t < 1) {
@@ -179,7 +184,7 @@ export function MorphingSeries({
     // shape before the first RAF. React flushes the update before the browser paints.
     setFramePaths({
       primary: buildSeriesPaths(fromP, geom.baseY),
-      ghost: fromG ? buildSeriesPaths(fromG, geom.baseY) : null,
+      ghost: fromG ? buildGhostPaths(fromG, geom.baseY) : null,
       primaryPoints: fromP,
     });
     if (rafRef.current == null) rafRef.current = requestAnimationFrame(() => tickRef.current());
@@ -206,12 +211,10 @@ export function MorphingSeries({
     // One mount-only reveal fade (data-chart-motion="morph"); UPDATE morphs are the point
     // interpolation above, not a re-mount, so this never replays on a period change.
     <g data-chart-motion="morph" data-chart-morph-state={framePaths ? 'running' : 'idle'}>
-      {/* Comparison (previous period) — solid smooth area only in the `comparison` appearance; the
-          legacy hosts keep a dashed reference line. Its dim rides strokeOpacity so no fade can
-          brighten the dashed pattern, and we morph the point geometry, never stroke-dasharray. */}
-      {ghost && comparison && ghost.area && (
-        <path data-chart-series="comparison-area" d={ghost.area} fill={`url(#${comparisonGradientId})`} />
-      )}
+      {/* Comparison (previous period) — ВСЕГДА штриховая линия без заливки (канон
+          «previous-period stays dashed/no-fill»): залитая comparison-area пересекалась с заливкой
+          текущего периода и давала мутные зоны. Дим рисуется strokeOpacity, чтобы никакой fade не
+          подсвечивал сам пунктир, и морфится геометрия точек, а не stroke-dasharray. */}
       {ghost && ghost.line && (
         <path
           data-chart-series="comparison"
@@ -219,7 +222,7 @@ export function MorphingSeries({
           fill="none"
           stroke="hsl(var(--chart-role-comparison))"
           strokeWidth={comparison ? '2' : '1.8'}
-          strokeDasharray={comparison ? undefined : '5 4'}
+          strokeDasharray="5 4"
           strokeOpacity={comparison ? '0.95' : '0.8'}
           strokeLinejoin="round"
           strokeLinecap="round"

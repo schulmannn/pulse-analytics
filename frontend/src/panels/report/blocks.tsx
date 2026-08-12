@@ -275,7 +275,7 @@ export function ReportMetricCard({ title, total, trend, series, valueFmt, zeroBa
       </div>
       <div className="report-metric-card__value flex items-baseline gap-2">
         <span className="report-metric-card__number text-2xl font-medium tabular-nums tracking-tight">{total}</span>
-        <DeltaPill delta={trend} subtle />
+        <DeltaPill delta={trend} />
       </div>
       <div className="report-metric-card__chart">
         <LineChart

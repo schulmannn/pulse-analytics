@@ -181,6 +181,17 @@ describe('buildSeriesPaths (segments + smooth cubic, honest gaps)', () => {
   it('an all-gap series yields empty paths', () => {
     expect(buildSeriesPaths([p(0, null), p(10, null)], 32)).toEqual({ line: '', area: '' });
   });
+
+  // Призрак прошлого периода — штриховая линия БЕЗ заливки, и её путь пересобирается каждый кадр
+  // морфа: area для него не должна строиться вовсе (линия при этом байт-в-байт та же).
+  it('lineOnly skips the area string and leaves the line untouched', () => {
+    const points = [p(0, 0), p(10, 5), p(20, null), p(30, 5)];
+    const full = buildSeriesPaths(points, 32);
+    const lineOnly = buildSeriesPaths(points, 32, { lineOnly: true });
+    expect(lineOnly.line).toBe(full.line);
+    expect(lineOnly.area).toBe('');
+    expect(full.area).not.toBe('');
+  });
 });
 
 describe('easeChartMorph (Recharts `ease` / --ease-chart-morph mirrored in JS)', () => {

@@ -42,7 +42,7 @@ import { CHART_MAX_POINTS, pickIndexes } from '@/lib/msSeries';
 import { useExplorerChartHeight } from '@/lib/useExplorerChartHeight';
 import { splitDailyWindows } from '@/lib/delta';
 import { MediaThumb } from '@/components/MediaThumb';
-import { MetricBackLink, MetricDescriptor, RailSection } from '@/components/metric/shared';
+import { ComparisonDeltaRow, MetricBackLink, MetricDescriptor, RailSection } from '@/components/metric/shared';
 
 /** Короткий день недели для тултипов дневной гранулы («чт, 2 июл») — артефакт v2. */
 const WEEKDAY_FMT = new Intl.DateTimeFormat('ru-RU', { weekday: 'short' });
@@ -1220,17 +1220,13 @@ export function MetricPage() {
                   <p className="text-xs text-muted-foreground">Выберите базу — серия сравнения, пары в рейтинге и Δ появятся автоматически.</p>
                 ) : compare ? (
                   <div className="space-y-3">
-                    {/* Значение базы — вторичный вес; Δ — цветной бейдж (прирост/спад). */}
+                    {/* Значение базы — вторичный вес; Δ — общая строка «Изменение» (одна на все
+                        вертикали): цветной ТЕКСТ без заливки, направление в глифе. */}
                     <div className="flex items-baseline justify-between gap-3">
                       <span className="text-xs text-muted-foreground">{cmpLabel}</span>
                       <span className="text-base font-medium tabular-nums text-ink2">{compare.previous}</span>
                     </div>
-                    {compareDelta != null && (
-                      <div className="flex items-center justify-between gap-3 border-t border-border pt-3 dark:border-white/6">
-                        <span className="text-xs text-muted-foreground">Изменение</span>
-                        <DeltaBadge value={compareDelta} />
-                      </div>
-                    )}
+                    {compareDelta != null && <ComparisonDeltaRow delta={compareDelta} />}
                   </div>
                 ) : (
                   <p className="text-xs text-muted-foreground">
@@ -1313,23 +1309,6 @@ function ChartTypeIcon({ kind }: { kind: 'line' | 'bar' | 'rank' | 'pivot' }) {
         </svg>
       )}
     </>
-  );
-}
-
-/** Colour-coded change badge for the comparison card — the one evaluated Δ that leans on tone
-    (gain = verdant, loss = ember); direction also rides the ▲/▼ glyph for colour-blind safety. */
-function DeltaBadge({ value }: { value: number }) {
-  const up = value > 0;
-  const down = value < 0;
-  return (
-    <span
-      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium tabular-nums ${
-        up ? 'bg-verdant/10 text-verdant' : down ? 'bg-ember/10 text-ember' : 'bg-muted text-muted-foreground'
-      }`}
-    >
-      <span aria-hidden="true">{up ? '▲' : down ? '▼' : '—'}</span>
-      {Math.abs(value).toFixed(1)}%
-    </span>
   );
 }
 

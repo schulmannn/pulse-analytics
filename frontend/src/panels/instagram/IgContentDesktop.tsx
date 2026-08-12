@@ -1094,7 +1094,9 @@ function IgFormatTag({ post }: { post: IgPost }) {
 /**
  * A metric cell with explicit comparable-period median context. Value is always shown; the «±N% к
  * медиане» delta appears only when periodMedian cleared the min-sample gate (never a faked
- * benchmark). Missing value → «—». Colour is reserved for the signal column (reach).
+ * benchmark). Missing value → «—». The delta reads MUTED (канон дельт, зеркало Posts.tsx):
+ * direction is carried by the ±N% wording, and verdant/ember stay reserved for the one evaluated
+ * period-vs-period Δ of a comparison rail. `tone` only picks the value ink.
  */
 function MedianCell({
   value,
@@ -1109,18 +1111,10 @@ function MedianCell({
 }) {
   if (value == null) return <span className="text-muted-foreground/40">—</span>;
   const cmp = compareToMedian(value, median);
-  const deltaColor =
-    tone === 'signal' && cmp
-      ? cmp.dir === 'above'
-        ? 'text-verdant'
-        : cmp.dir === 'below'
-          ? 'text-ember'
-          : 'text-muted-foreground'
-      : 'text-muted-foreground';
   return (
     <>
       <span className={cn('block font-medium tabular-nums', tone === 'signal' ? 'text-foreground' : 'text-muted-foreground')}>{format(value)}</span>
-      {cmp && <span className={cn('block text-2xs', deltaColor)}>{medianDeltaLabel(cmp)}</span>}
+      {cmp && <span className="block text-2xs text-muted-foreground">{medianDeltaLabel(cmp)}</span>}
     </>
   );
 }

@@ -26,7 +26,9 @@ interface PostDetailModalProps {
   /** Leaderboard position badge; omit where the list order is a transient sort. */
   rank?: number;
   reason: string | null;
-  /** Semantic tone for a benchmark label. Existing callers default to their legacy positive tone. */
+  /** Направление benchmark-подписи. Красит ГЛИФ ▲/▼/•, но НЕ текст: дельта «к медиане» читается
+      muted и в ячейке таблицы, и в модалке, открытой кликом по этой же ячейке — иначе одно и то же
+      сравнение звучит двумя голосами (канон «One voice for deltas»). */
   reasonTone?: 'positive' | 'negative' | 'neutral';
   /** Explain why no benchmark is shown instead of leaving an unexplained blank. */
   benchmarkUnavailable?: boolean;
@@ -183,16 +185,10 @@ export function PostDetailModal({
           {/* DATA column: benchmark context + primary metrics + ratios + velocity + reactions */}
           <div className="contents lg:flex lg:flex-col lg:gap-4">
             {reason && (
-              <p
-                className={cn(
-                  'order-2 flex items-center gap-1.5 text-xs font-medium',
-                  reasonTone === 'positive'
-                    ? 'text-verdant'
-                    : reasonTone === 'negative'
-                      ? 'text-ember'
-                      : 'text-muted-foreground',
-                )}
-              >
+              // Дельта «к медиане» — MUTED, как и в ячейке таблицы, из которой открыт этот пост:
+              // verdant/ember зарезервированы за оценочной Δ сравнения периодов в metric-эксплорере.
+              // Направление несёт глиф ▲/▼/• (и слово в самой подписи «выше/ниже медианы»).
+              <p className="order-2 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
                 <span aria-hidden="true">
                   {reasonTone === 'positive' ? '▲' : reasonTone === 'negative' ? '▼' : '•'}
                 </span>
