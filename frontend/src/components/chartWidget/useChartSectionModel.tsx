@@ -7,6 +7,7 @@ import { ThrowInRender } from '@/components/WidgetErrorBoundary';
 import { GroupCtx, prefersReducedMotion } from '@/components/widgets/WidgetGroup';
 import { maxSize } from '@/components/widgets/variants';
 import { observeSize } from '@/lib/observeSize';
+import { defaultWidgetTint, resolveWidgetTint } from '@/lib/widgetSurface';
 import {
   WidgetPeriodProvider,
   resolveEffectivePeriod,
@@ -36,6 +37,7 @@ export function useChartSectionModel(props: ChartSectionProps) {
     variants,
     defaultSize,
     defaultColor,
+    defaultTinted,
     fixedSize,
     expand,
     drillTo,
@@ -182,7 +184,18 @@ export function useChartSectionModel(props: ChartSectionProps) {
     : <ThrowInRender error={variantResult.error} />;
 
   const activeColor = (configEditor ? configEditor.color : prefs.color) ?? defaultColor;
-  const activeTinted = (configEditor ? configEditor.tinted : prefs.tinted) ?? true;
+  // Дефолт «цветного фона» приходит от хоста (см. defaultWidgetTint) — сохранённый выбор
+  // пользователя главнее. Считаем его от ОБЪЯВЛЕННОГО ХОСТОМ `defaultColor`, а НЕ от
+  // эффективного `activeColor`: иначе карточка, которой пользователь сам выбрал акцент (а
+  // переключатель не трогал), молча теряла бы заливку, которая у неё была. Тот же дефолт уезжает
+  // в редактор карточки, иначе переключатель «Цветной фон» показывал бы состояние, которого на
+  // карточке нет (и мигал бы при выборе свотча).
+  const tintedDefault = defaultWidgetTint(defaultColor, defaultTinted);
+  const activeTinted = resolveWidgetTint(
+    configEditor ? configEditor.tinted : prefs.tinted,
+    defaultColor,
+    defaultTinted,
+  );
   const activeTarget = configEditor ? (configEditor.target ?? null) : (prefs.target ?? null);
   const chosenSize: WidgetSize =
     fixedSize ?? (configEditor ? configEditor.size : prefs.size) ?? defaultSize ?? 'third';
@@ -278,6 +291,7 @@ export function useChartSectionModel(props: ChartSectionProps) {
       innerStyle,
       activeColor,
       activeTinted,
+      tintedDefault,
       activeTarget,
     },
     controls: {

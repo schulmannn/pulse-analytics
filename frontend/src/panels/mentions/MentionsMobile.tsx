@@ -1,6 +1,5 @@
 import { useMentions, useMentionsArchive } from '@/api/queries';
-import { compareDdMm } from '@/lib/dates';
-import { fmt, ddmmDay } from '@/lib/format';
+import { dayKeyToTs, fmt } from '@/lib/format';
 import { BarChart } from '@/components/BarChart';
 import { Skeleton } from '@/components/ui/skeleton';
 import type { Mentions as MentionsData } from '@/api/schemas';
@@ -210,26 +209,25 @@ export function MentionsMobile() {
   );
 }
 
-/** Slice the dd.mm-keyed archive by day count and build both chart presentations. Tolerant of both
-    «DD.MM» (live/archive) and «YYYY-MM-DD» (demo fixture) keys so the demo chart renders too. */
+/** Slice the day-keyed archive by day count and build both chart presentations. Tolerant of both
+    «DD.MM» (live/archive) and «YYYY-MM-DD» (demo fixture) keys so the demo chart renders too.
+    СОРТИРОВКА — по разобранному ключу (`dayKeyToTs`, epoch-ms с выводом года через Новый год),
+    подписи форматируются `fmt.day` уже ПОСЛЕ сортировки: одна форма («13 июл.») и для столбцов,
+    и для линии, а порядок серии не зависит от формата подписи. */
 function mentionsWindow(byDay: Record<string, number>, days: number) {
-  const norm = (key: string): string => {
-    // YYYY-MM-DD → DD.MM (demo fixture emits ISO days in the legacy by_day map).
-    const iso = key.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-    return iso ? `${iso[3]}.${iso[2]}` : key;
-  };
-  const entries = Object.entries(byDay).map(([k, v]) => [norm(k), v] as const);
-  entries.sort((a, b) => compareDdMm(a[0], b[0]));
+  const entries = Object.entries(byDay)
+    .map(([key, value]) => ({ ts: dayKeyToTs(key), value: value ?? 0 }))
+    .sort((a, b) => (a.ts ?? 0) - (b.ts ?? 0));
   const sliced = days === 0 ? entries : entries.slice(-days);
-  const dates = sliced.map((e) => e[0]);
-  const values = sliced.map((e) => e[1] ?? 0);
-  const titles = sliced.map((e) => `${ddmmDay(e[0])}: ${fmt.num(e[1] ?? 0)}`);
+  const values = sliced.map((e) => e.value);
+  const labels = sliced.map((e) => fmt.day(e.ts));
+  const titles = sliced.map((e) => `${fmt.day(e.ts)}: ${fmt.num(e.value)}`);
   const axisLabels = [
-    ddmmDay(dates[0] ?? ''),
-    ddmmDay(dates[Math.floor(dates.length / 2)] ?? ''),
-    ddmmDay(dates[dates.length - 1] ?? ''),
+    labels[0] ?? '',
+    labels[Math.floor(labels.length / 2)] ?? '',
+    labels[labels.length - 1] ?? '',
   ];
-  return { dates, values, titles, axisLabels };
+  return { labels, values, titles, axisLabels };
 }
 
 /** «Упоминаний по дням» on the Mentions surface. It keeps its source-screen ChartSection. */
@@ -249,7 +247,7 @@ export function MentionsByDayWidget({ byDay, id, homeKey }: { byDay: Record<stri
             label: 'Столбцы',
             // No wrapper padding: the chart fills the measured tile body exactly, so an extra pt-*
             // here would push it past the fixed tile and grow an inner scrollbar.
-            render: <BarChart values={w.values} labels={w.dates} titles={w.titles} />,
+            render: <BarChart values={w.values} labels={w.labels} titles={w.titles} />,
           },
           {
             key: 'line',
@@ -265,7 +263,7 @@ export function MentionsByDayWidget({ byDay, id, homeKey }: { byDay: Record<stri
         },
         renderExpandedBar: (days) => {
           const w = mentionsWindow(byDay, days);
-          return <BarChart values={w.values} labels={w.dates} titles={w.titles} />;
+          return <BarChart values={w.values} labels={w.labels} titles={w.titles} />;
         },
         statsFor: (days) => mentionsWindow(byDay, days).values,
       }}
@@ -289,7 +287,7 @@ export function MentionsWidgetBody({ viz }: { viz: WidgetViz }) {
   const w = mentionsWindow(archive.data?.by_day ?? {}, days);
   return viz === 'line'
     ? <LineChart values={w.values} labels={w.axisLabels} titles={w.titles} yMin={0} />
-    : <BarChart values={w.values} labels={w.dates} titles={w.titles} />;
+    : <BarChart values={w.values} labels={w.labels} titles={w.titles} />;
 }
 
 function MentionsSkeletons() {

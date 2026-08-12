@@ -76,6 +76,18 @@ widget's visualisation. Both live in **`src/lib/widgetSurface.ts`** (pure, unit-
   keeps the default ink title, and light keeps ink titles everywhere. The header icon affordances
   (⋯ / ↗ / ×) follow one quiet step lower — accent at 0.8 (`.widget-icon`, non-text 3.0-gated);
   their hover pops (`hover:text-foreground` / `hover:text-destructive`) stay untinted.
+- **Default surface = neutral; tint is a hand tool for ONE story per page.** An accented card
+  (`defaultColor`) renders **un-tinted by default** — a board of five different washes at once makes
+  colour mean nothing, while the canon says colour = series identity. A curated host may opt exactly
+  one lead card into the wash with `defaultTinted` (Обзор → «Просмотры», IG → «Охват», МойСклад →
+  «Выручка», Метрика → «Визиты», Покупатели → «Покупатели»); everything else keeps the canonical iris
+  accent on a neutral surface. A card whose **host** declares no accent is untouched — its
+  `--card-tint` radial is the baseline card surface, not a story. →
+  `defaultWidgetTint(defaultColor, defaultTinted)` / `resolveWidgetTint(savedTinted, …)`. Both read
+  the accent the **host declared in JSX**, never the card's effective accent: a default describes the
+  out-of-the-box card, so a colour the user picked himself must not silently strip the wash he had.
+  **Saved user prefs always win over the default** (`tinted` in `pulse_widget_prefs` is never
+  migrated): changing a default must not repaint a card someone has already coloured by hand.
 - **Width.** A temporal `line`/area cannot render at a **third** width — the x-axis collapses into
   sub-pixel mush (cf. the downsample note in `CLAUDE.md`). Such a viz is coerced UP to `half` rather
   than silently dropping points; compact vizzes (kpi hero, bar, donut) read fine at third.
@@ -97,6 +109,24 @@ app); `font-mono` = the local system monospace stack, scoped to timestamps / col
 status only. No screen depends on Google Fonts: the legacy shell uses system sans/serif stacks, and
 production CSP keeps `font-src 'self'` only. The two explicit `@font-face` rules ship only the
 RU/Cyrillic and Latin subsets; extended scripts intentionally fall back to the system stack.
+
+## Dates
+
+**One** date format across the whole app: **«13 июл.»** — `fmt.day` from `lib/format.ts`
+(`ru-RU`, `{ day:'numeric', month:'short' }`, with the dot the locale prints; May stays «18 мая»).
+Timestamps add the time through `fmt.date` («8 авг., 14:23»); a per-hour axis appends `HH:00` to
+`fmt.day`. No `dd.mm`, no hand-written month arrays, no `.replace('.', '')` "dotless" variants and
+no per-panel formatters — axes, tooltips, ledger facts, tables and captions all read the same.
+
+The **year is printed only where it carries meaning** — the boundaries of a compared window, which
+may sit on the other side of New Year («22 дек. 2026 г. — 31 дек. 2026 г., текущее 1 янв. 2027 г. —
+10 янв. 2027 г.»). That is `fmt.dayYear`, the same locale format plus `year:'numeric'` — not a
+numeric `10.06.2026`. Axes and tooltips never carry the year: the period bar already names it.
+
+A bare calendar key (`YYYY-MM-DD`) must go through `parseDayKey`/`fmt.day` (local midnight — UTC
+parsing shows the previous day west of UTC). **Daily breakdowns sort on `dayKeyToTs` (epoch-ms,
+with year inference for the API's year-less `DD.MM` keys) and are formatted only afterwards** —
+sorting the rendered label breaks across New Year and re-breaks on every format change.
 
 ## Radius
 

@@ -1,6 +1,7 @@
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { EmptyState } from '@/components/EmptyState';
 import { fmt } from '@/lib/format';
+import { formatShare } from '@/lib/breakdownShare';
 import { observeSize } from '@/lib/observeSize';
 import { useMorphValues } from '@/lib/useMorphValues';
 import { ChartTooltip } from '@/components/ChartTooltip';
@@ -13,6 +14,11 @@ interface PieChartProps {
   titles?: string[];
   /** Per-slice colour (an `hsl(...)` string). Missing entries cycle --chart-1..6. */
   colors?: (string | undefined)[];
+  /** Доли строк (0..1) от ПОЛНОЙ суммы разбивки — когда список урезан топ-N, знаменатель шире
+      переданных `values`. Заданные доли печатаются вместо `value / Σvalues`, поэтому круговая и
+      список показывают ОДНО число (см. lib/breakdownShare). Геометрия кольца не меняется —
+      дольки по-прежнему доли видимой суммы. */
+  shares?: (number | undefined)[];
   height?: number;
 }
 
@@ -75,7 +81,7 @@ function arcPath(cx: number, cy: number, rOuter: number, rInner: number, from: n
  * overlay, tokens only (works on the near-black canvas), no shadows. Slices below 2% fold into
  * «Прочее». Hover reads out label · value · %.
  */
-export function PieChart({ values, labels, titles, colors, height = 200 }: PieChartProps) {
+export function PieChart({ values, labels, titles, colors, shares, height = 200 }: PieChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const donutRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -150,7 +156,7 @@ export function PieChart({ values, labels, titles, colors, height = 200 }: PieCh
 
   // Keep the six largest slices (each a distinct hue: the item's own colour, else a --chart token
   // by rank), fold every remaining slice into one muted «Прочее» — collision-free by construction.
-  type Slice = { label: string; value: number; color: string; title: string };
+  type Slice = { label: string; value: number; color: string; title: string; share?: number };
   const ranked = positive
     .map((v, i) => ({ v, i }))
     .filter((s) => s.v > 0)
@@ -160,11 +166,17 @@ export function PieChart({ values, labels, titles, colors, height = 200 }: PieCh
     value: s.v,
     color: colors?.[s.i] ?? `hsl(var(--chart-${(pos % 6) + 1}-cat))`,
     title: titles?.[s.i] ?? `${labels?.[s.i] ?? ''}: ${fmt.num(s.v)}`,
+    share: shares?.[s.i],
   }));
-  const otherValue = ranked.slice(MAX_COLORS).reduce((sum, s) => sum + s.v, 0);
+  const folded = ranked.slice(MAX_COLORS);
+  const otherValue = folded.reduce((sum, s) => sum + s.v, 0);
+  // «Прочее» наследует СУММУ долей схлопнутых долек — иначе строка врала бы, что она весь остаток.
+  const otherShare = folded.some((s) => shares?.[s.i] != null)
+    ? folded.reduce((sum, s) => sum + (shares?.[s.i] ?? 0), 0)
+    : undefined;
   const slices: Slice[] =
     otherValue > 0
-      ? [...big, { label: 'Прочее', value: otherValue, color: 'hsl(var(--chart-role-neutral))', title: `Прочее: ${fmt.num(otherValue)}` }]
+      ? [...big, { label: 'Прочее', value: otherValue, color: 'hsl(var(--chart-role-neutral))', title: `Прочее: ${fmt.num(otherValue)}`, share: otherShare }]
       : big;
 
   // UPDATE-морф долек (канон Chart motion): на смене периода/фильтра значения ПЕРЕТЕКАЮТ
@@ -215,8 +227,14 @@ export function PieChart({ values, labels, titles, colors, height = 200 }: PieCh
     return { ...s, from, to: acc, mid: (from + acc) / 2 };
   });
 
-  const pct = (v: number) => `${((v / total) * 100).toFixed(1)}%`;
-  const tipText = (i: number) => `${arcs[i]?.title ?? ''} · ${pct(arcs[i]?.value ?? 0)}`;
+  // Доля дольки: явная (знаменатель = полная сумма разбивки до среза топ-N) или своя, от суммы
+  // видимых значений. Формат — общий с «значение · доля» в списках (lib/breakdownShare).
+  const pct = (s: { value: number; share?: number }) =>
+    formatShare(s.share ?? (total > 0 ? s.value / total : 0));
+  const tipText = (i: number) => {
+    const a = arcs[i];
+    return a ? `${a.title} · ${pct(a)}` : '';
+  };
 
   // Legend: full in the overlay; in a fixed tile capped by how many rows fit the donut height so
   // the list never scrolls off NOR clips (the tile is overflow-hidden) — «следить чтобы не съезжали»;
@@ -318,7 +336,7 @@ export function PieChart({ values, labels, titles, colors, height = 200 }: PieCh
               <span className="shrink-0 text-sm font-medium tabular-nums text-foreground">
                 {fmt.num(a.value)}
                 {' '}
-                <span className="ml-1.5 text-2xs font-normal text-muted-foreground">{pct(a.value)}</span>
+                <span className="ml-1.5 text-2xs font-normal text-muted-foreground">{pct(a)}</span>
               </span>
             </li>
           ))}

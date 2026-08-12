@@ -343,9 +343,10 @@ describe('resolveWidgetMetric — TG breakdowns (S3b)', () => {
   it('resolves tg.emoji from in-window post reactions (top emoji first)', () => {
     const r = bd('tg.emoji');
     expect(r.kind).toBe('breakdown');
+    // Часть целого → строка несёт долю от суммы ВСЕХ эмодзи окна (U7, «значение · доля»).
     expect(r.breakdown).toEqual([
-      { label: '🔥', value: 30, display: '30' },
-      { label: '👍', value: 20, display: '20' },
+      { label: '🔥', value: 30, display: '30', share: 0.6 },
+      { label: '👍', value: 20, display: '20', share: 0.4 },
     ]);
   });
 

@@ -140,12 +140,6 @@ function shiftIsoDay(day: string, delta: number): string {
   return shifted.toISOString().slice(0, 10);
 }
 
-/** «DD.MM» label from a YYYY-MM-DD ISO day. */
-export function ddmmFromIso(iso: string): string {
-  const parts = iso.split('-');
-  return parts.length === 3 ? `${parts[2]}.${parts[1]}` : iso;
-}
-
 /**
  * Bar timeline for the surface. For 7/30/90 the calendar is zero-filled to exactly `days` bars
  * ending today, and the ghost is the immediately-preceding equal window aligned by ordinal day. For
@@ -180,10 +174,10 @@ export function buildMentionsTimeline(
     return {
       values: curDays.map((d) => curMap.get(d)?.mentions ?? 0),
       ghost: prevDays.map((d) => prevMap.get(d)?.mentions ?? 0),
-      labels: curDays.map(ddmmFromIso),
+      labels: curDays.map((d) => fmt.day(d)),
       titles: curDays.map((d) => {
         const c = curMap.get(d);
-        return `${ddmmFromIso(d)}: ${fmt.num(c?.mentions ?? 0)} упом · ${fmt.short(c?.views ?? 0)} просм`;
+        return `${fmt.day(d)}: ${fmt.num(c?.mentions ?? 0)} упом · ${fmt.short(c?.views ?? 0)} просм`;
       }),
       days: curDays,
       views: curDays.map((d) => curMap.get(d)?.views ?? 0),
@@ -194,8 +188,8 @@ export function buildMentionsTimeline(
     const sorted = [...daily].sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : 0));
     return {
       values: sorted.map((p) => p.mentions),
-      labels: sorted.map((p) => ddmmFromIso(p.day)),
-      titles: sorted.map((p) => `${ddmmFromIso(p.day)}: ${fmt.num(p.mentions)} упом · ${fmt.short(p.views)} просм`),
+      labels: sorted.map((p) => fmt.day(p.day)),
+      titles: sorted.map((p) => `${fmt.day(p.day)}: ${fmt.num(p.mentions)} упом · ${fmt.short(p.views)} просм`),
       days: sorted.map((p) => p.day),
       views: sorted.map((p) => p.views),
     };
@@ -215,10 +209,10 @@ export function buildMentionsTimeline(
   return {
     values: curDays.map((d) => curMap.get(d)?.mentions ?? 0),
     ghost: prevDays.map((d) => prevMap.get(d)?.mentions ?? 0),
-    labels: curDays.map(ddmmFromIso),
+    labels: curDays.map((d) => fmt.day(d)),
     titles: curDays.map((d) => {
       const c = curMap.get(d);
-      return `${ddmmFromIso(d)}: ${fmt.num(c?.mentions ?? 0)} упом · ${fmt.short(c?.views ?? 0)} просм`;
+      return `${fmt.day(d)}: ${fmt.num(c?.mentions ?? 0)} упом · ${fmt.short(c?.views ?? 0)} просм`;
     }),
     days: curDays,
     views: curDays.map((d) => curMap.get(d)?.views ?? 0),
@@ -284,10 +278,10 @@ export function capMentionsTimeline(timeline: MentionsTimeline, kind: 'line' | '
   return {
     values: order.map((key) => sum(timeline.values, bucketOf.get(key)!)),
     ghost: hasGhost ? order.map((key) => sum(timeline.ghost, bucketOf.get(key)!)) : timeline.ghost,
-    labels: order.map(ddmmFromIso),
+    labels: order.map((key) => fmt.day(key)),
     titles: order.map((key) => {
       const idx = bucketOf.get(key)!;
-      return `${ddmmFromIso(key)} · неделя: ${fmt.num(sum(timeline.values, idx))} упом · ${fmt.short(sum(timeline.views, idx))} просм`;
+      return `${fmt.day(key)} · неделя: ${fmt.num(sum(timeline.values, idx))} упом · ${fmt.short(sum(timeline.views, idx))} просм`;
     }),
     days: order,
     views: order.map((key) => sum(timeline.views, bucketOf.get(key)!)),

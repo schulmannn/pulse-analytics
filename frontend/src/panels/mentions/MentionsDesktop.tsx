@@ -9,7 +9,6 @@ import {
   applyMentionsFilters,
   buildMentionsTimeline,
   capMentionsTimeline,
-  ddmmFromIso,
   filterMentionRows,
   mentionsDelta,
   mentionsInsights,
@@ -556,7 +555,7 @@ function PeriodContext({
   const items: { label: string; value: string }[] = [];
   if (insights.peak) items.push({
     label: sourceFiltered ? 'Пик выбранного канала' : 'Пик упоминаний',
-    value: `${ddmmFromIso(insights.peak.day)} · ${fmt.num(insights.peak.mentions)}`,
+    value: `${fmt.day(insights.peak.day)} · ${fmt.num(insights.peak.mentions)}`,
   });
   if (insights.topSourceLabel && insights.topSourceMentionShare != null) {
     items.push({

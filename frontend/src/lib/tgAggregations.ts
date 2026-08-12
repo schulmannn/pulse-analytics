@@ -11,6 +11,7 @@
 import type { NormalizedPost } from '@/lib/posts';
 import type { TgFull, TgGraphs } from '@/api/schemas';
 import { fmt, pluralRu } from '@/lib/format';
+import { withShares } from '@/lib/breakdownShare';
 
 /** A categorical row (matches WidgetResult.breakdown / Breakdown component items). */
 export interface BreakdownItem {
@@ -18,6 +19,9 @@ export interface BreakdownItem {
   value: number;
   display?: string;
   color?: string;
+  /** Доля от полной суммы разбивки (0..1) — только у частей целого, считается ДО среза топ-8
+      (lib/breakdownShare). Средние («Ср. охват по типу») и ERV долей не получают. */
+  share?: number;
 }
 
 type ViewsSummary = NonNullable<TgFull['views_summary']>;
@@ -60,10 +64,12 @@ export function emojiBreakdown(posts: NormalizedPost[]): BreakdownItem[] {
   posts.forEach((p) => p.reactionsDetail.forEach((rd) => {
     if (rd.emoji) map[rd.emoji] = (map[rd.emoji] ?? 0) + rd.count;
   }));
-  return Object.entries(map)
-    .map(([label, value]) => ({ label, value, display: fmt.num(value) }))
-    .sort((a, b) => b.value - a.value)
-    .slice(0, 8);
+  // Доли — от ВСЕХ эмодзи (withShares до slice), иначе хвост исчезает и восьмёрка даёт «100%».
+  return withShares(
+    Object.entries(map)
+      .map(([label, value]) => ({ label, value, display: fmt.num(value) }))
+      .sort((a, b) => b.value - a.value),
+  ).slice(0, 8);
 }
 
 /** «Вовлечённость по формату» — avg ERV per media type over the given posts. */
@@ -116,13 +122,15 @@ export function postCountBreakdown(posts: NormalizedPost[]): BreakdownItem[] {
 // ── Views-summary breakdowns (period-agnostic server aggregate) ───────────────────────────────
 /** «Состав вовлечённости» — reactions vs forwards vs replies. */
 export function engagementComposition(vs: ViewsSummary | null | undefined): BreakdownItem[] {
-  return [
-    { label: 'Реакции', value: Number(vs?.total_reactions ?? 0), color: 'hsl(var(--chart-1))' },
-    { label: 'Репосты', value: Number(vs?.total_forwards ?? 0), color: 'hsl(var(--chart-2))' },
-    { label: 'Комментарии', value: Number(vs?.total_replies ?? 0), color: 'hsl(var(--chart-3))' },
-  ]
-    .filter((i) => i.value > 0)
-    .map((i) => ({ ...i, display: fmt.num(i.value) }));
+  return withShares(
+    [
+      { label: 'Реакции', value: Number(vs?.total_reactions ?? 0), color: 'hsl(var(--chart-1))' },
+      { label: 'Репосты', value: Number(vs?.total_forwards ?? 0), color: 'hsl(var(--chart-2))' },
+      { label: 'Комментарии', value: Number(vs?.total_replies ?? 0), color: 'hsl(var(--chart-3))' },
+    ]
+      .filter((i) => i.value > 0)
+      .map((i) => ({ ...i, display: fmt.num(i.value) })),
+  );
 }
 
 /** «Ср. охват по типу» — avg views by media type. */
@@ -143,17 +151,21 @@ function mapSourceItems(
   colorMapper?: Record<string, string>,
 ): BreakdownItem[] {
   if (!arr) return [];
-  return arr
-    .map((item) => {
-      const raw = item.label ?? '';
-      return {
-        label: mapper ? mapper[raw] || raw : raw,
-        value: Number(item.value ?? 0),
-        color: colorMapper ? colorMapper[raw] : undefined,
-        display: fmt.num(Number(item.value ?? 0)),
-      };
-    })
-    .filter((i) => i.value > 0);
+  // Части целого: строка несёт «значение · доля». Доля — от суммы ВСЕЙ разбивки, поэтому
+  // проставляется здесь, до сортировок/срезов вызывающего кода (языки режутся топ-8).
+  return withShares(
+    arr
+      .map((item) => {
+        const raw = item.label ?? '';
+        return {
+          label: mapper ? mapper[raw] || raw : raw,
+          value: Number(item.value ?? 0),
+          color: colorMapper ? colorMapper[raw] : undefined,
+          display: fmt.num(Number(item.value ?? 0)),
+        };
+      })
+      .filter((i) => i.value > 0),
+  );
 }
 
 export function viewsBySourceBreakdown(graphs: TgGraphs | undefined): BreakdownItem[] {
@@ -163,6 +175,7 @@ export function newFollowersBySourceBreakdown(graphs: TgGraphs | undefined): Bre
   return mapSourceItems(graphs?.new_followers_by_source, SRC_NAMES);
 }
 export function languagesBreakdown(graphs: TgGraphs | undefined): BreakdownItem[] {
+  // Топ-8: доли уже проставлены mapSourceItems от ПОЛНОГО списка, срез их не пересчитывает.
   return mapSourceItems(graphs?.languages)
     .sort((a, b) => b.value - a.value)
     .slice(0, 8);

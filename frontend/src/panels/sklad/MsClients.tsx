@@ -119,6 +119,7 @@ export function MsClients() {
         title="Покупатели"
         fixedSize="half"
         defaultColor={1}
+        defaultTinted
         drillTo="/metrics/ms-customers"
       >
         <ChartCardBody

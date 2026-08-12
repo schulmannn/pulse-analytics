@@ -1,5 +1,6 @@
 import { lazy, Suspense, useState } from 'react';
 import { cn } from '@/lib/utils';
+import { fmt } from '@/lib/format';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { SegmentedControl } from '@/components/SegmentedControl';
@@ -23,10 +24,10 @@ const PRESETS: { days: PeriodDays; label: string }[] = [
   { days: 0, label: 'Всё' },
 ];
 
-/** Short «дд.мм» for the active custom-range chip label. */
-// Канон дат приложения — «3 июн.», не «03.06» (регресс закрытого канона, проход №3).
-const fmtRangeChip = (ms: number) =>
-  new Date(ms).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
+/** Date label for the active custom-range chip. */
+// Канон дат приложения — «3 июн.», не «03.06» (регресс закрытого канона, проход №3): один
+// форматтер на всё приложение, локальных вариантов не заводим.
+const fmtRangeChip = (ms: number) => fmt.day(ms);
 
 /**
  * Compact rounded-pill period selector for a feed header (7д / 30д / 90д / Всё). Presentational —

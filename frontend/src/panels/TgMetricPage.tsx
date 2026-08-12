@@ -528,8 +528,10 @@ function TgChurnPage() {
   const graphs = useTgGraphs();
   const flow = deriveFollowerFlows(graphs.data, calendarWindowForPeriod({ days: window.days, range: window.range }));
   const flowTotal = flow.joinedTotal + flow.leftTotal;
-  const rowDisplay = (value: number) =>
-    flowTotal > 0 ? `${fmt.num(value)} · ${Math.round((value / flowTotal) * 100)}%` : fmt.num(value);
+  // Доля — тем же слоем, что и у остальных разбивок-частей целого (lib/breakdownShare через
+  // `share` у Breakdown): один формат «значение · доля» на всё приложение, без локального
+  // Math.round, который округлял по своим правилам и расходился с соседней страницей.
+  const rowShare = (value: number) => (flowTotal > 0 ? value / flowTotal : undefined);
 
   return (
     <TgMetricShell
@@ -554,8 +556,18 @@ function TgChurnPage() {
           <>
             <Breakdown
               items={[
-                { label: 'Отписалось', value: flow.leftTotal, display: rowDisplay(flow.leftTotal) },
-                { label: 'Подписалось', value: flow.joinedTotal, display: rowDisplay(flow.joinedTotal) },
+                {
+                  label: 'Отписалось',
+                  value: flow.leftTotal,
+                  display: fmt.num(flow.leftTotal),
+                  share: rowShare(flow.leftTotal),
+                },
+                {
+                  label: 'Подписалось',
+                  value: flow.joinedTotal,
+                  display: fmt.num(flow.joinedTotal),
+                  share: rowShare(flow.joinedTotal),
+                },
               ]}
             />
             <div className="mt-3 text-xs font-medium text-muted-foreground">{fmt.num(flowTotal)} всего</div>
@@ -641,7 +653,7 @@ const BREAKDOWN_DEFS: Record<BreakdownKey, TgBreakdownDef> = {
     campaignScoped: true,
     comparison: LIST_COMPARISON,
     derive: (ctx) =>
-      deriveEmojis(ctx.full, ctx.period.inRange, ctx.keep).map((e) => ({ label: e.label, value: e.value, display: fmt.num(e.value) })),
+      deriveEmojis(ctx.full, ctx.period.inRange, ctx.keep).map((e) => ({ label: e.label, value: e.value, display: fmt.num(e.value), share: e.share })),
     empty: { title: 'Нет реакций за период' },
   },
   'tg-engagement-mix': {
@@ -664,6 +676,7 @@ const BREAKDOWN_DEFS: Record<BreakdownKey, TgBreakdownDef> = {
         value: c.value,
         display: fmt.num(c.value),
         color: c.color,
+        share: c.share,
       })),
     empty: { title: 'Нет вовлечённости за период' },
   },

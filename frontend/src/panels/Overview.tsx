@@ -71,12 +71,15 @@ export function Overview() {
             both vanish). id kept as `overview-hero` (this IS the lead card now) so deep-links and
             the shared page-period plumbing keep resolving. */}
         {/* The one honest daily series at the lead: channel views over the period. Линия/Столбцы —
-            через ту же карусель вариантов, что и компактные KPI-карточки ниже. */}
+            через ту же карусель вариантов, что и компактные KPI-карточки ниже.
+            Единственная тонированная карточка доски: по канону цвет = история, и история тут одна
+            (остальные карточки — нейтральная поверхность + канонный iris-акцент серии). */}
         <ChartSection
           id="overview-hero"
           title="Просмотры"
           defaultSize="half"
           defaultColor={1}
+          defaultTinted
           periodControl
           drillTo="/metrics/views"
           variants={[
@@ -86,7 +89,7 @@ export function Overview() {
         />
         {/* Subscriber base + movement — the second primary channel signal (reuses the `growth`
             curated Home key, so «На главную» pins the same card it already knew). */}
-        <GrowthChartBlock id="overview-growth" homeKey="growth" defaultColor={5} />
+        <GrowthChartBlock id="overview-growth" homeKey="growth" />
         {/* Row 2 — compact comparison cards at third width: headline value + honest Δ over an
             active-window publication-date sparkline (owner override 2026-07 — the previous non-temporal
             two-bar read is retired), each with its own title, menu and drill route. */}
@@ -94,7 +97,6 @@ export function Overview() {
           id="overview-avg-reach"
           title="Ср. охват"
           defaultSize="third"
-          defaultColor={2}
           drillTo="/metrics/avgReach"
           variants={[
             { key: 'line', label: 'Линия', render: <TgAvgReachBody state={kpis} /> },
@@ -110,14 +112,13 @@ export function Overview() {
           id="overview-reactions"
           title="Реакции"
           defaultSize="third"
-          defaultColor={4}
           drillTo="/metrics/reactions"
           variants={[
             { key: 'line', label: 'Линия', render: <TgReactionsBody state={kpis} /> },
             { key: 'bar', label: 'Столбцы', render: <TgReactionsBody state={kpis} viz="bar" /> },
           ]}
         />
-        <ChartSection id="overview-er" title="Вовлечённость" defaultSize="third" defaultColor={6} drillTo="/metrics/er">
+        <ChartSection id="overview-er" title="Вовлечённость" defaultSize="third" drillTo="/metrics/er">
           <TgErBody state={kpis} />
         </ChartSection>
         {/* Рассказ занимает ВЕСЬ ряд, и это не про «побольше места»: у third/half высота заперта в
@@ -192,7 +193,7 @@ function HealthBanner({ source }: { source?: string | null }) {
 /** «Рост подписчиков» wrapper: the compact SubscriberGrowth card body, but «Развернуть» opens the
     same full subscriber curve the history widget does (full-height axes + Мин/Макс/Среднее stats strip
     + period pills + reference lines) instead of a tiny sparkline over an empty fullscreen. */
-export function GrowthChartBlock({ id, homeKey, defaultColor }: { id?: string; homeKey?: string; defaultColor?: number } = {}) {
+export function GrowthChartBlock({ id, homeKey }: { id?: string; homeKey?: string } = {}) {
   const { data } = useHistory(730);
   const rows = (data?.rows ?? []).filter((r) => r.subscribers != null);
   return (
@@ -202,7 +203,6 @@ export function GrowthChartBlock({ id, homeKey, defaultColor }: { id?: string; h
       title="Рост подписчиков"
       drillTo="/metrics/subscribers"
       defaultSize="half"
-      defaultColor={defaultColor}
       periodControl
       expand={
         rows.length >= 2
