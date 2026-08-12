@@ -7,6 +7,7 @@ import { Icon } from '@/components/nav-icons';
 import { LineChart } from '@/components/LineChart';
 import { RadialShare } from '@/components/RadialShare';
 import { Button } from '@/components/ui/button';
+import { CAMPAIGNS_LIST } from '@/components/campaigns/routes';
 import {
   CampaignColorDot,
   CampaignStatusChip,
@@ -276,7 +277,7 @@ function CampaignHeader({
   return (
     <div className="space-y-3">
       <Link
-        to="/posts?view=campaigns"
+        to={CAMPAIGNS_LIST}
         className="inline-flex w-fit items-center gap-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
       >
         <Icon name="chevron" className="size-3.5 rotate-90" />

@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
-import { PAGE_HEADER_SHELL } from '@/lib/pageChrome';
+import { FEED_HEADER_HEIGHT_VAR, PAGE_HEADER_SHELL } from '@/lib/pageChrome';
 
 /**
  * The section SHELL shared by every dashboard feed page (TG and IG): a FLAT working surface with the
@@ -39,11 +39,42 @@ export function FeedBlock({
   /** Optional control aligned to the right of the sticky section header (e.g. a period selector). */
   headerRight?: ReactNode;
 }) {
+  const sectionRef = useRef<HTMLElement>(null);
+  const headerRef = useRef<HTMLDivElement>(null);
+
+  // ONE observer per section publishes the header's real height as a CSS variable, so a second
+  // sticky layer (the page's tab row, {@link PAGE_SUBNAV_SHELL}) can pin itself right below a header
+  // that wraps to two rows on narrow desktops. Written imperatively — no state, no re-render on
+  // resize; `floor` instead of `round` so a fractional height can never leave a sub-pixel slit where
+  // the scrolling content flashes between the two strips.
+  useLayoutEffect(() => {
+    const sectionEl = sectionRef.current;
+    const headerEl = headerRef.current;
+    if (!sectionEl || !headerEl) return;
+    let last = -1;
+    const apply = (height: number) => {
+      const next = Math.floor(height);
+      if (next === last || next <= 0) return;
+      last = next;
+      sectionEl.style.setProperty(FEED_HEADER_HEIGHT_VAR, `${next}px`);
+    };
+    apply(headerEl.getBoundingClientRect().height);
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      apply(entry.borderBoxSize?.[0]?.blockSize ?? entry.target.getBoundingClientRect().height);
+    });
+    observer.observe(headerEl);
+    return () => observer.disconnect();
+  }, []);
+
   return (
-    <section data-feed-block={section} className="scroll-mt-4">
+    <section ref={sectionRef} data-feed-block={section} className="scroll-mt-4">
       {/* Sticky page header (shared geometry with Home): «Обзор» stays put while the widgets scroll
           under it, over a solid canvas bg with no hairline — the strip simply clips the content. */}
       <div
+        ref={headerRef}
         data-feed-page-header
         className={cn(PAGE_HEADER_SHELL, 'flex flex-wrap items-center justify-between gap-x-3 gap-y-2')}
       >
