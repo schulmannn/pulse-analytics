@@ -220,22 +220,23 @@ export function MsOverview() {
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-6">
       {/* Story-карточки — та же грамматика, что у Обзоров TG/IG/Метрики (steep story card):
           подпись окна, hero-число, дельта к прошлому периоду и area-спарклайн без осей. Полные
-          оси и тултипы по датам живут на /metrics/ms-* (MsSummaryExplorer ниже в этом файле). */}
-      <ChartWidget id="ms-revenue" title="Выручка" fixedSize="half" defaultColor={1} drillTo="/metrics/ms-revenue"
+          оси и тултипы по датам живут на /metrics/ms-* (MsSummaryExplorer ниже в этом файле).
+          Тонирована ОДНА карточка доски — «Выручка»; остальные нейтральны с канонным акцентом. */}
+      <ChartWidget id="ms-revenue" title="Выручка" fixedSize="half" defaultColor={1} defaultTinted drillTo="/metrics/ms-revenue"
         variants={[
           { key: 'line', label: 'Линия', render: <MsStoryBody {...revStory} /> },
           { key: 'bar', label: 'Столбцы', render: <MsStoryBody {...revStory} viz="bar" /> },
         ]}
       />
 
-      <ChartWidget id="ms-orders" title="Заказы" fixedSize="half" defaultColor={5} drillTo="/metrics/ms-orders"
+      <ChartWidget id="ms-orders" title="Заказы" fixedSize="half" drillTo="/metrics/ms-orders"
         variants={[
           { key: 'line', label: 'Линия', render: <MsStoryBody {...ordStory} /> },
           { key: 'bar', label: 'Столбцы', render: <MsStoryBody {...ordStory} viz="bar" /> },
         ]}
       />
 
-      <ChartWidget id="ms-avg-check" title="Средний чек" fixedSize="half" defaultColor={2} drillTo="/metrics/ms-aov"
+      <ChartWidget id="ms-avg-check" title="Средний чек" fixedSize="half" drillTo="/metrics/ms-aov"
         variants={[
           { key: 'line', label: 'Линия', render: <MsStoryBody {...avgStory} /> },
           { key: 'bar', label: 'Столбцы', render: <MsStoryBody {...avgStory} viz="bar" /> },
@@ -298,7 +299,7 @@ export function MsOverview() {
         <MsTopProductsCard period={period} />
       </ChartWidget>
 
-      <ChartWidget id="ms-returns" title="Возвраты" fixedSize="half" defaultColor={4} drillTo="/metrics/ms-returns">
+      <ChartWidget id="ms-returns" title="Возвраты" fixedSize="half" drillTo="/metrics/ms-returns">
         {returns.isPending ? (
           <ChartSkeleton />
         ) : returns.isError ? (

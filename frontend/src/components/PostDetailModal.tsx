@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import { usePostStats } from '@/api/queries';
 import type { NormalizedPost } from '@/lib/posts';
-import { fmt, ruAxisLabel } from '@/lib/format';
+import { fmt } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import {
   Dialog,
@@ -350,16 +350,11 @@ function PostVelocity({ postId, className }: { postId: number | null; className?
   const graphValues = stats.data?.views_graph?.series?.[0]?.values ?? [];
   if (!(stats.data?.available ?? false) || graphValues.length <= 1) return null;
 
-  const titles = graphX.map((ts, i) => {
-    const dateStr = new Date(ts).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit' });
-    return `${dateStr}: ${fmt.num(graphValues[i] ?? 0)}`;
-  });
-  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  const formatLabel = (ts: number) => {
-    const d = new Date(ts);
-    // ruAxisLabel: «24 Jun 21:00» → «24 июн 21:00» — axis labels must be Russian in the RU UI.
-    return ruAxisLabel(`${d.getDate()} ${months[d.getMonth()] ?? ''} ${String(d.getHours()).padStart(2, '0')}:00`);
-  };
+  // Дата — общим каноном (`fmt.day` → «24 июн.»), час дописывается: ось почасовая.
+  const formatLabel = (ts: number) =>
+    `${fmt.day(ts)} ${String(new Date(ts).getHours()).padStart(2, '0')}:00`;
+  // Тултип и ось читают ОДНУ подпись — иначе на одном графике два формата даты.
+  const titles = graphX.map((ts, i) => `${formatLabel(ts)}: ${fmt.num(graphValues[i] ?? 0)}`);
   const first = graphX[0];
   const mid = graphX[Math.floor(graphX.length / 2)];
   const last = graphX[graphX.length - 1];

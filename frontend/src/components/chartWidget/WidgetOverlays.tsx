@@ -19,6 +19,9 @@ interface WidgetEditOverlayProps {
   showSize: boolean;
   defaultSize: WidgetSize;
   defaultColor?: number;
+  /** Resolved «цветной фон» default for this card — keeps the switch honest about what the
+      un-touched card actually shows. */
+  defaultTinted: boolean;
   minSize: WidgetSize;
   onChange: (next: WidgetPrefs) => void;
   onClose: () => void;
@@ -37,6 +40,7 @@ export function WidgetEditOverlay({ open, configDriven, ...props }: WidgetEditOv
       showSize={props.showSize}
       defaultSize={props.defaultSize}
       defaultColor={props.defaultColor}
+      defaultTinted={props.defaultTinted}
       minSize={props.minSize}
       onChange={props.onChange}
       onClose={props.onClose}

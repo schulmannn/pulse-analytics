@@ -15,7 +15,8 @@ export const METHODOLOGY = {
   ig_views: 'Просмотры Instagram — воспроизведения (plays)',
 } as const;
 
-const dayLabel = (day: string) => `${day.slice(8, 10)}.${day.slice(5, 7)}`;
+/** Подпись дня — общий канон приложения («13 июл.»), а не локальный «dd.mm» (U5). */
+const dayLabel = (day: string) => fmt.day(day);
 
 export interface TimelineSeries {
   labels: string[];

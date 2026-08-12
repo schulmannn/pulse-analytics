@@ -32,6 +32,10 @@ export interface WidgetBreakdownItem {
   value: number;
   display?: string;
   color?: string;
+  /** Доля от полной суммы разбивки (0..1). Есть только у частей целого (источники, языки,
+      тональность, эмодзи, состав вовлечённости) и считается ДО среза топ-N — см.
+      lib/breakdownShare. Средние/коэффициенты («Ср. охват по типу», ERV) её не несут. */
+  share?: number;
 }
 
 export interface WidgetLedgerRow {

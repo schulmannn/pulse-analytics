@@ -26,6 +26,10 @@ export interface ChartSectionProps {
   defaultSize?: WidgetSize;
   /** Metric-identity accent used until the user chooses a colour explicitly. */
   defaultColor?: number;
+  /** Opt-in accent-tinted surface until the user decides otherwise. Canon: at most ONE tinted
+      story card per page — every other card defaults to a neutral surface (DESIGN_TOKENS.md
+      «Surface & width policy»). Meaningful only together with `defaultColor`. */
+  defaultTinted?: boolean;
   /** Locks the surface size and hides the size control in the editor. */
   fixedSize?: WidgetSize;
   /** Rich fullscreen explorer configuration. */

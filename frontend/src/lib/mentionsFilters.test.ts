@@ -4,7 +4,6 @@ import {
   applyMentionsFilters,
   buildMentionsTimeline,
   capMentionsTimeline,
-  ddmmFromIso,
   filterMentionRows,
   mentionsDelta,
   mentionsInsights,
@@ -14,6 +13,7 @@ import {
   type MentionRow,
   type MentionSourceOption,
 } from '@/lib/mentionsFilters';
+import { fmt } from '@/lib/format';
 
 const q = (s: string) => new URLSearchParams(s);
 
@@ -95,7 +95,7 @@ describe('buildMentionsTimeline', () => {
     // last bar is today (14th) = 3, the 12th = 1, the rest zeros
     expect(t.values[t.values.length - 1]).toBe(3);
     expect(t.values[4]).toBe(1); // index 4 = 12th (14 - (6-4))
-    expect(t.labels[t.labels.length - 1]).toBe('14.07');
+    expect(t.labels[t.labels.length - 1]).toBe('14 июл.');
   });
 
   it('aligns the ghost to the previous equal window by ordinal day', () => {
@@ -110,7 +110,7 @@ describe('buildMentionsTimeline', () => {
   it('uses the server calendar anchor instead of the browser timezone date', () => {
     const daily = [point('2026-07-15', 4)];
     const t = buildMentionsTimeline(daily, [], 7, '2026-07-15');
-    expect(t.labels.at(-1)).toBe('15.07');
+    expect(t.labels.at(-1)).toBe('15 июл.');
     expect(t.values.at(-1)).toBe(4);
   });
 
@@ -119,7 +119,7 @@ describe('buildMentionsTimeline', () => {
     const t = buildMentionsTimeline(daily, [], 0, now);
     expect(t.ghost).toBeUndefined();
     expect(t.values).toEqual([4, 2]);
-    expect(t.labels).toEqual(['01.05', '15.06']);
+    expect(t.labels).toEqual(['1 мая', '15 июн.']);
   });
 
   it('zero-fills a custom range to exactly its inclusive day count', () => {
@@ -127,7 +127,7 @@ describe('buildMentionsTimeline', () => {
     const daily = [point('2026-06-10', 3), point('2026-06-14', 5)];
     const t = buildMentionsTimeline(daily, [], 0, '2026-06-14', { from: '2026-06-10', to: '2026-06-14' });
     expect(t.values).toEqual([3, 0, 0, 0, 5]);
-    expect(t.labels).toEqual(['10.06', '11.06', '12.06', '13.06', '14.06']);
+    expect(t.labels).toEqual(['10 июн.', '11 июн.', '12 июн.', '13 июн.', '14 июн.']);
   });
 
   it('aligns a custom-range ghost to the preceding equal-length window', () => {
@@ -143,7 +143,7 @@ describe('buildMentionsTimeline', () => {
     const daily = [point('2026-06-10', 7)];
     const t = buildMentionsTimeline(daily, [], 0, '2026-06-10', { from: '2026-06-10', to: '2026-06-10' });
     expect(t.values).toEqual([7]);
-    expect(t.labels).toEqual(['10.06']);
+    expect(t.labels).toEqual(['10 июн.']);
   });
 });
 
@@ -225,9 +225,13 @@ describe('table filter/sort', () => {
   });
 });
 
-describe('ddmmFromIso', () => {
-  it('formats an ISO day', () => {
-    expect(ddmmFromIso('2026-07-09')).toBe('09.07');
+describe('таймлайн упоминаний — канон подписи даты (U5)', () => {
+  it('подписи и тултипы идут единым «13 июл.», а не dd.mm', () => {
+    const daily: MentionDailyPoint[] = [{ day: '2026-07-09', mentions: 3, views: 300, channels: 1 }];
+    const t = buildMentionsTimeline(daily, [], 7, '2026-07-09');
+    expect(t.labels.at(-1)).toBe('9 июл.');
+    expect(t.titles.at(-1)).toContain('9 июл.:');
+    expect(t.labels.some((l) => /^\d{2}\.\d{2}$/.test(l))).toBe(false);
   });
 });
 
@@ -243,8 +247,8 @@ describe('capMentionsTimeline', () => {
     return {
       values: days.map((_, i) => (i % 3 === 0 ? 2 : i % 5 === 0 ? 1 : 0)),
       ghost: days.map((_, i) => (i % 4 === 0 ? 1 : 0)),
-      labels: days.map(ddmmFromIso),
-      titles: days.map((d) => `${ddmmFromIso(d)}: t`),
+      labels: days.map((d) => fmt.day(d)),
+      titles: days.map((d) => `${fmt.day(d)}: t`),
       days,
       views: days.map((_, i) => i),
     };

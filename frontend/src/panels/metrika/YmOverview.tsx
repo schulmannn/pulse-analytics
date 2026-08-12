@@ -200,10 +200,13 @@ export function YmOverview() {
   // Грамматика карточки — ОБЩАЯ с Обзорами Telegram и Instagram (steep story card): подпись окна,
   // крупное число, дельта к прошлому периоду и area-спарклайн без осей справа. Полные оси, точки,
   // сравнение и статистика живут на своей поверхности — `/metrics/ym-*`, куда ведёт drillTo.
+  // `story` помечает ЕДИНСТВЕННУЮ тонированную карточку доски (канон: дефолт — нейтральная
+  // поверхность, цветная заливка — ручной инструмент одной истории; остальные карточки несут
+  // канонный iris-акцент на серии).
   const metricCard = (
     id: string,
     title: string,
-    color: number,
+    story: boolean,
     block: { total: number | null; series: Array<{ day: string; value: number }> },
     prevTotal: number | null | undefined,
     caption?: string,
@@ -230,7 +233,8 @@ export function YmOverview() {
         id={id}
         title={title}
         fixedSize="half"
-        defaultColor={color}
+        defaultColor={story ? 1 : undefined}
+        defaultTinted={story}
         drillTo={`/metrics/${id}`}
         variants={[
           { key: 'line', label: 'Линия', render: <YmStoryBody {...storyProps} /> },
@@ -253,9 +257,9 @@ export function YmOverview() {
 
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-6">
-      {metricCard('ym-visits', 'Визиты', 1, visits, prev?.visits.total)}
-      {metricCard('ym-users', 'Посетители', 5, users, prev?.users.total, usersCaption)}
-      {metricCard('ym-pageviews', 'Просмотры страниц', 2, pageviews, prev?.pageviews.total)}
+      {metricCard('ym-visits', 'Визиты', true, visits, prev?.visits.total)}
+      {metricCard('ym-users', 'Посетители', false, users, prev?.users.total, usersCaption)}
+      {metricCard('ym-pageviews', 'Просмотры страниц', false, pageviews, prev?.pageviews.total)}
 
       {/* Качество трафика: отказы/длительность/глубина/новые/роботы — nullable, «—» когда недоступно. */}
       <YmQualityStrip

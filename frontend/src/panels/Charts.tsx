@@ -5,7 +5,7 @@ import { lttbDownsample } from '@/lib/downsample';
 import { BarChart } from '@/components/BarChart';
 import { LineChart } from '@/components/LineChart';
 import { ChartTooltip, useHeatmapTip } from '@/components/ChartTooltip';
-import { fmt, ruAxisLabel, pluralRu } from '@/lib/format';
+import { fmt, pluralRu } from '@/lib/format';
 import { ChartSkeleton as DataChartSkeleton } from '@/components/ui/dataSkeleton';
 import { useWidgetPeriod } from '@/lib/period';
 import { useWidgetInView } from '@/lib/widgetViewport';
@@ -27,15 +27,6 @@ interface SubscriberRow {
   subscribers?: number | null;
 }
 
-function ddmm(dayStr: string) {
-  const parts = dayStr.split('-');
-  if (parts.length !== 3) return dayStr;
-  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  const monthLabel = months[Number(parts[1]) - 1] ?? '';
-  // ruAxisLabel: «18 May» → «18 мая» — chart axes/tooltips must be Russian in the RU UI.
-  return ruAxisLabel(`${Number(parts[2])} ${monthLabel}`);
-}
-
 /**
  * `expanded` — та же развилка, что у WidgetRenderer: числовые подписи максимума и последней точки
  * это мебель ПОВЕРХНОСТИ ДОКАЗАТЕЛЬСТВА. На лице карточки они налезают на кривую и дублируют
@@ -45,10 +36,10 @@ function ddmm(dayStr: string) {
 export function SubscriberHistoryChart({ rows, expanded = false }: { rows: SubscriberRow[]; expanded?: boolean }) {
   const sampled = lttbDownsample(rows, 140, (row) => Number(row.subscribers));
   const values = sampled.map((row) => Number(row.subscribers));
-  const titles = sampled.map((row) => `${ddmm(row.day)}: ${fmt.num(row.subscribers)} ${pluralRu(Number(row.subscribers), ['подписчик', 'подписчика', 'подписчиков'])}`);
+  const titles = sampled.map((row) => `${fmt.day(row.day)}: ${fmt.num(row.subscribers)} ${pluralRu(Number(row.subscribers), ['подписчик', 'подписчика', 'подписчиков'])}`);
   // Full per-point labels: the axis-free card shows first/mid/last itself, the explorer
   // strides them into a real x-axis (a pre-picked 3-label array would starve the axis).
-  const labels = sampled.map((row) => ddmm(row.day));
+  const labels = sampled.map((row) => fmt.day(row.day));
 
   // Standard 1×-tile chart height (the LineChart default, 200); the expanded overlay
   // supplies its own 400 via ExpandedChartHeightContext.

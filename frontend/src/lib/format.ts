@@ -1,22 +1,9 @@
 // Formatting helpers ported verbatim from the legacy dashboard so migrated panels
 // render identical strings. Russian locale; thin no-break space as thousands sep.
 
-/**
- * Parse a bare calendar-day key ("YYYY-MM-DD") as LOCAL midnight. `new Date('YYYY-MM-DD')`
- * is UTC midnight, and rendering that locally shows the PREVIOUS day to any viewer west of
- * UTC (D6.5). A day key names a calendar date, not an instant — it must read the same in
- * every timezone. Full ISO timestamps are NOT day keys and keep instant semantics.
- */
 /** Русская плюрализация: pluralRu(5, ['пост', 'поста', 'постов']) → «постов». Живёт здесь
  *  (нижний слой без зависимостей), чтобы аггрегаторы не тянули resolveWidgetMetric циклом;
  *  resolveWidgetMetric ре-экспортирует для старых импортёров. */
-/** Метка дня из API-ключа «dd.mm» → канонный вид fmt.day («3 июл.»). Год фиктивный високосный
- *  (2000) — рендерится только день+месяц; не-ключи возвращаются как есть. */
-export function ddmmDay(key: string): string {
-  const m = /^(\d{2})\.(\d{2})$/.exec(key);
-  return m ? fmt.day(`2000-${m[2]}-${m[1]}`) : key;
-}
-
 export function pluralRu(n: number, forms: [one: string, few: string, many: string]): string {
   const abs = Math.abs(n) % 100;
   const d = abs % 10;
@@ -26,10 +13,37 @@ export function pluralRu(n: number, forms: [one: string, few: string, many: stri
   return forms[2];
 }
 
+/**
+ * Parse a bare calendar-day key ("YYYY-MM-DD") as LOCAL midnight. `new Date('YYYY-MM-DD')`
+ * is UTC midnight, and rendering that locally shows the PREVIOUS day to any viewer west of
+ * UTC (D6.5). A day key names a calendar date, not an instant — it must read the same in
+ * every timezone. Full ISO timestamps are NOT day keys and keep instant semantics.
+ */
 export function parseDayKey(s: string): Date | null {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
   if (!m) return null;
   return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+}
+
+/**
+ * Epoch-ms КЛЮЧ СОРТИРОВКИ для дневного ключа из API: «YYYY-MM-DD» (точная дата, локальная
+ * полночь) или «DD.MM» (год не передан — выводится: месяц, ушедший «вперёд» текущего больше чем
+ * на полгода, может быть только прошлогодним, аналитика историческая, декабрь виден из января).
+ *
+ * ИНВАРИАНТ: дневные разбивки сортируются по ЭТОМУ ключу, а подпись форматируется `fmt.day`
+ * уже ПОСЛЕ сортировки. Сортировка по тексту подписи ломается и на «dd.mm» через Новый год,
+ * и при любой смене формата подписи. `null` — ключ не распознан (порядок не определён).
+ */
+export function dayKeyToTs(key: string, now: Date = new Date()): number | null {
+  const iso = parseDayKey(key);
+  if (iso) return iso.getTime();
+  const m = /^(\d{1,2})\.(\d{1,2})$/.exec(key);
+  if (!m) return null;
+  const month = Number(m[2]) - 1;
+  if (month < 0 || month > 11) return null;
+  const monthsAhead = (month - now.getMonth() + 12) % 12;
+  const year = now.getFullYear() - (monthsAhead > 6 ? 1 : 0);
+  return new Date(year, month, Number(m[1])).getTime();
 }
 
 export const fmt = {
@@ -74,6 +88,21 @@ export const fmt = {
       return '';
     }
   },
+  /**
+   * Тот же канон подписи, но С ГОДОМ («10 июн. 2026 г.») — для границ окон, где год НЕСЁТ СМЫСЛ:
+   * окно сравнения может пересекать Новый год, и «22 дек. — 31 дек.» рядом с «1 янв. — 10 янв.»
+   * нечем отличить от прошлогоднего. На оси и в тултипе год избыточен — там остаётся `fmt.day`.
+   */
+  dayYear(v?: string | number | Date | null): string {
+    if (v == null || v === '') return '';
+    try {
+      const d = typeof v === 'string' ? (parseDayKey(v) ?? new Date(v)) : new Date(v);
+      if (isNaN(d.getTime())) return '';
+      return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' });
+    } catch {
+      return '';
+    }
+  },
   /** Localized date + time ("5 июн., 14:30"). A bare day key has no instant — no time part. */
   date(iso?: string | null): string {
     if (!iso) return '';
@@ -98,38 +127,21 @@ export const fmt = {
     if (h < 18) return 'Добрый день';
     return 'Добрый вечер';
   },
-  /** "Среда · 5 июня" */
+  /** "Среда · 5 июня" — длинная форма приветствия. Дата берётся у локали (рукописных массивов
+      месяцев в приложении нет); руками остаётся только день недели: ru-RU отдаёт его строчным
+      («среда»), а строка начинается с заглавной. */
   todayLabel(): string {
     const days = ['Воскресенье', 'Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота'];
-    const months = [
-      'января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
-      'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря',
-    ];
     const d = new Date();
-    return `${days[d.getDay()]} · ${d.getDate()} ${months[d.getMonth()]}`;
+    const date = d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
+    return `${days[d.getDay()]} · ${date}`;
   },
 };
 
 // ── Russian localisation for API-shaped chart strings ────────────────────────────────────────
-// The Telegram graphs pipeline delivers English month tokens ("18 May", "24 Jun 21:00") and
-// English series names ("Views", "Shares") verbatim; these two helpers keep the Russian UI
-// Russian without touching the numeric payloads.
-
-/** English 3-letter month token → Russian genitive short form (axis-label style). */
-const RU_MONTH: Record<string, string> = {
-  Jan: 'янв', Feb: 'фев', Mar: 'мар', Apr: 'апр', May: 'мая', Jun: 'июн',
-  Jul: 'июл', Aug: 'авг', Sep: 'сен', Oct: 'окт', Nov: 'ноя', Dec: 'дек',
-};
-
-/**
- * Translate the 12 English month tokens inside a pre-formatted axis label to Russian,
- * preserving everything else: "24 Jun 21:00" → "24 июн 21:00", "18 May" → "18 мая".
- * Unknown/already-Russian labels pass through unchanged.
- */
-export function ruAxisLabel(label: string): string {
-  if (!label) return label;
-  return label.replace(/\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b/g, (m) => RU_MONTH[m] ?? m);
-}
+// The Telegram graphs pipeline delivers English series names ("Views", "Shares") verbatim; this
+// helper keeps the Russian UI Russian without touching the numeric payloads. (Axis labels are NOT
+// localised from English tokens any more — every date label in the UI is built by `fmt.day`.)
 
 /** English series names the graphs API ships as-is → Russian UI names (lowercased keys). */
 const RU_SERIES: Record<string, string> = {

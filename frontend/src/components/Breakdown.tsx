@@ -1,12 +1,17 @@
 import { useContext } from 'react';
 import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
 import { EmptyState } from '@/components/EmptyState';
+import { displayWithShare } from '@/lib/breakdownShare';
 
 interface BreakdownItem {
   label: string;
   value: number;
   display?: string;
   color?: string; // optional HSL color for the bar fill + a leading dot
+  /** Доля от полной суммы разбивки (0..1) — печатается как «значение · 54.3%». Проставляется на
+      слое данных ДО среза топ-N (см. lib/breakdownShare); части целого получают её, средние и
+      коэффициенты — нет. */
+  share?: number;
 }
 
 interface BreakdownProps {
@@ -65,7 +70,7 @@ export function Breakdown({ items }: BreakdownProps) {
               <span className="truncate">{item.label}</span>
             </span>
             <span className="relative z-10 ml-2 shrink-0 text-sm tabular-nums text-muted-foreground">
-              {item.display ?? item.value}
+              {displayWithShare(String(item.display ?? item.value), item.share)}
             </span>
           </div>
         );

@@ -5,8 +5,8 @@ import type { TgFull, TgGraphs } from '@/api/schemas';
 import { lttbDownsample } from '@/lib/downsample';
 import { CHART_MAX_POINTS } from '@/lib/msSeries';
 import { normalizeTgPosts } from '@/lib/posts';
-import { compareDdMm } from '@/lib/dates';
-import { fmt, ruAxisLabel, ruSeriesName, ddmmDay, pluralRu } from '@/lib/format';
+import { dayKeyToTs, fmt, ruSeriesName, pluralRu } from '@/lib/format';
+import { withShares } from '@/lib/breakdownShare';
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
 import { ChartCardBody, ChartSection } from '@/components/ChartWidget';
@@ -53,20 +53,12 @@ const SENT_COLOR: Record<string, string> = {
   Negative: 'hsl(var(--brand-ember))',
 };
 
-const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
 // Chart sections render as customisable widgets (components/ChartWidget) — card surface,
 // per-widget accent/tint menu. Supersedes the old local hairline section (FH3 dedupe).
 
 export type TgAnalyticsGroup = 'dynamics' | 'audience' | 'content';
 
 export const WD_LABELS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
-
-const formatMsDate = (ts: number) => {
-  const d = new Date(ts);
-  // ruAxisLabel: axis labels/tooltips must read Russian («18 May» → «18 мая»).
-  return ruAxisLabel(`${d.getDate()} ${MON[d.getMonth()] ?? ''}`);
-};
 
 /** Display options for a daily-flow series (the widget's edit-dialog «Грануляция» /
     «Включая сегодня»). Mirrors WidgetSeriesOpts, both fields optional at this layer. */
@@ -131,7 +123,7 @@ export function windowGraphSeries(values: number[], xs: number[], win: CalendarW
     wValues = rows.map((r) => r.sum);
     wxs = rows.map((r) => r.anchor);
   }
-  const labels = wValues.map((_, i) => (wxs[i] ? formatMsDate(wxs[i]!) : ''));
+  const labels = wValues.map((_, i) => (wxs[i] ? fmt.day(wxs[i]!) : ''));
   const suffix = grain === 'week' ? ' · неделя' : grain === 'month' ? ' · месяц' : '';
   const titles = wValues.map((v, i) => `${labels[i]}: ${fmt.num(v)} ${unit}${suffix}`);
   // Headline for the steep card anatomy: the window's total + the PREVIOUS same-length window's
@@ -176,17 +168,22 @@ function mapSourceItems(
   colorMapper?: Record<string, string>,
 ) {
   if (!arr) return [];
-  return arr
-    .map((item) => {
-      const rawLabel = item.label ?? '';
-      return {
-        label: mapper ? mapper[rawLabel] || rawLabel : rawLabel,
-        value: Number(item.value ?? 0),
-        color: colorMapper ? colorMapper[rawLabel] : undefined,
-        display: fmt.num(Number(item.value ?? 0)),
-      };
-    })
-    .filter((item) => item.value > 0);
+  // Части целого: строка печатается как «значение · доля». Доля считается ЗДЕСЬ — от суммы всей
+  // разбивки, до сортировок и среза топ-8 у вызывающего кода (иначе восьмёрка языков дала бы
+  // ровно 100%, а хвост исчез бы). См. lib/breakdownShare.
+  return withShares(
+    arr
+      .map((item) => {
+        const rawLabel = item.label ?? '';
+        return {
+          label: mapper ? mapper[rawLabel] || rawLabel : rawLabel,
+          value: Number(item.value ?? 0),
+          color: colorMapper ? colorMapper[rawLabel] : undefined,
+          display: fmt.num(Number(item.value ?? 0)),
+        };
+      })
+      .filter((item) => item.value > 0),
+  );
 }
 
 export function tgViewsBySourceItems(graphs: TgGraphs | undefined) {
@@ -196,7 +193,8 @@ export function tgNewFollowersBySourceItems(graphs: TgGraphs | undefined) {
   return mapSourceItems(graphs?.new_followers_by_source, SRC_NAMES);
 }
 export function tgLanguageItems(graphs: TgGraphs | undefined) {
-  // Длинный хвост языков — топ-8, как у эмодзи/стран/городов.
+  // Длинный хвост языков — топ-8, как у эмодзи/стран/городов. Доли проставлены mapSourceItems от
+  // полной суммы, поэтому срез их не искажает (сумма видимых долей честно < 100%).
   return mapSourceItems(graphs?.languages)
     .sort((a, b) => b.value - a.value)
     .slice(0, 8);
@@ -231,16 +229,23 @@ function deriveTgAnalytics(
 ) {
   const vs = full?.views_summary;
 
-  // 2) Views by day — «dd.mm» keys sorted with year-rollover inference (Dec < Jan across NY).
+  // 2) Views by day — API отдаёт «dd.mm»-ключи. СОРТИРУЕМ ПО РАЗОБРАННОМУ КЛЮЧУ (dayKeyToTs,
+  // epoch-ms с выводом года: Dec < Jan через Новый год), подпись форматируем `fmt.day` уже ПОСЛЕ
+  // сортировки — порядок серии не зависит от формата подписи.
   const viewsByDayRaw: Record<string, number> = vs?.views_by_day ?? {};
-  const sortedDates = Object.keys(viewsByDayRaw).sort((a, b) => compareDdMm(a, b));
-  const last14Dates = sortedDates.slice(-14);
-  const vbdValues = last14Dates.map((d) => Number(viewsByDayRaw[d] ?? 0));
+  const sortedDays = Object.keys(viewsByDayRaw)
+    .map((key) => ({ key, ts: dayKeyToTs(key) }))
+    .sort((a, b) => (a.ts ?? 0) - (b.ts ?? 0));
+  const last14Days = sortedDays.slice(-14);
+  const vbdValues = last14Days.map((d) => Number(viewsByDayRaw[d.key] ?? 0));
   // Канонный вид дат («3 июл.»), не сырые dd.mm-ключи API (аудит).
-  const vbdTitles = last14Dates.map((d) => `${ddmmDay(d)}: ${fmt.num(viewsByDayRaw[d] ?? 0)} просмотров`);
+  const vbdLabels = last14Days.map((d) => fmt.day(d.ts));
+  const vbdTitles = last14Days.map(
+    (d) => `${fmt.day(d.ts)}: ${fmt.num(viewsByDayRaw[d.key] ?? 0)} просмотров`,
+  );
   // Ghost overlay = the previous equal-length window (the "vs прошлый период" comparison on the chart).
-  const prev14Dates = sortedDates.slice(-28, -14);
-  const vbdPrev = prev14Dates.length >= 2 ? prev14Dates.map((d) => Number(viewsByDayRaw[d] ?? 0)) : undefined;
+  const prev14Days = sortedDays.slice(-28, -14);
+  const vbdPrev = prev14Days.length >= 2 ? prev14Days.map((d) => Number(viewsByDayRaw[d.key] ?? 0)) : undefined;
 
   // 6) Views & reposts — two separate widgets (daily FLOWS, so zero-based bars are honest).
   // (The subscriber-LEVEL «Рост подписчиков» card lived here; removed as a duplicate — the level
@@ -294,7 +299,7 @@ function deriveTgAnalytics(
   const bestWdLabel = maxWdAvg > 0 ? WD_LABELS[wdAvgValues.indexOf(maxWdAvg)] ?? '' : '';
 
   return {
-    last14Dates, vbdValues, vbdTitles, vbdPrev,
+    vbdLabels, vbdValues, vbdTitles, vbdPrev,
     interGroup, viewSeries, shareSeries,
     vbsItems, nfsItems, langItems, sentItems,
     thData, hasHours, peakHourStr,
@@ -339,10 +344,12 @@ export function deriveEmojis(full: TgFull | undefined, inRange: InRange, keep: K
       if (rd.emoji) emojiMap[rd.emoji] = (emojiMap[rd.emoji] ?? 0) + rd.count;
     });
   });
-  return Object.entries(emojiMap)
-    .map(([label, value]) => ({ label, value }))
-    .sort((a, b) => b.value - a.value)
-    .slice(0, 8);
+  // Доля — от ВСЕХ эмодзи окна (withShares до slice), иначе топ-8 отчитался бы за 100% реакций.
+  return withShares(
+    Object.entries(emojiMap)
+      .map(([label, value]) => ({ label, value }))
+      .sort((a, b) => b.value - a.value),
+  ).slice(0, 8);
 }
 
 /** «Вовлечённость по формату» — avg ERV per media type over the in-window posts. */
@@ -371,11 +378,14 @@ export function deriveCompositionFromPosts(full: TgFull | undefined, inRange: In
   const reactions = posts.reduce((s, p) => s + p.likes, 0);
   const forwards = posts.reduce((s, p) => s + p.shares, 0);
   const replies = posts.reduce((s, p) => s + p.comments, 0);
-  return [
-    { label: 'Реакции', value: reactions, color: 'hsl(var(--chart-1))' },
-    { label: 'Репосты', value: forwards, color: 'hsl(var(--chart-2))' },
-    { label: 'Комментарии', value: replies, color: 'hsl(var(--chart-3))' },
-  ].filter((item) => item.value > 0);
+  // Состав = части одного целого → строки несут долю от суммы трёх видов вовлечённости.
+  return withShares(
+    [
+      { label: 'Реакции', value: reactions, color: 'hsl(var(--chart-1))' },
+      { label: 'Репосты', value: forwards, color: 'hsl(var(--chart-2))' },
+      { label: 'Комментарии', value: replies, color: 'hsl(var(--chart-3))' },
+    ].filter((item) => item.value > 0),
+  );
 }
 
 /** «Ср. охват по типу» from raw posts (avg views per media type) — the campaign-scoped counterpart
@@ -471,17 +481,17 @@ export function deriveFollowerFlows(
     }
     const weekRows = [...buckets.values()].sort((a, b) => a.anchor - b.anchor);
     values = weekRows.map((r) => r.sum);
-    labels = weekRows.map((r) => formatMsDate(r.anchor));
+    labels = weekRows.map((r) => fmt.day(r.anchor));
     titles = weekRows.map(
-      (r) => `${formatMsDate(r.anchor)}: ${r.sum >= 0 ? '+' : ''}${fmt.num(r.sum)} за неделю`,
+      (r) => `${fmt.day(r.anchor)}: ${r.sum >= 0 ? '+' : ''}${fmt.num(r.sum)} за неделю`,
     );
   } else {
     values = selected.current.map((row) => row.net);
     labels = selected.current.map((row) =>
-      Number.isFinite(row.timestamp) ? formatMsDate(row.timestamp) : '',
+      Number.isFinite(row.timestamp) ? fmt.day(row.timestamp) : '',
     );
     titles = selected.current.map((row) => {
-      const label = Number.isFinite(row.timestamp) ? formatMsDate(row.timestamp) : '';
+      const label = Number.isFinite(row.timestamp) ? fmt.day(row.timestamp) : '';
       return `${label}: ${row.net >= 0 ? '+' : ''}${fmt.num(row.net)} за день`;
     });
   }
@@ -639,7 +649,7 @@ export function TgAnalytics({
   // inside TgWidgetBody from the resolved page/Home-widget window.
   const derived = useMemo(() => deriveTgAnalytics(full, graphs, alwaysInRange), [full, graphs]);
   const {
-    last14Dates, vbdValues, vbdTitles, vbdPrev,
+    vbdLabels, vbdValues, vbdTitles, vbdPrev,
     interGroup, viewSeries, shareSeries,
     vbsItems, nfsItems, langItems, sentItems,
     thData, hasHours, peakHourStr,
@@ -676,7 +686,7 @@ export function TgAnalytics({
   const emojiVariants = useCallback(
     (period: WidgetPeriodValue) =>
       breakdownVariants(
-        deriveEmojis(full, period.inRange, keep).map((e) => ({ label: e.label, value: e.value, display: fmt.num(e.value) })),
+        deriveEmojis(full, period.inRange, keep).map((e) => ({ label: e.label, value: e.value, display: fmt.num(e.value), share: e.share })),
       ),
     [full, keep],
   );
@@ -688,6 +698,7 @@ export function TgAnalytics({
           value: c.value,
           display: fmt.num(c.value),
           color: c.color,
+          share: c.share,
         })),
       ),
     [full, keep],
@@ -840,8 +851,10 @@ export function TgAnalytics({
         return [{ key: 'list', label: 'Список', render: <EmptyState title="Нет данных за выбранный период." /> }];
       }
       const flowTotal = flow.joinedTotal + flow.leftTotal;
-      const rowDisplay = (value: number) =>
-        flowTotal > 0 ? `${fmt.num(value)} · ${Math.round((value / flowTotal) * 100)}%` : fmt.num(value);
+      // Доля — общим слоем (`share` у Breakdown, lib/breakdownShare), а не локальным Math.round:
+      // одна и та же строчная идиома «значение · доля» обязана печататься одним форматом рядом с
+      // соседними разбивками этой же страницы.
+      const rowShare = (value: number) => (flowTotal > 0 ? value / flowTotal : undefined);
       return [
         {
           key: 'list',
@@ -849,8 +862,18 @@ export function TgAnalytics({
           render: (
             <Breakdown
               items={[
-                { label: 'Отписалось', value: flow.leftTotal, display: rowDisplay(flow.leftTotal) },
-                { label: 'Подписалось', value: flow.joinedTotal, display: rowDisplay(flow.joinedTotal) },
+                {
+                  label: 'Отписалось',
+                  value: flow.leftTotal,
+                  display: fmt.num(flow.leftTotal),
+                  share: rowShare(flow.leftTotal),
+                },
+                {
+                  label: 'Подписалось',
+                  value: flow.joinedTotal,
+                  display: fmt.num(flow.joinedTotal),
+                  share: rowShare(flow.joinedTotal),
+                },
               ]}
             />
           ),
@@ -944,7 +967,7 @@ export function TgAnalytics({
             на каналах с broadcast-статистикой. Теперь эта карточка — ЧЕСТНЫЙ FALLBACK только для
             каналов без graphs (мелкие/QR: views_summary есть, статистики нет); на больших остаётся
             один rich «Просмотры», а сравнение периодов живёт на метрик-странице просмотров. */}
-        {inGroup('dynamics') && !viewSeries && last14Dates.length >= 2 && (
+        {inGroup('dynamics') && !viewSeries && vbdLabels.length >= 2 && (
           <ChartSection
             title="Просмотры по дням"
             defaultSize="half"
@@ -956,14 +979,14 @@ export function TgAnalytics({
                 render: (
                   <>
                     {/* Лицо карточки — без числовых подписей (см. «Чистый прирост» выше). */}
-                    <LineChart values={vbdValues} labels={[last14Dates[0] ?? '', last14Dates[Math.floor(last14Dates.length / 2)] ?? '', last14Dates[last14Dates.length - 1] ?? '']} titles={vbdTitles} markAnomalies ghost={vbdPrev} />
+                    <LineChart values={vbdValues} labels={[vbdLabels[0] ?? '', vbdLabels[Math.floor(vbdLabels.length / 2)] ?? '', vbdLabels[vbdLabels.length - 1] ?? '']} titles={vbdTitles} markAnomalies ghost={vbdPrev} />
                   </>
                 ),
               },
               {
                 key: 'bar',
                 label: 'Столбцы',
-                render: <BarChart values={vbdValues} labels={last14Dates} titles={vbdTitles} />,
+                render: <BarChart values={vbdValues} labels={vbdLabels} titles={vbdTitles} />,
               },
             ]}
           />

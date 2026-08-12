@@ -202,12 +202,10 @@ export function tvBreakdown(
   return [];
 }
 
-export const fmtDay = (iso: string) => {
-  const t = Date.parse(iso);
-  // Short-month form (7 июл.) — the SAME date grammar TG charts use (аудит тултипов: IG
-  // говорил 07.07, TG — 21 янв на соседних карточках).
-  return Number.isFinite(t) ? new Date(t).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' }) : '';
-};
+// Единый формат дат приложения («7 июл.») — делегат `fmt.day`, а не второй локальный форматтер:
+// он же чинит разбор голого ключа «YYYY-MM-DD» (parseDayKey = локальная полночь; Date.parse читал
+// его как UTC и западнее UTC показывал предыдущий день).
+export const fmtDay = (iso: string) => fmt.day(iso);
 
 export const flag = (iso: string) => {
   const cc = (iso || '').toUpperCase();

@@ -28,12 +28,14 @@ export function IgOverview({ ig }: { ig: IgData }) {
   return (
     <WidgetGroup id="ig-overview-v2" className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-6">
       {/* Row 1 — the two primary cards. Reach reuses the curated `ig-reach` Home key, so «На
-          главную» pins the card it already knew; audience drills to /metrics/ig-follows. */}
+          главную» pins the card it already knew; audience drills to /metrics/ig-follows.
+          «Охват» — единственная тонированная карточка доски (канон: одна история = один цвет). */}
       <ChartSection
         id="ig-overview-reach"
         title="Охват"
         defaultSize="half"
         defaultColor={1}
+        defaultTinted
         homeKey="ig-reach"
         drillTo="/metrics/ig-reach"
         variants={[
@@ -41,7 +43,7 @@ export function IgOverview({ ig }: { ig: IgData }) {
           { key: 'bar', label: 'Столбцы', render: <IgReachBody ig={ig} viz="bar" /> },
         ]}
       />
-      <ChartSection id="ig-overview-audience" title="Динамика аудитории" defaultSize="half" defaultColor={5} drillTo="/metrics/ig-follows">
+      <ChartSection id="ig-overview-audience" title="Динамика аудитории" defaultSize="half" drillTo="/metrics/ig-follows">
         <IgAudienceBody ig={ig} />
       </ChartSection>
       {/* Row 2 — compact comparisons at third width. */}
@@ -49,7 +51,6 @@ export function IgOverview({ ig }: { ig: IgData }) {
         id="ig-overview-views"
         title="Просмотры"
         defaultSize="third"
-        defaultColor={2}
         drillTo="/metrics/ig-views"
         variants={[
           { key: 'line', label: 'Линия', render: <IgViewsBody ig={ig} /> },
@@ -60,7 +61,6 @@ export function IgOverview({ ig }: { ig: IgData }) {
         id="ig-overview-interactions"
         title="Взаимодействия"
         defaultSize="third"
-        defaultColor={4}
         drillTo="/metrics/ig-interactions"
         variants={[
           { key: 'line', label: 'Линия', render: <IgInteractionsBody ig={ig} /> },
@@ -71,7 +71,6 @@ export function IgOverview({ ig }: { ig: IgData }) {
         id="ig-overview-engagement"
         title="Вовлечённость"
         defaultSize="third"
-        defaultColor={6}
         drillTo="/metrics/ig-er"
         variants={[
           { key: 'line', label: 'Линия', render: <IgEngagementBody ig={ig} /> },

@@ -534,6 +534,9 @@ function MsAssortmentDynamics({ period, metric }: { period: MsPeriod; metric: Ch
   );
 }
 
+/** Границы окон сравнения — каноном дат приложения, но С ГОДОМ («10 июн. 2026 г.»), а не
+    «10.06.2026»: окна сравнения бывают по разные стороны Нового года, и без года «22 дек. — 31 дек.»
+    рядом с «1 янв. — 10 янв.» не прочитать. */
 function formatComparisonDay(day: string): string {
-  return `${day.slice(8, 10)}.${day.slice(5, 7)}.${day.slice(0, 4)}`;
+  return fmt.dayYear(day);
 }

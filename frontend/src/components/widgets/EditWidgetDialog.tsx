@@ -75,6 +75,9 @@ export interface EditWidgetDialogProps {
   defaultSize?: WidgetSize;
   /** Metric-identity accent shown by the standard swatch when no override is stored. */
   defaultColor?: number;
+  /** «Цветной фон» of the card when the user hasn't chosen one (see defaultWidgetTint) — the
+      switch must show what the card actually renders, not a hardcoded «on». */
+  defaultTinted: boolean;
   /** Active variant's floor — sizes below it are disabled (the variant needs the width). */
   minSize?: WidgetSize;
   onChange: (next: WidgetPrefs) => void;
@@ -99,10 +102,13 @@ const CAROUSEL_GAP = 12;
 function VariantCarousel({
   variants,
   prefs,
+  tinted,
   onChange,
 }: {
   variants: WidgetVariant[];
   prefs: WidgetPrefs;
+  /** Effective «цветной фон» of the live card, so the preview matches it. */
+  tinted: boolean;
   onChange: (prefs: WidgetPrefs) => void;
 }) {
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -203,7 +209,7 @@ function VariantCarousel({
                   '--chart-role-selection': acc,
                 });
               }
-              if (prefs.tinted ?? true)
+              if (tinted)
                 previewStyle.backgroundColor = `hsl(var(${prefs.color ? `--chart-${prefs.color}-accent` : '--card-tint'}) / 0.07)`;
               return (
                 <button
@@ -314,7 +320,9 @@ function SourceSelect({ prefs, onChange }: { prefs: WidgetPrefs; onChange: (next
   );
 }
 
-export function EditWidgetDialog({ defaultTitle, prefs, variants, showPeriod, showSeries, showSource, showSize, defaultSize = 'half', defaultColor, minSize = 'third', onChange, onClose }: EditWidgetDialogProps) {
+export function EditWidgetDialog({ defaultTitle, prefs, variants, showPeriod, showSeries, showSource, showSize, defaultSize = 'half', defaultColor, defaultTinted, minSize = 'third', onChange, onClose }: EditWidgetDialogProps) {
+  // Сохранённый выбор пользователя главнее дефолта карточки (тот уже посчитан хостом).
+  const tinted = prefs.tinted ?? defaultTinted;
   const titleRef = useRef<HTMLInputElement>(null);
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
@@ -333,7 +341,7 @@ export function EditWidgetDialog({ defaultTitle, prefs, variants, showPeriod, sh
             {/* Live preview cards on a steep-style carousel: the centered card is the active
                 presentation; each renders for real, scaled down, and inherits accent/tint. */}
             <div className="mt-2">
-              <VariantCarousel variants={variants} prefs={prefs} onChange={onChange} />
+              <VariantCarousel variants={variants} prefs={prefs} tinted={tinted} onChange={onChange} />
             </div>
           </div>
         )}
@@ -472,7 +480,7 @@ export function EditWidgetDialog({ defaultTitle, prefs, variants, showPeriod, sh
           <label htmlFor="widget-tinted">Цветной фон</label>
           <Switch
             id="widget-tinted"
-            checked={prefs.tinted ?? true}
+            checked={tinted}
             onCheckedChange={(checked) => onChange({ ...prefs, tinted: checked })}
           />
         </div>

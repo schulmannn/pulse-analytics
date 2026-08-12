@@ -377,6 +377,9 @@ function WidgetChart({ result, eff, onDrill, expanded = false }: { result: Widge
         values={items.map((i) => i.value)}
         labels={items.map((i) => i.label)}
         titles={breakdownTitles(result)}
+        // Доля — от полной суммы разбивки (у урезанных топ-N списков она шире видимых значений),
+        // поэтому круговая и список печатают одно число.
+        shares={items.map((i) => i.share)}
         colors={items.map((i) => i.color)}
       />
     );

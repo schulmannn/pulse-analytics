@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fmt, parseDayKey, ruAxisLabel, ruSeriesName, sparkAreaPath, sparkPath } from '@/lib/format';
+import { dayKeyToTs, fmt, parseDayKey, ruSeriesName, sparkAreaPath, sparkPath } from '@/lib/format';
 
 describe('parseDayKey', () => {
   it('parses a bare day key as LOCAL midnight of that calendar date', () => {
@@ -82,25 +82,72 @@ describe('fmt', () => {
   });
 });
 
-describe('ruAxisLabel', () => {
-  it('translates English month tokens preserving the rest of the string', () => {
-    expect(ruAxisLabel('24 Jun 21:00')).toBe('24 июн 21:00');
-    expect(ruAxisLabel('18 May')).toBe('18 мая');
-    expect(ruAxisLabel('22 Mar')).toBe('22 мар');
+// ЕДИНЫЙ ФОРМАТ ДАТ (U5): подпись любой даты в UI строит `fmt.day` («13 июл.»), а дневные
+// разбивки сортируются по epoch-ms из `dayKeyToTs` ДО форматирования.
+describe('fmt.day — канон подписи «13 июл.»', () => {
+  it('держит канон на границах года и на «мая» без точки', () => {
+    expect(fmt.day('2026-01-01')).toBe('1 янв.');
+    expect(fmt.day('2026-05-18')).toBe('18 мая'); // ru-RU: май без сокращения → без точки
+    expect(fmt.day('2026-07-13')).toBe('13 июл.');
+    expect(fmt.day('2026-12-31')).toBe('31 дек.');
   });
 
-  it('covers all 12 months', () => {
-    const en = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    const ru = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
-    en.forEach((m, i) => expect(ruAxisLabel(`5 ${m}`)).toBe(`5 ${ru[i]}`));
+  it('никогда не отдаёт dd.mm и англ. месяцы', () => {
+    const labels = ['2026-01-01', '2026-06-05', '2026-12-31'].map((d) => fmt.day(d));
+    labels.forEach((l) => {
+      expect(l).not.toMatch(/^\d{2}\.\d{2}$/);
+      expect(l).not.toMatch(/Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec/);
+    });
   });
 
-  it('passes through non-month and already-Russian labels unchanged', () => {
-    expect(ruAxisLabel('05.06')).toBe('05.06');
-    expect(ruAxisLabel('5 июн')).toBe('5 июн');
-    expect(ruAxisLabel('')).toBe('');
-    // Only whole tokens are translated — substrings inside words stay intact.
-    expect(ruAxisLabel('Mayday')).toBe('Mayday');
+  it('форматирует epoch-ms и Date тем же каноном', () => {
+    const local = new Date(2026, 6, 13, 9, 0);
+    expect(fmt.day(local.getTime())).toBe('13 июл.');
+    expect(fmt.day(local)).toBe('13 июл.');
+  });
+
+  it('границы окон печатают год (fmt.dayYear) — окно сравнения пересекает Новый год', () => {
+    expect(fmt.dayYear('2026-12-22')).toBe('22 дек. 2026 г.');
+    expect(fmt.dayYear('2027-01-10')).toBe('10 янв. 2027 г.');
+    expect(fmt.dayYear('')).toBe('');
+    expect(fmt.dayYear(null)).toBe('');
+  });
+});
+
+describe('dayKeyToTs — ключ сортировки дневных разбивок', () => {
+  it('разбирает ISO-ключ как локальную полночь', () => {
+    expect(dayKeyToTs('2026-07-13')).toBe(new Date(2026, 6, 13).getTime());
+  });
+
+  it('выводит год у «DD.MM» и держит порядок ЧЕРЕЗ НОВЫЙ ГОД', () => {
+    const now = new Date(2027, 0, 5); // 5 января 2027
+    expect(new Date(dayKeyToTs('28.12', now)!).getFullYear()).toBe(2026);
+    expect(new Date(dayKeyToTs('03.01', now)!).getFullYear()).toBe(2027);
+    const sorted = ['03.01', '28.12', '01.01', '31.12'].sort(
+      (a, b) => (dayKeyToTs(a, now) ?? 0) - (dayKeyToTs(b, now) ?? 0),
+    );
+    expect(sorted).toEqual(['28.12', '31.12', '01.01', '03.01']);
+  });
+
+  it('порядок серии не зависит от формата подписи (сортируем по ts, форматируем после)', () => {
+    const now = new Date(2027, 0, 5);
+    const keys = ['03.01', '28.12', '01.01', '31.12'];
+    const labels = [...keys]
+      .sort((a, b) => (dayKeyToTs(a, now) ?? 0) - (dayKeyToTs(b, now) ?? 0))
+      .map((k) => fmt.day(dayKeyToTs(k, now)));
+    expect(labels).toEqual(['28 дек.', '31 дек.', '1 янв.', '3 янв.']);
+  });
+
+  it('внутри одного года месяцы не «уезжают» в прошлый год', () => {
+    const now = new Date(2026, 11, 20); // 20 декабря 2026
+    expect(new Date(dayKeyToTs('01.12', now)!).getFullYear()).toBe(2026);
+    expect(new Date(dayKeyToTs('15.06', now)!).getFullYear()).toBe(2026);
+  });
+
+  it('возвращает null для нераспознанного ключа', () => {
+    expect(dayKeyToTs('')).toBeNull();
+    expect(dayKeyToTs('13 июл.')).toBeNull();
+    expect(dayKeyToTs('13.99')).toBeNull();
   });
 });
 
