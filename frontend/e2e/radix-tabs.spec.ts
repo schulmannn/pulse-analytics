@@ -7,7 +7,8 @@ test('content route tabs use roving focus, arrows and linked tabpanels', async (
   const posts = page.getByRole('tab', { name: 'Публикации' });
   const campaigns = page.getByRole('tab', { name: 'Кампании' });
   const tabList = page.getByRole('tablist', { name: 'Раздел контента' });
-  await expect(tabList).toHaveAttribute('data-variant', 'default');
+  // Один паттерн второго уровня навигации: /posts выглядит ровно как «Разделы аналитики».
+  await expect(tabList).toHaveAttribute('data-variant', 'line');
   await expect(tabList.locator('[data-tabs-glider]')).toHaveCount(0);
   await posts.focus();
   await page.keyboard.press('ArrowRight');
@@ -43,5 +44,38 @@ test('analytics tabs delegate Home/End and panel relationships to Radix', async 
   const dynamics = page.getByRole('tab', { name: 'Динамика' });
   await expect(dynamics).toBeFocused();
   await expect(dynamics).toHaveAttribute('aria-selected', 'true');
+  await expect(page).not.toHaveURL(/[?&]tab=/);
+});
+
+/**
+ * Второй уровень навигации липнет под шапкой страницы (md+): глубоко в «Аудитории» строка табов
+ * обязана оставаться и ориентиром, и путём к соседним разделам. Липкость считается от ФАКТИЧЕСКОЙ
+ * высоты шапки (--feed-header-h), поэтому проверяем геометрию, а не только видимость.
+ */
+test('analytics tab row stays pinned under the page header while the section scrolls', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name === 'mobile-430', 'sticky-строка табов — только md+');
+  await bootDemo(page, '/analytics?tab=audience');
+
+  const tabList = page.getByRole('tablist', { name: 'Разделы аналитики' });
+  const header = page.locator('[data-feed-page-header]');
+  await expect(tabList).toBeVisible();
+
+  const scroller = page.locator('[data-dashboard-scroll]');
+  await scroller.evaluate((el) => el.scrollTo({ top: 1200 }));
+  expect(await scroller.evaluate((el) => el.scrollTop)).toBeGreaterThan(200);
+
+  await expect(tabList).toBeInViewport();
+  const headerBox = await header.boundingBox();
+  const listBox = await tabList.boundingBox();
+  expect(headerBox).not.toBeNull();
+  expect(listBox).not.toBeNull();
+  // Прилипшее состояние: строка сидит вплотную под шапкой (в покое зазор — mb-6, т.е. заметно больше).
+  const gap = listBox!.y - (headerBox!.y + headerBox!.height);
+  expect(gap).toBeGreaterThanOrEqual(-1);
+  expect(gap).toBeLessThanOrEqual(20);
+
+  // Переключение таба из прокрученного состояния работает и чистит URL для дефолтного раздела.
+  await page.getByRole('tab', { name: 'Динамика' }).click();
+  await expect(page.getByRole('tab', { name: 'Динамика' })).toHaveAttribute('aria-selected', 'true');
   await expect(page).not.toHaveURL(/[?&]tab=/);
 });

@@ -127,6 +127,25 @@ the mandatory phone CI job through `e2e/mobile-nav.spec.ts` at 360 / 390 / 430px
 links / ⓘ keep their text size — their tap area is the text and the same action has a full-size path in
 the detail overlay.
 
+## Page navigation (second level)
+
+**One control per role.** A page's second level of navigation — the sections of a route (`Динамика /
+Форматы / Аудитория / Сравнение` on /analytics, `Публикации / Кампании` on /posts and its IG mirror) —
+is always the shared `Tabs` component in its **`line`** variant (`TabsList variant="line"`): quiet
+labels with a 2px `--primary` underline on the active one. `pill` / `segmented` (the `default` variant
+and `SegmentedControl`) stays for switching the **representation of data inside a card** — viz type,
+comparison, breakdown. Never mix the two roles: a segmented control at the top of a page reads as a
+filter, and line tabs inside a card read as navigation away from it.
+
+**Sticky.** That tab row pins under the page header on **md+** (`PAGE_SUBNAV_SHELL` in
+`lib/pageChrome.ts`) inside the element scroller `[data-dashboard-scroll]` — so a reader deep inside a
+tab keeps both the orientation and the path to the neighbouring sections. Its `top` is the header's
+REAL height, published as `--feed-header-h` by a single `ResizeObserver` in `FeedBlock` (the header
+wraps to two rows on narrow desktops, so a constant would be wrong). The strip is opaque
+(`bg-background`) and carries a permanent bottom hairline — a hairline toggled on stick would change
+the strip height and cost CLS. Exactly **one** sticky second layer per page: nested control rows
+(the campaign scope row inside «Форматы») scroll away as before, and `<md` the whole page is unchanged.
+
 ## Content density (card ↔ detail)
 
 Every widget reads at **one predictable density** per footprint — a card never grows an inner scrollbar

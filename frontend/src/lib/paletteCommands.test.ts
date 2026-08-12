@@ -4,9 +4,11 @@ import {
   buildIgMetricCommands,
   buildNetworkRouteCommands,
   buildSourceCommands,
+  buildTgSectionCommands,
   channelDisplayName,
   type PaletteChannel,
 } from '@/lib/paletteCommands';
+import { ANALYTICS_TABS } from '@/lib/analyticsTabs';
 
 // Один канал каждой сети реестра. Совместимость определяется РЕЕСТРОМ (lib/networks → hasChannel):
 // tg — любой канал без source ig/ms/ym; ig — только ig_connected; ms/ym — ровно свой source.
@@ -89,6 +91,50 @@ describe('buildNetworkRouteCommands', () => {
     expect(overview?.search).toContain('overview');
     const analytics = buildNetworkRouteCommands([TG]).find((c) => c.path === '/analytics');
     expect(analytics?.search).toContain('analytics');
+  });
+});
+
+describe('buildTgSectionCommands', () => {
+  it('подразделы ТГ: кампании + все вкладки аналитики, пути с query', () => {
+    expect(buildTgSectionCommands([TG]).map((c) => c.path)).toEqual([
+      '/posts?view=campaigns',
+      '/analytics?tab=dynamics',
+      '/analytics?tab=content',
+      '/analytics?tab=audience',
+      '/analytics?tab=compare',
+    ]);
+  });
+
+  it('подписи вкладок — из ANALYTICS_TABS, без второго списка строк', () => {
+    const labels = buildTgSectionCommands([TG]).map((c) => c.label);
+    expect(labels).toEqual(['Кампании', ...ANALYTICS_TABS.map((t) => `Аналитика · ${t.label}`)]);
+  });
+
+  it('id стабильные route:<путь> — на них завязана MRU-история палитры', () => {
+    expect(buildTgSectionCommands([TG]).map((c) => c.id)).toEqual([
+      'route:/posts?view=campaigns',
+      'route:/analytics?tab=dynamics',
+      'route:/analytics?tab=content',
+      'route:/analytics?tab=audience',
+      'route:/analytics?tab=compare',
+    ]);
+  });
+
+  it('id не сталкиваются с плоскими разделами сети', () => {
+    const flat = new Set(buildNetworkRouteCommands([TG]).map((c) => c.id));
+    for (const command of buildTgSectionCommands([TG])) expect(flat.has(command.id)).toBe(false);
+  });
+
+  it('без телеграм-канала подразделов нет', () => {
+    expect(buildTgSectionCommands([IG, MS, YM])).toEqual([]);
+  });
+
+  it('search несёт синонимы: «камп…» и «сравн…» находят свои пункты', () => {
+    const byLabel = new Map(buildTgSectionCommands([TG]).map((c) => [c.label, c.search]));
+    expect(byLabel.get('Кампании')).toContain('campaign');
+    expect(byLabel.get('Кампании')).toContain('кампании');
+    expect(byLabel.get('Аналитика · Сравнение')).toContain('сравнение');
+    expect(byLabel.get('Аналитика · Сравнение')).toContain('compare');
   });
 });
 

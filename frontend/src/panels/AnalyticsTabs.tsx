@@ -21,6 +21,9 @@ import { CampaignFilterControl } from '@/components/campaigns/CampaignFilterCont
 import { useTgCampaignScope, type TgCampaignScope } from '@/lib/campaignFilter';
 import { Hashtags } from '@/panels/Hashtags';
 import { ContentOpportunity } from '@/panels/ContentOpportunity';
+import { PAGE_SUBNAV_SHELL } from '@/lib/pageChrome';
+import { ANALYTICS_TABS, isAnalyticsTab, type AnalyticsTab } from '@/lib/analyticsTabs';
+import { cn } from '@/lib/utils';
 
 /**
  * Analytics — the deep breakdowns. The Overview is a focused summary (Figma), so the detailed
@@ -28,20 +31,7 @@ import { ContentOpportunity } from '@/panels/ContentOpportunity';
  * сравнение) live here alongside the TG breakdowns + hashtag lift. Moved out of App.tsx so
  * the TG feed can compose it as a block.
  */
-// Order mirrors the canonical section schema (dynamics/reach → content aggregates →
-// audience/demographics → comparison). The tab is «Форматы», not «Контент»: the sidebar's
-// «Контент» section (the posts list) owns that name now — two different «Контент» one click
-// apart read as the same thing. This tab is per-TYPE aggregates (formats, эмодзи, hashtags).
-const ANALYTICS_TABS = [
-  { key: 'dynamics', label: 'Динамика' },
-  { key: 'content', label: 'Форматы' },
-  { key: 'audience', label: 'Аудитория' },
-  { key: 'compare', label: 'Сравнение' },
-] as const;
-type AnalyticsTab = (typeof ANALYTICS_TABS)[number]['key'];
-
-const isAnalyticsTab = (raw: string | null): raw is AnalyticsTab =>
-  ANALYTICS_TABS.some((t) => t.key === raw);
+// Порядок/подписи вкладок — в lib/analyticsTabs (их же читает ⌘K-палитра, см. модуль).
 
 export function Analytics() {
   // The active tab lives in ?tab= (replace, not push) so a shared /analytics link restores
@@ -68,8 +58,11 @@ export function Analytics() {
     >
       {/* Grouped tabs break the 20-chart wall into Динамика / Аудитория / Контент / Сравнение —
           each tab renders only its section family (progressive disclosure). The desktop-only export
-          control sits alongside the tabs and covers the whole analytics window regardless of tab. */}
-      <div className="flex items-center justify-between gap-3">
+          control sits alongside the tabs and covers the whole analytics window regardless of tab.
+          Второй уровень навигации липнет под шапкой страницы (md+, PAGE_SUBNAV_SHELL): в глубине
+          «Аудитории» строка остаётся и ориентиром, и путём к соседним табам. Внутренний ряд
+          «Форматов» (analytics-campaign-scope) НЕ липнет — липкий слой ровно один. */}
+      <div className={cn(PAGE_SUBNAV_SHELL, 'flex items-center justify-between gap-3')}>
         <TabsList
           aria-label="Разделы аналитики"
           variant="line"

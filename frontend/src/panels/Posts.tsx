@@ -75,7 +75,9 @@ export function Posts() {
       onValueChange={(next) => setView(next as 'posts' | 'campaigns')}
       className="space-y-6"
     >
-      <TabsList aria-label="Раздел контента">
+      {/* Второй уровень страницы — line-табы, тот же контрол и тот же вид, что «Разделы аналитики»
+          (pill/segmented остаётся переключателем представления данных ВНУТРИ карточки). */}
+      <TabsList aria-label="Раздел контента" variant="line" className="justify-start">
         {([['posts', 'Публикации'], ['campaigns', 'Кампании']] as const).map(([key, label]) => (
           <TabsTrigger key={key} value={key}>
             {label}

@@ -130,7 +130,8 @@ test.describe('Instagram Контент 2.0 (desktop)', () => {
     await expect(rows).toHaveCount(6);
     const routeTabs = page.getByRole('tablist', { name: 'Раздел контента' });
     const breakdownTabs = page.getByRole('tablist', { name: 'Дополнительные разборы контента' });
-    await expect(routeTabs).toHaveAttribute('data-variant', 'default');
+    // Второй уровень навигации страницы — line-табы (тот же контрол и вид, что на /analytics).
+    await expect(routeTabs).toHaveAttribute('data-variant', 'line');
     await expect(breakdownTabs).toHaveAttribute('data-variant', 'line');
     await expect(page.locator('[data-tabs-glider]')).toHaveCount(0);
     await expect(page.getByTestId('ig-content-result-count')).toHaveText(/6 публ\./);

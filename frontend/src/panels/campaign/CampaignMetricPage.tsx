@@ -15,6 +15,7 @@ import { ErrorState } from '@/components/ErrorState';
 import { LineChart } from '@/components/LineChart';
 import { RadialShare } from '@/components/RadialShare';
 import { SegmentedControl } from '@/components/SegmentedControl';
+import { CAMPAIGNS_LIST } from '@/components/campaigns/routes';
 import {
   CampaignColorDot,
   CampaignStatusChip,
@@ -99,7 +100,7 @@ export function CampaignMetricPage() {
     return (
       <EmptyState
         title="График кампании не найден"
-        action={{ to: '/posts?view=campaigns', label: 'К списку кампаний' }}
+        action={{ to: CAMPAIGNS_LIST, label: 'К списку кампаний' }}
       />
     );
   }
@@ -135,7 +136,7 @@ export function CampaignMetricPage() {
     return (
       <EmptyState
         title="Кампания не найдена"
-        action={{ to: '/posts?view=campaigns', label: 'К списку кампаний' }}
+        action={{ to: CAMPAIGNS_LIST, label: 'К списку кампаний' }}
       />
     );
   }

@@ -33,7 +33,8 @@ export function IgContent({ ig }: { ig: IgData }) {
       onValueChange={(next) => setView(next as 'posts' | 'campaigns')}
       className="space-y-6"
     >
-      <TabsList aria-label="Раздел контента">
+      {/* Зеркало TG-«Контента»: тот же line-вариант второго уровня навигации — менять парой. */}
+      <TabsList aria-label="Раздел контента" variant="line" className="justify-start">
         {([['posts', 'Публикации'], ['campaigns', 'Кампании']] as const).map(([key, label]) => (
           <TabsTrigger key={key} value={key}>
             {label}

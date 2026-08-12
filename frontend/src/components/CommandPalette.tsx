@@ -13,6 +13,7 @@ import {
   buildIgMetricCommands,
   buildNetworkRouteCommands,
   buildSourceCommands,
+  buildTgSectionCommands,
 } from '@/lib/paletteCommands';
 import type { PaletteChannel } from '@/lib/paletteCommands';
 import { getDrillMetric } from '@/lib/widgetMetrics';
@@ -101,6 +102,9 @@ function PaletteDialog({ close }: { close: () => void }) {
   const channels: PaletteChannel[] = channelsQuery.data?.channels ?? [];
   const routeCommands: PaletteCommand[] = [
     ...buildNetworkRouteCommands(channels),
+    // Подразделы ТГ (Кампании + вкладки аналитики) — сразу за плоскими разделами сети: реестр их
+    // не описывает, а без палитры до них добираются только кликом внутри страницы.
+    ...buildTgSectionCommands(channels),
     ...EXTRA_ROUTES.map((route) => ({ ...route, id: `route:${route.path}`, search: `перейти ${route.search}`.toLowerCase() })),
     ...(me.data?.role === 'superuser'
       ? SUPERUSER_ROUTES.map((route) => ({ ...route, id: `route:${route.path}`, search: `перейти ${route.search}`.toLowerCase() }))
