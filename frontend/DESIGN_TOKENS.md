@@ -23,11 +23,45 @@ semantic token.
 | Panel surface | `--card` `--popover` | `#fff` panels used **sparingly** — sections are hairline-delimited |
 | Secondary/tertiary ink | `--muted-foreground` `--ink2` `--ink3` | text hierarchy by shade, not weight |
 | Accent (single hue) | `--primary` `--accent` `--accent-foreground` | `--primary` is link/action ink on neutral surfaces; selected chips with `bg-primary/10` use the deeper `--accent-foreground`, AA-gated on that composite tint |
-| Deltas | `--brand-verdant` (up) `--brand-ember` / `-strong` (down) | reserved for CHART roles (DivergingBars) and status surfaces; the ↑/↓ delta chips and card stats read **muted** (steep: direction lives in the arrow/sign, nothing screams) |
+| Deltas | `--brand-verdant` (up) `--brand-ember` / `-strong` (down) | CHART roles (DivergingBars), status surfaces, and the evaluated Δ of the **metric explorer** (`/metrics/*`) — cards, tables and modals stay muted; see «One voice for deltas» below |
 | Status | `--status-warn` | risk / demo / stale collector |
 | Hairline | `--border` `--input` | decorative separators (the *only* borders in the system) |
 | Categorical series | `--chart-1 … --chart-6` | Muted/refined (Steep-noble), Okabe-Ito-ordered for colour-blind safety; light stays deep enough for non-text 3.0 on white, dark goes softer; series always carry a label too |
 | Identity chips | `--chip-{1..6}-{bg,ink}` | deterministic per channel-name hash |
+
+**One voice for deltas.** Direction always lives in the GLYPH (`↑ ↓` / `▲ ▼ ±` / `+ − ±`) **and, where
+the glyph is `aria-hidden`, in an `sr-only` word** — never in hue alone (WCAG 1.4.1). Colour is
+decoration on top of a sign that already reads without it.
+
+The one surface that takes that decoration is the **metric explorer** (`/metrics/*` of every
+vertical) — the drill-down whose entire job is «сравнить и оценить». Inside it, coloured TEXT in
+`verdant` / `ember`, never a tinted chip or filled pill (the old `DeltaBadge` is gone):
+
+- the comparison rail's period-vs-period row — `ComparisonDelta` / `ComparisonDeltaRow`
+  (`components/metric/shared.tsx`), the single component behind TG / IG / MS / Метрика / упоминания;
+- the same evaluated Δ when the page states it in prose instead of the rail («изменение за окно» in
+  the IG follows descriptor, `IgMetricPage.tsx`);
+- the pinned-point inspector's «К пред. дню / К пред. точке» (`PinnedDayPanel` hosts in
+  `MetricPage` / `IgMetricPage` / `YmMetricPage`);
+- `RankChart`'s baseline column — the rank viz's own form of that same comparison.
+
+Colour there is a **verdict**, so a metric that carries no sentiment opts out of it while keeping the
+same markup: `ComparisonDelta`/`ComparisonDeltaRow` take `evaluative={false}` and render the glyph and
+the spoken direction in muted ink. Brand-mention VOLUME is the standing case — more mentions is not
+self-evidently better (mirrors `DeltaLine` on `/mentions`: «never green/red — mention counts carry no
+sentiment»). Share the component, not the judgement.
+
+**Everything outside the explorer reads muted**, direction carried by the sign alone: card stats
+(`DeltaPill`, `StatTile`), the per-cell «к медиане» deltas in the content tables (four coloured
+percentages per row turned the densest surface into the loudest one) **and the same «к медиане» line
+in the post modal opened from that cell** — one comparison may not speak in two voices depending on
+which surface shows it. Zero is neutral (`±`, muted) everywhere.
+
+Known tail, NOT covered by this pass: the hashtag **lift** column in `components/instagram/content.tsx`
+still paints `verdant` / `ember` — it is a benchmark ratio, not a period Δ, and by this rule it should
+go muted; left alone here to keep the ticket's blast radius. The marketing `pages/Landing.tsx` mock is
+out of the app canon entirely. This rule NARROWS where verdant/ember may appear; it never licenses new
+colour.
 
 ### Chart series roles
 
@@ -42,7 +76,7 @@ positive/negative never lean on hue alone (diverging bars use position around ze
 | Role | Token | Aliases | Used by |
 |---|---|---|---|
 | Primary | `--chart-role-primary` | `--brand-iris` | line · area · points · bars · Breakdown fill · DivergingBars up |
-| Comparison | `--chart-role-comparison` | `--chart-2` | dashed previous-period / baseline ghost |
+| Comparison | `--chart-role-comparison` | `--chart-2` | previous-period / baseline ghost: **dashed, no fill** in every line host (incl. the metric explorer); bar hosts draw the ghost as a COLUMN at one shared alpha (`BarChart` `GHOST_ALPHA` = the line ghost's `0.8`, covering bars, hover highlight, legend and tooltip swatch) — an owner's decision, since a dash over bars mixes shape languages. The alpha is read straight out of `BarChart.tsx` by `scripts/contrast-tokens.mjs`: anything below non-text 3.0 on the light card fails the gate |
 | Positive | `--chart-role-positive` | `--brand-verdant` | gains / up emphasis (delta text) |
 | Negative | `--chart-role-negative` | `--brand-ember` | losses / down (DivergingBars down · delta text) |
 | Warning | `--chart-role-warning` | `--status-warn` | anomaly / caution markers |
@@ -50,8 +84,8 @@ positive/negative never lean on hue alone (diverging bars use position around ze
 | Selection | `--chart-role-selection` | `--brand-iris` | hover point + crosshair (= the accent) |
 
 The categorical **`--chart-1 … --chart-6`** (Okabe-Ito) stay for MULTI-series charts (pie slices,
-multi-line); the roles above are the single-series semantic set. `DeltaPill` / `WidgetRenderer` keep
-the canonical text tokens (`verdant` / `ember` / `status-warn` / `primary`) — those ARE the text side
+multi-line); the roles above are the single-series semantic set. `ComparisonDelta` / `WidgetRenderer`
+keep the canonical text tokens (`verdant` / `ember` / `status-warn` / `primary`) — those ARE the text side
 of the positive / negative / warning / primary roles (tuned for AA 4.5 as text, with on-tint
 variants), so they read role-consistent without duplicating a stroke token.
 
@@ -68,8 +102,10 @@ widget's visualisation. Both live in **`src/lib/widgetSurface.ts`** (pure, unit-
   included) stays on a **neutral** surface *regardless of the saved accent*: a coloured wash behind many
   series or rows reads as status, not story. The accent still lives on the **series stroke** and the
   **hero number** (`--chart-role-primary`); only the card BACKGROUND is neutralised. Positive/negative
-  colour stays reserved for *evaluated deltas* (DeltaPill), never categorical series. Previous-period
-  comparison stays dashed/no-fill (`--chart-role-comparison`).
+  colour stays reserved for the *evaluated comparison Δ* (`ComparisonDelta`), never categorical series
+  and never the quiet card/table deltas. Previous-period
+  comparison stays dashed/no-fill in every LINE host (`--chart-role-comparison`); bars are the one
+  owner-sanctioned exception (see the Comparison row above).
   → `vizAllowsTonalSurface(viz)` / `effectiveTinted(viz, savedTinted)`.
   On the dark TINTED card the widget **title** also rides the accent (`.widget-title` rule in
   `index.css`) — title, number, line and surface share one hue (steep); a neutral or un-tinted card
@@ -264,7 +300,7 @@ container would drag it off the panel edge it exists to track. Decisive point: t
 than overlays, so the frame does a full layout pass regardless. Converting the smaller half buys
 nothing measurable. Don't re-raise this without a profile showing otherwise.
 
-**Chart motion.** The full-size `LineChart` (line + area, primary and comparison) and shared `Sparkline`
+**Chart motion.** The full-size `LineChart` (primary line + area, comparison line) and shared `Sparkline`
 follow the shadcn/Recharts update model: after a period or filter change, old point coordinates are
 proportionally matched to the new point count and interpolated into the target shape. This is a real
 **shape morph**, not a clip wipe or cross-fade. Isolated `MorphingSeries` / `SparklineSeries` layers own

@@ -29,7 +29,7 @@ import { usePeriod, type PeriodDays } from '@/lib/period';
 import { useExplorerChartHeight } from '@/lib/useExplorerChartHeight';
 import { SegSelect } from '@/components/metric/SegSelect';
 import { isMentionsMetricKey } from '@/panels/mentions/mentionsMetricKeys';
-import { MetricBackLink, MetricColumns, MetricDescriptor, WindowBarShell, RailSection } from '@/components/metric/shared';
+import { ComparisonDeltaRow, MetricBackLink, MetricColumns, MetricDescriptor, WindowBarShell, RailSection } from '@/components/metric/shared';
 
 type ChartKind = 'line' | 'bar';
 type CompareMode = 'off' | 'prev';
@@ -235,14 +235,17 @@ function MentionsTimelinePage() {
                     {fmt.num(previousTotal ?? 0)}
                   </span>
                 </div>
-                <div className="flex items-baseline justify-between gap-3 border-t border-border pt-2">
-                  <span className="text-xs text-muted-foreground">Изменение</span>
-                  <span className="text-xs font-medium tabular-nums text-muted-foreground">
-                    {delta == null
-                      ? 'нет базы'
-                      : `${delta > 0 ? '+' : delta < 0 ? '−' : '±'}${Math.abs(delta).toFixed(1)}%`}
-                  </span>
-                </div>
+                {delta == null ? (
+                  <div className="flex items-baseline justify-between gap-3 border-t border-border pt-2">
+                    <span className="text-xs text-muted-foreground">Изменение</span>
+                    <span className="text-xs font-medium tabular-nums text-muted-foreground">нет базы</span>
+                  </div>
+                ) : (
+                  // Общая разметка рейла, но БЕЗ вердикта: объём упоминаний бренда сентимента не
+                  // несёт (та же причина, что у `DeltaLine` на /mentions — «never green/red»),
+                  // поэтому строка остаётся muted, как была до унификации.
+                  <ComparisonDeltaRow delta={delta} evaluative={false} />
+                )}
               </>
             )}
           </div>

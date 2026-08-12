@@ -29,8 +29,9 @@ interface LineChartProps {
   height?: number;
   /** Overlay hollow amber rings on statistically unusual points (local-outlier detection). */
   markAnomalies?: boolean;
-  /** Comparison series (previous period / baseline), drawn dashed in the contrast colour
-      (--chart-2) on the same y-scale, with a built-in legend row under the chart.
+  /** Comparison series (previous period / baseline), drawn dashed and WITHOUT a fill in the
+      contrast colour (`--chart-role-comparison`) on the same y-scale — в любом appearance, включая
+      `comparison` — with a built-in legend row under the chart.
       null здесь — тот же «день без сбора»: в пунктире разрыв, строка сравнения в ховере
       не показывается (гарды `!= null` сохранены). */
   ghost?: Array<number | null>;
@@ -193,7 +194,6 @@ export function LineChart({
   // Strip colons from useId — valid in ids, but break SVG url(#…) refs in some browsers.
   const chartId = useId().replace(/:/g, '');
   const gradientId = `lc${chartId}`;
-  const comparisonGradientId = `lcg${chartId}`;
   const gapPatternId = `lcgap${chartId}`;
 
   useLayoutEffect(() => {
@@ -426,7 +426,8 @@ export function LineChart({
 
     // ── The chart splits into three z-layers so the RAF morph re-renders ONLY the series paths ──
     // `staticUnder` (defs, grid, target/reference lines) sits below the series; `MorphingSeries`
-    // (rendered between them in the SVG body) owns the morphing primary/comparison line+area; and
+    // (rendered between them in the SVG body) owns the morphing primary line+area and the dashed
+    // comparison line (the ghost never gets an area of its own); and
     // `staticOver` (lone points, rings, poles, value/axis labels) sits above. Both static fragments
     // are part of this memo, so a morph frame's setState — confined to MorphingSeries — never rebuilds
     // the axes, labels or hover geometry. Target/reference hairlines read as «drawn under the series».
@@ -440,12 +441,8 @@ export function LineChart({
             <stop offset="0%" stopColor="hsl(var(--chart-role-primary))" stopOpacity={richStyle ? '0.3' : expanded ? '0.05' : '0.12'} />
             <stop offset="100%" stopColor="hsl(var(--chart-role-primary))" stopOpacity={richStyle ? '0.035' : expanded ? '0.05' : '0.12'} />
           </linearGradient>
-          {comparison && (
-            <linearGradient id={comparisonGradientId} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="hsl(var(--chart-role-comparison))" stopOpacity="0.22" />
-              <stop offset="100%" stopColor="hsl(var(--chart-role-comparison))" stopOpacity="0.025" />
-            </linearGradient>
-          )}
+          {/* У сравнения СВОЕГО градиента нет: прошлый период по канону — штриховая линия без
+              заливки, иначе две area пересекаются и дают мутные зоны. */}
         </defs>
 
         {/* Gridlines — start after the label gutter */}
@@ -568,7 +565,7 @@ export function LineChart({
       staticUnder, staticOver,
       morphGeom: { primary: primaryPoints, ghost: ghostPoints, baseY } as MorphGeom,
     };
-  }, [values, labels, activeGhost, hasGhostLegend, target, refLines, yMin, yMax, width, ctxHeight, height, expanded, showAxes, markExtremes, showPoints, anomalyIdx, gradientId, comparisonGradientId, gapPatternId, rhea, comparison, richStyle]);
+  }, [values, labels, activeGhost, hasGhostLegend, target, refLines, yMin, yMax, width, ctxHeight, height, expanded, showAxes, markExtremes, showPoints, anomalyIdx, gradientId, gapPatternId, rhea, comparison, richStyle]);
 
   // Hover-only lines remain one passive named graphic. Pointer scrubbing is supplementary to its
   // accessible summary and is registered on the DOM node. A drillable line instead uses the real
@@ -750,7 +747,10 @@ export function LineChart({
         data-chart-expanded={expanded ? '' : undefined}
         data-chart-appearance={appearance}
         data-chart-curve="smooth"
-        data-chart-comparison={comparison && hasGhostLegend ? 'area' : undefined}
+        // Как нарисован прошлый период: у линии он ВСЕГДА штриховой и без заливки (BarChart рядом
+        // рапортует 'grouped'/'stacked' — там призрак рисуется столбцами). Атрибут следует за
+        // РЕАЛЬНО нарисованной серией, поэтому смотрит на activeGhost, а не на наличие легенды.
+        data-chart-comparison={activeGhost ? 'dashed' : undefined}
         className={`block w-full ${onPointClick ? 'cursor-pointer' : 'cursor-crosshair'}`}
         height={h}
         viewBox={`0 0 ${W} ${h}`}
@@ -772,7 +772,6 @@ export function LineChart({
           geom={plot.morphGeom}
           signature={motionSignature}
           primaryGradientId={gradientId}
-          comparisonGradientId={comparisonGradientId}
           comparison={comparison}
           richStyle={richStyle}
           poles={!richStyle}
@@ -935,11 +934,13 @@ export function LineChart({
       {/* Comparison legend — names both series whenever a ghost is present; the comparison chip is a
           toggle (steep #9): click to hide/show the ghost series (the current-period chip stays put,
           hiding the metric itself is meaningless). Where a page-level compare control already owns the
-          on/off (legendToggle=false, the metric page) the chip is a static label instead. */}
+          on/off (legendToggle=false, the metric page) the chip is a static label instead.
+          Чипы одинаковы во ВСЕХ appearance и повторяют язык линий: сплошной штрих — текущий период,
+          пунктир — сравнение (квадрат-заливка врал бы про несуществующую area прошлого периода). */}
       {ghost && ghost.length >= 2 && (
         <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-2xs font-medium text-muted-foreground">
           <span className="flex select-none items-center gap-1.5">
-            <span aria-hidden="true" className={comparison ? 'h-2.5 w-2.5 rounded-[3px]' : 'h-0.5 w-4 rounded-full'} style={{ backgroundColor: 'hsl(var(--chart-role-primary))' }} />
+            <span aria-hidden="true" className="h-0.5 w-4 rounded-full" style={{ backgroundColor: 'hsl(var(--chart-role-primary))' }} />
             {primaryLabel ?? 'Текущий период'}
           </span>
           {legendToggle ? (
@@ -950,12 +951,12 @@ export function LineChart({
               title={ghostHidden ? 'Показать сравнение' : 'Скрыть сравнение'}
               className={`flex select-none items-center gap-1.5 rounded transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40 ${ghostHidden ? 'opacity-40 line-through' : ''}`}
             >
-              <span aria-hidden="true" className={comparison ? 'h-2.5 w-2.5 rounded-[3px]' : 'w-4 border-t-2 border-dashed'} style={comparison ? { backgroundColor: 'hsl(var(--chart-role-comparison))' } : { borderColor: 'hsl(var(--chart-role-comparison))' }} />
+              <span aria-hidden="true" className="w-4 border-t-2 border-dashed" style={{ borderColor: 'hsl(var(--chart-role-comparison))' }} />
               {ghostLabel}
             </button>
           ) : (
             <span className="flex select-none items-center gap-1.5">
-              <span aria-hidden="true" className={comparison ? 'h-2.5 w-2.5 rounded-[3px]' : 'w-4 border-t-2 border-dashed'} style={comparison ? { backgroundColor: 'hsl(var(--chart-role-comparison))' } : { borderColor: 'hsl(var(--chart-role-comparison))' }} />
+              <span aria-hidden="true" className="w-4 border-t-2 border-dashed" style={{ borderColor: 'hsl(var(--chart-role-comparison))' }} />
               {ghostLabel}
             </span>
           )}

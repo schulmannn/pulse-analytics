@@ -466,7 +466,7 @@ function StatTile({ label, value, trend, deltaText, info, onDrill }: StatTilePro
         {deltaText ? (
           <span className={cn('shrink-0 text-xs font-medium tabular-nums', deltaColor)}>{deltaText}</span>
         ) : (
-          <DeltaPill delta={trend} subtle />
+          <DeltaPill delta={trend} />
         )}
       </div>
     </div>

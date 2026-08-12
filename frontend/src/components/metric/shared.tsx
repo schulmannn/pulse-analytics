@@ -7,6 +7,7 @@
 
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
+import { cn } from '@/lib/utils';
 import { isPlainLeftClick, useViewTransitionNavigate } from '@/lib/viewTransitionNavigate';
 
 /** Back-ссылка metric-страницы («← Обзор» / «← Instagram» / …): единый глиф (скрыт от SR),
@@ -107,17 +108,58 @@ export function AboutRow({ label, text }: { label: string; text: string }) {
   );
 }
 
-/** Строка «Изменение» comparison-rail'а: ▲/▼ + |Δ|% в verdant/ember. Формулу дельты считает
-    страница (семантики окон различаются) — здесь только каноничная отрисовка, чтобы rail'ы
-    вертикалей не расходились по глифам, цветам и точности. */
-export function ComparisonDeltaRow({ delta }: { delta: number }) {
+/** Оценочная дельта сравнения — единственное место, где verdant/ember красят ТЕКСТ дельты
+    (залитая pill `DeltaBadge` выпилена; карточное `DeltaPill` и табличные дельты к медиане читаются
+    muted — см. «One voice for deltas» в DESIGN_TOKENS.md). Направление НЕ живёт в одном цвете
+    (WCAG 1.4.1): зрячий читает глиф ▲/▼/±, скринридер — слово «рост/снижение» рядом с ним. Сам глиф
+    от AT скрыт намеренно: «▲» озвучивается как «чёрный треугольник вверх», а это шум поверх уже
+    сказанного слова. Ноль нейтрален. `format` — для единиц, отличных от процента (штуки
+    подписчиков, п.п.); формулу дельты считает страница (семантики окон различаются). */
+export function ComparisonDelta({
+  delta,
+  format = (abs) => `${abs.toFixed(1)}%`,
+  className,
+  evaluative = true,
+}: {
+  delta: number;
+  format?: (abs: number) => string;
+  className?: string;
+  /** Несёт ли рост этой метрики оценку. `false` — для метрик, у которых «больше» НЕ значит «лучше»:
+      объём упоминаний бренда сентимента не несёт (см. `DeltaLine` в `MentionsDesktop.tsx`,
+      «never green/red — mention counts carry no sentiment»), и красить его в verdant/ember значило
+      бы вынести вердикт, которого вертикаль сознательно не выносит. Разметка при этом ОДНА:
+      меняется только тон, глиф и озвучка направления остаются. */
+  evaluative?: boolean;
+}) {
+  const glyph = delta > 0 ? '▲' : delta < 0 ? '▼' : '±';
+  const spoken = delta > 0 ? 'рост на ' : delta < 0 ? 'снижение на ' : 'без изменений, ';
+  const ink =
+    !evaluative || delta === 0 ? 'text-muted-foreground' : delta > 0 ? 'text-verdant' : 'text-ember';
+  return (
+    <span className={cn('font-medium tabular-nums', ink, className)}>
+      <span aria-hidden="true">{glyph}</span>
+      <span className="sr-only">{spoken}</span>
+      {format(Math.abs(delta))}
+    </span>
+  );
+}
+
+/** Строка «Изменение» comparison-rail'а — одна разметка на все вертикали (TG/IG/MS/Метрика/
+    упоминания), чтобы копии не расходились по глифам, цветам и точности. `evaluative={false}` —
+    для метрик без сентимента (объём упоминаний), см. {@link ComparisonDelta}. */
+export function ComparisonDeltaRow({
+  delta,
+  format,
+  evaluative,
+}: {
+  delta: number;
+  format?: (abs: number) => string;
+  evaluative?: boolean;
+}) {
   return (
     <div className="flex items-baseline justify-between gap-3 border-t border-border pt-2">
       <span className="text-xs text-muted-foreground">Изменение</span>
-      <span className={`text-xs font-medium tabular-nums ${delta >= 0 ? 'text-verdant' : 'text-ember'}`}>
-        {delta >= 0 ? '▲' : '▼'}
-        {Math.abs(delta).toFixed(1)}%
-      </span>
+      <ComparisonDelta delta={delta} format={format} evaluative={evaluative} className="text-xs" />
     </div>
   );
 }

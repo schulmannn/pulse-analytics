@@ -175,9 +175,13 @@ test('metric explorer gives the plot desktop space and exposes a hover inspector
   const chart = page.locator('svg[data-chart-kind="line"][data-chart-expanded]').first();
   await chart.waitFor({ state: 'visible', timeout: 15_000 });
   await expect(chart).toHaveAttribute('data-chart-curve', 'smooth');
-  await expect(chart).toHaveAttribute('data-chart-comparison', 'area');
+  // Канон «previous-period stays dashed/no-fill»: у прошлого периода ТОЛЬКО штриховая линия —
+  // ни своей area, ни сплошного штриха (залитое сравнение мутило пересечения с текущей заливкой).
+  await expect(chart).toHaveAttribute('data-chart-comparison', 'dashed');
   await expect(chart.locator('[data-chart-series="primary-area"]')).toHaveCount(1);
-  await expect(chart.locator('[data-chart-series="comparison-area"]')).toHaveCount(1);
+  await expect(chart.locator('[data-chart-series="comparison-area"]')).toHaveCount(0);
+  await expect(chart.locator('[data-chart-series="comparison"]')).toHaveAttribute('stroke-dasharray', '5 4');
+  await expect(chart.locator('[data-chart-series="comparison"]')).toHaveAttribute('fill', 'none');
   await chart.scrollIntoViewIfNeeded();
   await page.waitForTimeout(300);
 

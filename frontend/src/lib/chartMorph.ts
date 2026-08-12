@@ -122,10 +122,15 @@ export function interpolatePoints(
  * area closes each run to `baseY`. A run of a single point contributes nothing (a zero-length line is
  * invisible; the caller draws a dot). This is the SAME builder the static render uses, so a settled
  * morph frame is byte-identical to the target geometry.
+ *
+ * `lineOnly` пропускает сборку area-строки для серий, которые её не рисуют (призрак прошлого
+ * периода — штриховая линия БЕЗ заливки). Это не микрооптимизация ради красоты: путь пересобирается
+ * КАЖДЫЙ кадр RAF-морфа, на серии до CHART_MAX_POINTS точек и на нескольких графиках экрана сразу.
  */
 export function buildSeriesPaths(
   points: ReadonlyArray<MorphPoint>,
   baseY: number,
+  { lineOnly = false }: { lineOnly?: boolean } = {},
 ): { line: string; area: string } {
   const segs: Array<Array<{ x: number; y: number }>> = [];
   let run: Array<{ x: number; y: number }> = [];
@@ -142,9 +147,11 @@ export function buildSeriesPaths(
   if (run.length > 0) segs.push(run);
   const lineSegs = segs.filter((s) => s.length >= 2);
   const line = lineSegs.map((segment) => smoothSvgPath(segment)).join(' ');
-  const area = lineSegs
-    .map((segment) => `${smoothSvgPath(segment)} L ${segment[segment.length - 1].x} ${baseY} L ${segment[0].x} ${baseY} Z`)
-    .join(' ');
+  const area = lineOnly
+    ? ''
+    : lineSegs
+        .map((segment) => `${smoothSvgPath(segment)} L ${segment[segment.length - 1].x} ${baseY} L ${segment[0].x} ${baseY} Z`)
+        .join(' ');
   return { line, area };
 }
 

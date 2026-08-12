@@ -76,7 +76,7 @@ export function ReportComposition({ blocks, data, editable, onInsert, onMove, on
           <div className="text-2xs tracking-wide text-muted-foreground">{label}</div>
           <div className="mt-1 flex items-baseline gap-1.5">
             <span className="text-2xl font-medium tabular-nums tracking-tight">{drillMeta[k].total}</span>
-            <DeltaPill delta={drillMeta[k].trend} subtle />
+            <DeltaPill delta={drillMeta[k].trend} />
           </div>
         </Link>
       ))}
@@ -264,7 +264,7 @@ export function ReportComposition({ blocks, data, editable, onInsert, onMove, on
             </div>
             <div className="flex items-baseline gap-2">
               <span className="text-2xl font-medium tabular-nums tracking-tight">{drillMeta[spec.drill].total}</span>
-              <DeltaPill delta={drillMeta[spec.drill].trend} subtle />
+              <DeltaPill delta={drillMeta[spec.drill].trend} />
             </div>
             <ReportChart series={spec.series} viz={viz} valueFmt={spec.valueFmt} zeroBase={spec.zeroBase}
               chartAppearance={viz === 'line' ? 'rhea' : 'default'} chartLabel={chartLabel} />

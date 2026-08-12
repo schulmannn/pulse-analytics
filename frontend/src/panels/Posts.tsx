@@ -685,7 +685,9 @@ function FormatTag({ post }: { post: NormalizedPost }) {
  * A metric cell with explicit comparable-period median context. The value is always shown; the
  * delta appears only when periodMedian cleared the min-sample gate (never a faked benchmark). In
  * the dense table the delta is SHORT («+28%», full wording in the title tooltip) — repeating
- * «к медиане» in every cell is noise. One colour rule for every metric column (`dir` → green/red);
+ * «к медиане» in every cell is noise. The delta reads MUTED (канон дельт): direction lives in the
+ * +/−/± sign, and verdant/ember stay reserved for the one evaluated period-vs-period Δ of a
+ * comparison rail — four coloured percentages per row made the densest surface the loudest one.
  * `tone` only picks the value ink (primary signal column vs muted secondary).
  */
 function MedianCell({
@@ -701,13 +703,6 @@ function MedianCell({
 }) {
   if (value == null) return <span className="text-muted-foreground/40">—</span>;
   const cmp = compareToMedian(value, median);
-  const deltaColor = cmp
-    ? cmp.dir === 'above'
-      ? 'text-verdant'
-      : cmp.dir === 'below'
-        ? 'text-ember'
-        : 'text-muted-foreground'
-    : 'text-muted-foreground';
   const deltaShort = cmp
     ? cmp.dir === 'at' ? '±0%' : `${cmp.pct > 0 ? '+' : '−'}${Math.abs(Math.round(cmp.pct))}%`
     : null;
@@ -717,7 +712,7 @@ function MedianCell({
         {format(value)}
       </span>
       {cmp && (
-        <span className={cn('block text-2xs tabular-nums', deltaColor)} title="к медиане за период">
+        <span className="block text-2xs tabular-nums text-muted-foreground" title="к медиане за период">
           {deltaShort}
         </span>
       )}
