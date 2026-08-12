@@ -74,6 +74,18 @@ export const fmt = {
     return (p >= 0 ? '+' : '') + p.toFixed(digits) + '%';
   },
   /**
+   * АБСОЛЮТНЫЙ процент (доля, ER, ERV) с правилом точности: от 1% — один знак («28.9%»), ниже
+   * 1% — два («0.42%»), ниже 0.1% — «<0.1%» (там второй знак уже шум измерения, не сигнал).
+   * Знаковые ДЕЛЬТЫ форматирует fmt.pct — у них своя роль и обязательный знак.
+   */
+  pctAbs(p?: number | null): string {
+    if (p == null || isNaN(p)) return '—';
+    if (p === 0) return '0%';
+    const abs = Math.abs(p);
+    if (abs < 0.1) return '<0.1%';
+    return p.toFixed(abs >= 1 ? 1 : 2) + '%';
+  },
+  /**
    * Short localized day ("5 июн."). A "YYYY-MM-DD" archive key renders as that calendar
    * date in every timezone; an ISO timestamp / Date / epoch-ms renders as the viewer's
    * local day of that instant.

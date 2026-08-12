@@ -80,6 +80,20 @@ describe('fmt', () => {
     expect(fmt.pct(0, 0)).toBe('+0%');
     expect(fmt.pct(Number.NaN)).toBe('—');
   });
+
+  it('fmt.pctAbs: от 1% — один знак, ниже — два, ниже 0.1% — порог', () => {
+    expect(fmt.pctAbs(0)).toBe('0%');
+    expect(fmt.pctAbs(0.04)).toBe('<0.1%');
+    expect(fmt.pctAbs(0.4)).toBe('0.40%');
+    expect(fmt.pctAbs(4)).toBe('4.0%');
+    expect(fmt.pctAbs(28.92)).toBe('28.9%');
+    expect(fmt.pctAbs(100)).toBe('100.0%');
+    // Границы правил: ровно 0.1% уже печатается, ровно 1% уходит на один знак.
+    expect(fmt.pctAbs(0.1)).toBe('0.10%');
+    expect(fmt.pctAbs(1)).toBe('1.0%');
+    expect(fmt.pctAbs(null)).toBe('—');
+    expect(fmt.pctAbs(Number.NaN)).toBe('—');
+  });
 });
 
 // ЕДИНЫЙ ФОРМАТ ДАТ (U5): подпись любой даты в UI строит `fmt.day` («13 июл.»), а дневные

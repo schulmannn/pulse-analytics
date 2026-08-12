@@ -292,7 +292,9 @@ function PostsTable({ allPosts, loadedCount }: { allPosts: NormalizedPost[]; loa
           <CampaignFilterControl />
           {/* Desktop-only filters: text search + media format (mobile keeps the untouched list). */}
           <SearchField
-            className="hidden w-56 md:block"
+            /* w-56 минус pl-9 под лупу оставляли ~176px — ровно в длину плейсхолдера, и подсказка
+               обрезалась многоточием. w-72 держит строку целиком (IG-зеркало уже в этом диапазоне). */
+            className="hidden w-72 md:block"
             value={filters.q}
             onChange={(q) => update({ q })}
             placeholder="Поиск по тексту и хэштегам"

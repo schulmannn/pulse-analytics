@@ -162,18 +162,21 @@ function buildIgStory(
     n(fmt.kpi(reach.cur), '/metrics/ig-reach'),
     t(' — на '),
     { kind: 'delta', pct },
-    // InlineSpark carries its own horizontal margin; trailing whitespace would remain in DOM text
-    // before the following full stop because the spark itself is aria-hidden.
-    t(` ${pct < 0 ? 'ниже' : 'выше'} предыдущей`),
+    // Точка закрывает предложение ДО спарклайна: за инлайн-SVG она повисала в пустоте, оторванная
+    // от текста на всю ширину графика. Спарклайн идёт последним и пунктуации после себя не несёт.
+    // Искра стоит в предложении как слово: пробелы вокруг неё — настоящие, в тексте. Иначе SVG
+    // (aria-hidden) выпадает из дерева доступности и склеивает «предыдущей.База там потеряла».
+    t(` ${pct < 0 ? 'ниже' : 'выше'} предыдущей. `),
     { kind: 'spark', values: ig.reachDaily.slice(-14).map((x) => x.v) },
-    t('. '),
   ];
   const f7 = ig.followsDaily.slice(-7);
   if (f7.length === 7) {
     const net = sum(f7.map((p) => p.v));
     if (net !== 0) {
       para.push(
-        t(net < 0 ? 'База там потеряла ' : 'База там набрала '),
+        // Ведущий пробел: сегмент может идти сразу за искрой (см. выше). Двойной пробел после
+        // обычного текста схлопнут и DOM, и `\s{2,}` в narrativeToPlain.
+        t(net < 0 ? ' База там потеряла ' : ' База там набрала '),
         n(fmt.num(Math.abs(net)), '/metrics/ig-follows'),
         t(` ${plural(Math.abs(net), 'подписчика', 'подписчика', 'подписчиков')}`),
       );
@@ -192,7 +195,8 @@ function buildIgStory(
     const ervLift = best.erv / ig.avgMediaErv;
     if (ervLift >= 1.6) {
       para.push(
-        t('Герой там — '),
+        // Ведущий пробел — сегмент может идти сразу за искрой (блок базы выше необязателен).
+        t(' Герой там — '),
         { kind: 'post', text: `«${clip(best.title)}»`, href: best.permalink },
         t(': вовлечённость '),
         n(`${best.erv.toFixed(1)}%`, '/metrics/ig-er'),
@@ -219,9 +223,9 @@ export function buildIgWeekNarrative(ig: NarrativeIgInput | null | undefined): W
         n(fmt.kpi(reach.cur), '/metrics/ig-reach'),
         t(', на '),
         { kind: 'delta', pct },
-        t(` ${pct < 0 ? 'ниже' : 'выше'} предыдущей`),
+        // Точка — до спарклайна (см. buildIgStory): инлайн-SVG замыкает предложение.
+        t(` ${pct < 0 ? 'ниже' : 'выше'} предыдущей. `),
         { kind: 'spark', values: ig.reachDaily.slice(-14).map((x) => x.v) },
-        t('. '),
       ]);
     }
     // База — чистое движение подписчиков (Σ дневных нетто-подписок) + текущий уровень.
@@ -301,9 +305,9 @@ export function buildWeekNarrative(inp: NarrativeInput): WeekNarrative {
       n(fmt.kpi(curSum), '/metrics/views'),
       t(` ${pluralKpi(curSum, 'просмотр', 'просмотра', 'просмотров')} — на `),
       { kind: 'delta', pct },
-      t(` ${pct < 0 ? 'ниже' : 'выше'} предыдущей`),
+      // Точка — до спарклайна (см. buildIgStory): инлайн-SVG замыкает предложение.
+      t(` ${pct < 0 ? 'ниже' : 'выше'} предыдущей. `),
       { kind: 'spark', values: series.slice(-14).map((x) => x.v) },
-      t('. '),
     ];
 
     // Атрибуция — только считаемая. Приоритет: разница в тишине; иначе неповторённый пик.
@@ -314,13 +318,15 @@ export function buildWeekNarrative(inp: NarrativeInput): WeekNarrative {
     const peakUnmatched = pct < 0 && peakPrev.v > Math.max(...last7.map((x) => x.v));
     if (pct < 0 && silentCur >= silentPrev + 2) {
       p.push(
+        // Ведущий пробел: сегмент идёт сразу за искрой — без него скринридер прочтёт
+        // «предыдущей.Главный вклад».
         t(
-          `Главный вклад в разницу — тишина: ${silentCur} ${plural(silentCur, 'день', 'дня', 'дней')} без публикаций против ${silentPrev || 'нуля'} неделей раньше. `,
+          ` Главный вклад в разницу — тишина: ${silentCur} ${plural(silentCur, 'день', 'дня', 'дней')} без публикаций против ${silentPrev || 'нуля'} неделей раньше. `,
         ),
       );
     } else if (peakUnmatched && peakShare >= 25) {
       p.push(
-        t(`Разницу почти целиком объясняет один день: ${fmt.day(peakPrev.day)} прошлой недели дал `),
+        t(` Разницу почти целиком объясняет один день: ${fmt.day(peakPrev.day)} прошлой недели дал `),
         n(fmt.kpi(peakPrev.v), '/metrics/views'),
         t(` — ${peakShare}% её суммы, и в этот раз такого пика не случилось. `),
       );
@@ -335,7 +341,8 @@ export function buildWeekNarrative(inp: NarrativeInput): WeekNarrative {
       const mean = sum(nz) / Math.max(nz.length, 1);
       const sd = Math.sqrt(sum(nz.map((v) => (v - mean) ** 2)) / Math.max(nz.length, 1));
       if (anomIdx < series.length - 14 && sd > 0 && (anom.v - mean) / sd >= 2.2) {
-        p.push(t(`Рекорд месяца при этом старше: ${fmt.day(anom.day)}, `), n(fmt.kpi(anom.v), '/metrics/views'), t(' за день.'));
+        // Ведущий пробел — обе ветки атрибуции выше необязательны, сегмент может идти за искрой.
+        p.push(t(` Рекорд месяца при этом старше: ${fmt.day(anom.day)}, `), n(fmt.kpi(anom.v), '/metrics/views'), t(' за день.'));
       }
     }
     paragraphs.push(p);
@@ -425,7 +432,10 @@ export function narrativeToPlain(nar: WeekNarrative): string {
         .map((s) => {
           if (s.kind === 'text' || s.kind === 'number' || s.kind === 'post') return s.text;
           if (s.kind === 'delta') return `${s.pct < 0 ? '↓' : '↑'}${Math.abs(s.pct).toFixed(Math.abs(s.pct) < 10 ? 1 : 0)}%`;
-          return '';
+          // Искра в тексте не рисуется, но место занимает: печатаем пробелом, иначе точка
+          // предыдущего предложения склеилась бы со следующим («предыдущей.Главный вклад»).
+          // Дубли схлопнет `\s{2,}` ниже, хвост — trim.
+          return ' ';
         })
         .join('')
         .replace(/\s+([.,])/g, '$1')

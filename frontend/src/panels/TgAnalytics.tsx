@@ -913,7 +913,7 @@ export function TgAnalytics({
           key: 'bar',
           label: 'Столбцы',
           render: (
-            <div className="max-w-[560px]">
+            <div className="mx-auto max-w-[560px]">
               <BarChart values={wdCountValues} labels={WD_LABELS} titles={wdCountValues.map((v, i) => `${WD_LABELS[i]}: ${fmt.num(v)} постов`)} />
             </div>
           ),
@@ -922,7 +922,7 @@ export function TgAnalytics({
           key: 'line',
           label: 'Линия',
           render: (
-            <div className="max-w-[560px]">
+            <div className="mx-auto max-w-[560px]">
               <LineChart values={wdCountValues} labels={WD_LABELS} titles={wdCountValues.map((v, i) => `${WD_LABELS[i]}: ${fmt.num(v)} постов`)} yMin={0} />
             </div>
           ),
@@ -1139,8 +1139,9 @@ export function TgAnalytics({
 
         {inGroup('audience') && maxWdAvg > 0 && (
           /* D6.3: секция — последняя в «Аудитории» и при нечётном числе плиток растягивается
-             на обе колонки; 7 столбиков с кэпом 48px по центру full-width ряда = «острова в
-             пустоте». max-w держит чарт компактным слева (в 1×-плитке кэп не срабатывает). */
+             на обе колонки; 7 столбиков с кэпом 48px, размазанные по full-width ряду, = «острова
+             в пустоте». max-w держит чарт компактным (в 1×-плитке кэп не срабатывает), а mx-auto
+             ставит его в середину растянутой ячейки — прижатый влево блок читался как обрезанный. */
           <ChartSection title="Количество постов" drillTo="/metrics/tg-post-count" periodControl variants={postCountVariants} />
         )}
       </WidgetGroup>

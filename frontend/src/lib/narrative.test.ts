@@ -3,6 +3,28 @@ import { buildIgWeekNarrative, buildWeekNarrative, narrativeToPlain, plural, plu
 
 /** Intl ставит NBSP/узкий пробел в разрядах — тесты сравнивают по обычным пробелам. */
 const norm = (s: string) => s.replace(/[  ]/g, ' ');
+/** Обрамление inline-искры: точка ДО неё, пунктуации после — нет, а зазор с соседями — НАСТОЯЩИЕ
+ *  пробелы в тексте (SVG aria-hidden, margin для скринридера разделителем не работает). Проверка
+ *  идёт по абзацам: сегмент из СЛЕДУЮЩЕГО абзаца соседом не считается. Возвращает число искр. */
+function assertSparkFraming(nar: ReturnType<typeof buildWeekNarrative>): number {
+  let sparks = 0;
+  for (const p of nar.paragraphs) {
+    for (let i = 1; i < p.length; i += 1) {
+      if (p[i]?.kind !== 'spark') continue;
+      sparks += 1;
+      const before = p[i - 1];
+      expect(before?.kind).toBe('text');
+      if (before?.kind === 'text') expect(before.text).toMatch(/\. $/u);
+      const after = p[i + 1];
+      if (after?.kind === 'text') {
+        expect(after.text).not.toMatch(/^\s*[.,;:]/u);
+        expect(after.text).toMatch(/^ /u);
+      }
+    }
+  }
+  return sparks;
+}
+
 const day = (i: number) => `2026-06-${String(8 + i).padStart(2, '0')}`;
 const mkSeries = (vals: number[]) => vals.map((v, i) => ({ day: day(i), v }));
 const post = (title: string, views: number, re: number, erv: number, fw = 1): NarrativeInput['posts'][number] => ({
@@ -32,15 +54,11 @@ describe('buildWeekNarrative', () => {
     expect(plain).not.toContain('тишина'); // по одному нулевому дню в обеих неделях — гейт молчит
   });
 
-  it('не оставляет скрытый пробел перед точкой вокруг inline-спарка', () => {
+  it('закрывает предложение точкой ДО inline-спарка и не вешает пунктуацию после него', () => {
     const nar = buildWeekNarrative(base);
-    const segments = nar.paragraphs.flat();
-    for (let i = 1; i < segments.length; i += 1) {
-      if (segments[i]?.kind !== 'spark') continue;
-      const before = segments[i - 1];
-      expect(before?.kind).toBe('text');
-      if (before?.kind === 'text') expect(before.text).not.toMatch(/\s$/u);
-    }
+    expect(assertSparkFraming(nar)).toBeGreaterThan(0);
+    // Plain-версия печатает искру пробелом — иначе точка склеилась бы со следующей фразой.
+    expect(norm(narrativeToPlain(nar))).toMatch(/предыдущей\. \S/u);
   });
 
   it('атрибутирует тишине, когда пустых дней стало на 2+ больше', () => {
@@ -156,6 +174,13 @@ describe('Instagram + кросс-сетевой контраст', () => {
     // IG reach spark — ПОСЛЕДНИЙ spark (TG-views spark идёт первым в объединённом рассказе).
     const spark = nar.paragraphs.flat().filter((s) => s.kind === 'spark').at(-1);
     expect(spark && spark.kind === 'spark' ? spark.values.slice(-7) : []).toEqual(Array(7).fill(1000));
+  });
+
+  it('IG-ветки тоже закрывают предложение до спарка (общий рассказ и IG-фокусный)', () => {
+    const igInp = ig(flat600, Array(7).fill(648), [2, 3, -1, 4, 0, 1, 2]);
+    for (const nar of [buildWeekNarrative({ ...base, ig: igInp }), buildIgWeekNarrative(igInp)]) {
+      expect(assertSparkFraming(nar)).toBeGreaterThan(0);
+    }
   });
 
   it('контраст при расхождении: TG вниз, IG вверх → «просадка касается только Telegram»', () => {

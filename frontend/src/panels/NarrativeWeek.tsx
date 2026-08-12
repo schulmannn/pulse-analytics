@@ -228,6 +228,10 @@ function SegSpan({ seg, onPost }: { seg: NarrativeSeg; onPost: (i: number) => vo
     case 'delta':
       return <DeltaPill delta={{ dir: seg.pct < 0 ? 'down' : 'up', pct: Math.abs(seg.pct) }} />;
     case 'spark':
+      // Искра замыкает предложение (точка стоит ДО неё) и стоит в тексте как слово: словесный
+      // зазор дают НАСТОЯЩИЕ пробелы соседних text-сегментов (narrative.ts) — они же разделяют
+      // предложения для скринридера, для которого сам SVG aria-hidden. Обёртка с margin была бы
+      // зазором только визуальным и удваивала бы отступ поверх пробела.
       return <InlineSpark values={seg.values} />;
     case 'post': {
       const chip =
@@ -329,9 +333,12 @@ export function NarrativeWeekBody() {
   );
 }
 
-/** Общий рендерер «текста-с-данными»: абзацы сегментов + приклейка пунктуации к инлайн-элементам
- * (спарк/пилюля). Чип-пост: href (IG-медиа → permalink) или postIndex (TG → PostDetailModal через
- * onPost). Используют и TG-«Неделя канала», и IG-«Неделя». */
+/** Общий рендерер «текста-с-данными»: абзацы сегментов. Чип-пост: href (IG-медиа → permalink) или
+ * postIndex (TG → PostDetailModal через onPost). Используют и TG-«Неделя канала», и IG-«Неделя».
+ * Приклейка «сиротской» пунктуации к инлайн-элементу (спарк/пилюля) — РЕЗЕРВ, а не текущее
+ * поведение: ни один сегмент нынешних шаблонов (narrative.ts) не ставит `.`/`,` сразу после
+ * спарка или дельты — точку теперь несёт текст ДО искры. Ветки оставлены страховкой для будущих
+ * формулировок; поведение по умолчанию — ровно то, что описано выше. */
 export function NarrativeProse({
   paragraphs,
   onPost,
@@ -353,6 +360,7 @@ export function NarrativeProse({
         <p key={i}>
           {p.map((seg, j) => {
             const next = p[j + 1];
+            // Резервная ветка (см. JSDoc): текущие шаблоны пунктуацию после спарка/дельты не ставят.
             if ((seg.kind === 'spark' || seg.kind === 'delta') && next?.kind === 'text' && /^[.,]/.test(next.text)) {
               return (
                 <span key={j} className="whitespace-nowrap">
