@@ -63,8 +63,10 @@ export function IgOverview({ ig }: { ig: IgData }) {
         defaultSize="third"
         drillTo="/metrics/ig-interactions"
         variants={[
-          { key: 'line', label: 'Линия', render: <IgInteractionsBody ig={ig} /> },
+          // Столбцы первыми = дефолт (решение владельца 2026-08-13): счётный поток, а оконный
+          // агрегат-одиночка столбцом виден. Сохранённый выбор юзера (prefs.variant) выигрывает.
           { key: 'bar', label: 'Столбцы', render: <IgInteractionsBody ig={ig} viz="bar" /> },
+          { key: 'line', label: 'Линия', render: <IgInteractionsBody ig={ig} /> },
         ]}
       />
       <ChartSection

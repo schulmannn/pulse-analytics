@@ -99,8 +99,11 @@ export function Overview() {
           defaultSize="third"
           drillTo="/metrics/avgReach"
           variants={[
-            { key: 'line', label: 'Линия', render: <TgAvgReachBody state={kpis} /> },
+            // Столбцы первыми = дефолт (решение владельца 2026-08-13, зеркало Home-набора):
+            // среднее живёт только в дни с постами, линия рисовала ложную непрерывность.
+            // Сохранённый выбор юзера (prefs.variant) выигрывает над порядком.
             { key: 'bar', label: 'Столбцы', render: <TgAvgReachBody state={kpis} viz="bar" /> },
+            { key: 'line', label: 'Линия', render: <TgAvgReachBody state={kpis} /> },
           ]}
         />
         {/* Два варианта = переключатель типа графика в редакторе карточки: EditWidgetDialog
@@ -114,8 +117,9 @@ export function Overview() {
           defaultSize="third"
           drillTo="/metrics/reactions"
           variants={[
-            { key: 'line', label: 'Линия', render: <TgReactionsBody state={kpis} /> },
+            // Столбцы первыми = дефолт (решение владельца 2026-08-13): дискретные суточные суммы.
             { key: 'bar', label: 'Столбцы', render: <TgReactionsBody state={kpis} viz="bar" /> },
+            { key: 'line', label: 'Линия', render: <TgReactionsBody state={kpis} /> },
           ]}
         />
         <ChartSection id="overview-er" title="Вовлечённость" defaultSize="third" drillTo="/metrics/er">
