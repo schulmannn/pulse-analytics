@@ -9,6 +9,7 @@ import { dayKeyToTs, fmt, ruSeriesName, pluralRu } from '@/lib/format';
 import { withShares } from '@/lib/breakdownShare';
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
+import { DivergingBars } from '@/components/DivergingBars';
 import { ChartCardBody, ChartSection } from '@/components/ChartWidget';
 import { WidgetGroup } from '@/components/widgets/WidgetGroup';
 import { breakdownVariants, seriesBarValuesVariant } from '@/components/widgets/variants';
@@ -814,7 +815,39 @@ export function TgAnalytics({
       const delta = daily.prevTotal != null && daily.prevTotal > 0 && daily.total >= 0 ? pctDelta(daily.total, daily.prevTotal) : null;
       const scope = period.days === 0 && !period.range ? 'накопительно за всё время' : 'накопительно за период';
       const caption = delta ? `${scope} · к пред. периоду` : scope;
+      // Дневные ± столбцы вокруг нуля (владелец 2026-08-13): день с оттоком виден сразу, а
+      // «сколько всего» по-прежнему стоит в хедлайне — то, ради чего ряд когда-то накапливали.
+      // Форма — DivergingBars: монохром вокруг нулевой линии, направление несёт ПОЛОЖЕНИЕ, не цвет.
+      const flow = deriveFollowerFlows(graphs, calendarWindowForPeriod(period));
+      const flowW =
+        flow.values.length > CHART_MAX_POINTS
+          ? deriveFollowerFlows(graphs, calendarWindowForPeriod(period), { grain: 'week' })
+          : flow;
+      const headline = `${daily.total >= 0 ? '+' : '−'}${fmt.kpi(Math.abs(daily.total))}`;
       return [
+        {
+          key: 'bar',
+          label: 'Столбцы',
+          render:
+            flowW.values.length > 0 ? (
+              <ChartCardBody
+                value={headline}
+                delta={delta}
+                caption={delta ? 'по дням · к пред. периоду' : 'по дням'}
+              >
+                <DivergingBars
+                  values={flowW.values}
+                  labels={flowW.labels}
+                  titles={flowW.values.map(
+                    (value, index) =>
+                      `${flowW.labels[index] ?? ''}: ${value >= 0 ? '+' : '−'}${fmt.num(Math.abs(value))}`,
+                  )}
+                />
+              </ChartCardBody>
+            ) : (
+              <EmptyState title="Нет данных за выбранный период." />
+            ),
+        },
         {
           key: 'line',
           label: 'Линия',
