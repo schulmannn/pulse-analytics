@@ -1,5 +1,6 @@
 import { useContext, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ShareTrack } from '@/components/ShareRows';
+import { ChartBand } from '@/components/ChartBand';
 import { Link, useNavigate } from 'react-router-dom';
 import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
 import { observeSize } from '@/lib/observeSize';
@@ -87,14 +88,14 @@ function MsStoryBody({
       {values.length <= 1 ? (
         <EmptyState compact size="chart" title={emptyTitle} />
       ) : viz === 'bar' ? (
-        <div className="min-h-14 w-full flex-1">
+        <ChartBand>
           <BarChart
             values={values}
             labels={labels}
             titles={values.map((v, i) => `${labels[i] ?? ''}: ${formatValue(v)}`)}
             formatValue={formatValue}
           />
-        </div>
+        </ChartBand>
       ) : (
         <Sparkline
           values={values}

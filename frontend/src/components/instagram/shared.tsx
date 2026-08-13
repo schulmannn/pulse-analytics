@@ -8,6 +8,7 @@ import { DeltaPill } from '@/components/DeltaPill';
 import { EmptyState } from '@/components/EmptyState';
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
+import { ChartBand } from '@/components/ChartBand';
 import { ChartCardBody, ChartSection as WidgetChartSection } from '@/components/ChartWidget';
 import { CompactStatHeadline } from '@/components/CompareStat';
 import { Sparkline } from '@/components/Sparkline';
@@ -136,14 +137,14 @@ export function KpiHero({
   const chart =
     shown.length > 1 &&
     (viz === 'bar' ? (
-      <div className="h-full min-h-28 w-full">
+      <ChartBand className="h-full">
         <BarChart
           values={shown.map((p) => p.value)}
           labels={shown.map((p) => fmtDay(p.day))}
           titles={shown.map((p) => `${fmtDay(p.day)}: ${fmt.num(p.value)}`)}
           formatValue={fmt.num}
         />
-      </div>
+      </ChartBand>
     ) : (
       <Sparkline
         values={shown.map((p) => p.value)}
@@ -488,14 +489,14 @@ function IgTrendStat({
     <div className="flex h-full min-h-0 flex-col justify-between gap-4">
       <CompactStatHeadline text={live ? format(value as number) : '—'} delta={delta} onDrill={onDrill} drillLabel={drillLabel} live={live} />
       {hasChart && viz === 'bar' ? (
-        <div className="min-h-14 w-full flex-1">
+        <ChartBand>
           <BarChart
             values={chart.values}
             labels={chart.labels}
             titles={chart.values.map((v, i) => `${chart.labels[i] ?? ''}: ${format(v)}`)}
             formatValue={format}
           />
-        </div>
+        </ChartBand>
       ) : hasChart ? (
         <Sparkline
           values={chart.values}
