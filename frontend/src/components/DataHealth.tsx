@@ -16,7 +16,7 @@ import { NETWORKS } from '@/lib/networks';
 function Row({ label, value, tone }: { label: string; value: ReactNode; tone?: 'ok' | 'warn' | 'error' }) {
   const dot = tone === 'ok' ? 'bg-verdant' : tone === 'warn' ? 'bg-status-warn' : tone === 'error' ? 'bg-ember' : null;
   return (
-    <div className="flex items-center justify-between gap-3 border-t border-border py-2.5 text-sm first:border-t-0 first:pt-0">
+    <div className="flex items-center justify-between gap-3 py-2.5 text-sm">
       <span className="shrink-0 text-ink2">{label}</span>
       <span className="flex min-w-0 items-center gap-1.5 truncate font-mono text-xs tabular-nums text-ink3">
         {dot && <span aria-hidden="true" className={`h-1.5 w-1.5 shrink-0 rounded-full ${dot}`} />}
@@ -137,7 +137,7 @@ export function DataHealth({ defaultOpen = false }: { defaultOpen?: boolean } = 
         <Icon name="chevron" className={cn('ml-auto h-3.5 w-3.5 shrink-0 text-ink3 transition-transform', open && 'rotate-180')} />
       </button>
       {open && (
-        <div className="mt-3 max-w-sm">
+        <div className="mt-3 divide-y divide-border">
           <Row label="Источник" value={source} />
           <Row label="Последний сбор" value={lastCollect} />
           <Row label="Режим сбора" value={collectionMode} />

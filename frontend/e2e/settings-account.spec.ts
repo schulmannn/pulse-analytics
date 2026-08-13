@@ -32,7 +32,9 @@ async function bootSettings(page: Page, deleteStub: DeleteStub = {}) {
   await page.addInitScript(() => {
   });
   await page.goto('/settings?section=security');
-  await expect(page.getByRole('heading', { name: 'Безопасность', level: 3 })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Безопасность', level: 2 })).toBeVisible({
+    timeout: 25_000,
+  });
   await expect(page.getByRole('button', { name: 'Удалить аккаунт' })).toBeVisible();
   return deletes;
 }

@@ -1,4 +1,5 @@
 import { useState, type ChangeEvent, type FormEvent } from 'react';
+import { toast } from 'sonner';
 import {
   useChangePassword,
   useDeleteAccount,
@@ -21,8 +22,14 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -74,7 +81,7 @@ export function ProfileSection() {
 
   return (
     <SettingsGroup>
-      <div className="py-5 @min-[34rem]:py-6">
+      <div className="px-4 py-5 @min-[34rem]:py-6">
         <div className="flex flex-col gap-4 @min-[34rem]:flex-row @min-[34rem]:items-center">
           <span className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-full bg-avatar text-base font-medium text-ink2 ring-1 ring-border">
             {avatar ? (
@@ -127,7 +134,7 @@ export function ProfileSection() {
           </p>
         ) : null}
       </div>
-      <div className="py-4 @min-[34rem]:py-5">
+      <div className="px-4 py-4 @min-[34rem]:py-5">
         <p className="text-sm font-medium text-foreground">Email</p>
         <p className="mt-1 break-all text-sm text-ink2">{email || '—'}</p>
         <p className="mt-1 text-xs leading-relaxed text-ink3">
@@ -256,11 +263,11 @@ function ThemePreviewPanel({ className }: { className?: string }) {
 export function SecuritySection() {
   const me = useMe();
   const changePassword = useChangePassword();
+  const [open, setOpen] = useState(false);
   const [current, setCurrent] = useState('');
   const [next, setNext] = useState('');
   const [confirm, setConfirm] = useState('');
   const [err, setErr] = useState<string | null>(null);
-  const [done, setDone] = useState(false);
 
   const tooShort = next.length > 0 && next.length < 8;
   const mismatch = confirm.length > 0 && confirm !== next;
@@ -270,10 +277,17 @@ export function SecuritySection() {
     next.length >= 8 &&
     confirm === next;
 
+  const resetForm = () => {
+    setCurrent('');
+    setNext('');
+    setConfirm('');
+    setErr(null);
+    changePassword.reset();
+  };
+
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setErr(null);
-    setDone(false);
     if (next.length < 8) {
       setErr('Новый пароль минимум 8 символов');
       return;
@@ -284,10 +298,9 @@ export function SecuritySection() {
     }
     try {
       await changePassword.mutateAsync({ current, next });
-      setDone(true);
-      setCurrent('');
-      setNext('');
-      setConfirm('');
+      toast('Пароль изменён');
+      setOpen(false);
+      resetForm();
     } catch (error) {
       setErr(
         error instanceof ApiError
@@ -301,100 +314,118 @@ export function SecuritySection() {
 
   return (
     <div className="space-y-7">
-      <SettingsGroup
-        title="Пароль"
-        description="После изменения все остальные сессии будут завершены."
-      >
+      <SettingsGroup>
         <SettingsRow
-          title="Сменить пароль"
-          description="Используйте не менее 8 символов."
-          footer={
-            <form
-              onSubmit={onSubmit}
-              className="mt-4 w-full max-w-[340px] space-y-3"
-            >
-            <div>
-              <Label htmlFor="pw-current" className="mb-1.5 block">
-                Текущий пароль
-              </Label>
-              <Input
-                id="pw-current"
-                type="password"
-                autoComplete="current-password"
-                value={current}
-                onChange={(e) => {
-                  setCurrent(e.target.value);
-                  setErr(null);
-                  setDone(false);
-                }}
-                disabled={changePassword.isPending}
-              />
-            </div>
-            <div>
-              <Label htmlFor="pw-next" className="mb-1.5 block">
-                Новый пароль
-              </Label>
-              <Input
-                id="pw-next"
-                type="password"
-                autoComplete="new-password"
-                minLength={8}
-                aria-invalid={tooShort || undefined}
-                aria-describedby={tooShort ? 'pw-next-hint' : undefined}
-                value={next}
-                onChange={(e) => {
-                  setNext(e.target.value);
-                  setErr(null);
-                  setDone(false);
-                }}
-                disabled={changePassword.isPending}
-              />
-              {tooShort && (
-                <p id="pw-next-hint" className="mt-1 text-2xs text-ink3">
-                  Минимум 8 символов.
-                </p>
-              )}
-            </div>
-            <div>
-              <Label htmlFor="pw-confirm" className="mb-1.5 block">
-                Повторите новый пароль
-              </Label>
-              <Input
-                id="pw-confirm"
-                type="password"
-                autoComplete="new-password"
-                aria-invalid={mismatch || undefined}
-                aria-describedby={mismatch ? 'pw-confirm-err' : undefined}
-                value={confirm}
-                onChange={(e) => {
-                  setConfirm(e.target.value);
-                  setErr(null);
-                  setDone(false);
-                }}
-                disabled={changePassword.isPending}
-              />
-              {mismatch && (
-                <p
-                  id="pw-confirm-err"
-                  className="mt-1 text-2xs text-destructive"
-                >
-                  Пароли не совпадают.
-                </p>
-              )}
-            </div>
-
-            <div className="flex items-center gap-3 pt-0.5" aria-live="polite">
-              <Button type="submit" size="sm" disabled={!canSubmit}>
-                {changePassword.isPending ? 'Сохранение…' : 'Изменить пароль'}
+          title="Пароль"
+          description="После изменения все остальные сессии будут завершены."
+          control={
+            <>
+              <Button type="button" variant="secondary" size="sm" onClick={() => setOpen(true)}>
+                Сменить пароль
               </Button>
-              {done && <Badge variant="success">Пароль изменён</Badge>}
-            </div>
-            {err && (
-              <Alert variant="destructive" className="py-2.5">
-                <AlertDescription className="text-xs">{err}</AlertDescription>
-              </Alert>
-            )}
-            </form>
+              <Dialog
+                open={open}
+                onOpenChange={(nextOpen) => {
+                  setOpen(nextOpen);
+                  if (!nextOpen) resetForm();
+                }}
+              >
+                <DialogContent className="max-w-md">
+                  <DialogHeader>
+                    <DialogTitle>Сменить пароль</DialogTitle>
+                    <DialogDescription>
+                      Используйте не менее 8 символов. После изменения все остальные сессии будут завершены.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <form onSubmit={onSubmit} className="space-y-3">
+                    <div>
+                      <Label htmlFor="pw-current" className="mb-1.5 block">
+                        Текущий пароль
+                      </Label>
+                      <Input
+                        id="pw-current"
+                        type="password"
+                        autoComplete="current-password"
+                        value={current}
+                        onChange={(event) => {
+                          setCurrent(event.target.value);
+                          setErr(null);
+                        }}
+                        disabled={changePassword.isPending}
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="pw-next" className="mb-1.5 block">
+                        Новый пароль
+                      </Label>
+                      <Input
+                        id="pw-next"
+                        type="password"
+                        autoComplete="new-password"
+                        minLength={8}
+                        aria-invalid={tooShort || undefined}
+                        aria-describedby={tooShort ? 'pw-next-hint' : undefined}
+                        value={next}
+                        onChange={(event) => {
+                          setNext(event.target.value);
+                          setErr(null);
+                        }}
+                        disabled={changePassword.isPending}
+                      />
+                      {tooShort && (
+                        <p id="pw-next-hint" className="mt-1 text-2xs text-ink3">
+                          Минимум 8 символов.
+                        </p>
+                      )}
+                    </div>
+                    <div>
+                      <Label htmlFor="pw-confirm" className="mb-1.5 block">
+                        Повторите новый пароль
+                      </Label>
+                      <Input
+                        id="pw-confirm"
+                        type="password"
+                        autoComplete="new-password"
+                        aria-invalid={mismatch || undefined}
+                        aria-describedby={mismatch ? 'pw-confirm-err' : undefined}
+                        value={confirm}
+                        onChange={(event) => {
+                          setConfirm(event.target.value);
+                          setErr(null);
+                        }}
+                        disabled={changePassword.isPending}
+                      />
+                      {mismatch && (
+                        <p id="pw-confirm-err" className="mt-1 text-2xs text-destructive">
+                          Пароли не совпадают.
+                        </p>
+                      )}
+                    </div>
+                    {err && (
+                      <Alert variant="destructive" className="py-2.5">
+                        <AlertDescription className="text-xs">{err}</AlertDescription>
+                      </Alert>
+                    )}
+                    <div className="flex flex-col-reverse gap-2 pt-1 sm:flex-row sm:justify-end">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => {
+                          setOpen(false);
+                          resetForm();
+                        }}
+                      >
+                        Отмена
+                      </Button>
+                      <Button type="submit" size="sm" disabled={!canSubmit}>
+                        {changePassword.isPending ? 'Сохранение…' : 'Изменить пароль'}
+                      </Button>
+                    </div>
+                  </form>
+                </DialogContent>
+              </Dialog>
+            </>
           }
         />
       </SettingsGroup>
@@ -402,6 +433,7 @@ export function SecuritySection() {
         <SettingsGroup
           title="Опасная зона"
           description="Действия ниже необратимы и требуют отдельного подтверждения."
+          variant="danger"
         >
           <DeleteAccountRow />
         </SettingsGroup>

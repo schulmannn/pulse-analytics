@@ -17,8 +17,10 @@ import {
 } from '@/lib/paletteCommands';
 import type { PaletteChannel } from '@/lib/paletteCommands';
 import { getDrillMetric } from '@/lib/widgetMetrics';
+import { SETTINGS_GROUPS, type SettingsSectionKey } from '@/lib/settingsSections';
 import { Icon } from '@/components/nav-icons';
 import type { IconName } from '@/components/nav-icons';
+import { SettingsIcon } from '@/components/settings/primitives';
 import { Kbd, KbdGroup } from '@/components/ui/kbd';
 import {
   CommandDialog,
@@ -53,6 +55,17 @@ const SUPERUSER_ROUTES: Array<{ path: string; label: string; icon: IconName; sea
   { path: '/admin', label: 'Админ', icon: 'admin', search: 'админ admin' },
   { path: '/bugs', label: 'Баги', icon: 'bugs', search: 'баги bugs фидбек' },
 ];
+
+const SETTINGS_SEARCH: Record<SettingsSectionKey, string> = {
+  account: 'профиль фото email account profile avatar',
+  appearance: 'оформление тема светлая тёмная appearance theme dark light',
+  security: 'безопасность пароль сменить password security',
+  billing: 'тариф подписка оплата billing plan subscription pro max',
+  team: 'команда участники роли приглашение team members invite',
+  data: 'данные экспорт сбор состояние data export health',
+  channels: 'каналы ключи api telegram collector channels keys',
+  instagram: 'instagram подключение oauth инстаграм connect',
+};
 
 // Search history (MRU command ids) — the palette opens on «Недавнее», like Claude's search.
 const RECENTS_KEY = 'pulse_palette_recents';
@@ -137,6 +150,16 @@ function PaletteDialog({ close }: { close: () => void }) {
     run: () => navigate(`/metrics/${metric.key}`),
   }));
 
+  const settingsCommands: PaletteCommand[] = SETTINGS_GROUPS.flatMap((group) => group.items).map(
+    (item) => ({
+      id: `settings:${item.key}`,
+      label: `Настройки: ${item.label}`,
+      search: `настройки settings ${item.label} ${item.description} ${SETTINGS_SEARCH[item.key]}`.toLowerCase(),
+      icon: <SettingsIcon name={item.icon} className="h-4 w-4 shrink-0" />,
+      run: () => navigate(item.key === 'account' ? '/settings' : `/settings?section=${item.key}`),
+    }),
+  );
+
   // Sources = (channel × network), где пара реально существует (реестровый hasChannel): выбор
   // селектит канал И приземляет на эту сеть — ⌘K-двойник сайдбарного SourceSwitcher. Глиф — тот же
   // реестровый NetworkGlyph, что рисует сети в сайдбаре (третьей копии SVG в приложении нет).
@@ -192,6 +215,7 @@ function PaletteDialog({ close }: { close: () => void }) {
 
   const groups: PaletteSection[] = [
     { title: 'Разделы', items: routeCommands },
+    { title: 'Настройки', items: settingsCommands },
     { title: 'Метрики', items: [...metricCommands, ...igMetricCommands] },
     ...(sourceCommands.length > 0 ? [{ title: 'Источники', items: sourceCommands }] : []),
     { title: 'Аккаунт', items: [logoutCommand] },
