@@ -15,6 +15,7 @@ import { ChannelScope, useSelectedChannel } from '@/lib/channel-context';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
+import { Snippet } from '@/components/ui/snippet';
 
 /**
  * /connect — the source hub. Platforms sit on an orbit around Atlavue (atlas + view), the same
@@ -1680,10 +1681,8 @@ function CollectorGuide({ channelName }: { channelName: string | null }) {
   const createKey = useCreateKey(channelId ?? 0);
   const [oneTimeKey, setOneTimeKey] = useState<string | null>(null);
   const [keyErr, setKeyErr] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
   const handleCreateKey = async () => {
     setKeyErr(null);
-    setCopied(false);
     try {
       const res = await createKey.mutateAsync({ label: 'локальный коллектор' });
       if (res.key) setOneTimeKey(res.key);
@@ -1691,13 +1690,6 @@ function CollectorGuide({ channelName }: { channelName: string | null }) {
       setKeyErr(error instanceof ApiError ? error.message : 'Не удалось сгенерировать ключ — попробуйте ещё раз');
     }
   };
-  const copyKey = (txt: string) => {
-    navigator.clipboard.writeText(txt).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
-  };
-
   // Шаг 5 — живая проверка: поллим collector-status, пока шаг открыт.
   const onCheckStep = step === WIZARD_STEPS.length;
   const statusQ = useCollectorStatus(onCheckStep ? channelId : null);
@@ -1803,20 +1795,11 @@ function CollectorGuide({ channelName }: { channelName: string | null }) {
                 )}
                 {keyErr && <p role="alert" className="text-xs text-destructive">{keyErr}</p>}
                 {oneTimeKey && (
-                  <div role="status" className="space-y-2 rounded border border-status-warn/40 bg-background p-3">
-                    <p className="text-xs font-medium text-status-warn">Скопируйте сейчас — повторно ключ не показывается.</p>
-                    <div className="flex items-center gap-2">
-                      <code className="min-w-0 flex-1 truncate rounded bg-muted px-2 py-1.5 font-mono text-xs">{oneTimeKey}</code>
-                      <button
-                        type="button"
-                        data-mobile-touch-target=""
-                        onClick={() => copyKey(oneTimeKey)}
-                        className="btn-pill inline-flex min-h-11 shrink-0 items-center border border-border px-3 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground sm:min-h-0"
-                      >
-                        {copied ? 'Скопировано' : 'Копировать'}
-                      </button>
-                    </div>
-                  </div>
+                  <Snippet
+                    value={oneTimeKey}
+                    label="Скопируйте сейчас — повторно ключ не показывается."
+                    tone="warn"
+                  />
                 )}
               </div>
             )}
@@ -1958,46 +1941,21 @@ function Code({ children }: { children: ReactNode }) {
 }
 
 function CodeBlock({ children }: { children: ReactNode }) {
-  // Copy-кнопка (полировка 2026-07-28, паттерн Kibo Snippet): команды коллектора копируются одним
-  // кликом вместо ручного выделения; иконка мягко подменяется галочкой через .value-swap.
-  const [copied, setCopied] = useState(false);
   const text = typeof children === 'string' ? children : '';
-  const copy = () => {
-    if (!text) return;
-    navigator.clipboard.writeText(text).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    });
-  };
-  return (
-    <div className="relative mt-2">
-      <pre className="overflow-x-auto rounded border border-border bg-muted px-3 py-2.5 pr-10 font-mono text-xs leading-relaxed text-foreground">
+  if (!text) {
+    return (
+      <pre className="mt-2 overflow-x-auto rounded border border-border bg-muted px-3 py-2.5 font-mono text-xs leading-relaxed text-foreground">
         {children}
       </pre>
-      {text && (
-        <button
-          type="button"
-          data-mobile-touch-target=""
-          aria-label={copied ? 'Скопировано' : 'Скопировать команды'}
-          title={copied ? 'Скопировано' : 'Скопировать'}
-          onClick={copy}
-          className="absolute right-1.5 top-1.5 inline-flex min-h-11 min-w-11 items-center justify-center rounded border border-border bg-background/80 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40 sm:min-h-0 sm:min-w-0 sm:size-7"
-        >
-          <span key={String(copied)} className="value-swap inline-flex">
-            {copied ? (
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="size-3.5 text-verdant" aria-hidden="true">
-                <path d="m5 13 4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            ) : (
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="size-3.5" aria-hidden="true">
-                <rect x="9" y="9" width="11" height="11" rx="2" />
-                <path d="M5 15V5a2 2 0 0 1 2-2h10" strokeLinecap="round" />
-              </svg>
-            )}
-          </span>
-        </button>
-      )}
-    </div>
+    );
+  }
+  return (
+    <Snippet
+      value={text}
+      multiline
+      copyLabel="Скопировать команды"
+      className="mt-2"
+    />
   );
 }
 
