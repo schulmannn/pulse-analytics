@@ -6,6 +6,7 @@ import { IgNarrativeWeekBlock } from '@/panels/IgNarrativeWeek';
 import { IgReachHomeCard, IgFollowsHomeCard, IgKpiHomeCard, IgMovementHomeCard, IgCompareHomeCard, IgInsightsHomeCard } from '@/panels/instagram/igHome';
 import { Compare } from '@/panels/Compare';
 import { Insights } from '@/panels/Insights';
+import { CalendarChartBlock } from '@/panels/Charts';
 import type { SourceNetwork } from '@/lib/homeSourceContext';
 
 /**
@@ -58,6 +59,12 @@ export const HOME_REGISTRY: Record<string, HomeWidgetDef> = {
     label: 'Тепловая карта активности',
     network: 'tg',
     defaultSize: 'full',
+  },
+  calendar: {
+    label: 'Календарь активности',
+    network: 'tg',
+    defaultSize: 'full',
+    render: () => <CalendarChartBlock id="home-calendar" homeKey="calendar" />,
   },
   mentions: {
     label: 'Упоминания по дням',

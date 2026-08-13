@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { lazy, Suspense, useMemo } from 'react';
 import { useHistory, useVelocity, useTgFull } from '@/api/queries';
 import type { TgFull } from '@/api/schemas';
 import { lttbDownsample } from '@/lib/downsample';
@@ -15,6 +15,7 @@ import { seriesBarValuesVariant } from '@/components/widgets/variants';
 import { pctDelta } from '@/lib/delta';
 import type { WidgetViz } from '@/lib/widgetMetrics';
 import type { WidgetSize } from '@/lib/widgetPrefsStore';
+import { lazyWithReload } from '@/lib/lazyWithReload';
 
 interface HeatmapCell {
   n: number;
@@ -266,6 +267,28 @@ export function HeatmapChartBlock({ id, homeKey }: HomeBlockProps = {}) {
     <ChartSection title="Тепловая карта активности" defaultSize="full" periodControl id={id} homeKey={homeKey} drillTo="/metrics/tg-heatmap">
       <HeatmapWidgetBody />
     </ChartSection>
+  );
+}
+
+const ActivityCalendarBody = lazy(
+  lazyWithReload(() => import('@/panels/ActivityCalendar').then((module) => ({ default: module.ActivityCalendarBody }))),
+);
+
+export function CalendarChartBlock({ id, homeKey }: HomeBlockProps = {}) {
+  return (
+    <ChartSection title="Календарь активности" defaultSize="full" id={id} homeKey={homeKey}>
+      <CalendarWidgetBody />
+    </ChartSection>
+  );
+}
+
+/** Fixed-year body shared by Analytics and the pinnable Home card. It deliberately ignores the
+    page/widget period: this view always answers the same trailing-365-day question. */
+export function CalendarWidgetBody() {
+  return (
+    <Suspense fallback={<ChartSkeletonBody />}>
+      <ActivityCalendarBody />
+    </Suspense>
   );
 }
 

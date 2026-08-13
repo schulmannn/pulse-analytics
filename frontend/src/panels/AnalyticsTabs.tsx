@@ -9,7 +9,7 @@ import { buildTgAnalyticsRows, tgDailySeriesFromGraphs } from '@/lib/tgAnalytics
 import { downloadAnalyticsCsv, exportFilename } from '@/lib/analyticsExport';
 import { Insights } from '@/panels/Insights';
 import { Compare } from '@/panels/Compare';
-import { HistoryChartBlock, HeatmapChartBlock, VelocityChartBlock } from '@/panels/Charts';
+import { CalendarChartBlock, HistoryChartBlock, HeatmapChartBlock, VelocityChartBlock } from '@/panels/Charts';
 import { ChartSection } from '@/components/ChartWidget';
 import { WidgetGroup } from '@/components/widgets/WidgetGroup';
 import { WidgetErrorBoundary } from '@/components/WidgetErrorBoundary';
@@ -32,6 +32,12 @@ import { cn } from '@/lib/utils';
  * the TG feed can compose it as a block.
  */
 // Порядок/подписи вкладок — в lib/analyticsTabs (их же читает ⌘K-палитра, см. модуль).
+
+const DYNAMICS_WIDGET_ORDER = [
+  'История подписчиков',
+  'Скорость набора просмотров',
+  'Календарь активности',
+] as const;
 
 export function Analytics() {
   // The active tab lives in ?tab= (replace, not push) so a shared /analytics link restores
@@ -94,12 +100,19 @@ export function Analytics() {
               still take the full row via the widgets' own variant span. History/Velocity build
               their series in their own render (above ChartSection), so each gets a per-widget card
               boundary here — the same seam Home protects. */}
-          <WidgetGroup id="analytics-dynamics" className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-6">
+          <WidgetGroup
+            id="analytics-dynamics"
+            className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-6"
+            defaultOrder={DYNAMICS_WIDGET_ORDER}
+          >
             <WidgetErrorBoundary variant="card" size="half" widgetId="analytics-history" label="История подписчиков">
               <HistoryChartBlock />
             </WidgetErrorBoundary>
             <WidgetErrorBoundary variant="card" size="half" widgetId="analytics-velocity" label="Скорость набора просмотров">
               <VelocityChartBlock />
+            </WidgetErrorBoundary>
+            <WidgetErrorBoundary variant="card" size="full" widgetId="analytics-calendar" label="Календарь активности">
+              <CalendarChartBlock />
             </WidgetErrorBoundary>
           </WidgetGroup>
         </div>

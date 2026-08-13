@@ -43,10 +43,13 @@ export function currentTranslate(el: HTMLElement): [number, number] {
 export interface WidgetGroupProps {
   id: string;
   className?: string;
+  /** Stable first-mount order for groups whose data-backed cards may register asynchronously.
+      A persisted user order still wins; ids omitted from that order are appended by this list. */
+  defaultOrder?: readonly string[];
   children: ReactNode;
 }
 
-export function WidgetGroup({ id, className, children }: WidgetGroupProps) {
+export function WidgetGroup({ id, className, defaultOrder, children }: WidgetGroupProps) {
   const [registered, setRegistered] = useState<Registered[]>([]);
   const [reorderMode, setReorderMode] = useState(false);
   const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -253,11 +256,18 @@ export function WidgetGroup({ id, className, children }: WidgetGroupProps) {
   const stored = useGroupOrder(id);
   const sequence = useMemo(() => {
     const registeredIds = registered.map((r) => r.id);
+    const defaultRank = new Map(defaultOrder?.map((widgetId, index) => [widgetId, index]));
+    const newcomers = registeredIds.filter((widgetId) => !stored.includes(widgetId));
+    newcomers.sort((a, b) => {
+      const aRank = defaultRank.get(a) ?? Number.MAX_SAFE_INTEGER;
+      const bRank = defaultRank.get(b) ?? Number.MAX_SAFE_INTEGER;
+      return aRank - bRank;
+    });
     return [
       ...stored.filter((x) => registeredIds.includes(x)),
-      ...registeredIds.filter((x) => !stored.includes(x)),
+      ...newcomers,
     ];
-  }, [stored, registered]);
+  }, [defaultOrder, stored, registered]);
   // Drag callbacks live across renders (pointer capture, edge-scroll interval) — read the
   // sequence through a ref so a mid-drag closure never splices a stale order.
   const sequenceRef = useRef(sequence);
