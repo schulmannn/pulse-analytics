@@ -63,6 +63,7 @@ import {
 } from '@/lib/igContentFilters';
 import { cn } from '@/lib/utils';
 import { useIgScopedPosts, toCampaignItems } from '@/panels/instagram/igContentScope';
+import { useLiveList } from '@/lib/useLiveList';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Desktop — shadcn-style Publications table with an adjacent inspector and removable active-filter
@@ -189,6 +190,7 @@ export function IgContentDesktop({ ig }: { ig: IgData }) {
   const tableShellRef = useRef<HTMLDivElement>(null);
   const tableRef = useRef<HTMLTableElement>(null);
   const tableHeaderRef = useRef<HTMLTableSectionElement>(null);
+  const liveListRef = useLiveList<HTMLTableSectionElement>();
   const [stickyHeader, setStickyHeader] = useState<StickyHeaderGeometry | null>(null);
   const [tableViewport, setTableViewport] = useState<TableViewportGeometry | null>(null);
 
@@ -741,7 +743,7 @@ export function IgContentDesktop({ ig }: { ig: IgData }) {
       >
         <table ref={tableRef} className="data-table ig-content-table text-left text-sm">
           {renderTableHeader()}
-          <tbody>
+          <tbody ref={liveListRef}>
             {pagedRows.map((post, idx) => {
               const clickable = post.id != null;
               const isOpen = post.id != null && post.id === openId;

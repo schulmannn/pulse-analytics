@@ -1,5 +1,5 @@
 import autoAnimate from '@formkit/auto-animate';
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { parseCssDurationMs } from '@/lib/chartMotionRuntime';
 
 /**
@@ -20,17 +20,20 @@ import { parseCssDurationMs } from '@/lib/chartMotionRuntime';
  */
 
 export function useLiveList<T extends HTMLElement>() {
-  const ref = useRef<T | null>(null);
-  useEffect(() => {
-    const el = ref.current;
+  const controllerRef = useRef<ReturnType<typeof autoAnimate> | null>(null);
+  // Callback ref, not a one-shot effect: loading/empty branches often mount the real tbody/ul only
+  // after data arrives. Attaching at that commit keeps those live lists animated too.
+  const ref = useCallback((el: T | null) => {
+    controllerRef.current?.disable();
+    controllerRef.current = null;
     if (!el) return;
     // WAAPI-опции не читают var() — токены СЧИТЫВАЮТСЯ из computed-стиля (канон readMorphMs):
     // один источник правды в index.css, никаких зеркал-литералов.
     const styles = getComputedStyle(document.documentElement);
     const duration = parseCssDurationMs(styles.getPropertyValue('--motion-base')) ?? 240;
     const easing = styles.getPropertyValue('--ease-standard').trim();
-    const controller = autoAnimate(el, easing ? { duration, easing } : { duration });
-    return () => controller.disable();
+    controllerRef.current = autoAnimate(el, easing ? { duration, easing } : { duration });
   }, []);
+  useEffect(() => () => controllerRef.current?.disable(), []);
   return ref;
 }

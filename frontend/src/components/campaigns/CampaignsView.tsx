@@ -24,6 +24,7 @@ import { fmt } from '@/lib/format';
 import { isDemoMode } from '@/lib/demo';
 import { cn } from '@/lib/utils';
 import { useSelectedChannel } from '@/lib/channel-context';
+import { useLiveList } from '@/lib/useLiveList';
 
 type StatusFilter = 'all' | CampaignStatus;
 const FILTERS: { key: StatusFilter; label: string }[] = [
@@ -213,6 +214,7 @@ function CampaignPostsBranch({ campaignId }: { campaignId: number }) {
   const demo = isDemoMode();
   const postsQ = useCampaignPosts(demo ? null : campaignId);
   const posts = postsQ.data?.posts ?? [];
+  const liveListRef = useLiveList<HTMLUListElement>();
   return (
     <TableRow className="hover:bg-transparent" data-testid="campaign-branch">
       <TableCell colSpan={5} className="pb-3 pl-1 pt-0">
@@ -229,7 +231,7 @@ function CampaignPostsBranch({ campaignId }: { campaignId: number }) {
           ) : posts.length === 0 ? (
             <p className="py-2 text-xs text-muted-foreground">Публикаций пока нет — добавьте их из «Контента».</p>
           ) : (
-            <ul className="divide-y divide-border/60">
+            <ul ref={liveListRef} className="divide-y divide-border/60">
               {posts.slice(0, BRANCH_CAP).map((post) => {
                 const metric =
                   post.network === 'tg'

@@ -28,6 +28,7 @@ import { SearchField } from '@/components/SearchField';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { lazyWithReload } from '@/lib/lazyWithReload';
+import { useLiveList } from '@/lib/useLiveList';
 import {
   CONTENT_SORT_COLUMNS,
   applyContentFilters,
@@ -136,6 +137,7 @@ function PostsTable({ allPosts, loadedCount }: { allPosts: NormalizedPost[]; loa
   const pp = usePagePeriod();
   const { channelId } = useSelectedChannel();
   const { data: channelsData } = useChannels();
+  const liveListRef = useLiveList<HTMLTableSectionElement>();
 
   // The four non-period Content filters read straight from the URL (single source of truth); the
   // period is owned by the page-period context (header chips) and mirrored below.
@@ -493,7 +495,7 @@ function PostsTable({ allPosts, loadedCount }: { allPosts: NormalizedPost[]; loa
               </th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-border">
+          <tbody ref={liveListRef} className="divide-y divide-border">
             {rows.map((post, idx) => {
               const isClickable = post.id != null;
               return (
