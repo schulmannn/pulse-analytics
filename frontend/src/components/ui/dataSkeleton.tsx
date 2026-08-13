@@ -33,7 +33,32 @@ export function ChartSkeleton({
           </div>
         )}
         <div className={cn('min-h-0 flex-1', headline && 'mt-3')}>
-          <Skeleton className="h-full min-h-[72px] w-full rounded" />
+          <div
+            data-ghost-series=""
+            className="h-full min-h-[72px] w-full overflow-hidden rounded bg-muted/35"
+          >
+            <svg
+              aria-hidden="true"
+              viewBox="0 0 600 160"
+              preserveAspectRatio="none"
+              focusable="false"
+              className="h-full w-full text-border"
+            >
+              <path
+                d="M0 132 C52 120 71 75 118 88 C163 101 185 57 229 66 C278 77 296 111 343 91 C387 72 405 34 452 45 C505 57 530 99 600 61 L600 160 L0 160 Z"
+                fill="currentColor"
+                opacity="0.42"
+              />
+              <path
+                d="M0 132 C52 120 71 75 118 88 C163 101 185 57 229 66 C278 77 296 111 343 91 C387 72 405 34 452 45 C505 57 530 99 600 61"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                vectorEffect="non-scaling-stroke"
+                opacity="0.82"
+              />
+            </svg>
+          </div>
         </div>
       </div>
     </div>
