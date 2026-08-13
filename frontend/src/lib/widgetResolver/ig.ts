@@ -96,11 +96,17 @@ export const resolveIgMetric: WidgetMetricResolver = (metric, config, ctx, out) 
     const points = igNetFollowerPoints(ig.insights);
     const { cur, hasCur } = igWindowValue(points, since, until);
     if (!hasCur) return { ...out, empty: true };
-    let running = 0;
-    out.series = bucketIgSeries(points, since, until, grain).map((point) => {
-      running += point.value;
-      return { ...point, value: running };
-    });
+    const bucketed = bucketIgSeries(points, since, until, grain);
+    // Зеркало tg.netGrowth: столбцы = дневной ±поток вокруг нуля, линия = накопление за окно.
+    if (config.viz === 'bar') {
+      out.series = bucketed;
+    } else {
+      let running = 0;
+      out.series = bucketed.map((point) => {
+        running += point.value;
+        return { ...point, value: running };
+      });
+    }
     out.valueRaw = cur;
     out.value = `${cur > 0 ? '+' : cur < 0 ? '−' : ''}${fmt.num(Math.abs(cur))}`;
     applyGhost(points, true, true);
