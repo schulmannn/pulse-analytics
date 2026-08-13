@@ -311,27 +311,29 @@ test('mobile 390: source switcher opens as a dismissable bottom sheet', async ({
   await expect(sheet).toHaveCount(0);
 });
 
-// ── Settings = three stable categories with continuous sections ───────────────────────────────
-test('mobile 390: settings categories fit, keep URL state and focus the destination', async ({ page }) => {
+// ── Settings = one active section in an APG line-tab row ───────────────────────────────────────
+test('mobile 390: settings tabs fit, keep URL state and focus the destination', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 820 });
   await bootDemo(page, '/settings');
 
-  const categories = page.getByRole('navigation', { name: 'Категории настроек' });
-  const triggers = categories.getByRole('button');
-  await expect(triggers).toHaveCount(3);
-  for (const trigger of await triggers.all()) {
-    await expect(trigger).toBeVisible();
-    expect((await trigger.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+  const tablist = page.getByRole('tablist', { name: 'Разделы настроек' });
+  const tabs = tablist.getByRole('tab');
+  await expect(tabs).toHaveCount(8);
+  for (const tab of await tabs.all()) {
+    await expect(tab).toBeVisible();
+    expect((await tab.boundingBox())?.height).toBeGreaterThanOrEqual(44);
   }
-  await expect(categories.getByRole('button', { name: 'Аккаунт' })).toHaveAttribute(
+  await expect(tablist.getByRole('tab', { name: 'Профиль' })).toHaveAttribute(
     'aria-current',
-    'page',
+    'true',
   );
 
-  await categories.getByRole('button', { name: 'Подключения' }).click();
-  await expect(page).toHaveURL(/[?&]section=channels(?:&|$)/);
-  await expect(page.getByRole('heading', { name: 'Подключения', level: 2 })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Instagram', level: 3 })).toBeVisible();
+  const instagram = tablist.getByRole('tab', { name: 'Instagram' });
+  await instagram.focus();
+  await page.keyboard.press('Enter');
+  await expect(page).toHaveURL(/[?&]section=instagram(?:&|$)/);
+  await expect(page.getByRole('heading', { name: 'Instagram', level: 2 })).toBeFocused();
+  await expect(page.locator('[data-settings-section="channels"]')).toHaveCount(0);
 
   await expect(page.locator('button[aria-label^="Выбрать раздел настроек"]')).toHaveCount(0);
   await expect(page.getByRole('dialog', { name: 'Разделы настроек' })).toHaveCount(0);
@@ -339,7 +341,9 @@ test('mobile 390: settings categories fit, keep URL state and focus the destinat
     await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1),
   ).toBeTruthy();
 
-  await categories.getByRole('button', { name: 'Аккаунт' }).click();
+  const profile = tablist.getByRole('tab', { name: 'Профиль' });
+  await profile.focus();
+  await page.keyboard.press('Enter');
   await expect(page).toHaveURL(/\/settings(?:\?[^#]*)?$/);
   expect(new URL(page.url()).searchParams.has('section')).toBe(false);
 });

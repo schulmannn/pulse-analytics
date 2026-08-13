@@ -144,15 +144,15 @@ test('axe: no serious violations — command palette open', async ({ page }, tes
   await expectNoSeriousViolations(page, testInfo, 'palette');
 });
 
-test('axe: no serious violations — mobile settings categories', async ({ page }, testInfo) => {
-  test.skip(testInfo.project.name !== 'mobile-430', 'mobile settings categories');
+test('axe: no serious violations — mobile settings sections', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'mobile-430', 'mobile settings sections');
   await bootDemo(page, '/settings?section=billing');
-  await expect(page.getByRole('heading', { name: 'Рабочее пространство', level: 2 })).toBeVisible();
-  await expectNoSeriousViolations(page, testInfo, 'settings-workspace');
+  await expect(page.getByRole('heading', { name: 'Подписка', level: 2 })).toBeVisible();
+  await expectNoSeriousViolations(page, testInfo, 'settings-billing');
 
-  await page.getByRole('button', { name: 'Подключения', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Подключения', level: 2 })).toBeVisible();
-  await expectNoSeriousViolations(page, testInfo, 'settings-connections');
+  await page.getByRole('tab', { name: 'Instagram', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Instagram', level: 2 })).toBeVisible();
+  await expectNoSeriousViolations(page, testInfo, 'settings-instagram');
 });
 
 test('keyboard: widget edit dialog traps Tab and restores focus to the ⋯ trigger', async ({ page }) => {
