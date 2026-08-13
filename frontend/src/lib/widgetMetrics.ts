@@ -172,6 +172,9 @@ const TG_METRICS: MetricDef[] = [
   define({
     id: 'tg.avgReach', label: 'Средний охват поста', source: 'tg', kind: 'series', unit: 'views',
     category: 'engagement', dimensions: POST_DIMS, drillKey: 'avgReach', seriesAgg: 'mean',
+    // Среднее существует только в дни с постами — столбцы честнее линии, рисующей
+    // непрерывность между пропусками (решение владельца 2026-08-13, зеркало Home-дефолта).
+    defaultViz: 'bar', supportedViz: ['bar', 'line'],
     formula: 'Сумма просмотров постов, опубликованных в окне, ÷ число этих постов.',
     included: 'Это не карточка «Просмотры» — там канальный дневной архив, другая величина. На графике — среднее на пост за корзину; день без публикаций — пропуск, а не ноль.',
     sourceNote: 'Посты канала.',
@@ -179,11 +182,15 @@ const TG_METRICS: MetricDef[] = [
   define({
     id: 'tg.reactions', label: 'Реакции', source: 'tg', kind: 'series', unit: 'number',
     category: 'engagement', dimensions: POST_DIMS, drillKey: 'reactions',
+    // Дискретные постозависимые суточные суммы → столбцы (решение владельца 2026-08-13).
+    defaultViz: 'bar', supportedViz: ['bar', 'line'],
     formula: 'Сумма всех реакций-эмодзи под постами окна.', sourceNote: 'Посты канала.',
   }),
   define({
     id: 'tg.forwards', label: 'Репосты', source: 'tg', kind: 'series', unit: 'number',
     category: 'engagement', dimensions: POST_DIMS, drillKey: 'forwards',
+    // Как «Реакции»: счётный суточный поток → столбцы (решение владельца 2026-08-13).
+    defaultViz: 'bar', supportedViz: ['bar', 'line'],
     formula: 'Сколько раз посты переслали (forward) за период.', sourceNote: 'Посты канала.',
   }),
   define({
@@ -310,6 +317,9 @@ const IG_METRICS: MetricDef[] = [
   define({
     id: 'ig.interactions', label: 'Взаимодействия', source: 'ig', kind: 'series', unit: 'number',
     category: 'engagement',
+    // Счётный поток → столбцы (решение владельца 2026-08-13); оконный агрегат-одиночка
+    // столбцом виден, точкой линии — нет.
+    defaultViz: 'bar', supportedViz: ['bar', 'line'],
     formula: 'Лайки + комментарии + сохранения + репосты за период.',
     included: 'Instagram считает взаимодействия агрегатом за окно, дневного ряда нет — на графике весь период приходит одной точкой в конце. Честное число — в шапке.',
   }),
@@ -353,6 +363,8 @@ const MS_METRICS: MetricDef[] = [
   define({
     id: 'ms.revenue', label: 'Выручка', source: 'ms', kind: 'series', unit: 'currency',
     category: 'growth', drillTo: '/sklad',
+    // Деньги за день дискретны, провалы выходных столбцами честнее (решение владельца 2026-08-13).
+    defaultViz: 'bar', supportedViz: ['bar', 'line'],
     formula: 'Сумма продаж по дням за окно.',
     included: 'Возвраты считаются отдельно и из выручки не вычитаются.',
     sourceNote: 'МойСклад (серверный отчёт; «Всё» — дневной архив).',
@@ -360,6 +372,8 @@ const MS_METRICS: MetricDef[] = [
   define({
     id: 'ms.orders', label: 'Заказы', source: 'ms', kind: 'series', unit: 'number',
     category: 'growth', drillTo: '/sklad',
+    // Штуки за день → столбцы (решение владельца 2026-08-13).
+    defaultViz: 'bar', supportedViz: ['bar', 'line'],
     formula: 'Число заказов покупателей по дням за окно.', sourceNote: 'МойСклад.',
   }),
   define({

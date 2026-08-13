@@ -224,15 +224,18 @@ export function MsOverview() {
           Тонирована ОДНА карточка доски — «Выручка»; остальные нейтральны с канонным акцентом. */}
       <ChartWidget id="ms-revenue" title="Выручка" fixedSize="half" defaultColor={1} defaultTinted drillTo="/metrics/ms-revenue"
         variants={[
-          { key: 'line', label: 'Линия', render: <MsStoryBody {...revStory} /> },
+          // Столбцы первыми = дефолт (решение владельца 2026-08-13): деньги за день дискретны,
+          // провалы выходных столбцами честнее. Сохранённый выбор юзера выигрывает.
           { key: 'bar', label: 'Столбцы', render: <MsStoryBody {...revStory} viz="bar" /> },
+          { key: 'line', label: 'Линия', render: <MsStoryBody {...revStory} /> },
         ]}
       />
 
       <ChartWidget id="ms-orders" title="Заказы" fixedSize="half" drillTo="/metrics/ms-orders"
         variants={[
-          { key: 'line', label: 'Линия', render: <MsStoryBody {...ordStory} /> },
+          // Столбцы первыми = дефолт (решение владельца 2026-08-13): штуки за день.
           { key: 'bar', label: 'Столбцы', render: <MsStoryBody {...ordStory} viz="bar" /> },
+          { key: 'line', label: 'Линия', render: <MsStoryBody {...ordStory} /> },
         ]}
       />
 
