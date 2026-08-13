@@ -27,6 +27,7 @@ import {
   TextBlock,
 } from '@/panels/report/blocks';
 import type { ReportData } from '@/panels/report/useReportData';
+import { useScrollEdgeFade } from '@/lib/useScrollEdgeFade';
 
 interface CompositionProps {
   blocks: ReportBlock[];
@@ -43,6 +44,19 @@ function ReportSection({ title, children }: { title: string; children: ReactNode
   return (
     <div className="report-section">
       <ChartSection title={title}>{children}</ChartSection>
+    </div>
+  );
+}
+
+function ReportTableShell({ children }: { children: ReactNode }) {
+  const scrollFadeRef = useScrollEdgeFade<HTMLDivElement>();
+  return (
+    <div
+      ref={scrollFadeRef}
+      className="report-table-shell scroll-fade-x overflow-x-auto"
+      data-report-table="weekly"
+    >
+      {children}
     </div>
   );
 }
@@ -87,7 +101,7 @@ export function ReportComposition({ blocks, data, editable, onInsert, onMove, on
     if (!weekly) return null;
     return (
       <div className="report-table-group">
-        <div className="report-table-shell overflow-x-auto" data-report-table="weekly">
+        <ReportTableShell>
           <table className="report-table w-full min-w-[560px] border-collapse text-sm">
             <caption className="sr-only">Динамика показателей по неделям</caption>
             <thead className="report-table__head">
@@ -149,7 +163,7 @@ export function ReportComposition({ blocks, data, editable, onInsert, onMove, on
               })}
             </tbody>
           </table>
-        </div>
+        </ReportTableShell>
         <p className="report-table__note mt-2 text-2xs text-muted-foreground">
           Заливка — доля от максимума строки; источник — дневной архив, последняя неделя может быть неполной.
         </p>

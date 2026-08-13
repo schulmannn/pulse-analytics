@@ -24,6 +24,7 @@ import { ContentOpportunity } from '@/panels/ContentOpportunity';
 import { PAGE_SUBNAV_SHELL } from '@/lib/pageChrome';
 import { ANALYTICS_TABS, isAnalyticsTab, type AnalyticsTab } from '@/lib/analyticsTabs';
 import { cn } from '@/lib/utils';
+import { useScrollEdgeFade } from '@/lib/useScrollEdgeFade';
 
 /**
  * Analytics — the deep breakdowns. The Overview is a focused summary (Figma), so the detailed
@@ -43,6 +44,7 @@ export function Analytics() {
   // The active tab lives in ?tab= (replace, not push) so a shared /analytics link restores
   // it; the default «Динамика» keeps the URL clean. Period params (?p / ?from&to) coexist.
   const [params, setParams] = useSearchParams();
+  const tabsFadeRef = useScrollEdgeFade<HTMLDivElement>();
   const rawTab = params.get('tab');
   const tab: AnalyticsTab = isAnalyticsTab(rawTab) ? rawTab : 'dynamics';
   const setTab = (next: AnalyticsTab) => {
@@ -70,9 +72,10 @@ export function Analytics() {
           «Форматов» (analytics-campaign-scope) НЕ липнет — липкий слой ровно один. */}
       <div className={cn(PAGE_SUBNAV_SHELL, 'flex items-center justify-between gap-3')}>
         <TabsList
+          ref={tabsFadeRef}
           aria-label="Разделы аналитики"
           variant="line"
-          className="min-w-0 max-w-full shrink justify-start overflow-x-auto"
+          className="scroll-fade-x min-w-0 max-w-full shrink justify-start overflow-x-auto"
         >
           {ANALYTICS_TABS.map((t) => (
             <TabsTrigger

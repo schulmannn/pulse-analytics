@@ -19,6 +19,7 @@ import {
   type SettingsSectionKey,
 } from '@/lib/settingsSections';
 import { cn } from '@/lib/utils';
+import { useScrollEdgeFade } from '@/lib/useScrollEdgeFade';
 
 export function Settings() {
   const [params, setParams] = useSearchParams();
@@ -194,8 +195,9 @@ function SettingsTabsRow({
   isSuperuser: boolean;
   className?: string;
 }) {
+  const tabsFadeRef = useScrollEdgeFade<HTMLDivElement>();
   return (
-    <div className={cn('flex gap-1 overflow-x-auto border-b border-border', className)}>
+    <div ref={tabsFadeRef} className={cn('scroll-fade-x flex gap-1 overflow-x-auto border-b border-border', className)}>
       <div role="tablist" aria-label="Разделы настроек" className="flex shrink-0 gap-1">
         {SETTINGS_SECTIONS.map((item) => {
           const selected = item.key === section;

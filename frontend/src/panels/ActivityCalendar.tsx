@@ -8,6 +8,7 @@ import { toYmd } from '@/lib/analyticsExport';
 import { fmt } from '@/lib/format';
 import { tgDailySeriesFromGraphs } from '@/lib/tgAnalyticsExport';
 import { useWidgetInView } from '@/lib/widgetViewport';
+import { useScrollEdgeFade } from '@/lib/useScrollEdgeFade';
 
 const ACTIVITY_LEVEL_CLASS = [
   'bg-muted/40',
@@ -44,6 +45,7 @@ export function ActivityCalendarBody() {
 }
 
 function ActivityCalendar({ model }: { model: ActivityCalendarModel }) {
+  const scrollFadeRef = useScrollEdgeFade<HTMLDivElement>();
   const peak = model.peak;
   const ariaLabel = peak
     ? `Календарь активности за год: всего ${fmt.num(model.total)} просмотров, пик ${fmt.day(peak.day)} — ${fmt.num(peak.value)}`
@@ -52,7 +54,7 @@ function ActivityCalendar({ model }: { model: ActivityCalendarModel }) {
 
   return (
     <div role="img" aria-label={ariaLabel}>
-      <div className="overflow-x-auto pb-2" data-activity-calendar-scroll>
+      <div ref={scrollFadeRef} className="scroll-fade-x overflow-x-auto pb-2" data-activity-calendar-scroll>
         <div className="w-max min-w-[824px]">
           <div
             className="ml-8 grid h-4 gap-[3px] text-2xs text-muted-foreground"
