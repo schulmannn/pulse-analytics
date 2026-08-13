@@ -1,7 +1,8 @@
 import * as React from 'react';
-import { Slot } from '@radix-ui/react-slot';
+import { Slot, Slottable } from '@radix-ui/react-slot';
 import { cva, type VariantProps } from 'class-variance-authority';
 
+import { LoaderDots } from '@/components/ui/loader';
 import { cn } from '@/lib/utils';
 
 /**
@@ -57,18 +58,43 @@ export interface ButtonProps
   extends React.ButtonHTMLAttributes<HTMLButtonElement>,
     VariantProps<typeof buttonVariants> {
   asChild?: boolean;
+  pending?: boolean;
 }
 
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ className, variant, size, shape, asChild = false, ...props }, ref) => {
+  (
+    {
+      className,
+      variant,
+      size,
+      shape,
+      asChild = false,
+      pending = false,
+      disabled = false,
+      children,
+      ...props
+    },
+    ref,
+  ) => {
     const Comp = asChild ? Slot : 'button';
+    const unavailable = disabled || pending;
     return (
       <Comp
-        data-mobile-touch-target=""
-        className={cn(buttonVariants({ variant, size, shape, className }))}
-        ref={ref}
         {...props}
-      />
+        data-mobile-touch-target=""
+        data-pending={pending || undefined}
+        aria-busy={pending || undefined}
+        aria-disabled={asChild && unavailable ? true : props['aria-disabled']}
+        disabled={asChild ? undefined : unavailable}
+        className={cn(
+          buttonVariants({ variant, size, shape, className }),
+          asChild && unavailable && 'pointer-events-none opacity-50',
+        )}
+        ref={ref}
+      >
+        {pending ? <LoaderDots /> : null}
+        <Slottable>{children}</Slottable>
+      </Comp>
     );
   },
 );

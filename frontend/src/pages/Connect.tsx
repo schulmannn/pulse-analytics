@@ -998,14 +998,15 @@ function InstagramPanel() {
               <Button
                 type="button"
                 onClick={() => connect.mutate({ newSource: true })}
+                pending={connect.isPending}
                 disabled={connect.isPending}
               >
                 {connect.isPending ? 'Открытие Instagram…' : 'Подключить ещё один аккаунт'}
               </Button>
             )}
-            <button
+            <Button
               type="button"
-              data-mobile-touch-target=""
+              variant="secondary"
               onClick={() => {
                 void (async () => {
                   const ok = await confirm({
@@ -1016,11 +1017,12 @@ function InstagramPanel() {
                   if (ok) disconnect.mutate(undefined, { onSuccess: () => toast('Instagram отключён') });
                 })();
               }}
+              pending={disconnect.isPending}
               disabled={disconnect.isPending}
-              className="btn-pill inline-flex min-h-11 items-center border border-border px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-destructive disabled:opacity-50 sm:min-h-0"
+              className="text-muted-foreground hover:text-destructive"
             >
               {disconnect.isPending ? 'Отключение…' : 'Отключить'}
-            </button>
+            </Button>
           </div>
           {serverReady && (
             <p className="text-xs leading-relaxed text-muted-foreground">
@@ -1049,6 +1051,7 @@ function InstagramPanel() {
               <Button
                 type="button"
                 onClick={() => connect.mutate()}
+                pending={connect.isPending}
                 disabled={connect.isPending}
                 size="lg"
                 className="px-5"
@@ -1068,6 +1071,7 @@ function InstagramPanel() {
           <Button
             type="button"
             onClick={() => connect.mutate()}
+            pending={connect.isPending}
             disabled={connect.isPending || notReady}
             size="lg"
             className="px-5"
@@ -1786,6 +1790,7 @@ function CollectorGuide({ channelName }: { channelName: string | null }) {
                   <Button
                     type="button"
                     onClick={handleCreateKey}
+                    pending={createKey.isPending}
                     disabled={createKey.isPending}
                     size="sm"
                     className="px-4 text-sm"

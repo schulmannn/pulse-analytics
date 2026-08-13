@@ -23,7 +23,6 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { useConfirm } from '@/components/ConfirmDialogProvider';
 import {
   BTN_DESTRUCTIVE,
-  BTN_SECONDARY,
   SettingsGroup,
   SettingsIcon,
 } from '@/components/settings/primitives';
@@ -118,6 +117,7 @@ export function ChannelsSection() {
             </div>
             <Button
               type="submit"
+              pending={createChannelMutation.isPending}
               disabled={createChannelMutation.isPending || !usernameInput.trim()}
               className="shrink-0"
             >
@@ -264,15 +264,17 @@ function ChannelKeysPanel({ channelId }: { channelId: number }) {
             Что делать с ключом? →
           </Link>
         </div>
-        <button
+        <Button
           type="button"
-          data-mobile-touch-target=""
+          variant="secondary"
+          size="xs"
           onClick={handleCreateKey}
+          pending={createKeyMutation.isPending}
           disabled={createKeyMutation.isPending}
-          className={cn(BTN_SECONDARY, 'min-h-11 px-3 text-2xs sm:min-h-0')}
+          className="px-3 text-2xs"
         >
           {createKeyMutation.isPending ? 'Генерация…' : 'Создать ключ'}
-        </button>
+        </Button>
       </div>
       {keyError && <p role="alert" className="text-xs text-destructive">{keyError}</p>}
 

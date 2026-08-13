@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { buttonVariants } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { SwatchButton } from '@/components/ui/swatch-button';
 
 describe('mobile touch-target primitives', () => {
@@ -27,5 +27,28 @@ describe('mobile touch-target primitives', () => {
     expect(html).toContain('h-11 w-11');
     expect(html).toContain('sm:h-5 sm:w-5');
     expect(html).toContain('h-5 w-5');
+  });
+
+  it('adds the loader canon and disables a pending button without replacing its text', () => {
+    const html = renderToStaticMarkup(<Button pending>Сохранение…</Button>);
+
+    expect(html).toContain('disabled=""');
+    expect(html).toContain('aria-busy="true"');
+    expect(html).toContain('data-pending="true"');
+    expect(html).toContain('loader-dots');
+    expect(html).toContain('Сохранение…');
+  });
+
+  it('keeps pending content valid when Button delegates its element with asChild', () => {
+    const html = renderToStaticMarkup(
+      <Button asChild pending>
+        <a href="/next">Переход…</a>
+      </Button>,
+    );
+
+    expect(html).toContain('<a');
+    expect(html).toContain('aria-disabled="true"');
+    expect(html).toContain('loader-dots');
+    expect(html).toContain('Переход…');
   });
 });

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { DataHealth } from '@/components/DataHealth';
-import { BTN_SECONDARY, SettingsGroup, SettingsIcon } from '@/components/settings/primitives';
+import { SettingsGroup, SettingsIcon } from '@/components/settings/primitives';
+import { Button } from '@/components/ui/button';
 import { fetchAccountExport } from '@/lib/accountExport';
 
 /** «Данные» — the data-health ledger, GDPR-экспорт и row-link в раздел каналов. */
@@ -73,9 +74,9 @@ function ExportRow() {
         </span>
         {err && <span role="alert" className="mt-1 block text-xs font-medium text-destructive">{err}</span>}
       </span>
-      <button type="button" onClick={onExport} disabled={busy} className={BTN_SECONDARY}>
+      <Button type="button" variant="secondary" size="sm" onClick={onExport} pending={busy} disabled={busy}>
         {busy ? 'Подготовка…' : 'Скачать JSON'}
-      </button>
+      </Button>
     </div>
   );
 }
