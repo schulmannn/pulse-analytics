@@ -130,10 +130,12 @@ test('desktop Overview keeps period context compact', async ({ page }, testInfo)
 
   // Owner override 2026-07-27: idle-подпись «по датам публикаций» под спарклайном убрана (лишняя
   // строка на лице карточки); карточки с графиком остаются.
+  // Дискретные суточные метрики ведут СТОЛБЦАМИ (#461) — искра осталась вариантом, но не
+  // дефолтом; гейт по-прежнему требует график на лице карточки, только другой формы.
   for (const card of ['Ср. охват', 'Реакции']) {
     const section = page.getByRole('heading', { name: card, exact: true }).locator('xpath=ancestor::section[1]');
     await expect(section.getByText('по датам публикаций')).toHaveCount(0);
-    await expect(section.locator('svg[data-chart-kind="sparkline"]')).toBeVisible();
+    await expect(section.locator('svg[data-chart-kind="bar"]')).toBeVisible();
   }
 
   // «Вовлечённость» — БЕЗ искры, и это гейт, а не упущение. ER = вовлечение ÷ аудитория, а
@@ -183,7 +185,9 @@ test('desktop Instagram Overview keeps the split KPI hierarchy intact', async ({
     const section = page.getByRole('heading', { name: card, exact: true }).locator('xpath=ancestor::section[1]');
     // Idle-подпись «по дням» убрана (владелец, 2026-07-27); спарклайн остаётся.
     await expect(section.getByText('по дням')).toHaveCount(0);
-    await expect(section.locator('svg[data-chart-kind="sparkline"]')).toBeVisible();
+    // «Взаимодействия» — счётный поток, ведёт столбцами (#461); остальные две карточки — искрой.
+    const kind = card === 'Взаимодействия' ? 'bar' : 'sparkline';
+    await expect(section.locator(`svg[data-chart-kind="${kind}"]`)).toBeVisible();
     await expect(section.getByText('Нет данных за предыдущий период для сравнения.')).toHaveCount(0);
     await expect(section.getByText('Недостаточно дневных данных для графика.')).toHaveCount(0);
   }

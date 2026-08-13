@@ -15,22 +15,24 @@ test('KPI-карточка Обзора даёт выбрать столбцы �
     has: page.getByRole('heading', { name: 'Реакции', exact: true }),
   });
   await expect(card).toBeVisible();
-  // Исходно карточка рисует искру — прямоугольников-колонок в ней нет.
-  await expect(card.locator('svg rect')).toHaveCount(0);
+  // Исходно карточка рисует СТОЛБЦЫ: «Реакции» — дискретная суточная сумма, и bar здесь дефолт
+  // (#461). BarChart кладёт в svg прямоугольники-колонки, у искры их нет.
+  await expect.poll(async () => card.locator('svg rect').count()).toBeGreaterThan(0);
 
   await page.getByRole('button', { name: 'Меню виджета «Реакции»' }).click();
   await page.getByRole('menuitem', { name: 'Изменить' }).click();
   const editor = page.getByRole('dialog', { name: 'Настройка виджета «Реакции»' });
   await expect(editor).toBeVisible();
 
-  // Карусель вариантов теперь есть — до правки её не было вовсе.
-  await expect(editor.getByRole('button', { name: 'Тип виджета: Столбцы', exact: true })).toBeVisible();
-  await editor.getByRole('button', { name: 'Тип виджета: Столбцы', exact: true }).click();
+  // Карусель вариантов есть и переключает представление в обе стороны — проверяем обратный
+  // переход (столбцы → линия): именно он доказывает, что выбор пользователя жив после #461.
+  await expect(editor.getByRole('button', { name: 'Тип виджета: Линия', exact: true })).toBeVisible();
+  await editor.getByRole('button', { name: 'Тип виджета: Линия', exact: true }).click();
   await page.keyboard.press('Escape');
   await expect(editor).toHaveCount(0);
 
-  // Столбцы отрисовались: BarChart кладёт в svg прямоугольники-колонки, у искры их нет.
-  await expect.poll(async () => card.locator('svg rect').count()).toBeGreaterThan(0);
+  // Искра вернулась — колонок в svg не осталось.
+  await expect.poll(async () => card.locator('svg rect').count()).toBe(0);
   // Хедлайн карточки на месте — меняется только примитив под ним, не анатомия.
   await expect(card.getByRole('heading', { name: 'Реакции', exact: true })).toBeVisible();
 });
