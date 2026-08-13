@@ -212,6 +212,13 @@ wraps to two rows on narrow desktops, so a constant would be wrong). The strip i
 the strip height and cost CLS. Exactly **one** sticky second layer per page: nested control rows
 (the campaign scope row inside «Форматы») scroll away as before, and `<md` the whole page is unchanged.
 
+**Settings preferences.** `/settings` uses a vertical section rail when its own container is at least
+`44rem` wide, and the canonical line-tab row when that container is narrower. Only one detail section
+is mounted at a time. Setting groups are bordered `rounded-xl` cards whose `divide-y` is the single
+source of row hairlines; children do not add competing outer separators. Keep the detail column narrow
+and align row controls to one right edge. A settings view has at most one solid-primary action, while
+rare or destructive flows stay behind quiet or destructive controls.
+
 ## Content density (card ↔ detail)
 
 Every widget reads at **one predictable density** per footprint — a card never grows an inner scrollbar
