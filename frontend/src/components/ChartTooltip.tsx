@@ -65,7 +65,7 @@ export function useHeatmapTip(): { wrapRef: RefObject<HTMLDivElement | null>; ti
     the page chrome. Shows instantly on hover (vs. the slow native SVG <title>). */
 export function ChartTooltip({ tip, appearance = 'default' }: { tip: TooltipState; appearance?: 'default' | 'rhea' | 'comparison' }) {
   const ref = useRef<HTMLDivElement>(null);
-  const [box, setBox] = useState({ w: 0, h: 0, cw: 0 });
+  const [box, setBox] = useState({ w: 0, h: 0, cw: 0, ch: 0 });
   // The tooltip fades in on mount and GLIDES between points via the shared [data-chart-tooltip]
   // transform transition (index.css). But the very first (measured) frame moves the box by half its
   // width as the clamp resolves from an unmeasured origin — with the transition live that would read
@@ -89,8 +89,12 @@ export function ChartTooltip({ tip, appearance = 'default' }: { tip: TooltipStat
     if (!el) return;
     const w = el.offsetWidth;
     const h = el.offsetHeight;
-    const cw = (el.offsetParent as HTMLElement | null)?.clientWidth ?? 0;
-    setBox((prev) => (prev.w === w && prev.h === h && prev.cw === cw ? prev : { w, h, cw }));
+    const parent = el.offsetParent as HTMLElement | null;
+    const cw = parent?.clientWidth ?? 0;
+    const ch = parent?.clientHeight ?? 0;
+    setBox((prev) =>
+      prev.w === w && prev.h === h && prev.cw === cw && prev.ch === ch ? prev : { w, h, cw, ch },
+    );
   });
 
   if (!tip) return null;
@@ -100,14 +104,23 @@ export function ChartTooltip({ tip, appearance = 'default' }: { tip: TooltipStat
   const gap = 10;
   const measured = box.w > 0 && box.h > 0;
   const half = box.w / 2;
-  // Clamp the horizontal center so the tooltip stays inside the chart container.
-  const cx =
+  const clampX = (x: number) =>
     measured && box.cw > 0
-      ? Math.min(Math.max(tip.x, half + 2), Math.max(box.cw - half - 2, half + 2))
-      : tip.x;
+      ? Math.min(Math.max(x, half + 2), Math.max(box.cw - half - 2, half + 2))
+      : x;
   // Above the anchor by default; flip below when clipped by the container's top edge.
   const fitsAbove = tip.y - gap - box.h >= 0;
-  const top = fitsAbove ? tip.y - gap - box.h : tip.y + gap;
+  // На НИЗКОМ плоте (компактная карточка третьей ширины: тултип ~40px в поле ~150px) флип вниз
+  // клал непрозрачную плашку прямо на столбцы — соседние бары пропадали под ней, и карточка
+  // читалась как «график недорисован» (владелец, прод-скриншоты «Реакции» / «Ср. охват»).
+  // Здесь плашка вместо этого прижимается к ВЕРХУ плота (полоса над самым высоким столбцом
+  // почти всегда пуста) и уходит вбок от курсора, освобождая наведённую колонку. У высоких
+  // хостов (метрик-страница, развёртка) места хватает и поведение прежнее.
+  const lowHost = box.ch > 0 && box.ch < 220;
+  const dodge = !fitsAbove && lowHost;
+  const top = fitsAbove ? tip.y - gap - box.h : dodge ? 0 : tip.y + gap;
+  const sideRight = tip.x + gap + box.w <= box.cw - 2;
+  const cx = clampX(dodge ? tip.x + (sideRight ? gap + half : -(gap + half)) : tip.x);
 
   // ⚠️ Позиция ТОЛЬКО через transform + ширина w-max (не left/top): у absolute-элемента
   // shrink-to-fit ширина зависит от `left` (доступное место до правого края контейнера), а left
@@ -124,7 +137,13 @@ export function ChartTooltip({ tip, appearance = 'default' }: { tip: TooltipStat
       className={`pointer-events-none absolute left-0 top-0 z-10 w-max border bg-popover/98 px-3 py-2.5 text-xs font-medium leading-snug text-popover-foreground backdrop-blur-xs ${
         compact
           ? 'min-w-[148px] max-w-[220px] rounded-xl border-foreground/10 shadow-[0_10px_30px_rgba(0,0,0,0.14)] dark:border-white/10 dark:shadow-[0_14px_36px_rgba(0,0,0,0.4)]'
-          : 'min-w-[176px] max-w-[240px] rounded-md border-border shadow-[0_12px_32px_rgba(0,0,0,0.22)] dark:border-white/10 dark:shadow-[0_14px_36px_rgba(0,0,0,0.48)]'
+          : 'max-w-[240px] rounded-md border-border shadow-[0_12px_32px_rgba(0,0,0,0.22)] dark:border-white/10 dark:shadow-[0_14px_36px_rgba(0,0,0,0.48)]'
+      } ${
+        // На низком плоте плашка неизбежно стоит НАД столбцами: тогда она сжимается по контенту
+        // («8 авг.: 354» ≈ 110px вместо 176px) и закрывает вдвое меньше соседних баров.
+        // Ширина зависит от ХОСТА, а не от наведённой точки, поэтому при движении курсора
+        // геометрия не прыгает (см. предупреждение выше про #185).
+        compact || lowHost ? '' : 'min-w-[176px]'
       }`}
       style={{ transform: `translate(${cx - half}px, ${Math.max(top, 0)}px)`, visibility: measured ? 'visible' : 'hidden', transition: glide ? undefined : 'none' }}
     >
