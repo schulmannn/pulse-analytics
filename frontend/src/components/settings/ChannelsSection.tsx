@@ -22,6 +22,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { useConfirm } from '@/components/ConfirmDialogProvider';
 import {
   BTN_DESTRUCTIVE,
+  BTN_SECONDARY,
   SettingsGroup,
   SettingsIcon,
 } from '@/components/settings/primitives';
@@ -94,7 +95,7 @@ export function ChannelsSection() {
   return (
     <div className="space-y-7">
       <SettingsGroup title="Добавить канал">
-        <div className="py-4">
+        <div className="px-4 py-4">
           <div className="text-sm font-medium text-foreground">Telegram-канал</div>
           <p className="mt-0.5 max-w-[56ch] text-xs leading-relaxed text-ink3">
             Укажите @username публичного канала — начнём собирать статистику.
@@ -128,7 +129,7 @@ export function ChannelsSection() {
 
       {channels.length === 0 ? (
         <SettingsGroup title="Подключённые каналы">
-          <div className="py-4">
+          <div className="px-4 py-4">
             <EmptyState title="Список каналов пуст" reason="Добавьте первый канал выше." />
           </div>
         </SettingsGroup>
@@ -140,7 +141,7 @@ export function ChannelsSection() {
             const initial = (channel.username || channel.title || 'T').slice(0, 1).toUpperCase();
             const keysOpen = activeChannelKeysId === channel.id && !isCentral;
             return (
-              <div key={channel.id} className="py-4">
+              <div key={channel.id} className="px-4 py-4">
                 <div className="flex flex-col gap-3 @min-[32rem]:flex-row @min-[32rem]:items-start @min-[32rem]:justify-between @min-[32rem]:gap-6">
                   <div className="flex min-w-0 items-start gap-3">
                     <ChannelAvatar
@@ -276,7 +277,7 @@ function ChannelKeysPanel({ channelId }: { channelId: number }) {
           data-mobile-touch-target=""
           onClick={handleCreateKey}
           disabled={createKeyMutation.isPending}
-          className="min-h-11 rounded bg-primary px-3 py-1 text-2xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50 sm:min-h-0"
+          className={cn(BTN_SECONDARY, 'min-h-11 px-3 text-2xs sm:min-h-0')}
         >
           {createKeyMutation.isPending ? 'Генерация…' : 'Создать ключ'}
         </button>

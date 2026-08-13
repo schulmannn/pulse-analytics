@@ -7,14 +7,14 @@ import { fetchAccountExport } from '@/lib/accountExport';
 export function DataSection({ onOpenChannels }: { onOpenChannels: () => void }) {
   return (
     <SettingsGroup>
-      <div className="py-4">
+      <div className="px-4 py-4">
         <DataHealth defaultOpen />
       </div>
       <ExportRow />
       <button
         type="button"
         onClick={onOpenChannels}
-        className="group flex w-full items-center justify-between gap-6 py-4 text-left"
+        className="group flex w-full items-center justify-between gap-6 px-4 py-4 text-left"
       >
         <span className="min-w-0">
           <span className="block text-sm font-medium text-foreground transition-colors group-hover:text-primary">
@@ -64,7 +64,7 @@ function ExportRow() {
   };
 
   return (
-    <div className="flex w-full items-center justify-between gap-6 py-4">
+    <div className="flex w-full items-center justify-between gap-6 px-4 py-4">
       <span className="min-w-0">
         <span className="block text-sm font-medium text-foreground">Экспорт данных</span>
         <span className="mt-0.5 block max-w-[56ch] text-xs leading-relaxed text-ink3">

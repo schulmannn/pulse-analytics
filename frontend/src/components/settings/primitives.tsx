@@ -2,35 +2,37 @@ import type { ReactNode, SVGProps } from 'react';
 import { buttonVariants } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
-/** Shared settings building blocks: flat detail groups and container-responsive setting rows. */
-
-/**
- * Groups deliberately avoid nested cards. Hairlines and spacing carry the hierarchy while the
- * category page supplies the main layout and horizontal alignment.
- */
+/** Shared settings building blocks: bordered detail groups and container-responsive rows. */
 export function SettingsGroup({
   title,
   description,
+  variant = 'default',
   children,
 }: {
   title?: string;
   description?: ReactNode;
+  variant?: 'default' | 'danger';
   children: ReactNode;
 }) {
-  const hasHeading = Boolean(title || description);
+  const danger = variant === 'danger';
   return (
-    <div>
-      {title ? <h4 className="text-sm font-medium text-foreground">{title}</h4> : null}
+    <section>
+      {title ? (
+        <h3 className={cn('text-sm font-medium', danger ? 'text-destructive' : 'text-foreground')}>
+          {title}
+        </h3>
+      ) : null}
       {description ? <p className="mt-1 text-xs leading-relaxed text-ink3">{description}</p> : null}
       <div
         className={cn(
-          '@container divide-y divide-border border-y border-border',
-          hasHeading && 'mt-3',
+          '@container divide-y divide-border rounded-xl border',
+          danger ? 'border-destructive/30' : 'border-border',
+          (title || description) && 'mt-3',
         )}
       >
         {children}
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -48,7 +50,7 @@ interface SettingsRowProps {
 /** One setting row: title and supporting copy on the left, control on the right; stacks on phones. */
 export function SettingsRow({ title, description, control, footer, className }: SettingsRowProps) {
   return (
-    <div className={cn('py-4 @min-[32rem]:py-5', className)}>
+    <div className={cn('px-4 py-4 @min-[32rem]:py-5', className)}>
       <div className="flex flex-col gap-3 @min-[32rem]:flex-row @min-[32rem]:items-center @min-[32rem]:justify-between @min-[32rem]:gap-6">
         <div className="min-w-0">
           <div className="text-sm font-medium text-foreground">{title}</div>

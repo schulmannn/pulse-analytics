@@ -41,6 +41,7 @@ function TeamUpsell({ onOpenBilling }: { onOpenBilling: () => void }) {
         control={
           <Button
             type="button"
+            variant="secondary"
             size="sm"
             onClick={onOpenBilling}
           >
@@ -85,33 +86,33 @@ function TeamRoster({ plan }: { plan: 'pro' | 'max' }) {
         footer={
           <>
             <form onSubmit={onInvite} className="mt-3 flex flex-col gap-2 @min-[32rem]:flex-row">
-            <Input
-              type="email"
-              value={email}
-              onChange={(e) => {
-                setEmail(e.target.value);
-                setErr(null);
-              }}
-              placeholder="email коллеги"
-              disabled={full}
-              className="w-full flex-1"
-            />
-            <div className="flex shrink-0 items-center gap-2">
-              <PillSelect<TeamRole>
-                value={role}
-                options={ROLE_OPTIONS.map((r) => ({ value: r, label: ROLE_LABEL[r] }))}
-                onValueChange={(v) => setRole(v)}
+              <Input
+                type="email"
+                value={email}
+                onChange={(e) => {
+                  setEmail(e.target.value);
+                  setErr(null);
+                }}
+                placeholder="email коллеги"
                 disabled={full}
-                ariaLabel="Роль"
+                className="w-full flex-1"
               />
-              <Button
-                type="submit"
-                size="sm"
-                disabled={full || email.trim().length === 0}
-              >
-                Пригласить
-              </Button>
-            </div>
+              <div className="flex shrink-0 items-center gap-2">
+                <PillSelect<TeamRole>
+                  value={role}
+                  options={ROLE_OPTIONS.map((r) => ({ value: r, label: ROLE_LABEL[r] }))}
+                  onValueChange={(v) => setRole(v)}
+                  disabled={full}
+                  ariaLabel="Роль"
+                />
+                <Button
+                  type="submit"
+                  size="sm"
+                  disabled={full || email.trim().length === 0}
+                >
+                  Пригласить
+                </Button>
+              </div>
             </form>
             {err && <p className="mt-2 text-xs font-medium text-destructive">{err}</p>}
           </>
@@ -166,7 +167,7 @@ function MemberRow({
   control?: ReactNode;
 }) {
   return (
-    <div className="flex items-center justify-between gap-4 py-3">
+    <div className="flex items-center justify-between gap-4 px-4 py-3">
       <div className="flex min-w-0 items-center gap-2.5">
         <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-avatar text-2xs font-medium text-ink2">
           {initialsOf(email)}

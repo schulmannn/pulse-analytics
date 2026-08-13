@@ -28,7 +28,7 @@ export function InstagramSection() {
   return (
     <SettingsGroup>
       {status.isPending ? (
-        <div className="py-4">
+        <div className="px-4 py-4">
           <Skeleton className="h-10 w-full" />
         </div>
       ) : s?.connected ? (
