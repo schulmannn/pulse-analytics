@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { DeltaPill } from '@/components/DeltaPill';
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
+import { DivergingBars } from '@/components/DivergingBars';
 import { Sparkline } from '@/components/Sparkline';
 import { PieChart } from '@/components/PieChart';
 import { Breakdown } from '@/components/Breakdown';
@@ -368,6 +369,13 @@ function WidgetChart({ result, eff, onDrill, expanded = false }: { result: Widge
   }
   if (eff === 'bar') {
     const c = seriesToChart(result);
+    // Знакопеременный ряд (чистый прирост: подписки − отписки) столбцами от нуля не рисуется —
+    // BarChart масштабирует от 0 вверх, и минусовой день ушёл бы за базовую линию. Такие ряды
+    // берёт DivergingBars: столбцы вокруг нулевой линии, направление несёт ПОЛОЖЕНИЕ, а не цвет.
+    // Пропуск в дивергентной форме геометрии не имеет — читается как нулевой день.
+    if (c.values.some((value) => (value ?? 0) < 0)) {
+      return <DivergingBars values={c.values.map((value) => value ?? 0)} labels={c.labels} titles={c.titles} />;
+    }
     return <BarChart values={c.values} labels={c.labels} titles={c.titles} ghost={result.ghost} ghostLabel={result.ghostLabel} onPointClick={onPointClick} />;
   }
   if (eff === 'donut') {

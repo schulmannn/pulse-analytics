@@ -215,7 +215,10 @@ const TG_METRICS: MetricDef[] = [
   // Growth flows.
   define({
     id: 'tg.netGrowth', label: 'Чистый прирост подписчиков', source: 'tg', kind: 'series', unit: 'number',
-    category: 'growth', defaultViz: 'line', supportedViz: ['line'],
+    // Столбцы — дефолт (владелец 2026-08-13): дневной ±поток вокруг нуля, день с оттоком виден
+    // сразу. Линия остаётся вариантом и рисует НАКОПЛЕНИЕ за окно — форма ряда следует
+    // представлению, см. resolveNetGrowth.
+    category: 'growth', defaultViz: 'bar', supportedViz: ['bar', 'line'],
     formula: 'Накопительная сумма подписавшихся − отписавшихся от начала периода.', sourceNote: 'График подписчиков (MTProto).',
   }),
   define({
@@ -304,7 +307,8 @@ const IG_METRICS: MetricDef[] = [
   }),
   define({
     id: 'ig.netFollowers', label: 'Прирост подписчиков', source: 'ig', kind: 'series', unit: 'number',
-    category: 'growth', defaultViz: 'line', supportedViz: ['line'],
+    // Зеркало tg.netGrowth: столбцы = дневной ±поток, линия = накопление (см. resolveIgMetric).
+    category: 'growth', defaultViz: 'bar', supportedViz: ['bar', 'line'],
     formula: 'Чистый прирост подписчиков за окно: подписки минус отписки.',
     included: 'Instagram отдаёт подписки и отписки только агрегатом за окно, дневного ряда нет — на графике величина приходит одной ступенью в конце периода. Честное число — в шапке.',
   }),

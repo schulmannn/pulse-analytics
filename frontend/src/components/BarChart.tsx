@@ -160,6 +160,7 @@ export function BarChart({
   // Measure render width so the viewBox is 1:1 with CSS pixels — a fixed 600-wide viewBox
   // scaled to fit would render labels/bars at inconsistent, fuzzy sizes.
   const [width, setWidth] = useState(600);
+  const [hostHeight, setHostHeight] = useState(0);
   // Expanded (modal) rendering opts into value labels + y ticks.
   const expanded = useContext(ChartExpandedContext);
   const refLines = useContext(ChartRefLinesContext);
@@ -173,7 +174,16 @@ export function BarChart({
   useLayoutEffect(() => {
     const el = containerRef.current;
     if (!el) return;
-    const measure = () => setWidth(el.clientWidth || 600);
+    const measure = () => {
+      setWidth(el.clientWidth || 600);
+      // Высоту тоже берём у контейнера, когда он её ДИКТУЕТ (flex-полоса компактной карточки,
+      // `h-full` внутри плитки). Без этого столбцы рисовались на дефолтные 200px в полосе ~100px,
+      // тайл переполнялся и получал внутренний скроллбар — канон плотности запрещает
+      // (e2e «no inner scrollbars»; вскрылось, когда столбцы стали дефолтом дискретных метрик).
+      // Контейнер с auto-высотой отдаёт высоту собственного контента — тогда значение совпадает
+      // с текущим `height` и поведение прежнее, без цикла измерений.
+      setHostHeight(el.clientHeight || 0);
+    };
     measure();
     return observeSize(el, measure);
   }, []);
@@ -232,7 +242,11 @@ export function BarChart({
     // is an HTML row BELOW the svg — reserve its height so svg + legend fit the tile with no inner
     // scrollbar. (X-labels are drawn INSIDE the svg via paddingBottom, so they need no reservation.)
     const legendRow = ctxHeight != null && !expanded && hasGhost ? 22 : 0;
-    const chartHeight = Math.max((ctxHeight ?? height) - legendRow, 60);
+    // Приоритет высоты: контекст развёртки → измеренная полоса хоста → проп. Легенда сравнения
+    // резервируется и в измеренном хосте — иначе она вылезает за плитку тем же способом.
+    const hostBand = !expanded && hostHeight > 0 ? hostHeight : null;
+    const legendReserve = hostBand != null && !expanded && hasGhost ? 22 : legendRow;
+    const chartHeight = Math.max((ctxHeight ?? hostBand ?? height) - legendReserve, 60);
     const paddingBottom = labels && labels.length > 0 ? 24 : 0;
     const graphHeight = chartHeight - paddingBottom;
     // Expanded view: headroom for the value labels above full-height bars.
@@ -431,7 +445,7 @@ export function BarChart({
     );
 
     return { chartWidth, chartHeight, graphHeight, offsetX, itemWidth, bars, ghostBars, stacked, barTop, barCenterX, underLayer, overLayer };
-  }, [values, labels, activeGhost, hasGhost, target, refLines, width, ctxHeight, height, expanded, comparisonStyle, gapIdx, gapPatternId]);
+  }, [values, labels, activeGhost, hasGhost, target, refLines, width, ctxHeight, hostHeight, height, expanded, comparisonStyle, gapIdx, gapPatternId]);
 
   // ── UPDATE morph: the silhouette flows into the new shape on a data change ────────────────
   // Heights (the ONE dimension the data owns — x/width are layout) tween from the previously

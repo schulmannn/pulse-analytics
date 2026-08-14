@@ -1,5 +1,6 @@
 import { useContext, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ShareTrack } from '@/components/ShareRows';
+import { ChartBand } from '@/components/ChartBand';
 import { Link, useNavigate } from 'react-router-dom';
 import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
 import { observeSize } from '@/lib/observeSize';
@@ -87,14 +88,14 @@ function MsStoryBody({
       {values.length <= 1 ? (
         <EmptyState compact size="chart" title={emptyTitle} />
       ) : viz === 'bar' ? (
-        <div className="min-h-14 w-full flex-1">
+        <ChartBand>
           <BarChart
             values={values}
             labels={labels}
             titles={values.map((v, i) => `${labels[i] ?? ''}: ${formatValue(v)}`)}
             formatValue={formatValue}
           />
-        </div>
+        </ChartBand>
       ) : (
         <Sparkline
           values={values}
@@ -224,18 +225,21 @@ export function MsOverview() {
           Тонирована ОДНА карточка доски — «Выручка»; остальные нейтральны с канонным акцентом. */}
       <ChartWidget id="ms-revenue" title="Выручка" fixedSize="half" defaultColor={1} defaultTinted drillTo="/metrics/ms-revenue"
         variants={[
-          // Столбцы первыми = дефолт (решение владельца 2026-08-13): деньги за день дискретны,
-          // провалы выходных столбцами честнее. Сохранённый выбор юзера выигрывает.
-          { key: 'bar', label: 'Столбцы', render: <MsStoryBody {...revStory} viz="bar" /> },
+          // Столбцы на story-плитке склада не помещаются в 264px без внутреннего скролла
+          // (гейт плотности), поэтому лицо карточки ведёт искрой; «Столбцы» остаются вариантом,
+          // а в конструкторе виджетов дефолт метрики — bar (widgetMetrics).
           { key: 'line', label: 'Линия', render: <MsStoryBody {...revStory} /> },
+          { key: 'bar', label: 'Столбцы', render: <MsStoryBody {...revStory} viz="bar" /> },
         ]}
       />
 
       <ChartWidget id="ms-orders" title="Заказы" fixedSize="half" drillTo="/metrics/ms-orders"
         variants={[
-          // Столбцы первыми = дефолт (решение владельца 2026-08-13): штуки за день.
-          { key: 'bar', label: 'Столбцы', render: <MsStoryBody {...ordStory} viz="bar" /> },
+          // Столбцы на story-плитке склада не помещаются в 264px без внутреннего скролла
+          // (гейт плотности), поэтому лицо карточки ведёт искрой; «Столбцы» остаются вариантом,
+          // а в конструкторе виджетов дефолт метрики — bar (widgetMetrics).
           { key: 'line', label: 'Линия', render: <MsStoryBody {...ordStory} /> },
+          { key: 'bar', label: 'Столбцы', render: <MsStoryBody {...ordStory} viz="bar" /> },
         ]}
       />
 
