@@ -18,11 +18,11 @@ import { ChannelAvatar } from '@/components/ChannelAvatar';
 import { EmptyState } from '@/components/EmptyState';
 import { SourceStatus } from '@/components/SourceStatus';
 import { Button } from '@/components/ui/button';
+import { Snippet } from '@/components/ui/snippet';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useConfirm } from '@/components/ConfirmDialogProvider';
 import {
   BTN_DESTRUCTIVE,
-  BTN_SECONDARY,
   SettingsGroup,
   SettingsIcon,
 } from '@/components/settings/primitives';
@@ -117,6 +117,7 @@ export function ChannelsSection() {
             </div>
             <Button
               type="submit"
+              pending={createChannelMutation.isPending}
               disabled={createChannelMutation.isPending || !usernameInput.trim()}
               className="shrink-0"
             >
@@ -223,7 +224,6 @@ function ChannelKeysPanel({ channelId }: { channelId: number }) {
   const revokeKeyMutation = useRevokeKey(channelId);
 
   const [oneTimeKey, setOneTimeKey] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
 
   if (isLoading) {
     return (
@@ -239,7 +239,6 @@ function ChannelKeysPanel({ channelId }: { channelId: number }) {
 
   const handleCreateKey = async () => {
     setOneTimeKey(null);
-    setCopied(false);
     setKeyError(null);
     try {
       const res = await createKeyMutation.mutateAsync({ label: 'локальный коллектор' });
@@ -248,13 +247,6 @@ function ChannelKeysPanel({ channelId }: { channelId: number }) {
       // Inline вместо browser-alert (аудит) — тот же паттерн, что ошибка загрузки ключей выше.
       setKeyError('Не удалось сгенерировать токен — попробуйте ещё раз');
     }
-  };
-
-  const handleCopy = (txt: string) => {
-    navigator.clipboard.writeText(txt).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
   };
 
   const ingestUrl = `${window.location.origin}/api/collector/ingest`;
@@ -272,56 +264,34 @@ function ChannelKeysPanel({ channelId }: { channelId: number }) {
             Что делать с ключом? →
           </Link>
         </div>
-        <button
+        <Button
           type="button"
-          data-mobile-touch-target=""
+          variant="secondary"
+          size="xs"
           onClick={handleCreateKey}
+          pending={createKeyMutation.isPending}
           disabled={createKeyMutation.isPending}
-          className={cn(BTN_SECONDARY, 'min-h-11 px-3 text-2xs sm:min-h-0')}
+          className="px-3 text-2xs"
         >
           {createKeyMutation.isPending ? 'Генерация…' : 'Создать ключ'}
-        </button>
+        </Button>
       </div>
       {keyError && <p role="alert" className="text-xs text-destructive">{keyError}</p>}
 
-      {/* role="status" on the inserted box itself (announced on insertion) — a permanently mounted
-          live-region wrapper would eat two space-y-4 gaps in the default no-token state. */}
       {oneTimeKey && (
-          <div role="status" className="space-y-2.5 rounded border border-status-warn/40 bg-background p-3.5">
-            <div className="flex items-center gap-1.5 text-xs font-medium text-status-warn">
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                className="h-3.5 w-3.5 shrink-0"
-                aria-hidden="true"
-              >
-                <path
-                  d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-                <path d="M12 9v4M12 17h.01" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-              <span>Скопируйте токен сейчас — он показывается ОДИН раз:</span>
-            </div>
-            <div className="relative flex min-h-14 items-center gap-2 break-all rounded bg-muted/60 p-2 font-mono text-xs text-foreground sm:min-h-0">
-              <span className="flex-1 select-all pr-24">{oneTimeKey}</span>
-              <button
-                type="button"
-                data-mobile-touch-target=""
-                onClick={() => handleCopy(oneTimeKey)}
-                className="absolute right-2 top-1.5 min-h-11 rounded border bg-background px-2 py-1 font-sans text-2xs font-medium transition-colors hover:bg-secondary sm:min-h-0"
-              >
-                {copied ? 'Скопировано' : 'Копировать'}
-              </button>
-              <span role="status" className="sr-only">{copied ? 'Скопировано' : ''}</span>
-            </div>
-            <div className="text-2xs leading-normal text-muted-foreground">
-              Ingest URL: <code className="rounded bg-muted px-1 py-0.5 font-mono text-foreground">{ingestUrl}</code>
-            </div>
+        <div className="space-y-2.5">
+          <Snippet
+            value={oneTimeKey}
+            label="Скопируйте токен сейчас — он показывается ОДИН раз:"
+            tone="warn"
+          />
+          <div className="text-2xs leading-normal text-muted-foreground">
+            Ingest URL:{' '}
+            <code className="rounded bg-muted px-1 py-0.5 font-mono text-foreground">
+              {ingestUrl}
+            </code>
           </div>
+        </div>
       )}
 
       {keys.length === 0 ? (

@@ -158,7 +158,7 @@ export function LoginPage() {
             required
             disabled={forgotMutation.isPending}
           />
-          <Button type="submit" disabled={forgotMutation.isPending} size="lg" className="mt-5 w-full px-4">
+          <Button type="submit" pending={forgotMutation.isPending} disabled={forgotMutation.isPending} size="lg" className="mt-5 w-full px-4">
             {forgotMutation.isPending ? 'Отправка…' : 'Отправить ссылку'}
           </Button>
           {forgotMutation.isError && (
@@ -216,7 +216,7 @@ export function LoginPage() {
             disabled={loginMutation.isPending}
           />
         </div>
-        <Button type="submit" disabled={loginMutation.isPending} size="lg" className="mt-5 w-full px-4">
+        <Button type="submit" pending={loginMutation.isPending} disabled={loginMutation.isPending} size="lg" className="mt-5 w-full px-4">
           {loginMutation.isPending ? 'Вход…' : 'Войти'}
         </Button>
         {loginMutation.isError && (
@@ -289,7 +289,7 @@ export function RegisterPage() {
             disabled={registerMutation.isPending}
           />
         </div>
-        <Button type="submit" disabled={registerMutation.isPending} size="lg" className="mt-5 w-full px-4">
+        <Button type="submit" pending={registerMutation.isPending} disabled={registerMutation.isPending} size="lg" className="mt-5 w-full px-4">
           {registerMutation.isPending ? 'Регистрация…' : 'Создать аккаунт'}
         </Button>
         {registerMutation.isError && (
@@ -332,7 +332,7 @@ export function VerifyPage() {
           {token ? 'Подтвердите аккаунт — нажмите кнопку ниже.' : 'Ссылка неполная — откройте её из письма целиком или запросите новое письмо при входе.'}
         </p>
         {token && !verifyMutation.isSuccess && (
-          <Button type="submit" disabled={verifyMutation.isPending} size="lg" className="mt-5 w-full px-4">
+          <Button type="submit" pending={verifyMutation.isPending} disabled={verifyMutation.isPending} size="lg" className="mt-5 w-full px-4">
             {verifyMutation.isPending ? 'Подтверждение…' : 'Подтвердить email'}
           </Button>
         )}
@@ -384,7 +384,7 @@ export function ResetPage() {
           required
           disabled={!token || resetMutation.isPending}
         />
-        <Button type="submit" disabled={!token || resetMutation.isPending} size="lg" className="mt-5 w-full px-4">
+        <Button type="submit" pending={resetMutation.isPending} disabled={!token || resetMutation.isPending} size="lg" className="mt-5 w-full px-4">
           {resetMutation.isPending ? 'Сохранение…' : 'Сохранить пароль'}
         </Button>
         {resetMutation.isError && (

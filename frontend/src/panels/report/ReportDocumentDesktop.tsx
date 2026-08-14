@@ -244,6 +244,7 @@ export function ReportDocumentDesktop({
             <Button
               type="button"
               onClick={save}
+              pending={savePending}
               disabled={savePending || !nameValid || !sourceValid || !dirty}
               size="sm"
               className="report-control bg-foreground text-background shadow-xs hover:bg-foreground/80"
@@ -255,6 +256,7 @@ export function ReportDocumentDesktop({
             <Button
               type="button"
               onClick={handleDelete}
+              pending={deleteReport.isPending}
               disabled={deleteReport.isPending}
               variant="ghost"
               size="sm"

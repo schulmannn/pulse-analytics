@@ -234,7 +234,7 @@ export function CampaignDialog({
             <Button type="button" variant="ghost" size="sm" onClick={onClose}>
               Отмена
             </Button>
-            <Button type="submit" size="sm" disabled={pending || !name.trim()}>
+            <Button type="submit" size="sm" pending={pending} disabled={pending || !name.trim()}>
               {pending ? 'Сохранение…' : initial ? 'Сохранить' : 'Создать'}
             </Button>
           </DialogFooter>

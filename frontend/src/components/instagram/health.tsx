@@ -122,6 +122,7 @@ export function IgConnectPanel() {
             <Button
               type="button"
               onClick={() => connect.mutate()}
+              pending={connect.isPending}
               disabled={connect.isPending || notReady}
               className="px-3.5"
             >

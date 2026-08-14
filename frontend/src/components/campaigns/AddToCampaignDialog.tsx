@@ -177,6 +177,7 @@ export function AddToCampaignDialog({
                   <Button
                     type="button"
                     onClick={() => void submit()}
+                    pending={pending}
                     disabled={pending || (createMode ? !newName.trim() : selectedId == null)}
                     size="xs"
                     className="px-4"
