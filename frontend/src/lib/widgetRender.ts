@@ -3,7 +3,7 @@
 // React component so the label/formatting logic is unit-testable (the component itself is just
 // wiring the charts). No React here.
 
-import { fmt } from '@/lib/format';
+import { fmt, weekdayAxisFromDayKeys } from '@/lib/format';
 import type { MetricUnit, WidgetViz } from '@/lib/widgetMetrics';
 import type { WidgetResult } from '@/lib/resolveWidgetMetric';
 
@@ -46,6 +46,9 @@ export interface ChartSeries {
   values: Array<number | null>;
   labels: string[];
   titles: string[];
+  /** Ось короткого дневного окна: однобуквенные дни недели (канон weekdayAxisLabels) —
+      только подписи оси, тултипы (`titles`) держат полные даты. */
+  axisLabels?: string[];
 }
 
 /** Adapt a WidgetResult's series into the {values,labels,titles} the chart components take. */
@@ -54,14 +57,18 @@ export function seriesToChart(result: WidgetResult): ChartSeries {
   const f = unitFormat(result.seriesUnit ?? result.unit);
   // Недельная агрегация (длинные бары): дата точки — понедельник корзины, без « · неделя»
   // тултип «18 июл.: N» читался бы как один день.
-  const suffix = result.meta?.seriesGrain === 'week' ? ' · неделя' : '';
+  const week = result.meta?.seriesGrain === 'week';
+  const suffix = week ? ' · неделя' : '';
   const labels = series.map((p) => bucketLabel(p.date));
   const values = series.map((p) => p.value);
   // Пропуск подписывается словами, а не «0»: тултип обязан отличать «сбор не прошёл» от нуля.
   const titles = series.map((p, i) =>
     p.value == null ? `${labels[i]}: данных нет` : `${labels[i]}: ${f(p.value)}${suffix}`,
   );
-  return { values, labels, titles };
+  // Недельные ключи «выглядят» дневными (понедельник корзины) — буква дня там лгала бы.
+  // Месячные/квартальные корзины отсекает parseDayKey внутри хелпера (их ключи — не дневные).
+  const axisLabels = week ? undefined : weekdayAxisFromDayKeys(series.map((p) => p.date));
+  return { values, labels, titles, axisLabels };
 }
 
 /** Compact series stats for the story-card footer (S12): «Макс · Среднее» — the density steep puts

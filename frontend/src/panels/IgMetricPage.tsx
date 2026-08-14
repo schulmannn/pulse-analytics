@@ -385,6 +385,7 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
                   <LineChart
                     values={lvl.values}
                     labels={lvl.labels}
+                    axisLabels={lvl.axisLabels}
                     titles={lvl.titles}
                     height={chartH}
                     markExtremes
@@ -450,6 +451,7 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
                   <LineChart
                     values={win.values}
                     labels={win.labels}
+                    axisLabels={win.axisLabels}
                     titles={win.titles}
                     height={chartH}
                     markExtremes
@@ -466,6 +468,7 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
                   <BarChart
                     values={win.values}
                     labels={win.labels}
+                    axisLabels={win.axisLabels}
                     titles={win.titles}
                     height={chartH}
                     ghost={ghostOk ? ghostVals : undefined}

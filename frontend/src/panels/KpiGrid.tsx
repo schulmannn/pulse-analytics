@@ -290,7 +290,10 @@ function TgTrendStat({
             labels={spark.labels}
             axisLabels={spark.axisLabels}
             // Тултип столбца несёт ту же пару «дата · значение», что ховер-тултип искры.
-            titles={spark.values.map((v, i) => `${spark.labels[i] ?? ''}: ${format(v)}`)}
+            // Пропуск (день окна без публикаций, «вариант 2» 2026-08-14) подписывается словами.
+            titles={spark.values.map((v, i) =>
+              v == null ? `${spark.labels[i] ?? ''}: нет публикаций` : `${spark.labels[i] ?? ''}: ${format(v)}`,
+            )}
             formatValue={format}
           />
         </ChartBand>
@@ -352,7 +355,11 @@ function FeaturedKpi({ label, labelHidden = false, value, trend, caption, spark,
   // дельта и caption считаются от полного окна в deriveKpis и капом не затрагиваются.
   const sparkShown = useMemo(() => {
     if (!spark || spark.values.length <= CHART_MAX_POINTS) return spark;
-    const rows = spark.values.map((value, i) => ({ value, label: spark.labels[i] ?? '' }));
+    // Пропуски (null) при LTTB-капе отбрасываются вместе с подписями: viewsSpark их не несёт
+    // (архив/пост-фолбэк), а прореживать «дырку» алгоритму нечем.
+    const rows = spark.values.flatMap((value, i) =>
+      value == null ? [] : [{ value, label: spark.labels[i] ?? '' }],
+    );
     const sampled = lttbDownsample(rows, CHART_MAX_POINTS, (r) => r.value);
     return { labels: sampled.map((r) => r.label), values: sampled.map((r) => r.value) };
   }, [spark]);

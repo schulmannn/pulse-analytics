@@ -35,6 +35,36 @@ export function weekdayAxisLabels(
   return letters.every((letter) => letter.length > 0) ? letters : undefined;
 }
 
+/**
+ * Ось букв по РАЗМАХУ самих ключей — для поверхностей, у которых точное окно не под рукой:
+ * все ключи дневные (day-key строки ИЛИ ms-таймстампы) и календарный размах первого-последнего
+ * ≤ 8 дней. У оконных серий размах практически равен окну; у разреженной серии в длинном окне
+ * буквы честны, пока укладываются в одну календарную неделю (день недели уникален). Месячные
+ * и прочие не-дневные строковые ключи отсекает parseDayKey.
+ */
+export function weekdayAxisFromDayKeys(
+  dayKeys: Array<string | number | null | undefined>,
+): string[] | undefined {
+  if (dayKeys.length < 2 || dayKeys.length > 8) return undefined;
+  const toDate = (v: string | number | null | undefined): Date | null => {
+    if (v == null || v === '') return null;
+    // Строки: day-key («2026-08-14») или ПОЛНЫЙ ISO-таймстамп (>10 символов, IG end_time).
+    // Короткие не-дневные ключи (месяц «2026-05», год) отсекаются — у корзины буквы дня нет.
+    const d =
+      typeof v === 'number'
+        ? new Date(v)
+        : parseDayKey(v) ?? (v.length > 10 ? new Date(v) : null);
+    return d != null && !isNaN(d.getTime()) ? d : null;
+  };
+  const first = toDate(dayKeys[0]);
+  const last = toDate(dayKeys[dayKeys.length - 1]);
+  if (!first || !last) return undefined;
+  const spanDays = Math.round((last.getTime() - first.getTime()) / 86_400_000) + 1;
+  if (spanDays <= 0 || spanDays > 8) return undefined;
+  const letters = dayKeys.map((v) => (v == null ? '' : fmt.weekday(v)));
+  return letters.every((letter) => letter.length > 0) ? letters : undefined;
+}
+
 export function parseDayKey(s: string): Date | null {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
   if (!m) return null;

@@ -8,11 +8,12 @@ import { sparkDomain } from '@/lib/robustDomain';
 
 interface SparklineProps {
   /**
-   * `null` = пропуск измерения. Компактная искра БЕЗ ОСИ показывает только наблюдения: пропуски
-   * отбрасываются вместе со своими подписями, а не заполняются нулём. Это канон проекта для
-   * компактных искр (kpiDerive: «Sparse by construction — no fabricated zero days»): рисовать
-   * разрыв в 200×32 без оси некуда, а ноль вместо пропуска — прямая ложь. Полноразмерный
-   * {@link LineChart} разрывы показывает по-настоящему.
+   * `null` = пропуск измерения. Компактная искра показывает только наблюдения: пропуски
+   * отбрасываются вместе со своими подписями (labels + axisLabels синхронно), а не заполняются
+   * нулём — рисовать разрыв в 200×32 некуда, а ноль вместо пропуска — прямая ложь. Поэтому
+   * bar-вариант карточки (BarChart со штрихованной подложкой пропуска) показывает ПОЛНОЕ окно,
+   * а line-вариант — только дни с наблюдениями. Полноразмерный {@link LineChart} разрывы
+   * показывает по-настоящему.
    */
   values: Array<number | null>;
   /** Per-point labels (e.g. dates), same length as values — used in the hover read-out. */
@@ -336,11 +337,16 @@ export function Sparkline({
               {axisTicks.map((tick, index) =>
                 index === axisTicks.length - 1 ? (
                   // Пилюля не выше строки: leading-none (11px) + py-px (2px) = 13px < min-h-4,
-                  // фикс-тайл 264px не растёт ни на пиксель.
+                  // фикс-тайл 264px не растёт ни на пиксель. ЦВЕТ = цвет серии (владелец,
+                  // референс steep): солидная заливка тем же `color`, что рисует линию, чернила —
+                  // фон карточки. На тонированных карточках токен серии переопределён в скоупе
+                  // карточки, и пилюля перекрашивается вместе с линией — вечно-синий primary
+                  // там выбивался.
                   <span
                     key={tick.i}
                     data-axis-current=""
-                    className="shrink-0 rounded-full bg-primary/10 px-1.5 py-px font-medium leading-none text-accent-foreground"
+                    className="shrink-0 rounded-full px-1.5 py-px font-medium leading-none"
+                    style={{ backgroundColor: color, color: 'hsl(var(--background))' }}
                   >
                     {tick.text}
                   </span>

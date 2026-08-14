@@ -354,6 +354,7 @@ function WidgetChart({ result, eff, onDrill, expanded = false }: { result: Widge
       <LineChart
         values={c.values}
         labels={c.labels}
+        axisLabels={c.axisLabels}
         titles={c.titles}
         ghost={result.ghost}
         ghostLabel={result.ghostLabel}
@@ -374,9 +375,9 @@ function WidgetChart({ result, eff, onDrill, expanded = false }: { result: Widge
     // берёт DivergingBars: столбцы вокруг нулевой линии, направление несёт ПОЛОЖЕНИЕ, а не цвет.
     // Пропуск в дивергентной форме геометрии не имеет — читается как нулевой день.
     if (c.values.some((value) => (value ?? 0) < 0)) {
-      return <DivergingBars values={c.values.map((value) => value ?? 0)} labels={c.labels} titles={c.titles} />;
+      return <DivergingBars values={c.values.map((value) => value ?? 0)} labels={c.labels} axisLabels={c.axisLabels} titles={c.titles} />;
     }
-    return <BarChart values={c.values} labels={c.labels} titles={c.titles} ghost={result.ghost} ghostLabel={result.ghostLabel} onPointClick={onPointClick} />;
+    return <BarChart values={c.values} labels={c.labels} axisLabels={c.axisLabels} titles={c.titles} ghost={result.ghost} ghostLabel={result.ghostLabel} onPointClick={onPointClick} />;
   }
   if (eff === 'donut') {
     const items = result.breakdown ?? [];
@@ -411,7 +412,7 @@ function WidgetChart({ result, eff, onDrill, expanded = false }: { result: Widge
         />
       );
     }
-    return <LineChart values={c.values} labels={c.labels} titles={c.titles} height={64} onPointClick={onPointClick} />;
+    return <LineChart values={c.values} labels={c.labels} axisLabels={c.axisLabels} titles={c.titles} height={64} onPointClick={onPointClick} />;
   }
   return null;
 }

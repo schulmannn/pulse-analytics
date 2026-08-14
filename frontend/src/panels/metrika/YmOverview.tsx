@@ -14,7 +14,7 @@ import { DeltaPill } from '@/components/DeltaPill';
 import { InlineSpark } from '@/components/InlineSpark';
 import { pctDelta, type MetricDelta } from '@/lib/delta';
 import { lttbDownsample } from '@/lib/downsample';
-import { fmt } from '@/lib/format';
+import { fmt, weekdayAxisFromDayKeys } from '@/lib/format';
 import { usePagePeriod, useCardShowsPeriod } from '@/lib/period';
 import { msPreviousPeriod, useMsPagePeriod } from '@/lib/msPeriod';
 import { YM_BREAKDOWNS } from '@/panels/metrika/ymBreakdowns';
@@ -41,6 +41,7 @@ function YmStoryBody({
   caption,
   values,
   labels,
+  axisLabels,
   onDrill,
   viz = 'line',
 }: {
@@ -51,6 +52,8 @@ function YmStoryBody({
   caption?: string;
   values: number[];
   labels: string[];
+  /** Ось букв короткого дневного окна (канон weekdayAxisFromDayKeys). */
+  axisLabels?: string[];
   onDrill: () => void;
   viz?: 'line' | 'bar';
 }) {
@@ -71,6 +74,7 @@ function YmStoryBody({
           <BarChart
             values={values}
             labels={labels}
+            axisLabels={axisLabels}
             titles={values.map((v, i) => `${labels[i] ?? ''}: ${fmt.num(v)}`)}
             formatValue={fmt.num}
           />
@@ -79,6 +83,7 @@ function YmStoryBody({
         <Sparkline
           values={values}
           labels={labels}
+          axisLabels={axisLabels}
           area
           strokeWidth={2}
           interactive
@@ -226,6 +231,7 @@ export function YmOverview() {
       caption,
       values: sampled.map((p) => p.value),
       labels: sampled.map((p) => fmt.day(p.day)),
+      axisLabels: weekdayAxisFromDayKeys(sampled.map((p) => p.day)),
       onDrill: () => navigate(`/metrics/${id}`),
     };
     return (

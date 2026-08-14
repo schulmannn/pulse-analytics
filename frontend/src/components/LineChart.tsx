@@ -575,11 +575,11 @@ export function LineChart({
             <g key={`x${t.i}`} data-axis-current={isCurrent ? '' : undefined}>
               {!rhea && <line x1={t.px} y1={h - padB + 3} x2={t.px} y2={h - padB + 7} stroke="hsl(var(--border))" strokeWidth="1" vectorEffect="non-scaling-stroke" />}
               {pill && (
-                // Пара «bg-primary/10 + accent-foreground» — канон primary-tint-ink (AA-композит),
-                // тот же, что у HTML-пилюль компактной оси.
-                <rect x={pill.x} y={h - 19.5} width={pill.w} height={pill.h} rx={pill.h / 2} fill="hsl(var(--primary) / 0.1)" className="pointer-events-none" />
+                // Цвет пилюли = цвет серии (владелец, референс steep): солидный chart-role-primary,
+                // чернила — фон; тонированные карточки переопределяют токен в своём скоупе.
+                <rect x={pill.x} y={h - 19.5} width={pill.w} height={pill.h} rx={pill.h / 2} fill="hsl(var(--chart-role-primary))" className="pointer-events-none" />
               )}
-              <text x={t.x} y={h - 8} textAnchor="middle" data-chart-axis-label="x" className={`pointer-events-none select-none text-2xs font-medium tabular-nums ${isCurrent ? 'fill-accent-foreground' : 'fill-muted-foreground'}`}>
+              <text x={t.x} y={h - 8} textAnchor="middle" data-chart-axis-label="x" fill={isCurrent ? 'hsl(var(--background))' : undefined} className={`pointer-events-none select-none text-2xs font-medium tabular-nums ${isCurrent ? '' : 'fill-muted-foreground'}`}>
                 {t.text}
               </text>
             </g>
@@ -962,11 +962,14 @@ export function LineChart({
         <div className="mt-1.5 flex select-none items-center justify-between gap-2 px-1 text-2xs font-medium text-muted-foreground">
           {compactLabelIndexes.map((i, index) =>
             index === compactLabelIndexes.length - 1 ? (
+              // Цвет пилюли = цвет серии (владелец, референс steep): солидный chart-role-primary
+              // (тонированные карточки переопределяют токен в своём скоупе), чернила — фон.
               <span
                 key={i}
                 data-chart-axis-label="x-compact"
                 data-axis-current=""
-                className="shrink-0 rounded-full bg-primary/10 px-1.5 py-px font-medium leading-none text-accent-foreground"
+                className="shrink-0 rounded-full px-1.5 py-px font-medium leading-none"
+                style={{ backgroundColor: 'hsl(var(--chart-role-primary))', color: 'hsl(var(--background))' }}
               >
                 {compactLetterAxis ? compactLetterAxis[i] : labels?.[i]}
               </span>

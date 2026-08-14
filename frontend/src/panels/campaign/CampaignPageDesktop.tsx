@@ -34,7 +34,7 @@ import {
 } from '@/lib/campaignPageModel';
 import { campaignSourceKey } from '@/lib/campaignSources';
 import { PillSelect } from '@/components/PillSelect';
-import { fmt } from '@/lib/format';
+import { fmt, weekdayAxisFromDayKeys } from '@/lib/format';
 import { markdownToPlainText } from '@/lib/markdown';
 import { cn } from '@/lib/utils';
 import { CampaignPostsTable } from '@/panels/campaign/CampaignPostsTable';
@@ -247,10 +247,11 @@ function TimelineExplorer({
         {/* Кап длинной серии перед рендером (canon CLAUDE.md): линия — LTTB, столбцы — недели. */}
         {(() => {
           const shown = capTimelineMode(active);
+          const axisLetters = shown.days ? weekdayAxisFromDayKeys(shown.days) : undefined;
           return shown.kind === 'line' ? (
-            <LineChart values={shown.values} labels={shown.labels} titles={shown.titles} showPoints={shown.values.length <= 45} fullAxes />
+            <LineChart values={shown.values} labels={shown.labels} axisLabels={axisLetters} titles={shown.titles} showPoints={shown.values.length <= 45} fullAxes />
           ) : (
-            <BarChart values={shown.values} labels={shown.labels} titles={shown.titles} />
+            <BarChart values={shown.values} labels={shown.labels} axisLabels={axisLetters} titles={shown.titles} />
           );
         })()}
       </ChartSection>

@@ -1,5 +1,5 @@
 import { useMentions, useMentionsArchive } from '@/api/queries';
-import { dayKeyToTs, fmt } from '@/lib/format';
+import { dayKeyToTs, fmt, weekdayAxisFromDayKeys } from '@/lib/format';
 import { BarChart } from '@/components/BarChart';
 import { Skeleton } from '@/components/ui/skeleton';
 import type { Mentions as MentionsData } from '@/api/schemas';
@@ -222,12 +222,15 @@ function mentionsWindow(byDay: Record<string, number>, days: number) {
   const values = sliced.map((e) => e.value);
   const labels = sliced.map((e) => fmt.day(e.ts));
   const titles = sliced.map((e) => `${fmt.day(e.ts)}: ${fmt.num(e.value)}`);
-  const axisLabels = [
+  // Трёхточечная свёртка ДЛЯ labels линии (прежний компакт-паттерн этой поверхности); настоящая
+  // ось букв короткого окна (проп axisLabels чартов) — weekAxis, по ключам самой серии.
+  const compactLabels = [
     labels[0] ?? '',
     labels[Math.floor(labels.length / 2)] ?? '',
     labels[labels.length - 1] ?? '',
   ];
-  return { labels, values, titles, axisLabels };
+  const weekAxis = weekdayAxisFromDayKeys(sliced.map((e) => e.ts));
+  return { labels, values, titles, compactLabels, weekAxis };
 }
 
 /** «Упоминаний по дням» on the Mentions surface. It keeps its source-screen ChartSection. */
@@ -247,23 +250,23 @@ export function MentionsByDayWidget({ byDay, id, homeKey }: { byDay: Record<stri
             label: 'Столбцы',
             // No wrapper padding: the chart fills the measured tile body exactly, so an extra pt-*
             // here would push it past the fixed tile and grow an inner scrollbar.
-            render: <BarChart values={w.values} labels={w.labels} titles={w.titles} />,
+            render: <BarChart values={w.values} labels={w.labels} axisLabels={w.weekAxis} titles={w.titles} />,
           },
           {
             key: 'line',
             label: 'Линия',
-            render: <LineChart values={w.values} labels={w.axisLabels} titles={w.titles} yMin={0} />,
+            render: <LineChart values={w.values} labels={w.compactLabels} axisLabels={w.weekAxis} titles={w.titles} yMin={0} />,
           },
         ];
       }}
       expand={{
         renderExpanded: (days) => {
           const w = mentionsWindow(byDay, days);
-          return <LineChart values={w.values} labels={w.axisLabels} titles={w.titles} yMin={0} markAnomalies markExtremes />;
+          return <LineChart values={w.values} labels={w.compactLabels} axisLabels={w.weekAxis} titles={w.titles} yMin={0} markAnomalies markExtremes />;
         },
         renderExpandedBar: (days) => {
           const w = mentionsWindow(byDay, days);
-          return <BarChart values={w.values} labels={w.labels} titles={w.titles} />;
+          return <BarChart values={w.values} labels={w.labels} axisLabels={w.weekAxis} titles={w.titles} />;
         },
         statsFor: (days) => mentionsWindow(byDay, days).values,
       }}
@@ -286,8 +289,8 @@ export function MentionsWidgetBody({ viz }: { viz: WidgetViz }) {
 
   const w = mentionsWindow(archive.data?.by_day ?? {}, days);
   return viz === 'line'
-    ? <LineChart values={w.values} labels={w.axisLabels} titles={w.titles} yMin={0} />
-    : <BarChart values={w.values} labels={w.labels} titles={w.titles} />;
+    ? <LineChart values={w.values} labels={w.compactLabels} axisLabels={w.weekAxis} titles={w.titles} yMin={0} />
+    : <BarChart values={w.values} labels={w.labels} axisLabels={w.weekAxis} titles={w.titles} />;
 }
 
 function MentionsSkeletons() {

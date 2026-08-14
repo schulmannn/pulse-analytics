@@ -128,6 +128,8 @@ export interface SeriesBarValuesOptions {
   /** Extra ledger rows PREPENDED to the stats (e.g. «Сейчас» — the current level beside
       a delta chart). */
   extraRows?: LedgerRow[];
+  /** Ось букв короткого дневного окна (канон weekdayAxisFromDayKeys) — прокидывается в чарт. */
+  axisLabels?: string[];
 }
 
 /** The wide «Столбцы + значения» variant for SERIES charts: bars (flex-1) plus a right-hand
@@ -162,9 +164,9 @@ export function seriesBarValuesVariant(
       <BarValuesLayout
         chart={
           opts.diverging ? (
-            <DivergingBars values={values} labels={labels} titles={titles} />
+            <DivergingBars values={values} labels={labels} axisLabels={opts.axisLabels} titles={titles} />
           ) : (
-            <BarChart values={values} labels={labels} titles={titles} />
+            <BarChart values={values} labels={labels} axisLabels={opts.axisLabels} titles={titles} />
           )
         }
         rows={rows}

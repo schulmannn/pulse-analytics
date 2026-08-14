@@ -43,6 +43,7 @@ import {
   parseCampaignSourceKey,
   type CampaignSourceScope,
 } from '@/lib/campaignSources';
+import { weekdayAxisFromDayKeys } from '@/lib/format';
 import { useExplorerChartHeight } from '@/lib/useExplorerChartHeight';
 import { CampaignSourceLeaderboard } from '@/panels/campaign/CampaignSourceLeaderboard';
 import {
@@ -349,10 +350,12 @@ function CampaignTimelineMetric({
         ) : (
           (() => {
             const shown = capTimelineMode(kind === 'line' ? { ...active, kind: 'line' } : { ...active, kind: 'bar' });
+            const axisLetters = shown.days ? weekdayAxisFromDayKeys(shown.days) : undefined;
             return kind === 'line' ? (
               <LineChart
                 values={shown.values}
                 labels={shown.labels}
+                axisLabels={axisLetters}
                 titles={shown.titles}
                 yMin={0}
                 showPoints={shown.values.length <= 45}
@@ -361,7 +364,7 @@ function CampaignTimelineMetric({
                 markExtremes
               />
             ) : (
-              <BarChart values={shown.values} labels={shown.labels} titles={shown.titles} />
+              <BarChart values={shown.values} labels={shown.labels} axisLabels={axisLetters} titles={shown.titles} />
             );
           })()
         )}

@@ -15,7 +15,7 @@ import { getDrillMetric } from '@/lib/widgetMetrics';
 import { addWidgetForMetric } from '@/lib/widgetStore';
 import { pinToHome } from '@/lib/widgetPrefsStore';
 import { customKey } from '@/lib/widgetConfig';
-import { fmt, pluralRu } from '@/lib/format';
+import { fmt, pluralRu, weekdayAxisFromDayKeys } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { markdownToPlainText } from '@/lib/markdown';
 import { PinnedDayPanel } from '@/components/PinnedDayPanel';
@@ -189,6 +189,8 @@ function bucketedPostSeries(
   return {
     labels: keys.map((k) => bucketLabelOf(k, grain)),
     values: keys.map((k) => byBucket.get(k) ?? 0),
+    // Буквы короткого дневного окна (ревизия осей 2026-08-14); недельные корзины — датами.
+    axisLabels: grain === 'day' ? weekdayAxisFromDayKeys(keys) : undefined,
   };
 }
 
@@ -209,7 +211,11 @@ function bucketedHistoryFlow(
     byBucket.set(key, (byBucket.get(key) ?? 0) + Number(row.views));
   }
   const keys = fromMs != null ? bucketKeysInWindow(fromMs, toMs, grain) : [...byBucket.keys()].sort();
-  return { labels: keys.map((k) => bucketLabelOf(k, grain)), values: keys.map((k) => byBucket.get(k) ?? 0) };
+  return {
+    labels: keys.map((k) => bucketLabelOf(k, grain)),
+    values: keys.map((k) => byBucket.get(k) ?? 0),
+    axisLabels: grain === 'day' ? weekdayAxisFromDayKeys(keys) : undefined,
+  };
 }
 
 /** Subscriber level per bucket (last archive value inside the bucket) — sparse, data-only. */
@@ -227,7 +233,11 @@ function bucketedSubsSeries(
     byBucket.set(bucketKeyOf(t, grain), Number(row.subscribers)); // later rows overwrite = last-of-bucket
   }
   const keys = [...byBucket.keys()].sort();
-  return { labels: keys.map((k) => bucketLabelOf(k, grain)), values: keys.map((k) => byBucket.get(k)!) };
+  return {
+    labels: keys.map((k) => bucketLabelOf(k, grain)),
+    values: keys.map((k) => byBucket.get(k)!),
+    axisLabels: grain === 'day' ? weekdayAxisFromDayKeys(keys) : undefined,
+  };
 }
 
 /**
@@ -652,10 +662,12 @@ export function MetricPage() {
     ? {
         values: sampledLineIdx.map((i) => lineValues[i] ?? null),
         labels: sampledLineIdx.map((i) => series.labels[i] ?? ''),
+        // Прореженная серия длиннее порога букв (≤ 8) по построению — ось остаётся датами.
+        axisLabels: undefined as string[] | undefined,
         titles: sampledLineIdx.map((i) => titles[i] ?? ''),
         ghost: lineGhost ? sampledLineIdx.map((i) => lineGhost[i] ?? null) : undefined,
       }
-    : { values: lineValues, labels: series.labels, titles, ghost: lineGhost };
+    : { values: lineValues, labels: series.labels, axisLabels: series.axisLabels, titles, ghost: lineGhost };
 
   // ── События дня (chart_annotations): создание/удаление из панели пина ────────────────────
   const addAnnotation = async (dayKey: string) => {
@@ -734,7 +746,10 @@ export function MetricPage() {
         .sort((a, b) => Number(b[field!] ?? 0) - Number(a[field!] ?? 0))
         .slice(0, 5)
     : [];
-  const pinnedDiff = pinnedValid != null && pinnedValid > 0 ? series.values[pinnedValid] - series.values[pinnedValid - 1] : null;
+  // Пропуск (null-день) в паре — дельты нет: «изменение от дня без данных» было бы выдумкой.
+  const pinnedCur = pinnedValid != null && pinnedValid > 0 ? series.values[pinnedValid] : null;
+  const pinnedPrevVal = pinnedValid != null && pinnedValid > 0 ? series.values[pinnedValid - 1] : null;
+  const pinnedDiff = pinnedCur != null && pinnedPrevVal != null ? pinnedCur - pinnedPrevVal : null;
 
   return (
     <div className="space-y-4">
@@ -818,6 +833,7 @@ export function MetricPage() {
                 <LineChart
                   values={lineChart.values}
                   labels={lineChart.labels}
+                  axisLabels={lineChart.axisLabels}
                   titles={lineChart.titles}
                   hoverTitles={hoverTitles}
                   ghostTitles={ghostTitles}
@@ -848,6 +864,7 @@ export function MetricPage() {
                 <BarChart
                   values={series.values}
                   labels={series.labels}
+                  axisLabels={series.axisLabels}
                   titles={titles}
                   height={chartH}
                   appearance="comparison"

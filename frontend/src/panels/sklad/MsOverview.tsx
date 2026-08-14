@@ -20,7 +20,7 @@ import { SegmentedControl } from '@/components/SegmentedControl';
 import { Sparkline } from '@/components/Sparkline';
 import { pctDelta, type MetricDelta } from '@/lib/delta';
 import { lttbDownsample } from '@/lib/downsample';
-import { fmt } from '@/lib/format';
+import { fmt, weekdayAxisFromDayKeys } from '@/lib/format';
 import { usePagePeriod, useCardShowsPeriod } from '@/lib/period';
 import { msPreviousPeriod, useMsPagePeriod, type MsPeriod } from '@/lib/msPeriod';
 import {
@@ -56,6 +56,7 @@ function MsStoryBody({
   caption,
   values,
   labels,
+  axisLabels,
   formatValue,
   emptyTitle,
   drillTo,
@@ -68,6 +69,8 @@ function MsStoryBody({
   caption?: string;
   values: number[];
   labels: string[];
+  /** Ось букв короткого дневного окна (канон weekdayAxisFromDayKeys). */
+  axisLabels?: string[];
   formatValue: (v: number) => string;
   emptyTitle: string;
   drillTo: string;
@@ -92,6 +95,7 @@ function MsStoryBody({
           <BarChart
             values={values}
             labels={labels}
+            axisLabels={axisLabels}
             titles={values.map((v, i) => `${labels[i] ?? ''}: ${formatValue(v)}`)}
             formatValue={formatValue}
           />
@@ -100,6 +104,7 @@ function MsStoryBody({
         <Sparkline
           values={values}
           labels={labels}
+          axisLabels={axisLabels}
           area
           strokeWidth={2}
           interactive
@@ -213,9 +218,9 @@ export function MsOverview() {
   const periodInLabel = showPeriod ? windowLabel : undefined;
   // Пропсы story-тел вынесены: «Линия» и «Столбцы» это ОДНА карточка в двух подачах,
   // дублировать её данные в двух вариантах — прямой путь к их расхождению.
-  const revStory = { label: periodInLabel, value: `${fmt.short(revenue.total)} ₽`, delta: revenueDelta, values: revValues, labels: revLabels, formatValue: (v: number) => `${fmt.num(Math.round(v))} ₽`, emptyTitle: 'Недостаточно дней для графика.', drillTo: '/metrics/ms-revenue', drillLabel: 'Выручка' };
-  const ordStory = { label: periodInLabel, value: fmt.num(orders.totalCount), delta: ordersDelta, caption: `на ${fmt.short(orders.totalSum)} ₽`, values: ordValues, labels: ordLabels, formatValue: fmt.num, emptyTitle: 'Недостаточно дней для графика.', drillTo: '/metrics/ms-orders', drillLabel: 'Заказы' };
-  const avgStory = { label: periodInLabel, value: avgTotal != null ? `${fmt.short(avgTotal)} ₽` : '—', delta: avgDelta, caption: 'по дням с заказами', values: avgValues, labels: avgLabels, formatValue: (v: number) => `${fmt.num(Math.round(v))} ₽`, emptyTitle: 'Недостаточно дней с заказами для графика.', drillTo: '/metrics/ms-aov', drillLabel: 'Средний чек' };
+  const revStory = { label: periodInLabel, value: `${fmt.short(revenue.total)} ₽`, delta: revenueDelta, values: revValues, labels: revLabels, axisLabels: weekdayAxisFromDayKeys(revSeries.map((p) => p.day)), formatValue: (v: number) => `${fmt.num(Math.round(v))} ₽`, emptyTitle: 'Недостаточно дней для графика.', drillTo: '/metrics/ms-revenue', drillLabel: 'Выручка' };
+  const ordStory = { label: periodInLabel, value: fmt.num(orders.totalCount), delta: ordersDelta, caption: `на ${fmt.short(orders.totalSum)} ₽`, values: ordValues, labels: ordLabels, axisLabels: weekdayAxisFromDayKeys(ordSeries.map((p) => p.day)), formatValue: fmt.num, emptyTitle: 'Недостаточно дней для графика.', drillTo: '/metrics/ms-orders', drillLabel: 'Заказы' };
+  const avgStory = { label: periodInLabel, value: avgTotal != null ? `${fmt.short(avgTotal)} ₽` : '—', delta: avgDelta, caption: 'по дням с заказами', values: avgValues, labels: avgLabels, axisLabels: weekdayAxisFromDayKeys(avgSampled.map((p) => p.day)), formatValue: (v: number) => `${fmt.num(Math.round(v))} ₽`, emptyTitle: 'Недостаточно дней с заказами для графика.', drillTo: '/metrics/ms-aov', drillLabel: 'Средний чек' };
 
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-6">
@@ -418,6 +423,7 @@ function MsReturnsCardBody({
               <LineChart
                 values={sampled.map((p) => p.orders)}
                 labels={sampled.map((p) => fmt.day(p.day))}
+                axisLabels={weekdayAxisFromDayKeys(sampled.map((p) => p.day))}
                 titles={sampled.map((p) => `${fmt.day(p.day)}: ${fmt.num(p.orders)} · ${fmt.short(p.sum)} ₽`)}
                 yMin={0}
               />
@@ -519,6 +525,8 @@ export function MsSummaryExplorer({
 
   const values = points.map((p) => metricValue(metric, p));
   const labels = points.map((p) => fmt.day(p.day));
+  // Буквы короткого дневного окна; недельные/месячные корзины — датами (день якоря корзины лгал бы).
+  const axisLabels = grain === 'day' ? weekdayAxisFromDayKeys(points.map((p) => p.day)) : undefined;
   const titles = points.map((p) => `${fmt.day(p.day)}: ${fmtMetric(metric, metricValue(metric, p))}`);
   const comparisonDayPoints: DayPoint[] | null =
     comparisonPeriod && comparison.data
@@ -564,6 +572,7 @@ export function MsSummaryExplorer({
             ghostLabel="Пред. период"
             legendToggle={false}
             labels={labels}
+            axisLabels={axisLabels}
             titles={titles}
             height={expandedHeight ?? undefined}
           />
@@ -575,6 +584,7 @@ export function MsSummaryExplorer({
             ghostTitles={ghostOk ? comparisonPoints.map((p) => fmt.day(p.day)) : undefined}
             legendToggle={false}
             labels={labels}
+            axisLabels={axisLabels}
             titles={titles}
             yMin={0}
             height={expandedHeight ?? undefined}
@@ -767,6 +777,7 @@ export function MsReturnsExplorer({
 
   const values = points.map((p) => metricValue(seriesMetric, p));
   const labels = points.map((p) => fmt.day(p.day));
+  const axisLabels = grain === 'day' ? weekdayAxisFromDayKeys(points.map((p) => p.day)) : undefined;
   const titles = points.map((p) => `${fmt.day(p.day)}: ${fmtReturnsMetric(metric, metricValue(seriesMetric, p))}`);
   const comparisonPoints = comparisonPeriod && comparison.data
     ? aggregatePlotPoints(
@@ -788,6 +799,7 @@ export function MsReturnsExplorer({
           ghostLabel="Пред. период"
           legendToggle={false}
           labels={labels}
+          axisLabels={axisLabels}
           titles={titles}
           height={expandedHeight ?? undefined}
         />
@@ -799,6 +811,7 @@ export function MsReturnsExplorer({
           ghostTitles={ghostOk ? comparisonPoints.map((p) => fmt.day(p.day)) : undefined}
           legendToggle={false}
           labels={labels}
+          axisLabels={axisLabels}
           titles={titles}
           yMin={0}
           height={expandedHeight ?? undefined}

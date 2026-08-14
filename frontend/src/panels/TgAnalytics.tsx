@@ -5,7 +5,7 @@ import type { TgFull, TgGraphs } from '@/api/schemas';
 import { lttbDownsample } from '@/lib/downsample';
 import { CHART_MAX_POINTS } from '@/lib/msSeries';
 import { normalizeTgPosts } from '@/lib/posts';
-import { dayKeyToTs, fmt, ruSeriesName, pluralRu } from '@/lib/format';
+import { dayKeyToTs, fmt, ruSeriesName, pluralRu, weekdayAxisFromDayKeys } from '@/lib/format';
 import { withShares } from '@/lib/breakdownShare';
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
@@ -125,6 +125,9 @@ export function windowGraphSeries(values: number[], xs: number[], win: CalendarW
     wxs = rows.map((r) => r.anchor);
   }
   const labels = wValues.map((_, i) => (wxs[i] ? fmt.day(wxs[i]!) : ''));
+  // Ось букв короткого дневного окна (ревизия осей 2026-08-14): только дневной grain — у
+  // недельной/месячной корзины буква дня лгала бы. Полные даты остаются в labels/titles.
+  const axisLabels = grain === 'day' ? weekdayAxisFromDayKeys(wxs) : undefined;
   const suffix = grain === 'week' ? ' · неделя' : grain === 'month' ? ' · месяц' : '';
   const titles = wValues.map((v, i) => `${labels[i]}: ${fmt.num(v)} ${unit}${suffix}`);
   // Headline for the steep card anatomy: the window's total + the PREVIOUS same-length window's
@@ -136,7 +139,7 @@ export function windowGraphSeries(values: number[], xs: number[], win: CalendarW
   const prevTotal = selected.previous
     ? selected.previous.reduce((sum, row) => sum + row.value, 0)
     : null;
-  return { values: wValues, labels, titles, total, prevTotal };
+  return { values: wValues, labels, axisLabels, titles, total, prevTotal };
 }
 
 /** Кап ЛИНЕЙНОГО представления длинной серии (канон CLAUDE.md: длинные серии даунсэмплятся через
@@ -244,6 +247,9 @@ function deriveTgAnalytics(
   const vbdTitles = last14Days.map(
     (d) => `${fmt.day(d.ts)}: ${fmt.num(viewsByDayRaw[d.key] ?? 0)} просмотров`,
   );
+  // Буквы недели включаются только у молодых/разреженных каналов: фикс-окно 14 дней шире
+  // порога ≤ 8, но при < 8 реальных днях данных ось честно переходит на буквы.
+  const vbdAxisLabels = weekdayAxisFromDayKeys(last14Days.map((d) => d.ts));
   // Ghost overlay = the previous equal-length window (the "vs прошлый период" comparison on the chart).
   const prev14Days = sortedDays.slice(-28, -14);
   const vbdPrev = prev14Days.length >= 2 ? prev14Days.map((d) => Number(viewsByDayRaw[d.key] ?? 0)) : undefined;
@@ -300,7 +306,7 @@ function deriveTgAnalytics(
   const bestWdLabel = maxWdAvg > 0 ? WD_LABELS[wdAvgValues.indexOf(maxWdAvg)] ?? '' : '';
 
   return {
-    vbdLabels, vbdValues, vbdTitles, vbdPrev,
+    vbdLabels, vbdValues, vbdTitles, vbdPrev, vbdAxisLabels,
     interGroup, viewSeries, shareSeries,
     vbsItems, nfsItems, langItems, sentItems,
     thData, hasHours, peakHourStr,
@@ -440,6 +446,7 @@ export function deriveFollowerFlows(
   const empty = {
     values: [] as number[],
     labels: [] as string[],
+    axisLabels: undefined as string[] | undefined,
     titles: [] as string[],
     total: 0,
     prevTotal: null as number | null,
@@ -499,6 +506,11 @@ export function deriveFollowerFlows(
   return {
     values,
     labels,
+    // Буквы короткого дневного окна (ревизия осей 2026-08-14); недельные корзины — датами.
+    axisLabels:
+      opts?.grain === 'week'
+        ? undefined
+        : weekdayAxisFromDayKeys(selected.current.map((row) => row.timestamp)),
     titles,
     total: selected.current.reduce((sum, row) => sum + row.net, 0),
     prevTotal: selected.previous
@@ -650,7 +662,7 @@ export function TgAnalytics({
   // inside TgWidgetBody from the resolved page/Home-widget window.
   const derived = useMemo(() => deriveTgAnalytics(full, graphs, alwaysInRange), [full, graphs]);
   const {
-    vbdLabels, vbdValues, vbdTitles, vbdPrev,
+    vbdLabels, vbdValues, vbdTitles, vbdPrev, vbdAxisLabels,
     interGroup, viewSeries, shareSeries,
     vbsItems, nfsItems, langItems, sentItems,
     thData, hasHours, peakHourStr,
@@ -746,7 +758,7 @@ export function TgAnalytics({
           label: 'Линия',
           render: (
             <ChartCardBody value={fmt.kpi(w.total)} delta={delta} caption={caption}>
-              <LineChart values={line.values} labels={line.labels} titles={line.titles} markAnomalies />
+              <LineChart values={line.values} labels={line.labels} axisLabels={line.axisLabels} titles={line.titles} markAnomalies />
             </ChartCardBody>
           ),
         },
@@ -756,11 +768,11 @@ export function TgAnalytics({
           label: 'Столбцы',
           render: (
             <ChartCardBody value={fmt.kpi(w.total)} delta={delta} caption={caption}>
-              <BarChart values={bars.values} labels={bars.labels} titles={bars.titles} />
+              <BarChart values={bars.values} labels={bars.labels} axisLabels={bars.axisLabels} titles={bars.titles} />
             </ChartCardBody>
           ),
         },
-        seriesBarValuesVariant(bars.values, bars.labels, bars.titles, { sum: true }),
+        seriesBarValuesVariant(bars.values, bars.labels, bars.titles, { sum: true, axisLabels: bars.axisLabels }),
       ];
     },
     [viewSeries, interGroup],
@@ -784,7 +796,7 @@ export function TgAnalytics({
           label: 'Линия',
           render: (
             <ChartCardBody value={fmt.kpi(w.total)} delta={delta} caption={caption}>
-              <LineChart values={line.values} labels={line.labels} titles={line.titles} />
+              <LineChart values={line.values} labels={line.labels} axisLabels={line.axisLabels} titles={line.titles} />
             </ChartCardBody>
           ),
         },
@@ -793,11 +805,11 @@ export function TgAnalytics({
           label: 'Столбцы',
           render: (
             <ChartCardBody value={fmt.kpi(w.total)} delta={delta} caption={caption}>
-              <BarChart values={bars.values} labels={bars.labels} titles={bars.titles} />
+              <BarChart values={bars.values} labels={bars.labels} axisLabels={bars.axisLabels} titles={bars.titles} />
             </ChartCardBody>
           ),
         },
-        seriesBarValuesVariant(bars.values, bars.labels, bars.titles, { sum: true }),
+        seriesBarValuesVariant(bars.values, bars.labels, bars.titles, { sum: true, axisLabels: bars.axisLabels }),
       ];
     },
     [shareSeries, interGroup],
@@ -838,6 +850,7 @@ export function TgAnalytics({
                 <DivergingBars
                   values={flowW.values}
                   labels={flowW.labels}
+                  axisLabels={flowW.axisLabels}
                   titles={flowW.values.map(
                     (value, index) =>
                       `${flowW.labels[index] ?? ''}: ${value >= 0 ? '+' : '−'}${fmt.num(Math.abs(value))}`,
@@ -1012,14 +1025,14 @@ export function TgAnalytics({
                 render: (
                   <>
                     {/* Лицо карточки — без числовых подписей (см. «Чистый прирост» выше). */}
-                    <LineChart values={vbdValues} labels={[vbdLabels[0] ?? '', vbdLabels[Math.floor(vbdLabels.length / 2)] ?? '', vbdLabels[vbdLabels.length - 1] ?? '']} titles={vbdTitles} markAnomalies ghost={vbdPrev} />
+                    <LineChart values={vbdValues} labels={[vbdLabels[0] ?? '', vbdLabels[Math.floor(vbdLabels.length / 2)] ?? '', vbdLabels[vbdLabels.length - 1] ?? '']} axisLabels={vbdAxisLabels} titles={vbdTitles} markAnomalies ghost={vbdPrev} />
                   </>
                 ),
               },
               {
                 key: 'bar',
                 label: 'Столбцы',
-                render: <BarChart values={vbdValues} labels={vbdLabels} titles={vbdTitles} />,
+                render: <BarChart values={vbdValues} labels={vbdLabels} axisLabels={vbdAxisLabels} titles={vbdTitles} />,
               },
             ]}
           />
@@ -1064,11 +1077,11 @@ export function TgAnalytics({
               grainable: true,
               renderExpanded: (days, grain) => {
                 const w = capLineSeries(windowGraphSeries(viewSeries.values, interGroup.x, calendarWindowForDays(days), 'просмотров', { grain }));
-                return <LineChart values={w.values} labels={w.labels} titles={w.titles} markAnomalies markExtremes />;
+                return <LineChart values={w.values} labels={w.labels} axisLabels={w.axisLabels} titles={w.titles} markAnomalies markExtremes />;
               },
               renderExpandedBar: (days, grain) => {
                 const w = windowGraphSeries(viewSeries.values, interGroup.x, calendarWindowForDays(days), 'просмотров', { grain });
-                return <BarChart values={w.values} labels={w.labels} titles={w.titles} />;
+                return <BarChart values={w.values} labels={w.labels} axisLabels={w.axisLabels} titles={w.titles} />;
               },
               statsFor: (days, grain) => windowGraphSeries(viewSeries.values, interGroup.x, calendarWindowForDays(days), 'просмотров', { grain }).values,
             }}
@@ -1087,11 +1100,11 @@ export function TgAnalytics({
               grainable: true,
               renderExpanded: (days, grain) => {
                 const w = capLineSeries(windowGraphSeries(shareSeries.values, interGroup.x, calendarWindowForDays(days), 'репостов', { grain }));
-                return <LineChart values={w.values} labels={w.labels} titles={w.titles} markAnomalies markExtremes />;
+                return <LineChart values={w.values} labels={w.labels} axisLabels={w.axisLabels} titles={w.titles} markAnomalies markExtremes />;
               },
               renderExpandedBar: (days, grain) => {
                 const w = windowGraphSeries(shareSeries.values, interGroup.x, calendarWindowForDays(days), 'репостов', { grain });
-                return <BarChart values={w.values} labels={w.labels} titles={w.titles} />;
+                return <BarChart values={w.values} labels={w.labels} axisLabels={w.axisLabels} titles={w.titles} />;
               },
               statsFor: (days, grain) => windowGraphSeries(shareSeries.values, interGroup.x, calendarWindowForDays(days), 'репостов', { grain }).values,
             }}
