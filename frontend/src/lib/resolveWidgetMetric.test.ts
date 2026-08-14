@@ -508,6 +508,36 @@ describe('resolveWidgetMetric — tg.netGrowth (S3c series-from-graphs)', () => 
     const noFollowers: DataContext = { ...ctx, tg: { ...ctx.tg!, graphs: {} as unknown as TgGraphs } };
     expect(resolveWidgetMetric(cfg('tg.netGrowth'), noFollowers).empty).toBe(true);
   });
+
+  // Форма ряда следует представлению: столбцы рисуют ДНЕВНОЙ ±поток (иначе бары повторяли бы
+  // накопленную кривую и минусовой день был бы невидим), линия — накопление за окно.
+  it('bar viz plots the daily net flow, not the accumulated curve', () => {
+    const bars = resolveWidgetMetric(cfg('tg.netGrowth', { viz: 'bar' }), netCtx);
+    const line = resolveWidgetMetric(cfg('tg.netGrowth', { viz: 'line' }), netCtx);
+    // Окно плотное (день без данных = 0), поэтому сравниваем ненулевые дни: столбцы дают сам
+    // поток (30−10, 40−5), линия — накопление, где последняя точка равна итогу окна.
+    expect(bars.series!.map((p) => p.value).filter((v) => v !== 0)).toEqual([20, 35]);
+    expect(line.series!.at(-1)?.value).toBe(55);
+    expect(bars.valueRaw).toBe(55); // хедлайн — по-прежнему итог окна
+  });
+
+  it('bar viz keeps negative days negative (диверг-ряд, не обрезка нулём)', () => {
+    const churnGraphs = {
+      followers: {
+        x: [NOW - 2 * DAY, NOW - 1 * DAY],
+        series: [
+          { name: 'joined', values: [10, 5] },
+          { name: 'left', values: [30, 5] },
+        ],
+      },
+    } as unknown as TgGraphs;
+    const r = resolveWidgetMetric(cfg('tg.netGrowth', { viz: 'bar' }), {
+      ...ctx,
+      tg: { ...ctx.tg!, graphs: churnGraphs },
+    });
+    expect(r.series!.map((p) => p.value).filter((v) => v !== 0)).toEqual([-20]);
+    expect(r.value).toBe('−20');
+  });
 });
 
 describe('resolveWidgetMetric — stubs + guards (never throws)', () => {

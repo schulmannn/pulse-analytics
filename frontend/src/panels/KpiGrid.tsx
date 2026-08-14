@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import type { ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ValueSwap } from '@/components/ValueSwap';
+import { ChartBand } from '@/components/ChartBand';
 import { useChannels, useHistory, useTgFull } from '@/api/queries';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { lttbDownsample } from '@/lib/downsample';
@@ -282,7 +283,7 @@ function TgTrendStat({
         live={live}
       />
       {hasChart && viz === 'bar' ? (
-        <div className="min-h-14 w-full flex-1">
+        <ChartBand>
           <BarChart
             values={spark.values}
             labels={spark.labels}
@@ -290,7 +291,7 @@ function TgTrendStat({
             titles={spark.values.map((v, i) => `${spark.labels[i] ?? ''}: ${format(v)}`)}
             formatValue={format}
           />
-        </div>
+        </ChartBand>
       ) : hasChart ? (
         <Sparkline
           values={spark.values}

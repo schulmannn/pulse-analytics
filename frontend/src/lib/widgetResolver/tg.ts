@@ -246,11 +246,19 @@ const resolveNetGrowth: WidgetMetricResolver = (_metric, config, ctx, out) => {
     return Number.isFinite(timestamp) && timestamp >= since && timestamp <= winTo;
   });
   if (inWindow.length === 0) return { ...out, empty: true };
-  let running = 0;
-  out.series = bucketIgSeries(points, since, winTo, effectiveGrain(config.grain)).map((point) => {
-    running += point.value;
-    return { ...point, value: running };
-  });
+  const bucketed = bucketIgSeries(points, since, winTo, effectiveGrain(config.grain));
+  // Форма ряда следует представлению (владелец 2026-08-13): СТОЛБЦЫ рисуют дневной ±поток вокруг
+  // нуля (день с оттоком виден сразу), ЛИНИЯ — накопление от начала окна (прежнее поведение:
+  // «как изменилась база за период»). Хедлайн в обоих случаях один — итог окна.
+  if (config.viz === 'bar') {
+    out.series = bucketed;
+  } else {
+    let running = 0;
+    out.series = bucketed.map((point) => {
+      running += point.value;
+      return { ...point, value: running };
+    });
+  }
   const sum = inWindow.reduce((total, point) => total + point.value, 0);
   out.valueRaw = sum;
   out.value = `${sum > 0 ? '+' : sum < 0 ? '−' : ''}${fmt.num(Math.abs(sum))}`;
