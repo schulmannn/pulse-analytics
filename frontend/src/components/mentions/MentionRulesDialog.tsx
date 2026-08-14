@@ -192,6 +192,7 @@ export function MentionRulesDialog({
             {settings.can_edit && (
               <Button
                 type="submit"
+                pending={save.isPending}
                 disabled={save.isPending || lines(include).length === 0}
                 size="xs"
                 className="px-4"

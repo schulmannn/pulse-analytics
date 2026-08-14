@@ -63,6 +63,7 @@ export function InstagramSection() {
                   type="button"
                   variant="destructive"
                   size="sm"
+                  pending={disconnect.isPending}
                   disabled={disconnect.isPending}
                 >
                   {disconnect.isPending ? 'Отключение…' : 'Отключить'}
@@ -106,6 +107,7 @@ export function InstagramSection() {
               type="button"
               size="sm"
               onClick={() => connect.mutate()}
+              pending={connect.isPending}
               disabled={connect.isPending || !s?.server_ready}
               className="shrink-0"
             >

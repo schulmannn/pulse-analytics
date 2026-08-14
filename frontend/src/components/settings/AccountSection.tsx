@@ -33,8 +33,6 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
-  BTN_DESTRUCTIVE,
-  BTN_SECONDARY,
   SettingsGroup,
   SettingsIcon,
   SettingsRow,
@@ -97,34 +95,39 @@ export function ProfileSection() {
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2 @min-[34rem]:shrink-0">
-            <label
-              className={cn(
-                BTN_SECONDARY,
-                'cursor-pointer bg-secondary text-secondary-foreground hover:bg-secondary/80',
-              )}
+            <Button
+              asChild
+              variant="secondary"
+              size="sm"
+              pending={updateAvatar.isPending}
+              className="cursor-pointer bg-secondary text-secondary-foreground hover:bg-secondary/80"
             >
-              {updateAvatar.isPending
-                ? 'Загрузка…'
-                : avatar
-                  ? 'Сменить фото'
-                  : 'Загрузить фото'}
-              <input
-                type="file"
-                accept="image/png,image/jpeg,image/webp"
-                className="hidden"
-                onChange={onFile}
-                disabled={updateAvatar.isPending}
-              />
-            </label>
+              <label>
+                {updateAvatar.isPending
+                  ? 'Загрузка…'
+                  : avatar
+                    ? 'Сменить фото'
+                    : 'Загрузить фото'}
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  className="hidden"
+                  onChange={onFile}
+                  disabled={updateAvatar.isPending}
+                />
+              </label>
+            </Button>
             {avatar && (
-              <button
+              <Button
                 type="button"
+                variant="destructive"
+                size="sm"
                 onClick={() => removeAvatar.mutate()}
+                pending={removeAvatar.isPending}
                 disabled={removeAvatar.isPending}
-                className={BTN_DESTRUCTIVE}
               >
                 Удалить
-              </button>
+              </Button>
             )}
           </div>
         </div>
@@ -418,7 +421,7 @@ export function SecuritySection() {
                       >
                         Отмена
                       </Button>
-                      <Button type="submit" size="sm" disabled={!canSubmit}>
+                      <Button type="submit" size="sm" pending={changePassword.isPending} disabled={!canSubmit}>
                         {changePassword.isPending ? 'Сохранение…' : 'Изменить пароль'}
                       </Button>
                     </div>
@@ -540,6 +543,7 @@ function DeleteAccountRow() {
                   type="submit"
                   variant="destructive"
                   size="sm"
+                  pending={deleteAccount.isPending}
                   disabled={!match || deleteAccount.isPending}
                 >
                   {deleteAccount.isPending ? 'Удаление…' : 'Удалить навсегда'}

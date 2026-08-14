@@ -9,11 +9,13 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useChannels, useCollectorStatus, useConnectIg, useCreateKey, useDisconnectIg, useIgOauthStatus, useMsBackfillStatus, useMsStatus, useTgQrStatus, useYmStatus } from '@/api/queries';
 import { ApiError, apiSend } from '@/api/client';
 import { qk } from '@/api/queryKeys';
+import { orbitHealth, type OrbitNetworkHealth } from '@/lib/connectionHealth';
 import { fmt } from '@/lib/format';
 import { ChannelScope, useSelectedChannel } from '@/lib/channel-context';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
+import { Snippet } from '@/components/ui/snippet';
 
 /**
  * /connect — the source hub. Platforms sit on an orbit around Atlavue (atlas + view), the same
@@ -125,12 +127,18 @@ export function Connect() {
   }, [sourceParam]);
 
   const { data: channelsData } = useChannels();
+  const channels = channelsData?.channels ?? [];
+  const hasQrChannel = channels.some((channel) => channel.source === 'qr');
+  const hasCentralChannel = channels.some((channel) => channel.source === 'central');
+  const tgStatus = useTgQrStatus(hasQrChannel || hasCentralChannel);
   const igStatus = useIgOauthStatus();
   // Орбита обязана говорить то же, что панель справа: у каждого не-«скоро» источника свой
   // источник правды. Статусы МС/Метрики берём теми же хуками, что и MoySkladPanel/MetrikaPanel
   // (ключи запросов общие — повторный вызов не даёт лишнего сетевого похода).
-  const msStatus = useMsStatus();
-  const ymStatus = useYmStatus();
+  const msChannelId = channels.find((channel) => channel.source === 'ms')?.id ?? null;
+  const ymChannelId = channels.find((channel) => channel.source === 'ym')?.id ?? null;
+  const msStatus = useMsStatus(msChannelId);
+  const ymStatus = useYmStatus(ymChannelId);
 
   // IG counts as connected when a per-channel OAuth account is linked OR the global env account is
   // serving data (env_fallback) — both mean real Instagram numbers are flowing.
@@ -140,18 +148,55 @@ export function Connect() {
   // (владелец: «пишет, что МойСклад не подключён»). Канал каждой сети источника уже есть в списке
   // каналов (source: 'ms' | 'ym'); Telegram считает только собственные каналы (зеркало
   // channelsForSource), а не любой канал workspace.
-  const channels = channelsData?.channels ?? [];
-  const tgConnected = channels.some((c) => c.source !== 'ig' && c.source !== 'ms' && c.source !== 'ym');
-  const msChannelId = channels.find((c) => c.source === 'ms')?.id ?? null;
-  const ymChannelId = channels.find((c) => c.source === 'ym')?.id ?? null;
-  const msConnected = (msStatus.data?.connected ?? false) || msChannelId != null;
-  const ymConnected = (ymStatus.data?.connected ?? false) || ymChannelId != null;
+  const centralOwner = hasCentralChannel && !!tgStatus.data?.central_owner;
+  const managedTelegram = hasQrChannel || centralOwner;
+  const independentTelegram = channels.some(
+    (channel) =>
+      channel.source === 'collector' ||
+      channel.source == null ||
+      (channel.source === 'central' && !centralOwner),
+  );
+  // A retained QR channel row is not proof that its deleted session still sends data. While the
+  // shared status is loading we preserve the previous row-based state; once loaded, `connected`
+  // becomes authoritative. Collector / foreign central channels remain independently connected.
+  const managedTelegramConnected = managedTelegram
+    ? (tgStatus.data?.connected ?? true)
+    : false;
+  const tgConnected = independentTelegram || managedTelegramConnected;
+  const msConnected = msStatus.isSuccess ? !!msStatus.data?.connected : msChannelId != null;
+  const ymConnected = ymStatus.isSuccess ? !!ymStatus.data?.connected : ymChannelId != null;
+  const networkHealth = orbitHealth({
+    telegram: {
+      managed: managedTelegram,
+      connectionState: managedTelegram ? tgStatus.data?.connection_state : null,
+    },
+    instagram: {
+      connected: igStatus.data?.connected,
+      envFallback: igStatus.data?.env_fallback,
+      tokenExpiresAt: igStatus.data?.token_expires_at,
+    },
+    moysklad: msStatus.data,
+    metrika: ymStatus.data,
+  });
   const stateOf = (s: Service): 'connected' | 'available' | 'soon' => {
     if (s.kind === 'soon') return 'soon';
     if (s.kind === 'instagram') return igConnected ? 'connected' : 'available';
     if (s.kind === 'moysklad') return msConnected ? 'connected' : 'available';
     if (s.kind === 'metrika') return ymConnected ? 'connected' : 'available';
     return tgConnected ? 'connected' : 'available';
+  };
+  const healthOf = (service: Service): OrbitNetworkHealth => {
+    if (service.kind === 'instagram') return networkHealth.instagram;
+    if (service.kind === 'moysklad') return networkHealth.moysklad;
+    if (service.kind === 'metrika') return networkHealth.metrika;
+    if (service.kind === 'telegram') return networkHealth.telegram;
+    return { health: 'ok', reason: null };
+  };
+  const stateLabel = (service: Service, state = stateOf(service)) => {
+    if (state === 'soon') return 'скоро';
+    if (state === 'available') return 'доступен';
+    const reason = healthOf(service).reason;
+    return reason ? `подключён · ${reason}` : 'подключён';
   };
   const connectedCount = SERVICES.filter((s) => stateOf(s) === 'connected').length;
 
@@ -248,7 +293,7 @@ export function Connect() {
             {/* Хаб-круг с именем выбранного источника убран (владелец: дублировал панель справа —
                 имя и статус уже в её шапке). AT-анонс выбора сохранён невизуальным live-регионом. */}
             <span className="sr-only" aria-live="polite">
-              {active.name} — {activeState === 'connected' ? 'подключён' : activeState === 'available' ? 'доступен' : 'скоро'}
+              {active.name} — {stateLabel(active, activeState)}
             </span>
 
             {/* nodes */}
@@ -259,6 +304,7 @@ export function Connect() {
               const left = 50 + RADIUS * Math.sin(theta);
               const top = 50 - RADIUS * Math.cos(theta);
               const st = stateOf(s);
+              const health = healthOf(s);
               const isSel = s.id === selected;
               return (
                 <label
@@ -273,7 +319,7 @@ export function Connect() {
                     value={s.id}
                     checked={isSel}
                     onChange={() => setSelected(s.id)}
-                    aria-label={`${s.name}${st === 'connected' ? ' — подключён' : st === 'soon' ? ' — скоро' : ' — доступно'}`}
+                    aria-label={`${s.name} — ${stateLabel(s, st)}`}
                     className="peer sr-only"
                   />
                   <span
@@ -300,7 +346,17 @@ export function Connect() {
                     >
                       <Glyph id={s.id} className="size-6" />
                       {st === 'connected' && (
-                        <span aria-hidden="true" className="absolute -right-0.5 -top-0.5 size-3 rounded-full border-2 border-card bg-verdant" />
+                        <span
+                          aria-hidden="true"
+                          className={cn(
+                            'absolute -right-0.5 -top-0.5 size-3 rounded-full border-2 border-card',
+                            health.health === 'error'
+                              ? 'bg-ember'
+                              : health.health === 'warn'
+                                ? 'bg-status-warn'
+                                : 'bg-verdant',
+                          )}
+                        />
                       )}
                     </span>
                   </span>
@@ -942,14 +998,15 @@ function InstagramPanel() {
               <Button
                 type="button"
                 onClick={() => connect.mutate({ newSource: true })}
+                pending={connect.isPending}
                 disabled={connect.isPending}
               >
                 {connect.isPending ? 'Открытие Instagram…' : 'Подключить ещё один аккаунт'}
               </Button>
             )}
-            <button
+            <Button
               type="button"
-              data-mobile-touch-target=""
+              variant="secondary"
               onClick={() => {
                 void (async () => {
                   const ok = await confirm({
@@ -960,11 +1017,12 @@ function InstagramPanel() {
                   if (ok) disconnect.mutate(undefined, { onSuccess: () => toast('Instagram отключён') });
                 })();
               }}
+              pending={disconnect.isPending}
               disabled={disconnect.isPending}
-              className="btn-pill inline-flex min-h-11 items-center border border-border px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-destructive disabled:opacity-50 sm:min-h-0"
+              className="text-muted-foreground hover:text-destructive"
             >
               {disconnect.isPending ? 'Отключение…' : 'Отключить'}
-            </button>
+            </Button>
           </div>
           {serverReady && (
             <p className="text-xs leading-relaxed text-muted-foreground">
@@ -993,6 +1051,7 @@ function InstagramPanel() {
               <Button
                 type="button"
                 onClick={() => connect.mutate()}
+                pending={connect.isPending}
                 disabled={connect.isPending}
                 size="lg"
                 className="px-5"
@@ -1012,6 +1071,7 @@ function InstagramPanel() {
           <Button
             type="button"
             onClick={() => connect.mutate()}
+            pending={connect.isPending}
             disabled={connect.isPending || notReady}
             size="lg"
             className="px-5"
@@ -1145,7 +1205,11 @@ function TelegramPanel({
     if (pollRef.current) { window.clearTimeout(pollRef.current); pollRef.current = null; }
   };
 
-  const refreshStatus = () => qc.invalidateQueries({ queryKey: qk.tgQrStatus });
+  const refreshStatus = () =>
+    Promise.all([
+      qc.invalidateQueries({ queryKey: qk.tgQrStatus }),
+      qc.invalidateQueries({ queryKey: qk.channels }),
+    ]);
 
   const onConnected = (username: string | null, chans: QrChannel[]) => {
     stopPoll();
@@ -1621,10 +1685,8 @@ function CollectorGuide({ channelName }: { channelName: string | null }) {
   const createKey = useCreateKey(channelId ?? 0);
   const [oneTimeKey, setOneTimeKey] = useState<string | null>(null);
   const [keyErr, setKeyErr] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
   const handleCreateKey = async () => {
     setKeyErr(null);
-    setCopied(false);
     try {
       const res = await createKey.mutateAsync({ label: 'локальный коллектор' });
       if (res.key) setOneTimeKey(res.key);
@@ -1632,13 +1694,6 @@ function CollectorGuide({ channelName }: { channelName: string | null }) {
       setKeyErr(error instanceof ApiError ? error.message : 'Не удалось сгенерировать ключ — попробуйте ещё раз');
     }
   };
-  const copyKey = (txt: string) => {
-    navigator.clipboard.writeText(txt).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
-  };
-
   // Шаг 5 — живая проверка: поллим collector-status, пока шаг открыт.
   const onCheckStep = step === WIZARD_STEPS.length;
   const statusQ = useCollectorStatus(onCheckStep ? channelId : null);
@@ -1735,6 +1790,7 @@ function CollectorGuide({ channelName }: { channelName: string | null }) {
                   <Button
                     type="button"
                     onClick={handleCreateKey}
+                    pending={createKey.isPending}
                     disabled={createKey.isPending}
                     size="sm"
                     className="px-4 text-sm"
@@ -1744,20 +1800,11 @@ function CollectorGuide({ channelName }: { channelName: string | null }) {
                 )}
                 {keyErr && <p role="alert" className="text-xs text-destructive">{keyErr}</p>}
                 {oneTimeKey && (
-                  <div role="status" className="space-y-2 rounded border border-status-warn/40 bg-background p-3">
-                    <p className="text-xs font-medium text-status-warn">Скопируйте сейчас — повторно ключ не показывается.</p>
-                    <div className="flex items-center gap-2">
-                      <code className="min-w-0 flex-1 truncate rounded bg-muted px-2 py-1.5 font-mono text-xs">{oneTimeKey}</code>
-                      <button
-                        type="button"
-                        data-mobile-touch-target=""
-                        onClick={() => copyKey(oneTimeKey)}
-                        className="btn-pill inline-flex min-h-11 shrink-0 items-center border border-border px-3 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground sm:min-h-0"
-                      >
-                        {copied ? 'Скопировано' : 'Копировать'}
-                      </button>
-                    </div>
-                  </div>
+                  <Snippet
+                    value={oneTimeKey}
+                    label="Скопируйте сейчас — повторно ключ не показывается."
+                    tone="warn"
+                  />
                 )}
               </div>
             )}
@@ -1899,46 +1946,21 @@ function Code({ children }: { children: ReactNode }) {
 }
 
 function CodeBlock({ children }: { children: ReactNode }) {
-  // Copy-кнопка (полировка 2026-07-28, паттерн Kibo Snippet): команды коллектора копируются одним
-  // кликом вместо ручного выделения; иконка мягко подменяется галочкой через .value-swap.
-  const [copied, setCopied] = useState(false);
   const text = typeof children === 'string' ? children : '';
-  const copy = () => {
-    if (!text) return;
-    navigator.clipboard.writeText(text).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    });
-  };
-  return (
-    <div className="relative mt-2">
-      <pre className="overflow-x-auto rounded border border-border bg-muted px-3 py-2.5 pr-10 font-mono text-xs leading-relaxed text-foreground">
+  if (!text) {
+    return (
+      <pre className="mt-2 overflow-x-auto rounded border border-border bg-muted px-3 py-2.5 font-mono text-xs leading-relaxed text-foreground">
         {children}
       </pre>
-      {text && (
-        <button
-          type="button"
-          data-mobile-touch-target=""
-          aria-label={copied ? 'Скопировано' : 'Скопировать команды'}
-          title={copied ? 'Скопировано' : 'Скопировать'}
-          onClick={copy}
-          className="absolute right-1.5 top-1.5 inline-flex min-h-11 min-w-11 items-center justify-center rounded border border-border bg-background/80 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40 sm:min-h-0 sm:min-w-0 sm:size-7"
-        >
-          <span key={String(copied)} className="value-swap inline-flex">
-            {copied ? (
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="size-3.5 text-verdant" aria-hidden="true">
-                <path d="m5 13 4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            ) : (
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="size-3.5" aria-hidden="true">
-                <rect x="9" y="9" width="11" height="11" rx="2" />
-                <path d="M5 15V5a2 2 0 0 1 2-2h10" strokeLinecap="round" />
-              </svg>
-            )}
-          </span>
-        </button>
-      )}
-    </div>
+    );
+  }
+  return (
+    <Snippet
+      value={text}
+      multiline
+      copyLabel="Скопировать команды"
+      className="mt-2"
+    />
   );
 }
 

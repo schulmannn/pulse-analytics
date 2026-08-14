@@ -10,6 +10,7 @@ import {
 } from '@/api/queries';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
+import { Snippet } from '@/components/ui/snippet';
 import { cn } from '@/lib/utils';
 
 const DAY_LABELS: Array<[number, string]> = [
@@ -63,13 +64,6 @@ export function MentionNotifyDialog({ onClose }: { onClose: () => void }) {
   // регулярно гасится блокировщиком попапов, поэтому открытие — best-effort, а ссылку показываем
   // рядом: её всегда можно открыть или скопировать руками.
   const botUrl = link.data?.url ?? null;
-  const [copied, setCopied] = useState(false);
-  const copyBotUrl = (url: string) => {
-    navigator.clipboard.writeText(url).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
-  };
 
   const connectBot = async () => {
     const res = await link.mutateAsync().catch(() => null);
@@ -157,7 +151,7 @@ export function MentionNotifyDialog({ onClose }: { onClose: () => void }) {
                     {link.isPending ? 'Готовим ссылку…' : 'Привязать бота'}
                   </Button>
                   {botUrl && (
-                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs">
+                    <div className="space-y-2 text-xs">
                       <a
                         href={botUrl}
                         target="_blank"
@@ -166,14 +160,7 @@ export function MentionNotifyDialog({ onClose }: { onClose: () => void }) {
                       >
                         Открыть чат с ботом
                       </a>
-                      <button
-                        type="button"
-                        onClick={() => copyBotUrl(botUrl)}
-                        className="btn-pill border border-border px-3 py-1 font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                      >
-                        {copied ? 'Скопировано' : 'Копировать ссылку'}
-                      </button>
-                      <span role="status" className="sr-only">{copied ? 'Скопировано' : ''}</span>
+                      <Snippet value={botUrl} copyLabel="Копировать ссылку" />
                     </div>
                   )}
                   <p className="text-xs leading-5 text-muted-foreground">

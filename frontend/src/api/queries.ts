@@ -570,7 +570,11 @@ export function useDisconnectIg() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: () => apiSend('DELETE', '/api/ig/oauth', undefined, OkSchema),
-    onSuccess: () => qc.invalidateQueries({ predicate: (q) => String(q.queryKey[0]).startsWith('ig-') }),
+    onSuccess: () =>
+      Promise.all([
+        qc.invalidateQueries({ queryKey: qk.channels }),
+        qc.invalidateQueries({ predicate: (q) => String(q.queryKey[0]).startsWith('ig-') }),
+      ]),
   });
 }
 
@@ -729,8 +733,9 @@ const MsTopProductsSchema = z
 
 const MsStatusSchema = z.object({ connected: z.boolean(), org_name: z.string().nullable().optional() }).passthrough();
 
-export function useMsStatus() {
-  const { channelId } = useSelectedChannel();
+export function useMsStatus(channelIdOverride?: number | null) {
+  const { channelId: selectedChannelId } = useSelectedChannel();
+  const channelId = channelIdOverride === undefined ? selectedChannelId : channelIdOverride;
   return useQuery({
     enabled: channelId != null,
     queryKey: qk.msStatus.byChannel(channelId),
@@ -835,8 +840,9 @@ const YmStatusSchema = z
   })
   .passthrough();
 
-export function useYmStatus() {
-  const { channelId } = useSelectedChannel();
+export function useYmStatus(channelIdOverride?: number | null) {
+  const { channelId: selectedChannelId } = useSelectedChannel();
+  const channelId = channelIdOverride === undefined ? selectedChannelId : channelIdOverride;
   return useQuery({
     enabled: channelId != null,
     queryKey: qk.ymStatus.byChannel(channelId),

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { overviewHealthBanner } from './connectionHealth';
+import { orbitHealth, overviewHealthBanner } from './connectionHealth';
 import type { Freshness } from './freshness';
 
 const fresh: Freshness = { label: 'сегодня', stale: false };
@@ -128,5 +128,92 @@ describe('overviewHealthBanner — source=central, OWNER (managed session is the
 
   it('connected + fresh → no banner', () => {
     expect(overviewHealthBanner({ source: 'central', connectionState: 'connected', fresh, centralOwner: true })).toBeNull();
+  });
+});
+
+describe('orbitHealth', () => {
+  const now = Date.UTC(2026, 7, 13, 12);
+
+  it('maps only the canonical managed Telegram failure states', () => {
+    expect(
+      orbitHealth({ telegram: { managed: true, connectionState: 'reauth_required' }, now })
+        .telegram,
+    ).toEqual({ health: 'error', reason: 'сессия недействительна' });
+    expect(
+      orbitHealth({ telegram: { managed: true, connectionState: 'degraded' }, now }).telegram,
+    ).toEqual({ health: 'warn', reason: 'временно недоступен' });
+    expect(
+      orbitHealth({ telegram: { managed: true, connectionState: 'connected' }, now }).telegram,
+    ).toEqual({ health: 'ok', reason: null });
+    expect(
+      orbitHealth({ telegram: { managed: true, connectionState: 'future_state' }, now }).telegram,
+    ).toEqual({ health: 'ok', reason: null });
+  });
+
+  it('ignores managed-session state for collector-only / central non-owner Telegram', () => {
+    expect(
+      orbitHealth({ telegram: { managed: false, connectionState: 'reauth_required' }, now })
+        .telegram,
+    ).toEqual({ health: 'ok', reason: null });
+  });
+
+  it('maps an expired Instagram token to error', () => {
+    expect(
+      orbitHealth({
+        instagram: {
+          connected: true,
+          tokenExpiresAt: new Date(now - 1).toISOString(),
+        },
+        now,
+      }).instagram,
+    ).toEqual({ health: 'error', reason: 'токен истёк' });
+  });
+
+  it('maps an Instagram token expiring within seven days to warn with remaining days', () => {
+    expect(
+      orbitHealth({
+        instagram: {
+          connected: true,
+          tokenExpiresAt: new Date(now + 6.25 * 24 * 60 * 60 * 1000).toISOString(),
+        },
+        now,
+      }).instagram,
+    ).toEqual({ health: 'warn', reason: 'токен истекает 7 дн' });
+  });
+
+  it('keeps long-lived, invalid-date and environment-fallback Instagram statuses ok', () => {
+    expect(
+      orbitHealth({
+        instagram: {
+          connected: true,
+          tokenExpiresAt: new Date(now + 8 * 24 * 60 * 60 * 1000).toISOString(),
+        },
+        now,
+      }).instagram.health,
+    ).toBe('ok');
+    expect(
+      orbitHealth({ instagram: { connected: true, tokenExpiresAt: 'not-a-date' }, now }).instagram
+        .health,
+    ).toBe('ok');
+    expect(
+      orbitHealth({
+        instagram: {
+          connected: false,
+          envFallback: true,
+          tokenExpiresAt: new Date(now - 1).toISOString(),
+        },
+        now,
+      }).instagram.health,
+    ).toBe('ok');
+  });
+
+  it('does not invent health signals for current MS/YM status shapes', () => {
+    const health = orbitHealth({
+      moysklad: { connected: true },
+      metrika: { connected: true },
+      now,
+    });
+    expect(health.moysklad).toEqual({ health: 'ok', reason: null });
+    expect(health.metrika).toEqual({ health: 'ok', reason: null });
   });
 });
