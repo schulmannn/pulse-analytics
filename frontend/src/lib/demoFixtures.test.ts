@@ -112,7 +112,9 @@ describe('demo fixtures', () => {
     const full = TgFullSchema.parse(demoFixture('/api/tg/full'));
     expect(full.posts.length).toBeGreaterThan(5);
     const history = HistorySchema.parse(demoFixture('/api/history/channel'));
-    expect(history.rows.length).toBe(90);
+    // Архив подписчиков глубже годового ряда просмотров (см. buildHistory): демо обязано
+    // показывать честную пустоту графика постов там, где уровень подписчиков ещё известен.
+    expect(history.rows.length).toBe(420);
     // subscribers should be monotonic-ish upward (a believable growth story)
     const first = Number(history.rows[0].subscribers);
     const last = Number(history.rows[history.rows.length - 1].subscribers);

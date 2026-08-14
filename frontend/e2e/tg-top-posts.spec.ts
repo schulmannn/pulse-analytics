@@ -51,13 +51,17 @@ test.describe('TG Обзор — карточки топ-постов + пери
     // Открываем календарь и выбираем окно двумя календарными месяцами ранее — демо-посты укладываются
     // в последние ~23 дня, поэтому это окно гарантированно пустое (детерминированный сдвиг контента).
     await periodGroup.getByRole('button', { name: 'Свой период' }).click();
-    await page.getByRole('button', { name: 'Предыдущий месяц' }).click();
-    await page.getByRole('button', { name: 'Предыдущий месяц' }).click();
+    // Календарь активности дал демо-фикстурам год дневных точек, поэтому «два месяца назад»
+    // больше не пустое окно. Уходим за пределы годового ряда — проверка та же: карточка с
+    // разрешимой датой обязана честно сказать «нет данных», а не подставить последние точки.
+    for (let back = 0; back < 13; back += 1) {
+      await page.getByRole('button', { name: 'Предыдущий месяц' }).click();
+    }
     // Derive the dates from the same relative month we navigated to. Absolute May 2026 selectors
     // expired as soon as the real current month moved on, even though the product stayed correct.
     const targetMonth = new Date();
     targetMonth.setDate(1);
-    targetMonth.setMonth(targetMonth.getMonth() - 2);
+    targetMonth.setMonth(targetMonth.getMonth() - 13);
     const targetDate = (day: number) =>
       new Date(targetMonth.getFullYear(), targetMonth.getMonth(), day);
     const dayKey = (day: number) => targetDate(day).toLocaleDateString('ru-RU');

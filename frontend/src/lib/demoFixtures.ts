@@ -19,8 +19,11 @@ const wobble = (i: number, amp: number, period = 6) => Math.round(Math.sin((i / 
 function buildHistory() {
   const rows: Array<Record<string, number | string>> = [];
   let subs = 10_900;
-  for (let d = 89; d >= 0; d--) {
-    const age = 89 - d; // 0 = oldest, 89 = today
+  // Архив подписчиков ГЛУБЖЕ ряда просмотров (365 дн. у календаря активности) — это инвариант
+  // демо-стенда: карточка с разрешимой датой обязана честно пустеть за пределами графика постов,
+  // тогда как уровень подписчиков там ещё есть (tg-top-posts.spec держит оба конца).
+  for (let d = 419; d >= 0; d--) {
+    const age = 419 - d; // 0 = oldest, 419 = today
     const joins = 46 + Math.round(14 * Math.abs(Math.sin(age / 4))) + wobble(age, 7) + Math.round(age * 0.15);
     const leaves = 22 + Math.abs(wobble(age, 8, 5));
     subs += joins - leaves;
