@@ -69,16 +69,12 @@ export function IgOverview({ ig }: { ig: IgData }) {
           { key: 'line', label: 'Линия', render: <IgInteractionsBody ig={ig} /> },
         ]}
       />
-      <ChartSection
-        id="ig-overview-engagement"
-        title="Вовлечённость"
-        defaultSize="third"
-        drillTo="/metrics/ig-er"
-        variants={[
-          { key: 'line', label: 'Линия', render: <IgEngagementBody ig={ig} /> },
-          { key: 'bar', label: 'Столбцы', render: <IgEngagementBody ig={ig} viz="bar" /> },
-        ]}
-      />
+      {/* Вовлечённость — центрированный стат БЕЗ графика (владелец, 2026-08-14): вариантов
+          line/bar больше нет, дневной ER остаётся на /metrics/ig-er. Сохранённый prefs.variant
+          прежних вариантов просто игнорируется (children-режим ChartSection, как у TG ER). */}
+      <ChartSection id="ig-overview-engagement" title="Вовлечённость" defaultSize="third" drillTo="/metrics/ig-er">
+        <IgEngagementBody ig={ig} />
+      </ChartSection>
       {/* The S/M/L grid pairs the narrative with one strongest rule-based insight at M/M;
           no unsupported footprint and no second wall of text. */}
       <IgNarrativeWeekBlock id="ig-overview-week" homeKey="ig-week" fixedSize="half" title="Неделя аккаунта" />

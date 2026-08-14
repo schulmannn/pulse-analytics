@@ -739,7 +739,7 @@ function IgErPage({
         <h1 className="text-2xl font-medium tracking-tight text-foreground">{ER_DEF.term}</h1>
         <div className="mt-1 text-xs tracking-wide text-muted-foreground">{handle ? `Instagram ${handle}` : 'Instagram'}</div>
         <div className="mt-2 flex flex-wrap items-baseline gap-x-2.5 gap-y-1 lg:hidden">
-          <span className="text-3xl font-medium leading-none tabular-nums tracking-tight">{hasCur ? `${erReach.toFixed(2)}%` : '—'}</span>
+          <span className="text-3xl font-medium leading-none tabular-nums tracking-tight">{hasCur ? fmt.pctAbs(erReach) : '—'}</span>
           <DeltaPill delta={trend} />
           <span className="text-xs tracking-wide text-muted-foreground">{windowDays} дн.</span>
         </div>
@@ -756,11 +756,11 @@ function IgErPage({
                 <div className="grid grid-cols-1 gap-px border-t border-border bg-border sm:grid-cols-3">
                   <div className="bg-card p-4">
                     <div className="text-xs tracking-wide text-muted-foreground">Текущий период</div>
-                    <div className="mt-2 text-3xl font-medium tabular-nums tracking-tight">{erReach.toFixed(2)}%</div>
+                    <div className="mt-2 text-3xl font-medium tabular-nums tracking-tight">{fmt.pctAbs(erReach)}</div>
                   </div>
                   <div className="bg-card p-4">
                     <div className="text-xs tracking-wide text-muted-foreground">Пред. период</div>
-                    <div className="mt-2 text-3xl font-medium tabular-nums tracking-tight text-ink2">{hasPrev ? `${erReachPrev.toFixed(2)}%` : '—'}</div>
+                    <div className="mt-2 text-3xl font-medium tabular-nums tracking-tight text-ink2">{hasPrev ? fmt.pctAbs(erReachPrev) : '—'}</div>
                   </div>
                   <div className="bg-card p-4">
                     <div className="text-xs tracking-wide text-muted-foreground">Изменение</div>
@@ -776,7 +776,7 @@ function IgErPage({
                 </div>
                 {/* The reconcile line (TG metric-page idiom): the ratio unfolded into its parts. */}
                 <p className="mt-3 text-xs text-muted-foreground">
-                  ER = {fmt.kpi(interactions.cur)} взаимодействий ÷ {fmt.kpi(reach.cur)} охвата × 100% = {erReach.toFixed(2)}%
+                  ER = {fmt.kpi(interactions.cur)} взаимодействий ÷ {fmt.kpi(reach.cur)} охвата × 100% = {fmt.pctAbs(erReach)}
                 </p>
               </>
             ) : (
@@ -795,7 +795,7 @@ function IgErPage({
           <RailSection title="Сравнение">
             <div className="flex items-baseline justify-between gap-3">
               <span className="text-xs text-muted-foreground">Текущее окно</span>
-              <span className="text-base font-medium tabular-nums text-foreground">{hasCur ? `${erReach.toFixed(2)}%` : '—'}</span>
+              <span className="text-base font-medium tabular-nums text-foreground">{hasCur ? fmt.pctAbs(erReach) : '—'}</span>
             </div>
           </RailSection>
           <Link to="/instagram/analytics" className="inline-flex items-center gap-1 text-xs font-medium text-primary transition-colors hover:text-primary/80">

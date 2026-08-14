@@ -137,7 +137,9 @@ export function ChartTooltip({ tip, appearance = 'default' }: { tip: TooltipStat
       className={`pointer-events-none absolute left-0 top-0 z-10 w-max border bg-popover/98 px-3 py-2.5 text-xs font-medium leading-snug text-popover-foreground backdrop-blur-xs ${
         compact
           ? 'min-w-[148px] max-w-[220px] rounded-xl border-foreground/10 shadow-[0_10px_30px_rgba(0,0,0,0.14)] dark:border-white/10 dark:shadow-[0_14px_36px_rgba(0,0,0,0.4)]'
-          : 'max-w-[240px] rounded-md border-border shadow-[0_12px_32px_rgba(0,0,0,0.22)] dark:border-white/10 dark:shadow-[0_14px_36px_rgba(0,0,0,0.48)]'
+          // rounded-xl и у default-подачи (владелец, 2026-08-14: «острые углы → закруглённое всё») —
+          // один радиус на обе подачи тултипа.
+          : 'max-w-[240px] rounded-xl border-border shadow-[0_12px_32px_rgba(0,0,0,0.22)] dark:border-white/10 dark:shadow-[0_14px_36px_rgba(0,0,0,0.48)]'
       } ${
         // На низком плоте плашка неизбежно стоит НАД столбцами: тогда она сжимается по контенту
         // («8 авг.: 354» ≈ 110px вместо 176px) и закрывает вдвое меньше соседних баров.

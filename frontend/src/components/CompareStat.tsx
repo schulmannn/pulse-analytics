@@ -51,6 +51,60 @@ export function CompactStatHeadline({
   );
 }
 
+/**
+ * Центрированный стат без графика (референс владельца, 2026-08-14): крупное число ПО ЦЕНТРУ тела
+ * карточки, строкой под ним — сравнение с прошлым периодом, внизу — тихая пояснительная строка.
+ * Для карточек «Вовлечённость» (TG/IG): у TG искры нет по решению 2026-07 (форма ER дублировала
+ * «Реакции», корреляция 0.996), у IG она снята этим же референсом — дневной ER остаётся на
+ * странице разбора. `deltaText` (у TG — честные «п.п.») выигрывает у процентной DeltaPill.
+ */
+export function CenteredStat({
+  text,
+  delta,
+  deltaText,
+  onDrill,
+  drillLabel,
+  live,
+  note,
+}: {
+  text: string;
+  delta?: MetricDelta | null;
+  deltaText?: string | null;
+  onDrill?: () => void;
+  drillLabel?: string;
+  live: boolean;
+  note?: ReactNode;
+}) {
+  const numberClass = 'kpi-accent text-hero font-medium leading-none tabular-nums tracking-tight';
+  const showDelta = live && (deltaText || (delta && delta.dir !== 'flat'));
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 text-center">
+        {onDrill && live ? (
+          <button
+            type="button"
+            aria-label={drillLabel ? `Разбор: ${drillLabel}` : undefined}
+            title="Подробный разбор"
+            onClick={onDrill}
+            className={`${numberClass} rounded transition-colors hover:text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40`}
+          >
+            <ValueSwap swapKey={text}>{text}</ValueSwap>
+          </button>
+        ) : (
+          <div className={numberClass}><ValueSwap swapKey={text}>{text}</ValueSwap></div>
+        )}
+        {showDelta ? (
+          <div className="flex items-center justify-center gap-1.5 text-xs font-medium tabular-nums text-muted-foreground">
+            {deltaText ? <span>{deltaText}</span> : <DeltaPill delta={delta} />}
+            <span className="font-normal">к прошлому периоду</span>
+          </div>
+        ) : null}
+      </div>
+      {note ? <p className="text-2xs leading-relaxed text-muted-foreground">{note}</p> : null}
+    </div>
+  );
+}
+
 /** One horizontal comparison bar — label · track · formatted value. */
 function CompareBar({
   label,

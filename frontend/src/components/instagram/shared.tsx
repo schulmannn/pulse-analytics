@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { lttbDownsample } from '@/lib/downsample';
 import { CHART_MAX_POINTS } from '@/lib/msSeries';
-import { fmt } from '@/lib/format';
+import { fmt, weekdayAxisLabels } from '@/lib/format';
 import { pctDelta, type MetricDelta } from '@/lib/delta';
 import { DeltaPill } from '@/components/DeltaPill';
 import { EmptyState } from '@/components/EmptyState';
@@ -10,7 +10,7 @@ import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
 import { ChartBand } from '@/components/ChartBand';
 import { ChartCardBody, ChartSection as WidgetChartSection } from '@/components/ChartWidget';
-import { CompactStatHeadline } from '@/components/CompareStat';
+import { CenteredStat, CompactStatHeadline } from '@/components/CompareStat';
 import { Sparkline } from '@/components/Sparkline';
 import type { WidgetSize } from '@/lib/widgetPrefsStore';
 import { fmtDay, pairDelta, windowIgSeries, type Point, type WindowPair } from '@/lib/igMetrics';
@@ -115,6 +115,7 @@ export function KpiHero({
   series,
   drillTo,
   viz = 'line',
+  windowDays,
 }: {
   label: string;
   value: string;
@@ -125,15 +126,18 @@ export function KpiHero({
   drillTo?: string;
   /** «Линия» / «Столбцы» из карусели вариантов карточки — паритет с TG-твином FeaturedKpi. */
   viz?: 'line' | 'bar';
+  /** Длина активного окна в днях — короткое окно (≤ 8) метит ось буквами дней недели. */
+  windowDays?: number;
 }) {
   const navigate = useNavigate();
   const daily = (series ?? []).filter((p) => p.day !== 'total');
   // Кап длинной линии (канон CLAUDE.md): на «Всё» дневной архив уходил в чарт целиком —
   // LTTB прореживает до CHART_MAX_POINTS, labels строятся из тех же выбранных точек.
   const shown = lttbDownsample(daily, CHART_MAX_POINTS, (p) => p.value);
+  const axisLabels = weekdayAxisLabels(shown.map((p) => p.day), windowDays);
   // Канон hero-карточки Обзора — безосевой area-Sparkline (TG-твин FeaturedKpi): ряд дат на лице
-  // не рисуем, значения по дням читаются hover-читалкой (caption обязателен — без него Sparkline
-  // не рендерит читалку вовсе); полные оси живут на /metrics/ig-* (drillTo).
+  // не рисуем, значения по дням читаются hover-тултипом (caption обязателен — без него Sparkline
+  // не резервирует строку оси); полные оси живут на /metrics/ig-* (drillTo).
   const chart =
     shown.length > 1 &&
     (viz === 'bar' ? (
@@ -141,6 +145,7 @@ export function KpiHero({
         <BarChart
           values={shown.map((p) => p.value)}
           labels={shown.map((p) => fmtDay(p.day))}
+          axisLabels={axisLabels}
           titles={shown.map((p) => `${fmtDay(p.day)}: ${fmt.num(p.value)}`)}
           formatValue={fmt.num}
         />
@@ -149,6 +154,7 @@ export function KpiHero({
       <Sparkline
         values={shown.map((p) => p.value)}
         labels={shown.map((p) => fmtDay(p.day))}
+        axisLabels={axisLabels}
         area
         strokeWidth={2}
         interactive
@@ -302,7 +308,9 @@ export function IgKpiBlock({ ig }: { ig: IgData }) {
         />
         <KpiCard
           label="Вовлечённость"
-          value={ig.erReach > 0 ? `${ig.erReach.toFixed(2)}%` : '—'}
+          // Единый формат абсолютного процента с TG (fmt.pctAbs): «25.1%», не «25.10%» — карточка
+          // и /metrics/ig-er обязаны печатать одно число одним форматом.
+          value={ig.erReach > 0 ? fmt.pctAbs(ig.erReach) : '—'}
           trend={erTrend}
           onDrill={() => navigate('/metrics/ig-er')}
         />
@@ -397,6 +405,7 @@ export function IgReachBody({ ig, viz }: { ig: IgData; viz?: 'line' | 'bar' }) {
       series={ig.series.reach.filter((p) => ig.inWindow(p.day))}
       drillTo="/metrics/ig-reach"
       viz={viz}
+      windowDays={ig.window.days}
     />
   );
 }
@@ -440,6 +449,7 @@ export function IgAudienceBody({ ig }: { ig: IgData }) {
             <Sparkline
               values={level.map((p) => p.value)}
               labels={level.map((p) => fmtDay(p.day))}
+              axisLabels={weekdayAxisLabels(level.map((p) => p.day), ig.window.days)}
               area
               strokeWidth={2}
               interactive
@@ -493,6 +503,7 @@ function IgTrendStat({
           <BarChart
             values={chart.values}
             labels={chart.labels}
+            axisLabels={chart.axisLabels}
             titles={chart.values.map((v, i) => `${chart.labels[i] ?? ''}: ${format(v)}`)}
             formatValue={format}
           />
@@ -501,6 +512,7 @@ function IgTrendStat({
         <Sparkline
           values={chart.values}
           labels={chart.labels}
+          axisLabels={chart.axisLabels}
           area
           strokeWidth={2}
           interactive
@@ -551,23 +563,25 @@ export function IgInteractionsBody({ ig, viz }: { ig: IgData; viz?: 'line' | 'ba
   );
 }
 
-/** «Вовлечённость» (third): daily ER = 100·interactions ÷ reach, aligned by calendar day. */
-export function IgEngagementBody({ ig, viz }: { ig: IgData; viz?: 'line' | 'bar' }) {
+/** «Вовлечённость» (third): ER по центру карточки (референс владельца, 2026-08-14 — центрированный
+    процент, под ним сравнение с прошлым периодом; зеркало TG TgErBody). Дневная кривая ER снята
+    с карточки тем же решением — она остаётся на странице разбора /metrics/ig-er. Формат — единый
+    абсолютный процент fmt.pctAbs («25.1%», не «25.10%»), паритет с TG «28.9%». */
+export function IgEngagementBody({ ig }: { ig: IgData }) {
   const navigate = useNavigate();
   const erTrend =
     ig.erReach > 0 && ig.pairs.reach.hasCur && ig.pairs.reach.hasPrev && ig.erReachPrev > 0
       ? pctDelta(ig.erReach, ig.erReachPrev)
       : null;
+  const live = ig.erReach > 0;
   return (
-    <IgTrendStat
-      value={ig.erReach > 0 ? ig.erReach : null}
+    <CenteredStat
+      text={live ? fmt.pctAbs(ig.erReach) : '—'}
       delta={erTrend}
-      chart={ig.overviewCharts.engagement}
-      viz={viz}
-      format={(n) => `${n.toFixed(2)}%`}
-      hasValue={ig.erReach > 0}
       onDrill={() => navigate('/metrics/ig-er')}
       drillLabel="Вовлечённость"
+      live={live}
+      note="Взаимодействия к охвату аккаунта за период."
     />
   );
 }

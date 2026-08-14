@@ -2,6 +2,8 @@
 // takeaways. Each insight carries the numbers behind it and a confidence level, so the UI reads
 // like an analyst's note ("here's the claim, here's the proof, here's how sure we are"), not a
 // generic AI summary. Pure + testable: the panel gathers inputs, this decides what's worth saying.
+import { fmt } from '@/lib/format';
+
 export type Confidence = 'high' | 'medium' | 'low';
 
 export interface IgInsightInput {
@@ -93,7 +95,7 @@ export function buildIgInsights(i: IgInsightInput): IgInsight[] {
       out.push({
         tone: up ? 'up' : 'down',
         text: `Вовлечённость ${up ? 'выросла' : 'снизилась'}.`,
-        evidence: `ER по охвату ${i.erReach.toFixed(2)}% (было ${i.erReachPrev.toFixed(2)}%)${driver}`,
+        evidence: `ER по охвату ${fmt.pctAbs(i.erReach)} (было ${fmt.pctAbs(i.erReachPrev)})${driver}`,
         confidence: n >= 5 ? 'high' : 'medium',
         priority: 80,
       });
@@ -101,7 +103,7 @@ export function buildIgInsights(i: IgInsightInput): IgInsight[] {
       out.push({
         tone: 'neutral',
         text: 'Вовлечённость держится стабильно.',
-        evidence: `ER по охвату ${i.erReach.toFixed(2)}%`,
+        evidence: `ER по охвату ${fmt.pctAbs(i.erReach)}`,
         confidence: n >= 5 ? 'medium' : 'low',
         priority: 40,
       });

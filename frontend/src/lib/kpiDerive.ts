@@ -1,5 +1,5 @@
 import type { ChannelsResponse, HistoryData, TgFull } from '@/api/schemas';
-import { fmt, pluralRu } from '@/lib/format';
+import { fmt, pluralRu, weekdayAxisLabels as weekdayAxis } from '@/lib/format';
 import { normalizeTgPosts } from '@/lib/posts';
 import type { NormalizedPost } from '@/lib/posts';
 import type { DateRange, PeriodDays } from '@/lib/period';
@@ -10,7 +10,11 @@ import type { MetricDelta } from '@/lib/delta';
 export interface DailySeries {
   labels: string[];
   values: number[];
+  /** Ось короткого окна (≤ 8 дневных точек): однобуквенные дни недели (fmt.weekday) вместо дат.
+      Только ПОДПИСИ ОСИ — `labels` остаются полными датами для тултипа/читалки. */
+  axisLabels?: string[];
 }
+
 
 /** KPI metrics that have a dedicated metric page (subset of MetricKey shown as a KPI). */
 export type DrillKey = 'views' | 'subscribers' | 'avgReach' | 'reactions' | 'forwards' | 'er';
@@ -42,13 +46,15 @@ export function filledDailySeries(
   }
   const labels: string[] = [];
   const values: number[] = [];
+  const dayKeys: string[] = [];
   const start = fromMs - (fromMs % DAY_MS);
   for (let t = start; t <= toMs; t += DAY_MS) {
     const key = new Date(t).toISOString().slice(0, 10);
+    dayKeys.push(key);
     labels.push(fmt.day(key));
     values.push(byDay.get(key) ?? 0);
   }
-  return { labels, values };
+  return { labels, values, axisLabels: weekdayAxis(dayKeys, dayKeys.length) };
 }
 
 /** Sparse daily sums (no zero-fill) — for the unbounded «Всё» window. */
@@ -153,6 +159,12 @@ export function deriveKpis(
   const avgReachPair = range ? null : avgReachWindows(avgReachPosts, days);
   const avgReachTrend = avgReachPair ? pctDelta(avgReachPair.current, avgReachPair.previous) : null;
 
+  // Длина активного окна в ДНЯХ — для оси коротких окон (буквы дней недели, weekdayAxis):
+  // пресет несёт её напрямую (0 = «всё» → null), кастомный диапазон — по своим границам.
+  const windowDays = range
+    ? Math.round((range.to - range.from) / DAY_MS) + 1
+    : days > 0 ? days : null;
+
   // Per-metric daily series for the inline sparklines (within the active window). Carries the
   // day labels alongside the values so the interactive read-out can name the hovered point.
   const dailySeries = (value: (post: (typeof posts)[number]) => number): DailySeries => {
@@ -165,7 +177,11 @@ export function deriveKpis(
       byDay.set(key, (byDay.get(key) ?? 0) + value(post));
     });
     const entries = [...byDay.entries()].sort(([a], [b]) => a.localeCompare(b));
-    return { labels: entries.map(([k]) => fmt.day(k)), values: entries.map(([, v]) => v) };
+    return {
+      labels: entries.map(([k]) => fmt.day(k)),
+      values: entries.map(([, v]) => v),
+      axisLabels: weekdayAxis(entries.map(([k]) => k), windowDays),
+    };
   };
   // Active-window sparklines for the three compact TG comparison cards (Ср. охват / Реакции /
   // Вовлечённость). Owner override (2026-07): these third-width cards now carry an HONEST
@@ -192,13 +208,18 @@ export function deriveKpis(
   });
   const pubDays = [...pubDayBuckets.entries()].sort(([a], [b]) => a.localeCompare(b));
   const pubDayLabels = pubDays.map(([k]) => fmt.day(k));
+  // Ось букв дней недели у публикационных искр: дни РАЗРЕЖЕНЫ (без публикаций дня нет), поэтому
+  // буквы идут с пропусками — «M W F» честно называет дни выходов, полную дату держит тултип.
+  const pubDayAxis = weekdayAxis(pubDays.map(([k]) => k), windowDays);
   const avgReachSpark: DailySeries = {
     labels: pubDayLabels,
     values: pubDays.map(([, b]) => (b.count > 0 ? b.views / b.count : 0)),
+    axisLabels: pubDayAxis,
   };
   const reactionsSpark: DailySeries = {
     labels: pubDayLabels,
     values: pubDays.map(([, b]) => b.reactions),
+    axisLabels: pubDayAxis,
   };
   // Знаменатель ER — аудитория ТОГО ДНЯ, из дневного архива, а не сегодняшнее число подписчиков.
   // С константой в знаменателе ER выходил РОВНО пропорционален вовлечению: erSpark = reactions ×
@@ -219,11 +240,16 @@ export function deriveKpis(
       const base = membersByDay.get(day) ?? members;
       return base > 0 ? ((b.reactions + b.replies + b.forwards) / base) * 100 : 0;
     }),
+    axisLabels: pubDayAxis,
   };
   // Sparkline matches the (channel-wide) headline: daily channel views from the archive when we
   // have it, else the post-derived daily series (fallback path).
   const viewsSpark: DailySeries = hasChannelViews
-    ? { labels: viewsArchiveRows.map((r) => fmt.day(r.day)), values: viewsArchiveRows.map((r) => Number(r.views)) }
+    ? {
+        labels: viewsArchiveRows.map((r) => fmt.day(r.day)),
+        values: viewsArchiveRows.map((r) => Number(r.views)),
+        axisLabels: weekdayAxis(viewsArchiveRows.map((r) => r.day), windowDays),
+      }
     : dailySeries((post) => Number(post.views ?? post.view_count ?? 0));
   // Subscriber trend from the daily archive (reliable, unlike post-derived views).
   const subsRows = historyRows
@@ -232,6 +258,7 @@ export function deriveKpis(
   const subsSpark: DailySeries = {
     labels: subsRows.map((row) => fmt.day(row.day)),
     values: subsRows.map((row) => Number(row.subscribers)),
+    axisLabels: weekdayAxis(subsRows.map((row) => row.day), windowDays),
   };
   // Absolute subscriber change ("−108 за 30 дн.") — more legible than the % alone. Only for the
   // `days` presets: a custom date range overrides the preset window, so a preset-based number +

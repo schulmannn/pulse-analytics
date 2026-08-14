@@ -167,7 +167,9 @@ export const resolveIgMetric: WidgetMetricResolver = (metric, config, ctx, out) 
     if (reach <= 0) return { ...out, empty: true };
     const engagementRate = (interactions / reach) * 100;
     out.valueRaw = engagementRate;
-    out.value = `${engagementRate.toFixed(2)}%`;
+    // Единый абсолютный процент (fmt.pctAbs) — виджет обязан печатать то же «25.1%», что карточка
+    // Обзора и /metrics/ig-er.
+    out.value = fmt.pctAbs(engagementRate);
     return out;
   }
 

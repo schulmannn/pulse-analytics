@@ -26,6 +26,12 @@ interface BarChartProps {
    */
   values: Array<number | null>;
   labels?: string[];
+  /**
+   * Подписи ОСИ вместо дат из `labels` (короткое окно ≤ 8 точек: буквы дней недели, канон
+   * weekdayAxis). Буквы узкие — подписан КАЖДЫЙ столбец, все по центру колонки. Тултип
+   * по-прежнему называет полную дату (titles/labels).
+   */
+  axisLabels?: string[];
   titles?: string[];
   height?: number;
   /** Comparison series (previous period / baseline). В СТОЛБЦАХ призрак рисуется столбцами же —
@@ -67,6 +73,8 @@ const MAX_BAR_W = 48;
 const BAR_RATIO = 0.7;
 // Approximate glyph width of the 11px tabular numerals used for tick/value labels.
 const CHAR_W = 6.6;
+// Горизонтальное поле пилюли текущей метки оси X (px с каждой стороны текста).
+const AXIS_PILL_PAD = 6;
 // ОДНА альфа призрачных столбцов на все подачи: grouped-пара, stacked-сегмент, hover-хайлайт,
 // свотчи легенды и точка в тултипе. Раньше grouped жил на /0.35, а stacked и хайлайт — в полную
 // непрозрачность, из-за чего «прошлый период» звучал то тише, то громче текущего.
@@ -81,11 +89,18 @@ const GHOST_FILL = `hsl(var(--chart-role-comparison) / ${GHOST_ALPHA})`;
 
 interface BarBox { x: number; y: number; w: number; h: number }
 
-/** A stack segment with independently rounded outer corners, avoiding seams at the join. */
-function stackSegmentPath(box: BarBox, roundTop: boolean, roundBottom: boolean): string {
+// Радиус внешних углов столбца (владелец, 2026-08-14: «острые углы → закруглённое всё»). Одна
+// константа на одиночные бары, grouped-пары, stacked-сегменты и hover/pinned-подсветку — иначе
+// подсветка перерисовывала бы столбец с другой формой углов. Узкий/низкий столбец клампится
+// половиной своей стороны, так что плотные серии не превращаются в капсулы.
+const BAR_CORNER_R = 6;
+
+/** A stack segment with independently rounded outer corners, avoiding seams at the join.
+    Экспорт: DivergingBars скругляет той же формой внешний угол плюс/минус-баров. */
+export function stackSegmentPath(box: BarBox, roundTop: boolean, roundBottom: boolean): string {
   if (box.h <= 0 || box.w <= 0) return '';
-  const top = roundTop ? Math.min(4, box.w / 2, box.h / 2) : 0;
-  const bottom = roundBottom ? Math.min(4, box.w / 2, box.h / 2) : 0;
+  const top = roundTop ? Math.min(BAR_CORNER_R, box.w / 2, box.h / 2) : 0;
+  const bottom = roundBottom ? Math.min(BAR_CORNER_R, box.w / 2, box.h / 2) : 0;
   const right = box.x + box.w;
   const base = box.y + box.h;
   return [
@@ -105,6 +120,7 @@ function stackSegmentPath(box: BarBox, roundTop: boolean, roundBottom: boolean):
 export function BarChart({
   values: rawValues,
   labels,
+  axisLabels,
   titles,
   height = 200,
   ghost: rawGhost,
@@ -273,8 +289,13 @@ export function BarChart({
     const itemWidth = Math.min(plotW / n, MAX_BAR_W / BAR_RATIO);
     const barWidth = itemWidth * BAR_RATIO;
     const offsetX = gutterW + (plotW - itemWidth * n) / 2;
+    // Буквенная ось короткого окна (axisLabels): буквы узкие, подписан КАЖДЫЙ столбец — без
+    // прореживания «M _ W _ F» ряд терял бы ритм недели. Даты прореживаются по ширине, как раньше.
+    const letterAxis = axisLabels && axisLabels.length === n ? axisLabels : null;
     // Thin x-labels by measured width; labels are hidden rather than rotated in tight cards.
-    const labelIndexes = axisLabelIndexSet(n, plotW, { minLabelPx: expanded ? 68 : 78, maxLabels: expanded ? 12 : 7 });
+    const labelIndexes = letterAxis
+      ? new Set(values.map((_, i) => i))
+      : axisLabelIndexSet(n, plotW, { minLabelPx: expanded ? 68 : 78, maxLabels: expanded ? 12 : 7 });
 
     const barTop = (val: number) => graphHeight - (val / max) * usable;
     const barCenterX = (i: number) => offsetX + i * itemWidth + itemWidth / 2;
@@ -374,9 +395,36 @@ export function BarChart({
       <>
         {values.map((val, i) => {
           const strideHit = labelIndexes.has(i);
-          const showLabel = labels?.[i] && strideHit;
+          const axisText = letterAxis ? letterAxis[i] : labels?.[i];
+          const showLabel = axisText && strideHit;
           const showValue = expanded && strideHit && !stacked;
           if (!showLabel && !showValue) return null;
+          const isLast = i === values.length - 1;
+          // Крайние ДАТЫ прижимаются к краям плота (start/end), а не центрируются под столбцом —
+          // центрированная последняя дата наполовину вылетала за svg и клипалась («9 ин» вместо
+          // «9 июл.», дизайн-проход №3). Зеркало поведения LineChart. Буквы дней недели узкие и
+          // центрируются под КАЖДЫМ столбцом (референс владельца). Последняя метка при этом
+          // отступает от края на поле своей пилюли, чтобы пилюля не клипалась рамкой svg.
+          const labelX = letterAxis
+            ? barCenterX(i)
+            : isLast
+              ? Math.min(bars[i].x + bars[i].w, width - 1) - (labels?.[i] ? AXIS_PILL_PAD : 0)
+              : i === 0
+                ? Math.max(bandX(i), 1)
+                : barCenterX(i);
+          const anchor = letterAxis ? 'middle' : isLast ? 'end' : i === 0 ? 'start' : 'middle';
+          // ПИЛЮЛЯ текущей (последней) метки — «где сейчас» на оси (референс владельца:
+          // «Aug» / обведённая «T»). viewBox здесь 1:1 с CSS-px, поэтому скруглённый rect не
+          // искажается. Ширина текста оценивается CHAR_W — тем же приёмом, что y-gutter.
+          const pill = showLabel && isLast
+            ? (() => {
+                const textW = String(axisText).length * CHAR_W;
+                const pillH = 15;
+                const pillW = Math.max(textW + AXIS_PILL_PAD * 2, pillH);
+                const x = anchor === 'end' ? labelX - textW - AXIS_PILL_PAD : labelX - pillW / 2;
+                return { x: Math.max(1, x), w: pillW, h: pillH };
+              })()
+            : null;
           return (
             <g key={`l${i}`}>
               {showValue && (
@@ -390,18 +438,30 @@ export function BarChart({
                 </text>
               )}
               {showLabel && (
-                // Крайние подписи прижимаются к краям плота (start/end), а не центрируются под
-                // столбцом — центрированная последняя дата наполовину вылетала за svg и клипалась
-                // («9 ин» вместо «9 июл.», дизайн-проход №3). Зеркало поведения LineChart.
-                <text
-                  x={i === values.length - 1 ? Math.min(bars[i].x + bars[i].w, width - 1) : i === 0 ? Math.max(bandX(i), 1) : barCenterX(i)}
-                  y={chartHeight - 6}
-                  textAnchor={i === values.length - 1 ? 'end' : i === 0 ? 'start' : 'middle'}
-                  data-chart-axis-label="x"
-                  className="pointer-events-none select-none fill-muted-foreground text-2xs font-medium tabular-nums"
-                >
-                  {labels?.[i]}
-                </text>
+                <g data-axis-current={isLast ? '' : undefined}>
+                  {pill && (
+                    // Пара «bg-primary/10 + accent-foreground» — канон primary-tint-ink
+                    // (AA-композит), тот же, что у HTML-пилюль оси спарков.
+                    <rect
+                      x={pill.x}
+                      y={chartHeight - 17.5}
+                      width={pill.w}
+                      height={pill.h}
+                      rx={pill.h / 2}
+                      fill="hsl(var(--primary) / 0.1)"
+                      className="pointer-events-none"
+                    />
+                  )}
+                  <text
+                    x={labelX}
+                    y={chartHeight - 6}
+                    textAnchor={anchor}
+                    data-chart-axis-label="x"
+                    className={`pointer-events-none select-none text-2xs font-medium tabular-nums ${isLast ? 'fill-accent-foreground' : 'fill-muted-foreground'}`}
+                  >
+                    {axisText}
+                  </text>
+                </g>
               )}
             </g>
           );
@@ -445,7 +505,7 @@ export function BarChart({
     );
 
     return { chartWidth, chartHeight, graphHeight, offsetX, itemWidth, bars, ghostBars, stacked, barTop, barCenterX, underLayer, overLayer };
-  }, [values, labels, activeGhost, hasGhost, target, refLines, width, ctxHeight, hostHeight, height, expanded, comparisonStyle, gapIdx, gapPatternId]);
+  }, [values, labels, axisLabels, activeGhost, hasGhost, target, refLines, width, ctxHeight, hostHeight, height, expanded, comparisonStyle, gapIdx, gapPatternId]);
 
   // ── UPDATE morph: the silhouette flows into the new shape on a data change ────────────────
   // Heights (the ONE dimension the data owns — x/width are layout) tween from the previously
@@ -487,7 +547,9 @@ export function BarChart({
             fill="hsl(var(--chart-role-primary))"
           />
         ) : (
-          <rect key={`b${i}`} data-chart-series="current" x={b.x} y={b.y} width={b.w} height={b.h} fill="hsl(var(--chart-role-primary))" rx={2} />
+          // Одиночный столбец: скруглённый ВЕРХ, прямое основание на базовой линии — капсула,
+          // оторванная от оси, читалась бы как «плавающий» бар (stackSegmentPath клампит радиус).
+          <path key={`b${i}`} data-chart-series="current" d={stackSegmentPath(b, true, false)} fill="hsl(var(--chart-role-primary))" />
         ))}
         {ghostBars.map((b, i) => plot.stacked ? (
           <path
@@ -497,7 +559,7 @@ export function BarChart({
             fill={GHOST_FILL}
           />
         ) : (
-          <rect key={`gb${i}`} data-chart-series="comparison" x={b.x} y={b.y} width={b.w} height={b.h} fill={GHOST_FILL} rx={2} />
+          <path key={`gb${i}`} data-chart-series="comparison" d={stackSegmentPath(b, true, false)} fill={GHOST_FILL} />
         ))}
       </>
     );
@@ -686,7 +748,9 @@ export function BarChart({
             )}
           </g>
         ) : hover && hover.i < n ? (
-          <rect x={bars[hover.i].x} y={bars[hover.i].y} width={bars[hover.i].w} height={bars[hover.i].h} fill="hsl(var(--chart-role-selection))" rx={2} className="pointer-events-none" />
+          // Та же скруглённая форма, что у самого столбца, — иначе подсветка перерисовывала бы
+          // бар с другими углами.
+          <path d={stackSegmentPath(bars[hover.i], true, false)} fill="hsl(var(--chart-role-selection))" className="pointer-events-none" />
         ) : null}
 
         {plot.overLayer}
@@ -694,17 +758,21 @@ export function BarChart({
         {/* PINNED column — persistent highlight + dashed crosshair (under the live hover). */}
         {pinnedIndex != null && pinnedIndex < n && bars[pinnedIndex] && (
           <g className="pointer-events-none">
-            <rect
-              x={bars[pinnedIndex].x}
-              y={stacked ? columnTops[pinnedIndex] : bars[pinnedIndex].y}
-              width={bars[pinnedIndex].w}
-              height={stacked ? graphHeight - columnTops[pinnedIndex] : bars[pinnedIndex].h}
-              fill={stacked ? 'none' : 'hsl(var(--chart-role-selection))'}
-              stroke={stacked ? 'hsl(var(--chart-role-selection))' : undefined}
-              strokeWidth={stacked ? 2 : undefined}
-              vectorEffect={stacked ? 'non-scaling-stroke' : undefined}
-              rx={stacked ? 4 : 2}
-            />
+            {stacked ? (
+              <rect
+                x={bars[pinnedIndex].x}
+                y={columnTops[pinnedIndex]}
+                width={bars[pinnedIndex].w}
+                height={graphHeight - columnTops[pinnedIndex]}
+                fill="none"
+                stroke="hsl(var(--chart-role-selection))"
+                strokeWidth={2}
+                vectorEffect="non-scaling-stroke"
+                rx={BAR_CORNER_R}
+              />
+            ) : (
+              <path d={stackSegmentPath(bars[pinnedIndex], true, false)} fill="hsl(var(--chart-role-selection))" />
+            )}
             <line
               x1={barCenterX(pinnedIndex)}
               y1={0}

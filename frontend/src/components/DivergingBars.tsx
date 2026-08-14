@@ -5,6 +5,7 @@ import { seriesMotionKey } from '@/lib/chartMotion';
 import { useMorphValues } from '@/lib/useMorphValues';
 import { observeSize } from '@/lib/observeSize';
 import { ChartTooltip } from '@/components/ChartTooltip';
+import { stackSegmentPath } from '@/components/BarChart';
 import { EmptyState } from '@/components/EmptyState';
 import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
 
@@ -129,6 +130,9 @@ export function DivergingBars({ values, labels, titles, height }: DivergingBarsP
         y: extent >= 0 ? plot.mid - bh : plot.mid,
         w: plot.barWidth,
         h: bh,
+        // Скругляется ВНЕШНИЙ угол (от нулевой линии): у плюс-бара верх, у минус-бара низ —
+        // основание на нулевой линии остаётся прямым (канон BarChart, «закруглённое всё»).
+        up: extent >= 0,
         fill: 'hsl(var(--chart-role-primary))',
         // Down bars: same ink, one luminance step quieter — position already says the direction.
         op: plot.valid[i] ? (extent >= 0 ? 1 : 0.6) : 0,
@@ -138,7 +142,7 @@ export function DivergingBars({ values, labels, titles, height }: DivergingBarsP
   const barsLayer = useMemo(
     () =>
       bars?.map((b, i) => (
-        <rect key={i} x={b.x} y={b.y} width={b.w} height={b.h} fill={b.fill} fillOpacity={b.op} rx={1} />
+        <path key={i} d={stackSegmentPath(b, b.up, !b.up)} fill={b.fill} fillOpacity={b.op} />
       )) ?? null,
     [bars],
   );
@@ -213,14 +217,10 @@ export function DivergingBars({ values, labels, titles, height }: DivergingBarsP
         {plot.labelsLayer}
 
         {hover && hover.i < n && (
-          <rect
-            x={bars[hover.i].x}
-            y={bars[hover.i].y}
-            width={bars[hover.i].w}
-            height={bars[hover.i].h}
+          <path
+            d={stackSegmentPath(bars[hover.i], bars[hover.i].up, !bars[hover.i].up)}
             fill={bars[hover.i].fill}
             fillOpacity={bars[hover.i].op}
-            rx={1}
             className="pointer-events-none"
           />
         )}
