@@ -734,7 +734,10 @@ export function MetricPage() {
         .sort((a, b) => Number(b[field!] ?? 0) - Number(a[field!] ?? 0))
         .slice(0, 5)
     : [];
-  const pinnedDiff = pinnedValid != null && pinnedValid > 0 ? series.values[pinnedValid] - series.values[pinnedValid - 1] : null;
+  // Пропуск (null-день) в паре — дельты нет: «изменение от дня без данных» было бы выдумкой.
+  const pinnedCur = pinnedValid != null && pinnedValid > 0 ? series.values[pinnedValid] : null;
+  const pinnedPrevVal = pinnedValid != null && pinnedValid > 0 ? series.values[pinnedValid - 1] : null;
+  const pinnedDiff = pinnedCur != null && pinnedPrevVal != null ? pinnedCur - pinnedPrevVal : null;
 
   return (
     <div className="space-y-4">

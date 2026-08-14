@@ -6,10 +6,12 @@ import type { DateRange, PeriodDays } from '@/lib/period';
 import { avgReachWindows, dailyWindowDelta, pctDelta, subscriberChange, subscriberDelta, sumPostWindows } from '@/lib/delta';
 import type { MetricDelta } from '@/lib/delta';
 
-/** A daily metric series: aligned day labels + values (sparklines, drills, metric pages). */
+/** A daily metric series: aligned day labels + values (sparklines, drills, metric pages).
+    `null` = пропуск измерения (день окна без публикаций у avg-метрик): линия рвётся, столбец
+    получает штрихованную подложку «0 ≠ n/a» — НЕ ноль. */
 export interface DailySeries {
   labels: string[];
-  values: number[];
+  values: Array<number | null>;
   /** Ось короткого окна (≤ 8 дневных точек): однобуквенные дни недели (fmt.weekday) вместо дат.
       Только ПОДПИСИ ОСИ — `labels` остаются полными датами для тултипа/читалки. */
   axisLabels?: string[];
@@ -184,14 +186,16 @@ export function deriveKpis(
     };
   };
   // Active-window sparklines for the three compact TG comparison cards (Ср. охват / Реакции /
-  // Вовлечённость). Owner override (2026-07): these third-width cards now carry an HONEST
-  // publication-date timeline, keyed by UTC publication day over the posts already filtered by the
-  // top-bar period/range — the chart depends ONLY on the active window, never on previous-window
-  // coverage. Sparse by construction (no fabricated zero days) and sorted ascending by UTC day:
-  //   • Ср. охват — mean views per post published that day
-  //   • Реакции — Σ reactions for posts published that day
+  // Вовлечённость): an HONEST publication-date timeline, keyed by UTC publication day over the
+  // posts already filtered by the top-bar period/range — the chart depends ONLY on the active
+  // window, never on previous-window coverage. Sorted ascending by UTC day:
+  //   • Ср. охват — mean views per post published that day (день без постов = ПРОПУСК, не ноль)
+  //   • Реакции — Σ reactions for posts published that day (день без постов = честный ноль)
   //   • Вовлечённость — 100·(reactions + replies/comments + forwards) ÷ member count, that day
   // Divisor is the live `members` (parity with the ER headline). Not shared with Instagram.
+  // История канона: 2026-07 серии были sparse by construction (без сфабрикованных нулей);
+  // 2026-08-14 владелец развернул их на ПОЛНОЕ окно («выбрал 7 дней — вижу 7 дней», как
+  // конфиг-виджеты) — честность держат null-пропуски и нули по семантике метрики, см. ниже.
   const pubDayBuckets = new Map<string, { views: number; reactions: number; replies: number; forwards: number; count: number }>();
   posts.forEach((post) => {
     if (!post.date) return;
@@ -206,19 +210,37 @@ export function deriveKpis(
     bucket.count += 1;
     pubDayBuckets.set(key, bucket);
   });
-  const pubDays = [...pubDayBuckets.entries()].sort(([a], [b]) => a.localeCompare(b));
+  // РАЗВОРОТ НА ПОЛНОЕ ОКНО (решение владельца 2026-08-14, «вариант 2»; прежний sparse-канон
+  // 2026-07 снят): «выбрал 7 дней — вижу 7 дней». Кандидаты — UTC-дни окна (пресет = rolling
+  // Date.now(), диапазон = его границы), ОБЪЕДИНЁННЫЕ с фактическими бакетами: пост на кромке
+  // rolling-окна, чей UTC-день старше кандидатов, не теряется. «Всё» (days=0 без range)
+  // безгранично — остаётся разреженным, как раньше.
+  const pubDayKeys = (() => {
+    const bucketKeys = [...pubDayBuckets.keys()];
+    if (!range && days === 0) return bucketKeys.sort((a, b) => a.localeCompare(b));
+    const toMs = range ? range.to : Date.now();
+    const fromMs = range ? range.from : Date.now() - (days - 1) * DAY_MS;
+    const keys = new Set(bucketKeys);
+    for (let t = fromMs; t <= toMs; t += DAY_MS) keys.add(new Date(t).toISOString().slice(0, 10));
+    // Финальный день добавляется явно: шаг в 24 часа через смену сезонного времени внутри
+    // кастомного диапазона мог бы не попасть в последний календарный день.
+    keys.add(new Date(toMs).toISOString().slice(0, 10));
+    return [...keys].sort((a, b) => a.localeCompare(b));
+  })();
+  const pubDays = pubDayKeys.map((key) => [key, pubDayBuckets.get(key)] as const);
   const pubDayLabels = pubDays.map(([k]) => fmt.day(k));
-  // Ось букв дней недели у публикационных искр: дни РАЗРЕЖЕНЫ (без публикаций дня нет), поэтому
-  // буквы идут с пропусками — «M W F» честно называет дни выходов, полную дату держит тултип.
-  const pubDayAxis = weekdayAxis(pubDays.map(([k]) => k), windowDays);
+  const pubDayAxis = weekdayAxis(pubDayKeys, windowDays);
   const avgReachSpark: DailySeries = {
     labels: pubDayLabels,
-    values: pubDays.map(([, b]) => (b.count > 0 ? b.views / b.count : 0)),
+    // День без публикаций — НЕ ноль охвата на пост (среднее от ничего — ложь), а честный
+    // ПРОПУСК: BarChart рисует штрихованную подложку «0 ≠ n/a», тултип говорит «нет публикаций».
+    values: pubDays.map(([, b]) => (b ? (b.count > 0 ? b.views / b.count : 0) : null)),
     axisLabels: pubDayAxis,
   };
   const reactionsSpark: DailySeries = {
     labels: pubDayLabels,
-    values: pubDays.map(([, b]) => b.reactions),
+    // У счётного потока день без публикаций — честный ноль: реакций к постам этого дня нет.
+    values: pubDays.map(([, b]) => (b ? b.reactions : 0)),
     axisLabels: pubDayAxis,
   };
   // Знаменатель ER — аудитория ТОГО ДНЯ, из дневного архива, а не сегодняшнее число подписчиков.
@@ -237,6 +259,7 @@ export function deriveKpis(
   const erSpark: DailySeries = {
     labels: pubDayLabels,
     values: pubDays.map(([day, b]) => {
+      if (!b) return 0; // день без публикаций: нового вовлечения нет — честный ноль
       const base = membersByDay.get(day) ?? members;
       return base > 0 ? ((b.reactions + b.replies + b.forwards) / base) * 100 : 0;
     }),
