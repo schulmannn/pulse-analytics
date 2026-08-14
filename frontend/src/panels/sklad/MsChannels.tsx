@@ -10,7 +10,7 @@ import { SegmentedControl } from '@/components/SegmentedControl';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { ChartSkeleton, TableSkeleton } from '@/components/ui/dataSkeleton';
-import { fmt, pluralRu, smoothSvgPath, weekdayAxisFromDayKeys } from '@/lib/format';
+import { fmt, pluralRu, smoothSvgPath, timeAxisFromDayKeys } from '@/lib/format';
 import { usePagePeriod } from '@/lib/period';
 import { msPreviousPeriod, useMsPagePeriod, type MsPeriod } from '@/lib/msPeriod';
 import { useSelectedChannel } from '@/lib/channel-context';
@@ -294,8 +294,8 @@ export function MsChannelChart({
       count: points.length,
       values: points.map((p) => metricValue(metric, p)),
       labels: points.map((p) => fmt.day(p.day)),
-      // Буквы короткого дневного окна; недельные/месячные корзины — датами.
-      axisLabels: grain === 'day' ? weekdayAxisFromDayKeys(points.map((p) => p.day)) : undefined,
+      // Временна́я ось (timeAxisCore): буквы короткого окна / EN-месяцы длинного.
+      axisLabels: timeAxisFromDayKeys(points.map((p) => p.day), { monthsOnly: grain !== 'day' }),
       titles: points.map((p) => `${fmt.day(p.day)}: ${fmtMetric(metric, metricValue(metric, p))}`),
       total: metricTotal(data.series, metric),
     };

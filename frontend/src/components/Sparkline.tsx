@@ -148,6 +148,9 @@ export function Sparkline({
       .map((i) => ({ i, text: labels[i] ?? '' }))
       .filter((tick) => tick.text.length > 0);
   }, [axis, labels]);
+  // Разреженная ось (EN-месяцы длинного окна, timeAxisCore): тики стоят у СВОИХ точек, а не
+  // равномерной flex-раскладкой — детект по пустым элементам массива оси.
+  const sparseAxis = !!axis && axis.some((text) => text.length === 0);
 
   // Pointer scrubbing is supplementary to the SVG's detailed accessible name, not an activation
   // action. Keep the surface passive and listen for its coordinates on the DOM node.
@@ -332,7 +335,33 @@ export function Sparkline({
         // стоит на месте — вместе с пилюлей ТЕКУЩЕЙ (последней) метки, которая отвечает на «где
         // сейчас» (референс владельца: «Aug» / обведённая «T»).
         <div className="mt-1 min-h-4 truncate text-2xs tabular-nums text-muted-foreground">
-          {axisTicks.length > 1 ? (
+          {axisTicks.length > 1 && sparseAxis ? (
+            // РАЗРЕЖЕННАЯ ось (EN-месяцы длинного окна): тики стоят на НАСТОЯЩИХ x своих точек —
+            // flex-равномерка врала бы позициями (частичный месяц на кромке окна короче целых).
+            // Кромочные тики прижимаются к краям, чтобы не клипались контейнером.
+            <span aria-hidden="true" className="relative block h-4">
+              {axisTicks.map((tick, index) => {
+                const isCurrent = index === axisTicks.length - 1;
+                const pct = xPct(tick.i);
+                const transform =
+                  pct < 6 ? undefined : pct > 92 ? 'translateX(-100%)' : 'translateX(-50%)';
+                return isCurrent ? (
+                  <span
+                    key={tick.i}
+                    data-axis-current=""
+                    className="absolute top-0 rounded-full px-1.5 py-px font-medium leading-none"
+                    style={{ left: `${Math.min(pct, 100)}%`, transform, backgroundColor: color, color: 'hsl(var(--background))' }}
+                  >
+                    {tick.text}
+                  </span>
+                ) : (
+                  <span key={tick.i} className="absolute top-0" style={{ left: `${pct}%`, transform }}>
+                    {tick.text}
+                  </span>
+                );
+              })}
+            </span>
+          ) : axisTicks.length > 1 ? (
             <span aria-hidden="true" className="flex items-center justify-between gap-2">
               {axisTicks.map((tick, index) =>
                 index === axisTicks.length - 1 ? (

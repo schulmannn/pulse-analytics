@@ -289,9 +289,14 @@ export function BarChart({
     const itemWidth = Math.min(plotW / n, MAX_BAR_W / BAR_RATIO);
     const barWidth = itemWidth * BAR_RATIO;
     const offsetX = gutterW + (plotW - itemWidth * n) / 2;
-    // Буквенная ось короткого окна (axisLabels): буквы узкие, подписан КАЖДЫЙ столбец — без
-    // прореживания «M _ W _ F» ряд терял бы ритм недели. Даты прореживаются по ширине, как раньше.
+    // Канонная ось (timeAxisCore): буквы короткого окна — на каждом столбце; EN-месяцы длинного —
+    // разреженно ('' между тиками, showLabel их отсеет). Даты прореживаются по ширине, как раньше.
     const letterAxis = axisLabels && axisLabels.length === n ? axisLabels : null;
+    // «Текущий» индекс оси (несёт пилюлю): у дат — последний столбец; у канонной оси — последний
+    // НЕПУСТОЙ тик (месяц-тик стоит у первого столбца месяца).
+    const axisCurrentIdx = letterAxis
+      ? letterAxis.reduce((acc, text, i) => (text.length > 0 ? i : acc), -1)
+      : n - 1;
     // Thin x-labels by measured width; labels are hidden rather than rotated in tight cards.
     const labelIndexes = letterAxis
       ? new Set(values.map((_, i) => i))
@@ -399,14 +404,17 @@ export function BarChart({
           const showLabel = axisText && strideHit;
           const showValue = expanded && strideHit && !stacked;
           if (!showLabel && !showValue) return null;
-          const isLast = i === values.length - 1;
+          const isLast = i === axisCurrentIdx;
           // Крайние ДАТЫ прижимаются к краям плота (start/end), а не центрируются под столбцом —
           // центрированная последняя дата наполовину вылетала за svg и клипалась («9 ин» вместо
           // «9 июл.», дизайн-проход №3). Зеркало поведения LineChart. Буквы дней недели узкие и
           // центрируются под КАЖДЫМ столбцом (референс владельца). Последняя метка при этом
           // отступает от края на поле своей пилюли, чтобы пилюля не клипалась рамкой svg.
+          // Канонная ось: центр колонки, но КЛАМП в рамку svg по половине текста — месячный тик
+          // первого столбца иначе клипался левым краем («ay» вместо «May»).
+          const axisTextW = String(axisText ?? '').length * CHAR_W;
           const labelX = letterAxis
-            ? barCenterX(i)
+            ? Math.max(axisTextW / 2 + 1, Math.min(barCenterX(i), chartWidth - axisTextW / 2 - 1))
             : isLast
               ? Math.min(bars[i].x + bars[i].w, width - 1) - (labels?.[i] ? AXIS_PILL_PAD : 0)
               : i === 0

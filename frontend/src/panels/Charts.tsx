@@ -4,7 +4,7 @@ import type { TgFull } from '@/api/schemas';
 import { lttbDownsample } from '@/lib/downsample';
 import { BarChart } from '@/components/BarChart';
 import { LineChart } from '@/components/LineChart';
-import { fmt, pluralRu, weekdayAxisFromDayKeys } from '@/lib/format';
+import { fmt, pluralRu, timeAxisFromDayKeys } from '@/lib/format';
 import { ChartSkeleton as DataChartSkeleton } from '@/components/ui/dataSkeleton';
 import { useWidgetPeriod } from '@/lib/period';
 import { useWidgetInView } from '@/lib/widgetViewport';
@@ -45,7 +45,7 @@ export function SubscriberHistoryChart({ rows, expanded = false }: { rows: Subsc
       yMax={Math.max(...values)}
       titles={titles}
       labels={labels}
-      axisLabels={weekdayAxisFromDayKeys(sampled.map((row) => row.day))}
+      axisLabels={timeAxisFromDayKeys(sampled.map((row) => row.day))}
       markAnomalies
       markExtremes={expanded}
     />

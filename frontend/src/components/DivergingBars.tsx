@@ -13,7 +13,7 @@ interface DivergingBarsProps {
   values: number[];
   /** Per-bar x-labels; thinned to a readable stride, like BarChart. */
   labels?: string[];
-  /** Подписи ОСИ вместо дат (короткое окно ≤ 8 точек: буквы дней недели, канон weekdayAxisLabels).
+  /** Подписи ОСИ вместо дат (короткое окно ≤ 8 точек: буквы дней недели, канон timeAxisLabels).
       Буквы узкие — подписан каждый столбец. Тултип (`titles`) держит полные даты. */
   axisLabels?: string[];
   titles?: string[];
@@ -103,12 +103,16 @@ export function DivergingBars({ values, labels, axisLabels, titles, height }: Di
     });
     const valid = values.map((value) => Number.isFinite(value));
 
+    // «Текущий» индекс оси (пилюля): последний НЕПУСТОЙ тик канонной оси, иначе последний столбец.
+    const axisCurrentIdx = letterAxis
+      ? letterAxis.reduce((acc, text, i) => (text.length > 0 ? i : acc), -1)
+      : values.length - 1;
     const labelsLayer = hasLabels
       ? values.map((_, i) => {
           const axisText = letterAxis ? letterAxis[i] : labels?.[i];
           const show = axisText && labelIndexes.has(i);
           if (!show) return null;
-          const isLast = i === values.length - 1;
+          const isLast = i === axisCurrentIdx;
           const x = i * step + step / 2;
           // Пилюля текущей (последней) метки — канон семьи графиков (BarChart/LineChart):
           // солидная заливка цветом серии, чернила — фон; тонированная карточка перекрашивает

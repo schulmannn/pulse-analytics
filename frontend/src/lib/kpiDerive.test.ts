@@ -212,9 +212,13 @@ describe('deriveKpis — axisLabels короткого окна', () => {
     expect(d.reactionsSpark.labels[0]).toBe(fmt.day(utcDayAgo(6)));
   });
 
-  it('30-дневное окно и «всё время» остаются на датах (axisLabels нет)', () => {
+  it('30-дневное окно остаётся на датах; «всё время» меряется размахом архива', () => {
     expect(withPosts(30).reactionsSpark.axisLabels).toBeUndefined();
     expect(withPosts(30).viewsSpark.axisLabels).toBeUndefined();
-    expect(withPosts(0).reactionsSpark.axisLabels).toBeUndefined();
+    // «Всё» безгранично — окно честно меряется размахом самой серии: архив из четырёх дней
+    // (молодой канал) несёт буквы, многомесячный нёс бы EN-месяцы.
+    expect(withPosts(0).reactionsSpark.axisLabels).toEqual(
+      [6, 5, 3].map((ago) => fmt.weekday(utcDayAgo(ago))),
+    );
   });
 });

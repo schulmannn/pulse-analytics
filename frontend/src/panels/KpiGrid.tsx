@@ -7,7 +7,7 @@ import { useChannels, useHistory, useTgFull } from '@/api/queries';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { lttbDownsample } from '@/lib/downsample';
 import { CHART_MAX_POINTS } from '@/lib/msSeries';
-import { fmt } from '@/lib/format';
+import { fmt, timeAxisFromDayKeys } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { ErrorState } from '@/components/ErrorState';
 import { Sparkline } from '@/components/Sparkline';
@@ -356,12 +356,17 @@ function FeaturedKpi({ label, labelHidden = false, value, trend, caption, spark,
   const sparkShown = useMemo(() => {
     if (!spark || spark.values.length <= CHART_MAX_POINTS) return spark;
     // Пропуски (null) при LTTB-капе отбрасываются вместе с подписями: viewsSpark их не несёт
-    // (архив/пост-фолбэк), а прореживать «дырку» алгоритму нечем.
+    // (архив/пост-фолбэк), а прореживать «дырку» алгоритму нечем. Ось пересчитывается ПО КЛЮЧАМ
+    // выбранных точек (timeAxisFromDayKeys): длинное окно после капа несёт EN-месяцы, а не даты.
     const rows = spark.values.flatMap((value, i) =>
-      value == null ? [] : [{ value, label: spark.labels[i] ?? '' }],
+      value == null ? [] : [{ value, label: spark.labels[i] ?? '', key: spark.dayKeys?.[i] }],
     );
     const sampled = lttbDownsample(rows, CHART_MAX_POINTS, (r) => r.value);
-    return { labels: sampled.map((r) => r.label), values: sampled.map((r) => r.value) };
+    return {
+      labels: sampled.map((r) => r.label),
+      values: sampled.map((r) => r.value),
+      axisLabels: timeAxisFromDayKeys(sampled.map((r) => r.key)),
+    };
   }, [spark]);
   return (
     <ChartCardBody

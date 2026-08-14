@@ -15,7 +15,7 @@ import { getDrillMetric } from '@/lib/widgetMetrics';
 import { addWidgetForMetric } from '@/lib/widgetStore';
 import { pinToHome } from '@/lib/widgetPrefsStore';
 import { customKey } from '@/lib/widgetConfig';
-import { fmt, pluralRu, weekdayAxisFromDayKeys } from '@/lib/format';
+import { fmt, pluralRu, timeAxisFromDayKeys } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { markdownToPlainText } from '@/lib/markdown';
 import { PinnedDayPanel } from '@/components/PinnedDayPanel';
@@ -189,8 +189,9 @@ function bucketedPostSeries(
   return {
     labels: keys.map((k) => bucketLabelOf(k, grain)),
     values: keys.map((k) => byBucket.get(k) ?? 0),
-    // Буквы короткого дневного окна (ревизия осей 2026-08-14); недельные корзины — датами.
-    axisLabels: grain === 'day' ? weekdayAxisFromDayKeys(keys) : undefined,
+    // Временна́я ось (timeAxisCore): короткое окно — буквы дней, длинное — EN-месяцы; недельные
+    // корзины проходят (месяц у якоря-понедельника честный), месячные ключи отсекаются сами.
+    axisLabels: timeAxisFromDayKeys(keys, { monthsOnly: grain !== 'day' }),
   };
 }
 
@@ -214,7 +215,7 @@ function bucketedHistoryFlow(
   return {
     labels: keys.map((k) => bucketLabelOf(k, grain)),
     values: keys.map((k) => byBucket.get(k) ?? 0),
-    axisLabels: grain === 'day' ? weekdayAxisFromDayKeys(keys) : undefined,
+    axisLabels: timeAxisFromDayKeys(keys, { monthsOnly: grain !== 'day' }),
   };
 }
 
@@ -236,7 +237,7 @@ function bucketedSubsSeries(
   return {
     labels: keys.map((k) => bucketLabelOf(k, grain)),
     values: keys.map((k) => byBucket.get(k)!),
-    axisLabels: grain === 'day' ? weekdayAxisFromDayKeys(keys) : undefined,
+    axisLabels: timeAxisFromDayKeys(keys, { monthsOnly: grain !== 'day' }),
   };
 }
 

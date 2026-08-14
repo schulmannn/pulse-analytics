@@ -1,5 +1,5 @@
 import type { ChannelsResponse, HistoryData, TgFull } from '@/api/schemas';
-import { fmt, pluralRu, weekdayAxisLabels as weekdayAxis } from '@/lib/format';
+import { fmt, pluralRu, timeAxisLabels as weekdayAxis } from '@/lib/format';
 import { normalizeTgPosts } from '@/lib/posts';
 import type { NormalizedPost } from '@/lib/posts';
 import type { DateRange, PeriodDays } from '@/lib/period';
@@ -12,9 +12,11 @@ import type { MetricDelta } from '@/lib/delta';
 export interface DailySeries {
   labels: string[];
   values: Array<number | null>;
-  /** Ось короткого окна (≤ 8 дневных точек): однобуквенные дни недели (fmt.weekday) вместо дат.
+  /** Временна́я ось (timeAxisCore): буквы дней короткого окна / EN-месяцы длинного вместо дат.
       Только ПОДПИСИ ОСИ — `labels` остаются полными датами для тултипа/читалки. */
   axisLabels?: string[];
+  /** Сырые day-key'и точек — для пересчёта оси после визуального капа (LTTB теряет индексы). */
+  dayKeys?: string[];
 }
 
 
@@ -161,11 +163,23 @@ export function deriveKpis(
   const avgReachPair = range ? null : avgReachWindows(avgReachPosts, days);
   const avgReachTrend = avgReachPair ? pctDelta(avgReachPair.current, avgReachPair.previous) : null;
 
-  // Длина активного окна в ДНЯХ — для оси коротких окон (буквы дней недели, weekdayAxis):
-  // пресет несёт её напрямую (0 = «всё» → null), кастомный диапазон — по своим границам.
+  // Длина активного окна в ДНЯХ для временно́й оси (timeAxisLabels): пресет несёт её напрямую,
+  // кастомный диапазон — по своим границам; «Всё» передаёт 0 — хелпер меряет окно размахом серии.
   const windowDays = range
     ? Math.round((range.to - range.from) / DAY_MS) + 1
-    : days > 0 ? days : null;
+    : days;
+
+  // Кап фетча (100 постов): когда выборка на капе, дни СТАРШЕ самого старого зафетченного поста
+  // «не измерены», а не «без публикаций» — разворачивать сетку (и штриховку «нет публикаций»)
+  // на них было бы ложью. Честная левая граница публикационной сетки = старейший пост выборки.
+  const fetchedCount = data?.posts?.length ?? 0;
+  const postsAtFetchCap = !range && fetchedCount >= 100 && posts.length >= fetchedCount;
+  const oldestFetchedTs = postsAtFetchCap
+    ? posts.reduce<number>((acc, post) => {
+        const t = post.date ? Date.parse(post.date) : Number.NaN;
+        return Number.isFinite(t) && t < acc ? t : acc;
+      }, Number.POSITIVE_INFINITY)
+    : null;
 
   // Per-metric daily series for the inline sparklines (within the active window). Carries the
   // day labels alongside the values so the interactive read-out can name the hovered point.
@@ -183,6 +197,7 @@ export function deriveKpis(
       labels: entries.map(([k]) => fmt.day(k)),
       values: entries.map(([, v]) => v),
       axisLabels: weekdayAxis(entries.map(([k]) => k), windowDays),
+      dayKeys: entries.map(([k]) => k),
     };
   };
   // Active-window sparklines for the three compact TG comparison cards (Ср. охват / Реакции /
@@ -219,7 +234,10 @@ export function deriveKpis(
     const bucketKeys = [...pubDayBuckets.keys()];
     if (!range && days === 0) return bucketKeys.sort((a, b) => a.localeCompare(b));
     const toMs = range ? range.to : Date.now();
-    const fromMs = range ? range.from : Date.now() - (days - 1) * DAY_MS;
+    // На капе фетча левая граница сетки — старейший зафетченный пост: дни старше него «не
+    // измерены» (см. postsAtFetchCap выше), их нельзя показывать ни нулём, ни «нет публикаций».
+    const windowFromMs = range ? range.from : Date.now() - (days - 1) * DAY_MS;
+    const fromMs = oldestFetchedTs != null ? Math.max(windowFromMs, oldestFetchedTs) : windowFromMs;
     const keys = new Set(bucketKeys);
     for (let t = fromMs; t <= toMs; t += DAY_MS) keys.add(new Date(t).toISOString().slice(0, 10));
     // Финальный день добавляется явно: шаг в 24 часа через смену сезонного времени внутри
@@ -272,6 +290,7 @@ export function deriveKpis(
         labels: viewsArchiveRows.map((r) => fmt.day(r.day)),
         values: viewsArchiveRows.map((r) => Number(r.views)),
         axisLabels: weekdayAxis(viewsArchiveRows.map((r) => r.day), windowDays),
+        dayKeys: viewsArchiveRows.map((r) => r.day),
       }
     : dailySeries((post) => Number(post.views ?? post.view_count ?? 0));
   // Subscriber trend from the daily archive (reliable, unlike post-derived views).
@@ -315,8 +334,8 @@ export function deriveKpis(
   // всё загруженное попадает в окно (значит, более старые посты обрезаны), честно говорим «по
   // последним N постам», а не молча выдаём урезанный срез как полный — для ЛЮБОГО пресета, не
   // только «Всё».
-  const fetched = data?.posts?.length ?? 0;
-  const atFetchCap = !range && fetched >= 100 && postsAnalyzed >= fetched;
+  // Хойстнуто выше (postsAtFetchCap) — кап нужен уже публикационной сетке спарков.
+  const atFetchCap = postsAtFetchCap;
   // «по N постам» описывает пост-базис — неверно для канальных просмотров (они по всему каналу,
   // не по постам окна). Оставляем этот caption только на фолбэке в пост-сумму.
   const viewsBase = !hasChannelViews && postsAnalyzed

@@ -17,7 +17,7 @@ import { PinnedDayPanel } from '@/components/PinnedDayPanel';
 import { ChartSkeleton } from '@/components/ui/dataSkeleton';
 import { ChartTooltip, useHeatmapTip } from '@/components/ChartTooltip';
 import { Skeleton } from '@/components/ui/skeleton';
-import { fmt, weekdayAxisFromDayKeys } from '@/lib/format';
+import { fmt, timeAxisFromDayKeys } from '@/lib/format';
 import { lttbDownsample } from '@/lib/downsample';
 import { useExplorerChartHeight } from '@/lib/useExplorerChartHeight';
 import { usePeriod, type DateRange, type PeriodDays } from '@/lib/period';
@@ -314,7 +314,7 @@ function YmSeriesPage({ def }: { def: YmSeriesDef }) {
   const rendered = days === 0 ? lttbDownsample(winPoints, 140, (p) => p.value) : winPoints;
   const values = rendered.map((p) => p.value);
   const labels = rendered.map((p) => fmt.day(p.day));
-  const axisLabels = weekdayAxisFromDayKeys(rendered.map((p) => p.day));
+  const axisLabels = timeAxisFromDayKeys(rendered.map((p) => p.day));
   const titles = rendered.map((p) => `${fmt.day(p.day)}: ${fmt.num(p.value)} ${def.genitive}`);
   const m = values.length;
 

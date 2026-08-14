@@ -17,7 +17,7 @@ import { RadialGauge } from '@/components/RadialGauge';
 import { Sparkline } from '@/components/Sparkline';
 import { pctDelta, type MetricDelta } from '@/lib/delta';
 import { lttbDownsample } from '@/lib/downsample';
-import { fmt, pluralRu, weekdayAxisFromDayKeys } from '@/lib/format';
+import { fmt, pluralRu, timeAxisFromDayKeys } from '@/lib/format';
 import { usePagePeriod, usePeriod } from '@/lib/period';
 import { msPreviousPeriod, useMsPagePeriod, type MsPeriod } from '@/lib/msPeriod';
 import {
@@ -67,7 +67,7 @@ export function MsClients() {
     return {
       count: sampled.length,
       labels: sampled.map((r) => fmt.day(r.day)),
-      axisLabels: weekdayAxisFromDayKeys(sampled.map((r) => r.day)),
+      axisLabels: timeAxisFromDayKeys(sampled.map((r) => r.day)),
       // Лицо карточки — одна суммарная серия заказов (канон story card); разбивка «Новые /
       // Повторные» с двумя линиями и датами живёт в MsCustomerExplorer (/metrics/ms-customers).
       values: sampled.map((r) => r.new_orders + r.repeat_orders),
@@ -241,8 +241,8 @@ export function MsCustomerExplorer({
       primary: pairs.map((pair) => pair.primary),
       repeat: metric === 'repeatShare' ? undefined : pairs.map((pair) => pair.repeat ?? 0),
       labels: points.map((point) => fmt.day(point.day)),
-      // Буквы короткого дневного окна; недельные корзины — датами.
-      axisLabels: grain === 'day' ? weekdayAxisFromDayKeys(points.map((point) => point.day)) : undefined,
+      // Временна́я ось (timeAxisCore): буквы короткого окна / EN-месяцы длинного.
+      axisLabels: timeAxisFromDayKeys(points.map((point) => point.day), { monthsOnly: grain !== 'day' }),
       titles: points.map((point, index) => {
         const pair = pairs[index];
         if (metric === 'repeatShare') return `${fmt.day(point.day)}: ${pair.primary?.toFixed(1) ?? '—'}%`;

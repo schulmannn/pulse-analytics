@@ -1,5 +1,5 @@
 import { useMentions, useMentionsArchive } from '@/api/queries';
-import { dayKeyToTs, fmt, weekdayAxisFromDayKeys } from '@/lib/format';
+import { dayKeyToTs, fmt, timeAxisFromDayKeys } from '@/lib/format';
 import { BarChart } from '@/components/BarChart';
 import { Skeleton } from '@/components/ui/skeleton';
 import type { Mentions as MentionsData } from '@/api/schemas';
@@ -229,7 +229,7 @@ function mentionsWindow(byDay: Record<string, number>, days: number) {
     labels[Math.floor(labels.length / 2)] ?? '',
     labels[labels.length - 1] ?? '',
   ];
-  const weekAxis = weekdayAxisFromDayKeys(sliced.map((e) => e.ts));
+  const weekAxis = timeAxisFromDayKeys(sliced.map((e) => e.ts));
   return { labels, values, titles, compactLabels, weekAxis };
 }
 

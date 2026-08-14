@@ -1,6 +1,6 @@
 import type { IgHistoryRow, IgInsights, IgProfile } from '@/api/schemas';
 import { pctDelta, type MetricDelta } from '@/lib/delta';
-import { weekdayAxisLabels } from '@/lib/format';
+import { timeAxisLabels } from '@/lib/format';
 import {
   fmtDay,
   followerLevelSeries,
@@ -153,14 +153,14 @@ function windowedDaily(series: Point[], since: number, until: number): Point[] {
 }
 
 // A sparkline needs ≥2 points; fewer → empty (the card says «Недостаточно дневных данных…»).
-// Короткое окно (≤ 8 дней) несёт ось буквами дней недели (канон weekdayAxisLabels) — буквы
+// Короткое окно (≤ 8 дней) несёт ось буквами дней недели (канон timeAxisLabels) — буквы
 // только на оси, тултип держит полные даты из `labels`.
 const toChart = (points: Point[], windowDays?: number): IgOverviewChart =>
   points.length >= 2
     ? {
         labels: points.map((p) => fmtDay(p.day)),
         values: points.map((p) => p.value),
-        axisLabels: weekdayAxisLabels(points.map((p) => p.day), windowDays),
+        axisLabels: timeAxisLabels(points.map((p) => p.day), windowDays),
       }
     : EMPTY_CHART;
 

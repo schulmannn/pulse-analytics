@@ -3,7 +3,7 @@
 // React component so the label/formatting logic is unit-testable (the component itself is just
 // wiring the charts). No React here.
 
-import { fmt, weekdayAxisFromDayKeys } from '@/lib/format';
+import { fmt, timeAxisFromDayKeys } from '@/lib/format';
 import type { MetricUnit, WidgetViz } from '@/lib/widgetMetrics';
 import type { WidgetResult } from '@/lib/resolveWidgetMetric';
 
@@ -46,7 +46,7 @@ export interface ChartSeries {
   values: Array<number | null>;
   labels: string[];
   titles: string[];
-  /** Ось короткого дневного окна: однобуквенные дни недели (канон weekdayAxisLabels) —
+  /** Ось короткого дневного окна: однобуквенные дни недели (канон timeAxisLabels) —
       только подписи оси, тултипы (`titles`) держат полные даты. */
   axisLabels?: string[];
 }
@@ -65,9 +65,10 @@ export function seriesToChart(result: WidgetResult): ChartSeries {
   const titles = series.map((p, i) =>
     p.value == null ? `${labels[i]}: данных нет` : `${labels[i]}: ${f(p.value)}${suffix}`,
   );
-  // Недельные ключи «выглядят» дневными (понедельник корзины) — буква дня там лгала бы.
-  // Месячные/квартальные корзины отсекает parseDayKey внутри хелпера (их ключи — не дневные).
-  const axisLabels = week ? undefined : weekdayAxisFromDayKeys(series.map((p) => p.date));
+  // Временна́я ось (timeAxisCore): буквы дней у короткого окна, EN-месяцы у длинного. Недельные
+  // ключи проходят (буквы у них невозможны по размаху, месяц якоря-понедельника честный);
+  // месячные/квартальные корзины отсекает axisKeyToDate — ось остаётся датами.
+  const axisLabels = timeAxisFromDayKeys(series.map((p) => p.date), { monthsOnly: week });
   return { values, labels, titles, axisLabels };
 }
 

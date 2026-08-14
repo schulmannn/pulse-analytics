@@ -396,6 +396,11 @@ export function LineChart({
     // by measured width, always including the first and the last point. Буквенная ось короткого
     // окна (axisLabels, канон weekdayAxis) метит КАЖДУЮ точку — буквы узкие и не сталкиваются.
     const letterAxis = axisLabels && axisLabels.length === n ? axisLabels : null;
+    // «Текущий» индекс оси (несёт пилюлю): у дат — последняя точка; у канонной оси
+    // (буквы/месяцы) — последний НЕПУСТОЙ тик (месяц-тик стоит у первой точки месяца).
+    const axisCurrentIdx = letterAxis
+      ? letterAxis.reduce((acc, text, i) => (text.length > 0 ? i : acc), -1)
+      : n - 1;
     const xTicks = hasXAxis
       ? (() => {
           const indexes = letterAxis
@@ -562,7 +567,7 @@ export function LineChart({
             (текущая) метка несёт пилюлю «где сейчас» (референс владельца 2026-08-14, канон общий
             со спарками и столбцами); viewBox тут 1:1 с CSS-px, скруглённый rect не искажается. */}
         {xTicks.map((t) => {
-          const isCurrent = t.i === n - 1;
+          const isCurrent = t.i === axisCurrentIdx;
           const pill = isCurrent
             ? (() => {
                 const textW = t.text.length * CHAR_W;
@@ -763,12 +768,14 @@ export function LineChart({
   const hoverGhostY = hoverGhostVal != null ? yFor(hoverGhostVal) : null;
   // Пин на дыре: вертикаль остаётся (день-то выбран), solid-маркер — только у реальной точки.
   const pinnedPt = pinnedIndex != null && pinnedIndex >= 0 && pinnedIndex < n ? points[pinnedIndex] : null;
-  // Буквенная компакт-ось (короткое окно): все точки, буквы узкие. Даты — прежний прореженный ряд.
+  // Канонная компакт-ось (timeAxisCore): буквы короткого окна — на каждой точке; EN-месяцы
+  // длинного — только непустые тики. Даты — прежний прореженный ряд.
   const compactLetterAxis = axisLabels && axisLabels.length === values.length ? axisLabels : null;
+  const compactSparse = !!compactLetterAxis && compactLetterAxis.some((text) => text.length === 0);
   const compactLabelIndexes =
     (labels || compactLetterAxis) && !hasXAxis
       ? compactLetterAxis
-        ? values.map((_, i) => i)
+        ? compactLetterAxis.flatMap((text, i) => (text.length > 0 ? [i] : []))
         : labels && labels.length > 0
           ? axisLabelIndexes(labels.length, W, { minLabelPx: 92, maxLabels: expanded ? 8 : 5 })
           : []
@@ -958,7 +965,33 @@ export function LineChart({
           залипший ховер. С 2026-08-14 владелец вернул её ОБЩИМ каноном всей семьи графиков
           (искры/столбцы/линии несут одинаковую метку «где сейчас»), что и снимает старую жалобу:
           теперь это язык системы, а не глитч одной карточки. */}
-      {compactLabelIndexes.length > 0 && !hasXAxis && (
+      {compactLabelIndexes.length > 0 && !hasXAxis && compactSparse && (
+        // РАЗРЕЖЕННАЯ компакт-ось (EN-месяцы длинного окна): тики стоят у СВОИХ точек по доле
+        // индекса — flex-равномерка врала бы позициями (частичный месяц на кромке короче целых).
+        <div className="relative mt-1.5 h-4 select-none px-1 text-2xs font-medium text-muted-foreground">
+          {compactLabelIndexes.map((i, index) => {
+            const isCurrent = index === compactLabelIndexes.length - 1;
+            const pct = values.length > 1 ? (i / (values.length - 1)) * 100 : 0;
+            const transform = pct < 6 ? undefined : pct > 92 ? 'translateX(-100%)' : 'translateX(-50%)';
+            return isCurrent ? (
+              <span
+                key={i}
+                data-chart-axis-label="x-compact"
+                data-axis-current=""
+                className="absolute top-0 rounded-full px-1.5 py-px leading-none"
+                style={{ left: `${Math.min(pct, 100)}%`, transform, backgroundColor: 'hsl(var(--chart-role-primary))', color: 'hsl(var(--background))' }}
+              >
+                {compactLetterAxis?.[i]}
+              </span>
+            ) : (
+              <span key={i} data-chart-axis-label="x-compact" className="absolute top-0" style={{ left: `${pct}%`, transform }}>
+                {compactLetterAxis?.[i]}
+              </span>
+            );
+          })}
+        </div>
+      )}
+      {compactLabelIndexes.length > 0 && !hasXAxis && !compactSparse && (
         <div className="mt-1.5 flex select-none items-center justify-between gap-2 px-1 text-2xs font-medium text-muted-foreground">
           {compactLabelIndexes.map((i, index) =>
             index === compactLabelIndexes.length - 1 ? (

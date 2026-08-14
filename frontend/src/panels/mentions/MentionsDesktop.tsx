@@ -21,7 +21,7 @@ import {
   type MentionsFilters,
   type MentionsSort,
 } from '@/lib/mentionsFilters';
-import { fmt, weekdayAxisFromDayKeys } from '@/lib/format';
+import { fmt, timeAxisFromDayKeys } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { BarChart } from '@/components/BarChart';
 import { Button } from '@/components/ui/button';
@@ -394,13 +394,13 @@ export function MentionsDesktop() {
             drillTo={`/metrics/mentions-timeline${metricQuery}`}
             expand={{
               renderExpandedBar: () => (
-                <BarChart values={timeline.values} labels={timeline.labels} axisLabels={weekdayAxisFromDayKeys(timeline.days)} titles={timeline.titles} ghost={timeline.ghost} ghostLabel="Предыдущий период" />
+                <BarChart values={timeline.values} labels={timeline.labels} axisLabels={timeAxisFromDayKeys(timeline.days)} titles={timeline.titles} ghost={timeline.ghost} ghostLabel="Предыдущий период" />
               ),
               statsFor: () => timeline.values,
             }}
           >
             {timeline.values.length > 0 ? (
-              <BarChart values={timeline.values} labels={timeline.labels} axisLabels={weekdayAxisFromDayKeys(timeline.days)} titles={timeline.titles} ghost={timeline.ghost} ghostLabel="Предыдущий период" />
+              <BarChart values={timeline.values} labels={timeline.labels} axisLabels={timeAxisFromDayKeys(timeline.days)} titles={timeline.titles} ghost={timeline.ghost} ghostLabel="Предыдущий период" />
             ) : (
               <EmptyState compact size="chart" title="За выбранный период упоминаний нет." />
             )}
