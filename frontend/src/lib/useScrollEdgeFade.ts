@@ -33,6 +33,12 @@ export function useScrollEdgeFade<T extends HTMLElement>(forwardedRef?: MutableE
         const state = scrollEdgeFadeState(element);
         element.toggleAttribute('data-fade-start', state.start);
         element.toggleAttribute('data-fade-end', state.end);
+        // Прокручиваемая область обязана быть достижимой с клавиатуры (WCAG 2.1.1; правило axe
+        // `scrollable-region-focusable`, обязательный phone-гейт). Таб-стоп появляется ТОЛЬКО
+        // когда прятать действительно есть что: у влезающего рейла лишней остановки не будет.
+        const scrollable = element.scrollWidth - element.clientWidth > 1;
+        if (scrollable) element.tabIndex = 0;
+        else element.removeAttribute('tabindex');
       };
       const schedule = () => {
         if (frame === 0) frame = window.requestAnimationFrame(update);
