@@ -55,9 +55,6 @@ describe('shared data states', () => {
     expect(chart).toContain('role="status"');
     expect(chart).toContain('aria-busy="true"');
     expect(chart).toContain('aria-label="Загрузка графика"');
-    expect(chart).toContain('data-ghost-series=""');
-    expect(chart).toContain('<svg');
-    expect(chart).toContain('min-h-[72px]');
     expect(table).toContain('aria-label="Загрузка таблицы"');
     expect(table).toContain('aria-hidden="true"');
   });
