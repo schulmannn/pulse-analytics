@@ -551,7 +551,12 @@ export function BarChart({
         ) : (
           // Одиночный столбец: скруглённый ВЕРХ, прямое основание на базовой линии — капсула,
           // оторванная от оси, читалась бы как «плавающий» бар (stackSegmentPath клампит радиус).
-          <path key={`b${i}`} data-chart-series="current" d={stackSegmentPath(b, true, false)} fill="hsl(var(--chart-role-primary))" />
+          // Пустая геометрия (нулевой/пропущенный день) НЕ рендерится вовсе: <path d=""> — это
+          // невидимый элемент, о который спотыкаются селекторы «первой серии» (forced-colors gate).
+          (() => {
+            const d = stackSegmentPath(b, true, false);
+            return d ? <path key={`b${i}`} data-chart-series="current" d={d} fill="hsl(var(--chart-role-primary))" /> : null;
+          })()
         ))}
         {ghostBars.map((b, i) => plot.stacked ? (
           <path
@@ -561,7 +566,10 @@ export function BarChart({
             fill={GHOST_FILL}
           />
         ) : (
-          <path key={`gb${i}`} data-chart-series="comparison" d={stackSegmentPath(b, true, false)} fill={GHOST_FILL} />
+          (() => {
+            const d = stackSegmentPath(b, true, false);
+            return d ? <path key={`gb${i}`} data-chart-series="comparison" d={d} fill={GHOST_FILL} /> : null;
+          })()
         ))}
       </>
     );

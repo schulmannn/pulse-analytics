@@ -170,9 +170,11 @@ export function DivergingBars({ values, labels, axisLabels, titles, height }: Di
   }, [plot, extents]);
   const barsLayer = useMemo(
     () =>
-      bars?.map((b, i) => (
-        <path key={i} d={stackSegmentPath(b, b.up, !b.up)} fill={b.fill} fillOpacity={b.op} />
-      )) ?? null,
+      bars?.map((b, i) => {
+        // Пустая геометрия не рендерится (см. BarChart): <path d=""> — невидимый элемент-ловушка.
+        const d = stackSegmentPath(b, b.up, !b.up);
+        return d ? <path key={i} d={d} fill={b.fill} fillOpacity={b.op} /> : null;
+      }) ?? null,
     [bars],
   );
 
