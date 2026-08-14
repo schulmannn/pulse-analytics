@@ -1,8 +1,7 @@
 import * as React from 'react';
-import { Slot, Slottable } from '@radix-ui/react-slot';
+import { Slot } from '@radix-ui/react-slot';
 import { cva, type VariantProps } from 'class-variance-authority';
 
-import { LoaderDots } from '@/components/ui/loader';
 import { cn } from '@/lib/utils';
 
 /**
@@ -92,8 +91,26 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
         )}
         ref={ref}
       >
-        {pending ? <LoaderDots /> : null}
-        <Slottable>{children}</Slottable>
+        {/* Точки канона рисуются РАЗМЕТКОЙ, а не импортом ui/loader: Button лежит в каждом
+            роут-чанке, и импорт тянул модуль лоадера (и Slottable) во все маршруты — два
+            бюджета уходили в минус. Класс `loader-dots` и его keyframes глобальные
+            (index.css, «Loader canon»), поэтому вид и reduced-motion идентичны LoaderDots.
+            asChild-ветка отдаёт ЕДИНСТВЕННОГО ребёнка, как того требует Slot: pending на
+            обёртке-ссылке не применяется (её состояние несёт сама цель). */}
+        {asChild ? (
+          children
+        ) : (
+          <>
+            {pending ? (
+              <span aria-hidden="true" className="loader-dots inline-flex items-center gap-1">
+                <span className="size-1 rounded-full bg-current" />
+                <span className="size-1 rounded-full bg-current" />
+                <span className="size-1 rounded-full bg-current" />
+              </span>
+            ) : null}
+            {children}
+          </>
+        )}
       </Comp>
     );
   },
