@@ -16,7 +16,7 @@ import { MetricInfo } from '@/components/InfoTooltip';
 import { DeltaPill } from '@/components/DeltaPill';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ChartCardBody } from '@/components/ChartWidget';
-import { CompactStatHeadline } from '@/components/CompareStat';
+import { CenteredStat, CompactStatHeadline } from '@/components/CompareStat';
 import { useCardShowsPeriod, usePagePeriod, useWidgetPeriod, widgetPeriodValue } from '@/lib/period';
 import { useWidgetInView } from '@/lib/widgetViewport';
 import type { MetricDelta } from '@/lib/delta';
@@ -206,34 +206,35 @@ export function TgReactionsBody({ state, viz }: { state: TgKpiState; viz?: 'line
   );
 }
 
-/** «Вовлечённость» — ER headline; the active-window publication-date sparkline below (percent). */
+/** «Вовлечённость» — ER по центру карточки (референс владельца, 2026-08-14: центрированный
+    процент, под ним сравнение с прошлым периодом). */
 export function TgErBody({ state }: { state: TgKpiState }) {
   const { derived, isPending, isError } = state;
   const navigate = useNavigate();
   if (isPending) return <CompactSkeleton />;
   if (isError) return <ErrorState title="Не удалось загрузить" reason="ошибка" />;
-  const { er, erTrend, members, normPosts } = derived;
+  const { er, erTrend, erCaption, members, normPosts } = derived;
   const live = members > 0 && normPosts.length > 0 && er != null && Number.isFinite(er);
   // БЕЗ искры. ER — это вовлечение, делённое на аудиторию, а аудитория за окно меняется на
   // проценты, тогда как вовлечение — в десятки раз. Значит нормализованная по min–max кривая ER
   // повторяет кривую «Реакций» почти в точности (замерено на проде: корреляция 0.996 при
   // расхождении форм 5.4% высоты плота — меньше двух пикселей на искре 200×32). Соседняя карточка
-  // уже показывает эту форму; вторая копия занимала треть полосы под сигнал, которого нет.
-  // Освободившееся место отдано формуле — она отвечает на реальный вопрос «из чего это число».
+  // уже показывает эту форму. Дельта — в честных «п.п.» (erCaption), не в относительных процентах.
   return (
-    <div className="flex h-full min-h-0 flex-col justify-center gap-2">
-      <CompactStatHeadline
-        text={live ? fmt.pctAbs(er as number) : '—'}
-        delta={erTrend}
-        onDrill={() => navigate('/metrics/er')}
-        drillLabel="Вовлечённость"
-        live={live}
-      />
-      <p className="text-2xs leading-relaxed text-muted-foreground">
-        Реакции, репосты и комментарии к постам периода — к текущей базе подписчиков.
-        {live && normPosts.length > 0 ? ` По ${normPosts.length} публикациям.` : ''}
-      </p>
-    </div>
+    <CenteredStat
+      text={live ? fmt.pctAbs(er as number) : '—'}
+      delta={erTrend}
+      deltaText={erCaption}
+      onDrill={() => navigate('/metrics/er')}
+      drillLabel="Вовлечённость"
+      live={live}
+      note={
+        <>
+          Реакции, репосты и комментарии к постам периода — к текущей базе подписчиков.
+          {live && normPosts.length > 0 ? ` По ${normPosts.length} публикациям.` : ''}
+        </>
+      }
+    />
   );
 }
 
@@ -287,7 +288,8 @@ function TgTrendStat({
           <BarChart
             values={spark.values}
             labels={spark.labels}
-            // Тултип столбца несёт ту же пару «дата · значение», что ховер-читалка искры.
+            axisLabels={spark.axisLabels}
+            // Тултип столбца несёт ту же пару «дата · значение», что ховер-тултип искры.
             titles={spark.values.map((v, i) => `${spark.labels[i] ?? ''}: ${format(v)}`)}
             formatValue={format}
           />
@@ -296,11 +298,12 @@ function TgTrendStat({
         <Sparkline
           values={spark.values}
           labels={spark.labels}
+          axisLabels={spark.axisLabels}
           area
           strokeWidth={2}
           interactive
-          // caption="" — ховер-читалка «дата · значение · Δ» живёт, а idle-подпись «по датам
-          // публикаций» убрана (владелец: лишняя строка на лице карточки).
+          // caption="" — резервирует строку оси; ховер-детали несёт плавающий тултип, idle-подпись
+          // «по датам публикаций» убрана (владелец: лишняя строка на лице карточки).
           caption=""
           formatValue={format}
           className="h-full min-h-14 w-full"
@@ -377,6 +380,7 @@ function FeaturedKpi({ label, labelHidden = false, value, trend, caption, spark,
           <BarChart
             values={sparkShown.values}
             labels={sparkShown.labels}
+            axisLabels={sparkShown.axisLabels}
             titles={sparkShown.values.map((v, i) => `${sparkShown.labels[i] ?? ''}: ${fmt.num(v)}`)}
             formatValue={fmt.num}
           />
@@ -385,6 +389,7 @@ function FeaturedKpi({ label, labelHidden = false, value, trend, caption, spark,
         <Sparkline
           values={sparkShown.values}
           labels={sparkShown.labels}
+          axisLabels={sparkShown.axisLabels}
           area
           strokeWidth={2}
           interactive

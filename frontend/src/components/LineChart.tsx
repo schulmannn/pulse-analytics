@@ -23,6 +23,11 @@ interface LineChartProps {
       нулём: ноль-которого-не-было — ложь дашборда (выдуманный обвал). */
   values: Array<number | null>;
   labels?: string[];
+  /**
+   * Подписи ОСИ вместо дат из `labels` (короткое окно ≤ 8 точек: буквы дней недели, канон
+   * weekdayAxis). Буквы узкие — тик у КАЖДОЙ точки. Тултип по-прежнему называет полную дату.
+   */
+  axisLabels?: string[];
   titles?: string[];
   yMin?: number;
   yMax?: number;
@@ -128,6 +133,7 @@ export function axisLabel(v: number, step: number): string {
 export function LineChart({
   values,
   labels,
+  axisLabels,
   titles,
   yMin,
   yMax,
@@ -387,12 +393,17 @@ export function LineChart({
       : null;
 
     // Real x-axis ticks (axes mode): width-aware stride so labels never collide — one label
-    // by measured width, always including the first and the last point.
+    // by measured width, always including the first and the last point. Буквенная ось короткого
+    // окна (axisLabels, канон weekdayAxis) метит КАЖДУЮ точку — буквы узкие и не сталкиваются.
+    const letterAxis = axisLabels && axisLabels.length === n ? axisLabels : null;
     const xTicks = hasXAxis
       ? (() => {
-          return axisLabelIndexes(n, plotW, { minLabelPx: expanded ? 76 : 88, maxLabels: expanded ? 12 : 8 })
+          const indexes = letterAxis
+            ? values.map((_, i) => i)
+            : axisLabelIndexes(n, plotW, { minLabelPx: expanded ? 76 : 88, maxLabels: expanded ? 12 : 8 });
+          return indexes
             .map((i) => {
-              const text = labels?.[i] ?? '';
+              const text = letterAxis ? letterAxis[i] : labels?.[i] ?? '';
               if (!text) return null;
               const halfW = (text.length * CHAR_W) / 2;
               const x = Math.min(Math.max(points[i].x, gutterW + halfW), Math.max(W - padR - halfW, gutterW + halfW));
@@ -547,15 +558,33 @@ export function LineChart({
           </text>
         ))}
 
-        {/* X-axis (axes mode) — tick marks + date labels inside the bottom band */}
-        {xTicks.map((t) => (
-          <g key={`x${t.i}`}>
-            {!rhea && <line x1={t.px} y1={h - padB + 3} x2={t.px} y2={h - padB + 7} stroke="hsl(var(--border))" strokeWidth="1" vectorEffect="non-scaling-stroke" />}
-            <text x={t.x} y={h - 8} textAnchor="middle" data-chart-axis-label="x" className="pointer-events-none select-none fill-muted-foreground text-2xs font-medium tabular-nums">
-              {t.text}
-            </text>
-          </g>
-        ))}
+        {/* X-axis (axes mode) — tick marks + date labels inside the bottom band. Последняя
+            (текущая) метка несёт пилюлю «где сейчас» (референс владельца 2026-08-14, канон общий
+            со спарками и столбцами); viewBox тут 1:1 с CSS-px, скруглённый rect не искажается. */}
+        {xTicks.map((t) => {
+          const isCurrent = t.i === n - 1;
+          const pill = isCurrent
+            ? (() => {
+                const textW = t.text.length * CHAR_W;
+                const pillH = 15;
+                const pillW = Math.max(textW + 12, pillH);
+                return { x: Math.max(1, Math.min(t.x - pillW / 2, W - pillW - 1)), w: pillW, h: pillH };
+              })()
+            : null;
+          return (
+            <g key={`x${t.i}`} data-axis-current={isCurrent ? '' : undefined}>
+              {!rhea && <line x1={t.px} y1={h - padB + 3} x2={t.px} y2={h - padB + 7} stroke="hsl(var(--border))" strokeWidth="1" vectorEffect="non-scaling-stroke" />}
+              {pill && (
+                // Пара «bg-primary/10 + accent-foreground» — канон primary-tint-ink (AA-композит),
+                // тот же, что у HTML-пилюль компактной оси.
+                <rect x={pill.x} y={h - 19.5} width={pill.w} height={pill.h} rx={pill.h / 2} fill="hsl(var(--primary) / 0.1)" className="pointer-events-none" />
+              )}
+              <text x={t.x} y={h - 8} textAnchor="middle" data-chart-axis-label="x" className={`pointer-events-none select-none text-2xs font-medium tabular-nums ${isCurrent ? 'fill-accent-foreground' : 'fill-muted-foreground'}`}>
+                {t.text}
+              </text>
+            </g>
+          );
+        })}
       </>
     );
 
@@ -565,7 +594,7 @@ export function LineChart({
       staticUnder, staticOver,
       morphGeom: { primary: primaryPoints, ghost: ghostPoints, baseY } as MorphGeom,
     };
-  }, [values, labels, activeGhost, hasGhostLegend, target, refLines, yMin, yMax, width, ctxHeight, height, expanded, showAxes, markExtremes, showPoints, anomalyIdx, gradientId, gapPatternId, rhea, comparison, richStyle]);
+  }, [values, labels, axisLabels, activeGhost, hasGhostLegend, target, refLines, yMin, yMax, width, ctxHeight, height, expanded, showAxes, markExtremes, showPoints, anomalyIdx, gradientId, gapPatternId, rhea, comparison, richStyle]);
 
   // Hover-only lines remain one passive named graphic. Pointer scrubbing is supplementary to its
   // accessible summary and is registered on the DOM node. A drillable line instead uses the real
@@ -734,9 +763,15 @@ export function LineChart({
   const hoverGhostY = hoverGhostVal != null ? yFor(hoverGhostVal) : null;
   // Пин на дыре: вертикаль остаётся (день-то выбран), solid-маркер — только у реальной точки.
   const pinnedPt = pinnedIndex != null && pinnedIndex >= 0 && pinnedIndex < n ? points[pinnedIndex] : null;
+  // Буквенная компакт-ось (короткое окно): все точки, буквы узкие. Даты — прежний прореженный ряд.
+  const compactLetterAxis = axisLabels && axisLabels.length === values.length ? axisLabels : null;
   const compactLabelIndexes =
-    labels && labels.length > 0 && !hasXAxis
-      ? axisLabelIndexes(labels.length, W, { minLabelPx: 92, maxLabels: expanded ? 8 : 5 })
+    (labels || compactLetterAxis) && !hasXAxis
+      ? compactLetterAxis
+        ? values.map((_, i) => i)
+        : labels && labels.length > 0
+          ? axisLabelIndexes(labels.length, W, { minLabelPx: 92, maxLabels: expanded ? 8 : 5 })
+          : []
       : [];
 
   return (
@@ -917,17 +952,30 @@ export function LineChart({
         />
       )}
 
-      {/* Minimal x labels (axis-free cards): first / mid / last under the svg. Axes mode
-          draws the real in-svg x-axis above instead. Метки ровные: бывшая акцент-пилюля
-          последней метки (emphasizeLastLabel) снята продуктово — прод-фидбек: среди плоских
-          соседок она читалась как залипший ховер, а не подсветка «сегодня». */}
-      {labels && labels.length > 0 && !hasXAxis && (
+      {/* Minimal x labels (axis-free cards): first / mid / last under the svg. Axes mode draws the
+          real in-svg x-axis above instead. История пилюли последней метки: первая попытка
+          (emphasizeLastLabel) была снята — ОДИНОКАЯ пилюля среди плоских соседок читалась как
+          залипший ховер. С 2026-08-14 владелец вернул её ОБЩИМ каноном всей семьи графиков
+          (искры/столбцы/линии несут одинаковую метку «где сейчас»), что и снимает старую жалобу:
+          теперь это язык системы, а не глитч одной карточки. */}
+      {compactLabelIndexes.length > 0 && !hasXAxis && (
         <div className="mt-1.5 flex select-none items-center justify-between gap-2 px-1 text-2xs font-medium text-muted-foreground">
-          {compactLabelIndexes.map((i) => (
-            <span key={i} data-chart-axis-label="x-compact" className="min-w-0 truncate">
-              {labels[i]}
-            </span>
-          ))}
+          {compactLabelIndexes.map((i, index) =>
+            index === compactLabelIndexes.length - 1 ? (
+              <span
+                key={i}
+                data-chart-axis-label="x-compact"
+                data-axis-current=""
+                className="shrink-0 rounded-full bg-primary/10 px-1.5 py-px font-medium leading-none text-accent-foreground"
+              >
+                {compactLetterAxis ? compactLetterAxis[i] : labels?.[i]}
+              </span>
+            ) : (
+              <span key={i} data-chart-axis-label="x-compact" className="min-w-0 truncate">
+                {compactLetterAxis ? compactLetterAxis[i] : labels?.[i]}
+              </span>
+            ),
+          )}
         </div>
       )}
 

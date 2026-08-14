@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { dayKeyToTs, fmt, parseDayKey, ruSeriesName, sparkAreaPath, sparkPath } from '@/lib/format';
+import { dayKeyToTs, fmt, parseDayKey, ruSeriesName, sparkAreaPath, sparkPath, weekdayAxisLabels } from '@/lib/format';
 
 describe('parseDayKey', () => {
   it('parses a bare day key as LOCAL midnight of that calendar date', () => {
@@ -206,5 +206,35 @@ describe('spark paths', () => {
     expect(area).toContain(' C');
     expect(area.endsWith('L200,32 L0,32 Z')).toBe(true);
     expect(sparkAreaPath([])).toBe('');
+  });
+});
+
+describe('fmt.weekday + weekdayAxisLabels — буквенная ось короткого окна', () => {
+  it('однобуквенные ЛАТИНСКИЕ дни недели: Mon=M … Sun=S (русская свёртка неоднозначна)', () => {
+    // 2026-06-08 — понедельник.
+    expect(['2026-06-08', '2026-06-09', '2026-06-10', '2026-06-11', '2026-06-12', '2026-06-13', '2026-06-14'].map((d) => fmt.weekday(d)))
+      .toEqual(['M', 'T', 'W', 'T', 'F', 'S', 'S']);
+    expect(fmt.weekday(null)).toBe('');
+    expect(fmt.weekday('не дата')).toBe('');
+  });
+
+  it('weekdayAxisLabels: буквы только для окна ≤ 8 дней и ряда 2–8 точек', () => {
+    const week = ['2026-06-08', '2026-06-09', '2026-06-10', '2026-06-11', '2026-06-12', '2026-06-13', '2026-06-14'];
+    expect(weekdayAxisLabels(week, 7)).toEqual(['M', 'T', 'W', 'T', 'F', 'S', 'S']);
+    // Разреженные дни ВНУТРИ короткого окна — буквы честны (день недели в окне уникален).
+    expect(weekdayAxisLabels(['2026-06-09', '2026-06-11', '2026-06-13'], 7)).toEqual(['T', 'T', 'S']);
+  });
+
+  it('weekdayAxisLabels: длинное окно НЕ получает буквы — два понедельника с одной «M» лгут', () => {
+    expect(weekdayAxisLabels(['2026-06-01', '2026-06-08', '2026-06-15'], 30)).toBeUndefined();
+    expect(weekdayAxisLabels(['2026-06-08', '2026-06-09'], 0)).toBeUndefined();
+    expect(weekdayAxisLabels(['2026-06-08', '2026-06-09'], null)).toBeUndefined();
+    // Одна точка — не ось; девять точек — окно уже не «короткое».
+    expect(weekdayAxisLabels(['2026-06-08'], 7)).toBeUndefined();
+    expect(weekdayAxisLabels(Array.from({ length: 9 }, (_, i) => `2026-06-${String(8 + i).padStart(2, '0')}`), 9)).toBeUndefined();
+  });
+
+  it('weekdayAxisLabels: непарсибельный ключ отменяет всю ось (никаких пустых тиков)', () => {
+    expect(weekdayAxisLabels(['2026-06-08', 'total'], 7)).toBeUndefined();
   });
 });

@@ -1,5 +1,6 @@
 import type { IgHistoryRow, IgInsights, IgProfile } from '@/api/schemas';
 import { pctDelta, type MetricDelta } from '@/lib/delta';
+import { weekdayAxisLabels } from '@/lib/format';
 import {
   fmtDay,
   followerLevelSeries,
@@ -79,6 +80,9 @@ export interface IgWindowDaily {
 export interface IgOverviewChart {
   labels: string[];
   values: number[];
+  /** Ось короткого окна (≤ 8 дневных точек): однобуквенные дни недели (fmt.weekday) вместо дат.
+      Только подписи ОСИ — `labels` остаются полными датами для тултипа. */
+  axisLabels?: string[];
 }
 
 export interface IgOverviewCharts {
@@ -149,9 +153,15 @@ function windowedDaily(series: Point[], since: number, until: number): Point[] {
 }
 
 // A sparkline needs ≥2 points; fewer → empty (the card says «Недостаточно дневных данных…»).
-const toChart = (points: Point[]): IgOverviewChart =>
+// Короткое окно (≤ 8 дней) несёт ось буквами дней недели (канон weekdayAxisLabels) — буквы
+// только на оси, тултип держит полные даты из `labels`.
+const toChart = (points: Point[], windowDays?: number): IgOverviewChart =>
   points.length >= 2
-    ? { labels: points.map((p) => fmtDay(p.day)), values: points.map((p) => p.value) }
+    ? {
+        labels: points.map((p) => fmtDay(p.day)),
+        values: points.map((p) => p.value),
+        axisLabels: weekdayAxisLabels(points.map((p) => p.day), windowDays),
+      }
     : EMPTY_CHART;
 
 /**
@@ -166,6 +176,8 @@ export function igOverviewCharts(series: IgWindowSeries, since: number, until: n
   const viewsCanon = hasDailySeries(series.views, CHART_CANON_MIN);
   const tiCanon = hasDailySeries(series.ti, CHART_CANON_MIN);
   const tiDaily = tiCanon ? windowedDaily(series.ti, since, until) : [];
+  // Длина активного окна в днях — включительные границы [since, until] (см. useIgData).
+  const windowDays = Math.round((until - since) / 86_400_000) + 1;
 
   // ER needs BOTH a real daily interactions series and a real daily reach series. Align by calendar
   // day and keep only days with a positive reach denominator — a day with reach 0 or a missing reach
@@ -180,12 +192,12 @@ export function igOverviewCharts(series: IgWindowSeries, since: number, until: n
       const reach = reachByDay.get(p.day);
       if (reach != null && reach > 0) erPoints.push({ day: p.day, value: (p.value / reach) * 100 });
     }
-    engagement = toChart(erPoints);
+    engagement = toChart(erPoints, windowDays);
   }
 
   return {
-    views: viewsCanon ? toChart(windowedDaily(series.views, since, until)) : EMPTY_CHART,
-    interactions: toChart(tiDaily),
+    views: viewsCanon ? toChart(windowedDaily(series.views, since, until), windowDays) : EMPTY_CHART,
+    interactions: toChart(tiDaily, windowDays),
     engagement,
   };
 }

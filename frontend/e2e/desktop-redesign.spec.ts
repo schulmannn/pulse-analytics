@@ -141,11 +141,18 @@ test('desktop Overview keeps period context compact', async ({ page }, testInfo)
   // «Вовлечённость» — БЕЗ искры, и это гейт, а не упущение. ER = вовлечение ÷ аудитория, а
   // аудитория за окно меняется на проценты против десятков раз у вовлечения, поэтому
   // нормализованная по min–max кривая ER повторяла кривую «Реакций» почти в точности (замер на
-  // проде: корреляция 0.996). Вместо копии соседнего графика карточка объясняет, из чего число.
+  // проде: корреляция 0.996). С 2026-08-14 карточка — центрированный стат (референс владельца);
+  // формула-пояснение остаётся её нижней строкой.
   {
     const er = page.getByRole('heading', { name: 'Вовлечённость', exact: true }).locator('xpath=ancestor::section[1]');
     await expect(er.locator('svg[data-chart-kind="sparkline"]')).toHaveCount(0);
     await expect(er.getByText(/Реакции, репосты и комментарии/)).toBeVisible();
+  }
+
+  // Пилюля текущей (последней) метки оси X (владелец, 2026-08-14) — на оси спарка hero-карточки.
+  {
+    const hero = page.getByRole('heading', { name: 'Просмотры', exact: true }).locator('xpath=ancestor::section[1]');
+    await expect(hero.locator('[data-axis-current]').first()).toBeVisible();
   }
 
   const compactTop = await page.getByRole('heading', { name: 'Ср. охват', exact: true }).evaluate((el) => el.closest('section')!.getBoundingClientRect().top);
@@ -178,18 +185,27 @@ test('desktop Instagram Overview keeps the split KPI hierarchy intact', async ({
   await expect(page.getByRole('heading', { name: 'Главное изменение' })).toBeVisible();
   expect(await overflowingCards(page)).toEqual([]);
 
-  // The three third-width IG cards (Просмотры / Взаимодействия / Вовлечённость) now carry an
-  // active-window sparkline over the CANONICAL account daily series — its «по дням» caption renders
-  // and the old previous-period empty copy is gone (the chart never depends on prior-window coverage).
-  for (const card of ['Просмотры', 'Взаимодействия', 'Вовлечённость']) {
+  // Просмотры / Взаимодействия carry an active-window chart over the CANONICAL account daily
+  // series — the old previous-period empty copy is gone (the chart never depends on prior-window
+  // coverage).
+  for (const card of ['Просмотры', 'Взаимодействия']) {
     const section = page.getByRole('heading', { name: card, exact: true }).locator('xpath=ancestor::section[1]');
-    // Idle-подпись «по дням» убрана (владелец, 2026-07-27); спарклайн остаётся.
+    // Idle-подпись «по дням» убрана (владелец, 2026-07-27); график остаётся.
     await expect(section.getByText('по дням')).toHaveCount(0);
-    // «Взаимодействия» — счётный поток, ведёт столбцами (#461); остальные две карточки — искрой.
+    // «Взаимодействия» — счётный поток, ведёт столбцами (#461); «Просмотры» — искрой.
     const kind = card === 'Взаимодействия' ? 'bar' : 'sparkline';
     await expect(section.locator(`svg[data-chart-kind="${kind}"]`)).toBeVisible();
     await expect(section.getByText('Нет данных за предыдущий период для сравнения.')).toHaveCount(0);
     await expect(section.getByText('Недостаточно дневных данных для графика.')).toHaveCount(0);
+  }
+
+  // «Вовлечённость» — центрированный стат БЕЗ графика (владелец, 2026-08-14; зеркало TG-гейта):
+  // процент по центру, под ним сравнение с прошлым периодом, дневной ER остаётся на /metrics/ig-er.
+  {
+    const er = page.getByRole('heading', { name: 'Вовлечённость', exact: true }).locator('xpath=ancestor::section[1]');
+    await expect(er.locator('svg[data-chart-kind="sparkline"]')).toHaveCount(0);
+    await expect(er.locator('svg[data-chart-kind="bar"]')).toHaveCount(0);
+    await expect(er.getByText('Взаимодействия к охвату аккаунта за период.')).toBeVisible();
   }
 
   const compactTop = await page.getByRole('heading', { name: 'Просмотры', exact: true }).evaluate((el) => el.closest('section')!.getBoundingClientRect().top);

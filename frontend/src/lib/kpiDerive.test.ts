@@ -140,3 +140,47 @@ describe('deriveKpis — спарклайны TG по датам публика�
     expect(d.reactionsSpark.values).toEqual([2, 4]); // ровно два бакета, без нулевых дней между
   });
 });
+
+/**
+ * Ось букв дней недели (владелец, 2026-08-14): короткое окно (≤ 8 дн.) несёт axisLabels —
+ * однобуквенные латинские дни недели; labels ОСТАЮТСЯ полными датами (тултип). Длинное окно
+ * и «всё время» осей-букв не получают.
+ */
+describe('deriveKpis — axisLabels короткого окна', () => {
+  const withPosts = (days: import('@/lib/period').PeriodDays) =>
+    deriveKpis(
+      {
+        channel: { memberCount: 5000 },
+        // 2026-06-08 (Пн), 09 (Вт), 11 (Чт) — разреженные дни публикаций внутри окна.
+        posts: [0, 1, 3].map((offset) => ({
+          date: `2026-06-${String(8 + offset).padStart(2, '0')}T12:00:00.000Z`,
+          views: 100,
+          reactions: 1,
+          forwards: 0,
+          replies: 0,
+        })),
+      } as never,
+      { rows: [0, 1, 2, 3].map((i) => ({ day: `2026-06-${String(8 + i).padStart(2, '0')}`, views: 100, subscribers: 5000 })) } as never,
+      undefined,
+      null,
+      days,
+      null,
+      () => true,
+    );
+
+  it('7-дневное окно: спарки публикаций и канальных просмотров несут буквы, labels — даты', () => {
+    const d = withPosts(7);
+    expect(d.reactionsSpark.axisLabels).toEqual(['M', 'T', 'T']);
+    expect(d.avgReachSpark.axisLabels).toEqual(['M', 'T', 'T']);
+    expect(d.erSpark.axisLabels).toEqual(['M', 'T', 'T']);
+    expect(d.viewsSpark.axisLabels).toEqual(['M', 'T', 'W', 'T']);
+    // Полные даты не тронуты — тултип по-прежнему называет день.
+    expect(d.reactionsSpark.labels[0]).toBe(fmt.day('2026-06-08'));
+  });
+
+  it('30-дневное окно и «всё время» остаются на датах (axisLabels нет)', () => {
+    expect(withPosts(30).reactionsSpark.axisLabels).toBeUndefined();
+    expect(withPosts(30).viewsSpark.axisLabels).toBeUndefined();
+    expect(withPosts(0).reactionsSpark.axisLabels).toBeUndefined();
+  });
+});

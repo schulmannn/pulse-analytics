@@ -1,6 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { seriesMotionKey } from '@/lib/chartMotion';
 import type { MorphPoint } from '@/lib/chartMorph';
+import { ChartTooltip, type TooltipState } from '@/components/ChartTooltip';
 import { SparklineSeries } from '@/components/SparklineSeries';
 import { cn } from '@/lib/utils';
 import { sparkDomain } from '@/lib/robustDomain';
@@ -16,6 +17,13 @@ interface SparklineProps {
   values: Array<number | null>;
   /** Per-point labels (e.g. dates), same length as values — used in the hover read-out. */
   labels?: string[];
+  /**
+   * Подписи ОСИ вместо дат из `labels` (короткое окно ≤ 8 точек: буквы дней недели, канон
+   * weekdayAxis). Выравнены с values и при пропусках отбрасываются синхронно с labels. Буквы
+   * узкие, поэтому буквенная ось показывает ВСЕ тики — а не первый/середину/последний, как даты.
+   * Полную дату наведённой точки по-прежнему называет тултип (из `labels`).
+   */
+  axisLabels?: string[];
   /** Full hsl() stroke/fill colour, e.g. 'hsl(var(--brand-iris))'. */
   color?: string;
   /** Add a soft gradient area fill under the line (featured cards). */
@@ -25,9 +33,10 @@ interface SparklineProps {
   /** Show peak + current markers and a hover dot/guide. */
   interactive?: boolean;
   /**
-   * Idle text shown under the line (e.g. "по дням"). On hover it is replaced by the read-out
-   * (date · value · day-over-day Δ). Omit it to suppress the read-out line entirely (compact
-   * tiles) — hover then only moves the dot, so there's no layout shift.
+   * Idle text shown under the line (e.g. "по дням") when there is no axis to draw. The reserved
+   * line otherwise holds the X axis, which STAYS PUT on hover — the hovered date · value · Δ
+   * read-out lives in the floating ChartTooltip (владелец, 2026-08-14: «такие же pop-up, как у
+   * столбцов»). Omit the prop to suppress the line entirely (compact tiles) — no layout shift.
    */
   caption?: string;
   /** Formats a value for the hover read-out (default: String). */
@@ -68,6 +77,7 @@ function computeSparkPoints(values: number[], domain: { min: number; max: number
 export function Sparkline({
   values: rawValues,
   labels: rawLabels,
+  axisLabels: rawAxisLabels,
   color = 'hsl(var(--brand-iris))',
   area = false,
   strokeWidth = 1.6,
@@ -77,27 +87,36 @@ export function Sparkline({
   formatValue = String,
 }: SparklineProps) {
   // Отбрасываем пропуски вместе с их подписями ОДИН раз, до всей геометрии и морфа: дальше по
-  // компоненту `values` — это уже только наблюдения, и ни min/max, ни ховер-читалка, ни
+  // компоненту `values` — это уже только наблюдения, и ни min/max, ни ховер-тултип, ни
   // aria-label не могут случайно наткнуться на null. Мемо по ссылке входного массива, чтобы
   // ховер-перерисовка не порождала новый `values` и не перезапускала морф.
-  const { values, labels } = useMemo(() => {
+  const { values, labels, axis } = useMemo(() => {
     const source = rawValues ?? [];
     if (!source.some((value) => value == null)) {
-      return { values: source as number[], labels: rawLabels };
+      return { values: source as number[], labels: rawLabels, axis: rawAxisLabels };
     }
     const kept: number[] = [];
     const keptLabels: string[] = [];
+    const keptAxis: string[] = [];
     source.forEach((value, index) => {
       if (value == null) return;
       kept.push(value);
       if (rawLabels) keptLabels.push(rawLabels[index] ?? '');
+      if (rawAxisLabels) keptAxis.push(rawAxisLabels[index] ?? '');
     });
-    return { values: kept, labels: rawLabels ? keptLabels : undefined };
-  }, [rawValues, rawLabels]);
+    return {
+      values: kept,
+      labels: rawLabels ? keptLabels : undefined,
+      axis: rawAxisLabels ? keptAxis : undefined,
+    };
+  }, [rawValues, rawLabels, rawAxisLabels]);
 
   // Strip colons from useId — they're valid in ids but break SVG url(#…) refs in some browsers.
   const gradientId = `sl${useId().replace(/:/g, '')}`;
-  const [hover, setHover] = useState<number | null>(null);
+  // Ховер несёт индекс точки И размер поверхности на момент движения: тултип якорится в px
+  // относительно relative-обёртки (контракт ChartTooltip), а проценты xPct/yPct переводятся в px
+  // ровно тем прямоугольником, по которому считался индекс, — отдельный замер не нужен.
+  const [hover, setHover] = useState<{ i: number; w: number; h: number } | null>(null);
   const hoverSurfaceRef = useRef<HTMLDivElement>(null);
   // Target morph geometry, memoised on the VALUES reference: a hover rerender keeps the same `values`
   // ref (hover is local state — the parent doesn't re-render), so the morph layer sees a stable
@@ -109,14 +128,17 @@ export function Sparkline({
   const points = useMemo(() => computeSparkPoints(values ?? [], domain), [values, domain]);
 
   /**
-   * Разметка оси: первая, последняя и середина — не больше трёх на компактной искре. Больше в
-   * ширину карточки в треть экрана не влезает без наложения, а прореживать «сколько поместится»
-   * без замера текста значит гадать: подписи здесь HTML, но кегль зависит от темы и шрифта.
-   * Три точки честно отвечают на «какой отрезок передо мной» — остальное берёт ховер-читалка.
+   * Разметка оси. Буквенная ось короткого окна (axisLabels: «M T W T F S S») показывает ВСЕ
+   * тики — буквы узкие, и только полный ряд даёт ритм недели (референс владельца, 2026-08-14).
+   * Даты остаются тройкой «первая, середина, последняя»: больше в ширину карточки в треть экрана
+   * не влезает без наложения, а прореживать «сколько поместится» без замера текста значит гадать.
    * Ровно два лейбла (начало и конец) при коротком ряде — тоже валидная ось, поэтому середина
-   * добавляется, только если она НЕ совпадает с краями.
+   * добавляется, только если она НЕ совпадает с краями. Конкретный день называет ховер-тултип.
    */
   const axisTicks = useMemo(() => {
+    if (axis && axis.length >= 2) {
+      return axis.map((text, i) => ({ i, text })).filter((tick) => tick.text.length > 0);
+    }
     if (!labels || labels.length < 2) return [] as { i: number; text: string }[];
     const last = labels.length - 1;
     const mid = Math.floor(last / 2);
@@ -124,7 +146,7 @@ export function Sparkline({
     return idx
       .map((i) => ({ i, text: labels[i] ?? '' }))
       .filter((tick) => tick.text.length > 0);
-  }, [labels]);
+  }, [axis, labels]);
 
   // Pointer scrubbing is supplementary to the SVG's detailed accessible name, not an activation
   // action. Keep the surface passive and listen for its coordinates on the DOM node.
@@ -135,7 +157,12 @@ export function Sparkline({
       const rect = surface.getBoundingClientRect();
       if (rect.width === 0) return;
       const ratio = (event.clientX - rect.left) / rect.width;
-      setHover(Math.max(0, Math.min(values.length - 1, Math.round(ratio * (values.length - 1)))));
+      const i = Math.max(0, Math.min(values.length - 1, Math.round(ratio * (values.length - 1))));
+      setHover((prev) =>
+        prev && prev.i === i && prev.w === rect.width && prev.h === rect.height
+          ? prev
+          : { i, w: rect.width, h: rect.height },
+      );
     };
     const clearHover = () => setHover(null);
     surface.addEventListener('mousemove', handleMove);
@@ -163,21 +190,26 @@ export function Sparkline({
   // Тот же клип, что в геометрии морфа, иначе ховер-точка уехала бы выше линии.
   const yPct = (v: number) => ((VBH - PAD - ((Math.min(v, max) - min) / range) * (VBH - PAD * 2)) / VBH) * 100;
 
-  const active = hover;
+  const active = hover?.i ?? null;
 
-
-  // Read-out text: idle caption, or date · value · Δ-vs-previous-point while hovering.
-  let readout = caption ?? '';
-  if (active != null) {
-    const v = values[active];
-    const label = labels?.[active];
-    const prev = active > 0 ? values[active - 1] : null;
+  // Плавающий тултип у наведённой точки — тот же канонный ChartTooltip, что у столбцов/линий
+  // (владелец, 2026-08-14: «такие же pop-up для линейных графиков»). Содержимое повторяет формат
+  // бар-карточек («11 авг.: 391») плюс Δ к предыдущей точке, которую несла прежняя читалка.
+  // У клипнутой точки тултип обязан назвать НАСТОЯЩЕЕ число: домен режется, данные — нет.
+  let tip: TooltipState = null;
+  if (interactive && hover != null && hover.w > 0) {
+    const v = values[hover.i];
+    const label = labels?.[hover.i];
+    const prev = hover.i > 0 ? values[hover.i - 1] : null;
     const diff = prev != null ? v - prev : null;
     const diffStr =
       diff != null && diff !== 0 ? ` ${diff > 0 ? '↑' : '↓'}${formatValue(Math.abs(diff))}` : '';
-    // У клипнутой точки читалка обязана назвать НАСТОЯЩЕЕ число: домен режется, данные — нет.
-    const clipNote = clippedSet.has(active) ? ' · пик срезан' : '';
-    readout = `${label ? `${label} · ` : ''}${formatValue(v)}${diffStr}${clipNote}`;
+    const clipNote = clippedSet.has(hover.i) ? ' · пик срезан' : '';
+    tip = {
+      x: (xPct(hover.i) / 100) * hover.w,
+      y: (yPct(v) / 100) * hover.h,
+      text: `${label ? `${label}: ` : ''}${formatValue(v)}${diffStr}${clipNote}`,
+    };
   }
 
   // Ховер-точка — единственный HTML-оверлей: полюса (начало/конец) рисует SparklineSeries из
@@ -281,28 +313,44 @@ export function Sparkline({
               />
             ))}
             {active != null && dot(active)}
+            {/* Канонный плавающий тултип (общий с BarChart/LineChart) — якорится к точке внутри
+                этой же relative-обёртки; на низкой искре его lowHost-логика сама уводит плашку
+                вбок, не накрывая линию. */}
+            <ChartTooltip tip={tip} />
           </>
         )}
       </div>
 
       {interactive && caption !== undefined && (
-        // min-h резервирует строку и при ПУСТОМ idle-caption (caption="" — читалка без idle-текста):
-        // без резерва пустой div схлопывался в 0, ховер-текст раздувал ряд, и график «скакал»
-        // (владелец, Метрика/МойСклад). Высота = line-box text-2xs.
+        // min-h резервирует строку и при ПУСТОМ idle-caption (caption="" — ось без idle-текста):
+        // без резерва пустой div схлопывался в 0 и график «скакал» (владелец, Метрика/МойСклад).
+        // Высота = line-box text-2xs.
         //
-        // Ось X живёт в ЭТОЙ ЖЕ строке (владелец: «сделай подписи по оси X, в днях»). Строка и так
-        // зарезервирована и в покое пуста, поэтому ось не добавляет карточке ни пикселя высоты — на
-        // фикс-тайле 264px это решает, влезет она или нет. При наведении ось уступает место читалке
-        // «дата · значение · Δ»: та называет КОНКРЕТНЫЙ день, то есть точнее любой разметки.
+        // Ось X живёт в ЭТОЙ ЖЕ строке (владелец: «сделай подписи по оси X, в днях») и с 2026-08-14
+        // НЕ уступает место ховер-читалке: конкретный день называет плавающий ChartTooltip, а ось
+        // стоит на месте — вместе с пилюлей ТЕКУЩЕЙ (последней) метки, которая отвечает на «где
+        // сейчас» (референс владельца: «Aug» / обведённая «T»).
         <div className="mt-1 min-h-4 truncate text-2xs tabular-nums text-muted-foreground">
-          {active == null && axisTicks.length > 1 ? (
-            <span aria-hidden="true" className="flex justify-between gap-2">
-              {axisTicks.map((tick) => (
-                <span key={tick.i} className="truncate">{tick.text}</span>
-              ))}
+          {axisTicks.length > 1 ? (
+            <span aria-hidden="true" className="flex items-center justify-between gap-2">
+              {axisTicks.map((tick, index) =>
+                index === axisTicks.length - 1 ? (
+                  // Пилюля не выше строки: leading-none (11px) + py-px (2px) = 13px < min-h-4,
+                  // фикс-тайл 264px не растёт ни на пиксель.
+                  <span
+                    key={tick.i}
+                    data-axis-current=""
+                    className="shrink-0 rounded-full bg-primary/10 px-1.5 py-px font-medium leading-none text-accent-foreground"
+                  >
+                    {tick.text}
+                  </span>
+                ) : (
+                  <span key={tick.i} className="truncate">{tick.text}</span>
+                ),
+              )}
             </span>
           ) : (
-            readout
+            caption
           )}
         </div>
       )}

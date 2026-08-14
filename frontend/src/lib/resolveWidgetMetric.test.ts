@@ -709,7 +709,7 @@ describe('resolveWidgetMetric — Instagram (S11)', () => {
 
   it('resolves ig.erv = interactions ÷ reach × 100', () => {
     const r = resolveWidgetMetric(cfg('ig.erv'), igCtx);
-    expect(r.value).toBe('10.00%'); // 300 / 3000 × 100 — 2 знака, как IG-KPI и страница ig-er
+    expect(r.value).toBe('10.0%'); // 300 / 3000 × 100 — единый fmt.pctAbs, как IG-KPI и страница ig-er
     expect(r.valueRaw).toBeCloseTo(10, 5);
   });
 

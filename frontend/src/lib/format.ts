@@ -19,6 +19,22 @@ export function pluralRu(n: number, forms: [one: string, few: string, many: stri
  * UTC (D6.5). A day key names a calendar date, not an instant — it must read the same in
  * every timezone. Full ISO timestamps are NOT day keys and keep instant semantics.
  */
+/**
+ * Ось короткого дневного окна: латинские однобуквенные дни недели (fmt.weekday) для рядов
+ * ≤ 8 точек В ОКНЕ ≤ 8 дней. Порог по ОКНУ обязателен: разреженный ряд из 5 точек в 30-дневном
+ * окне содержал бы два разных понедельника с одинаковой «M» — буквы честны, только пока день
+ * недели в окне уникален. undefined = ось остаётся датами.
+ */
+export function weekdayAxisLabels(
+  dayKeys: string[],
+  windowDays: number | null | undefined,
+): string[] | undefined {
+  if (windowDays == null || windowDays <= 0 || windowDays > 8) return undefined;
+  if (dayKeys.length < 2 || dayKeys.length > 8) return undefined;
+  const letters = dayKeys.map((key) => fmt.weekday(key));
+  return letters.every((letter) => letter.length > 0) ? letters : undefined;
+}
+
 export function parseDayKey(s: string): Date | null {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
   if (!m) return null;
@@ -96,6 +112,22 @@ export const fmt = {
       const d = typeof v === 'string' ? (parseDayKey(v) ?? new Date(v)) : new Date(v);
       if (isNaN(d.getTime())) return '';
       return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
+    } catch {
+      return '';
+    }
+  },
+  /**
+   * Однобуквенный день недели для оси КОРОТКОГО окна (≤ 8 дневных точек): Mon=M … Sun=S.
+   * Латиница намеренно (владелец, 2026-08-14): русская однобуквенная свёртка неоднозначна —
+   * «П» = Пн/Пт, «С» = Ср/Сб/Вс, — а двухбуквенное «Пн» на 7–8 тиках компактной оси толкается.
+   * Полную дату при этом обязан называть ховер (тултип), буква несёт только ритм недели.
+   */
+  weekday(v?: string | number | Date | null): string {
+    if (v == null || v === '') return '';
+    try {
+      const d = typeof v === 'string' ? (parseDayKey(v) ?? new Date(v)) : new Date(v);
+      if (isNaN(d.getTime())) return '';
+      return ['S', 'M', 'T', 'W', 'T', 'F', 'S'][d.getDay()] ?? '';
     } catch {
       return '';
     }
