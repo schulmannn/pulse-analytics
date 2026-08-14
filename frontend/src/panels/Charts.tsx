@@ -1,10 +1,9 @@
-import { useMemo } from 'react';
+import { lazy, Suspense, useMemo } from 'react';
 import { useHistory, useVelocity, useTgFull } from '@/api/queries';
 import type { TgFull } from '@/api/schemas';
 import { lttbDownsample } from '@/lib/downsample';
 import { BarChart } from '@/components/BarChart';
 import { LineChart } from '@/components/LineChart';
-import { ChartTooltip, useHeatmapTip } from '@/components/ChartTooltip';
 import { fmt, pluralRu } from '@/lib/format';
 import { ChartSkeleton as DataChartSkeleton } from '@/components/ui/dataSkeleton';
 import { useWidgetPeriod } from '@/lib/period';
@@ -15,12 +14,8 @@ import { seriesBarValuesVariant } from '@/components/widgets/variants';
 import { pctDelta } from '@/lib/delta';
 import type { WidgetViz } from '@/lib/widgetMetrics';
 import type { WidgetSize } from '@/lib/widgetPrefsStore';
-
-interface HeatmapCell {
-  n: number;
-  ervSum: number;
-  reachSum: number;
-}
+import { lazyWithReload } from '@/lib/lazyWithReload';
+import { TG_DAY_NAMES, type HeatmapBestSlot, type HeatmapCell } from '@/lib/tgHeatmap';
 
 interface SubscriberRow {
   day: string;
@@ -193,16 +188,6 @@ export function HistoryWidgetBody() {
   );
 }
 
-const DAY_NAMES = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
-
-interface HeatmapBestSlot {
-  weekday: number;
-  hour: number;
-  avgErv: number;
-  n: number;
-  reachSum: number;
-}
-
 /** Aggregate posts into the 7×24 ERV grid + the best slot. Pure — memoized by the block. */
 function buildHeatmap(
   posts: NonNullable<TgFull['posts']>,
@@ -269,6 +254,31 @@ export function HeatmapChartBlock({ id, homeKey }: HomeBlockProps = {}) {
   );
 }
 
+const ActivityCalendarBody = lazy(
+  lazyWithReload(() => import('@/panels/ActivityCalendar').then((module) => ({ default: module.ActivityCalendarBody }))),
+);
+const HeatmapSurface = lazy(
+  lazyWithReload(() => import('@/panels/HeatmapSurface').then((module) => ({ default: module.HeatmapSurface }))),
+);
+
+export function CalendarChartBlock({ id, homeKey }: HomeBlockProps = {}) {
+  return (
+    <ChartSection title="Календарь активности" defaultSize="full" id={id} homeKey={homeKey}>
+      <CalendarWidgetBody />
+    </ChartSection>
+  );
+}
+
+/** Fixed-year body shared by Analytics and the pinnable Home card. It deliberately ignores the
+    page/widget period: this view always answers the same trailing-365-day question. */
+export function CalendarWidgetBody() {
+  return (
+    <Suspense fallback={<ChartSkeletonBody />}>
+      <ActivityCalendarBody />
+    </Suspense>
+  );
+}
+
 /** Bare, self-fetching heatmap body shared by the source card and ConfigWidget. */
 export function HeatmapWidgetBody() {
   // Прогрессивная загрузка Главной: офскрин-пин не фетчит (вне Главной контекст = true).
@@ -305,13 +315,15 @@ function HeatmapBody({ posts }: { posts: NonNullable<TgFull['posts']> }) {
   const trimmed = hourRange.from > 0 || hourRange.to < 23;
   return (
     <>
-      <HeatmapSurface grid={grid} maxErv={maxErv} bestSlot={bestSlot} hourRange={hourRange} />
+      <Suspense fallback={<ChartSkeletonBody />}>
+        <HeatmapSurface grid={grid} maxErv={maxErv} bestSlot={bestSlot} hourRange={hourRange} />
+      </Suspense>
       <div className="mt-3 text-xs font-medium text-muted-foreground">
         {bestSlot ? (
           <span>
             лучший слот:{' '}
             <strong className="text-foreground">
-              {DAY_NAMES[bestSlot.weekday] ?? ''} {bestSlot.hour}:00
+              {TG_DAY_NAMES[bestSlot.weekday] ?? ''} {bestSlot.hour}:00
             </strong>{' '}
             · ERV {bestSlot.avgErv.toFixed(1)}%
             {trimmed ? (
@@ -323,87 +335,6 @@ function HeatmapBody({ posts }: { posts: NonNullable<TgFull['posts']> }) {
         )}
       </div>
     </>
-  );
-}
-
-/** The interactive heatmap surface — owns the tooltip state so hovering re-renders only
-    this leaf (cheap cell mapping), never the parent's aggregation. */
-function HeatmapSurface({
-  grid,
-  maxErv,
-  bestSlot,
-  hourRange,
-}: {
-  grid: HeatmapCell[][];
-  maxErv: number;
-  bestSlot: HeatmapBestSlot | null;
-  hourRange: { from: number; to: number };
-}) {
-  // Делегированный hover-читатель [data-heatmap-tip] — вынесен в useHeatmapTip (общий с
-  // почасовыми хитмапами Метрики), поведение прежнее: пассивные ячейки, гашение над пустыми,
-  // при прокрутке и потере фокуса.
-  const { wrapRef, tip } = useHeatmapTip();
-  // Видимые часы (сжатый диапазон из HeatmapBody). Подпись — «6:00», не голое «6»: на сжатом
-  // 7д-окне колонок мало и цифры без «:00» читались как непонятные числа/даты (проход №3).
-  // Плотность подписей — по ширине формата: «6:00» шире голой цифры, каждый час подписываем
-  // только на узких диапазонах.
-  const hours = Array.from({ length: hourRange.to - hourRange.from + 1 }, (_, i) => hourRange.from + i);
-  const cols = `30px repeat(${hours.length}, minmax(14px, 1fr))`;
-  const labelStride = hours.length <= 8 ? 1 : hours.length <= 16 ? 2 : 3;
-  const ariaSummary = bestSlot
-    ? `Тепловая карта публикаций по дням и часам. Лучший слот: ${DAY_NAMES[bestSlot.weekday] ?? ''} ${bestSlot.hour}:00, ERV ${bestSlot.avgErv.toFixed(1)}%.`
-    : 'Тепловая карта публикаций по дням и часам. Недостаточно данных, чтобы определить лучший слот.';
-
-  return (
-    <div ref={wrapRef} role="img" aria-label={ariaSummary} className="relative">
-      <div className="overflow-x-auto pb-2">
-        <div className="min-w-[420px] space-y-[2px]">
-          <div className="grid gap-[2px]" style={{ gridTemplateColumns: cols }}>
-            <div />
-            {hours.map((hr) => (
-              <div key={hr} className="select-none whitespace-nowrap text-center text-2xs font-medium tabular-nums text-muted-foreground">
-                {hr % labelStride === 0 ? `${hr}:00` : ''}
-              </div>
-            ))}
-          </div>
-
-          {DAY_NAMES.map((dayName, w) => {
-            const currentRow = grid[w] ?? [];
-            return (
-              <div
-                key={w}
-                className="grid items-center gap-[2px]"
-                style={{ gridTemplateColumns: cols }}
-              >
-                <div className="select-none text-2xs font-medium text-muted-foreground">{dayName}</div>
-                {hours.map((hr) => {
-                  const cell = currentRow[hr];
-                  if (!cell || cell.n === 0) {
-                    return <div key={hr} className="h-4 rounded-sm bg-muted/40" />;
-                  }
-                  const avgErv = cell.ervSum / cell.n;
-                  const opacity = maxErv > 0 ? Math.max(0.18, avgErv / maxErv) : 0;
-                  const isBest = bestSlot && bestSlot.weekday === w && bestSlot.hour === hr;
-                  const titleText = `${dayName} ${hr}:00 · ${cell.n} ${pluralRu(cell.n, ['пост', 'поста', 'постов'])} · ERV ${avgErv.toFixed(1)}% · ср.охват ${fmt.short(cell.reachSum / cell.n)}`;
-                  return (
-                    <div
-                      key={hr}
-                      className={`relative h-4 cursor-crosshair rounded-sm transition-opacity dur-base ease-house${isBest ? ' border-2 border-verdant' : ''}`}
-                      data-heatmap-tip={titleText}
-                      style={{
-                        backgroundColor: 'hsl(var(--brand-iris))',
-                        opacity,
-                      }}
-                    />
-                  );
-                })}
-              </div>
-            );
-          })}
-        </div>
-      </div>
-      <ChartTooltip tip={tip} />
-    </div>
   );
 }
 

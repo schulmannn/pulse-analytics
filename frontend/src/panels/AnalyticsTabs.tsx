@@ -9,7 +9,7 @@ import { buildTgAnalyticsRows, tgDailySeriesFromGraphs } from '@/lib/tgAnalytics
 import { downloadAnalyticsCsv, exportFilename } from '@/lib/analyticsExport';
 import { Insights } from '@/panels/Insights';
 import { Compare } from '@/panels/Compare';
-import { HistoryChartBlock, HeatmapChartBlock, VelocityChartBlock } from '@/panels/Charts';
+import { CalendarChartBlock, HistoryChartBlock, HeatmapChartBlock, VelocityChartBlock } from '@/panels/Charts';
 import { ChartSection } from '@/components/ChartWidget';
 import { WidgetGroup } from '@/components/widgets/WidgetGroup';
 import { WidgetErrorBoundary } from '@/components/WidgetErrorBoundary';
@@ -24,6 +24,7 @@ import { ContentOpportunity } from '@/panels/ContentOpportunity';
 import { PAGE_SUBNAV_SHELL } from '@/lib/pageChrome';
 import { ANALYTICS_TABS, isAnalyticsTab, type AnalyticsTab } from '@/lib/analyticsTabs';
 import { cn } from '@/lib/utils';
+import { useScrollEdgeFade } from '@/lib/useScrollEdgeFade';
 
 /**
  * Analytics — the deep breakdowns. The Overview is a focused summary (Figma), so the detailed
@@ -33,10 +34,17 @@ import { cn } from '@/lib/utils';
  */
 // Порядок/подписи вкладок — в lib/analyticsTabs (их же читает ⌘K-палитра, см. модуль).
 
+const DYNAMICS_WIDGET_ORDER = [
+  'История подписчиков',
+  'Скорость набора просмотров',
+  'Календарь активности',
+] as const;
+
 export function Analytics() {
   // The active tab lives in ?tab= (replace, not push) so a shared /analytics link restores
   // it; the default «Динамика» keeps the URL clean. Period params (?p / ?from&to) coexist.
   const [params, setParams] = useSearchParams();
+  const tabsFadeRef = useScrollEdgeFade<HTMLDivElement>();
   const rawTab = params.get('tab');
   const tab: AnalyticsTab = isAnalyticsTab(rawTab) ? rawTab : 'dynamics';
   const setTab = (next: AnalyticsTab) => {
@@ -64,9 +72,10 @@ export function Analytics() {
           «Форматов» (analytics-campaign-scope) НЕ липнет — липкий слой ровно один. */}
       <div className={cn(PAGE_SUBNAV_SHELL, 'flex items-center justify-between gap-3')}>
         <TabsList
+          ref={tabsFadeRef}
           aria-label="Разделы аналитики"
           variant="line"
-          className="min-w-0 max-w-full shrink justify-start overflow-x-auto"
+          className="scroll-fade-x min-w-0 max-w-full shrink justify-start overflow-x-auto"
         >
           {ANALYTICS_TABS.map((t) => (
             <TabsTrigger
@@ -94,12 +103,19 @@ export function Analytics() {
               still take the full row via the widgets' own variant span. History/Velocity build
               their series in their own render (above ChartSection), so each gets a per-widget card
               boundary here — the same seam Home protects. */}
-          <WidgetGroup id="analytics-dynamics" className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-6">
+          <WidgetGroup
+            id="analytics-dynamics"
+            className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-6"
+            defaultOrder={DYNAMICS_WIDGET_ORDER}
+          >
             <WidgetErrorBoundary variant="card" size="half" widgetId="analytics-history" label="История подписчиков">
               <HistoryChartBlock />
             </WidgetErrorBoundary>
             <WidgetErrorBoundary variant="card" size="half" widgetId="analytics-velocity" label="Скорость набора просмотров">
               <VelocityChartBlock />
+            </WidgetErrorBoundary>
+            <WidgetErrorBoundary variant="card" size="full" widgetId="analytics-calendar" label="Календарь активности">
+              <CalendarChartBlock />
             </WidgetErrorBoundary>
           </WidgetGroup>
         </div>

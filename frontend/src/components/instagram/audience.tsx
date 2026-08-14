@@ -15,6 +15,7 @@ import {
   igCityItems,
   DAY_NAMES,
 } from '@/lib/igMetrics';
+import { useScrollEdgeFade } from '@/lib/useScrollEdgeFade';
 
 export function AudienceBlock({ breakdowns, followers }: { breakdowns: IgBreakdowns | undefined; followers: number }) {
   // Shared derivations (igMetrics): the card and each /metrics/ig-* full page read the SAME math, so
@@ -99,6 +100,7 @@ export function AudienceBlock({ breakdowns, followers }: { breakdowns: IgBreakdo
 export function BestTimeHeatmap({ online }: { online: IgOnline | undefined }) {
   const [tip, setTip] = useState<TooltipState>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const scrollFadeRef = useScrollEdgeFade<HTMLDivElement>();
   const { grid, max, best, hasSignal } = aggregateOnline(online);
 
   if (!hasSignal) {
@@ -128,7 +130,7 @@ export function BestTimeHeatmap({ online }: { online: IgOnline | undefined }) {
 
   return (
     <div ref={wrapRef} className="relative">
-      <div className="overflow-x-auto pb-2">
+      <div ref={scrollFadeRef} className="scroll-fade-x overflow-x-auto pb-2">
         <div className="min-w-full space-y-[2px] lg:min-w-[440px]">
           <div className="grid gap-[2px]" style={{ gridTemplateColumns: '30px repeat(24, minmax(14px, 1fr))' }}>
             <div />

@@ -63,6 +63,8 @@ import {
 } from '@/lib/igContentFilters';
 import { cn } from '@/lib/utils';
 import { useIgScopedPosts, toCampaignItems } from '@/panels/instagram/igContentScope';
+import { useLiveList } from '@/lib/useLiveList';
+import { useScrollEdgeFade } from '@/lib/useScrollEdgeFade';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Desktop — shadcn-style Publications table with an adjacent inspector and removable active-filter
@@ -187,8 +189,10 @@ export function IgContentDesktop({ ig }: { ig: IgData }) {
   // Current 1-based page — only material once the result set exceeds one page (see PAGE_SIZE).
   const [page, setPage] = useState(1);
   const tableShellRef = useRef<HTMLDivElement>(null);
+  const tableFadeRef = useScrollEdgeFade(tableShellRef);
   const tableRef = useRef<HTMLTableElement>(null);
   const tableHeaderRef = useRef<HTMLTableSectionElement>(null);
+  const liveListRef = useLiveList<HTMLTableSectionElement>();
   const [stickyHeader, setStickyHeader] = useState<StickyHeaderGeometry | null>(null);
   const [tableViewport, setTableViewport] = useState<TableViewportGeometry | null>(null);
 
@@ -732,16 +736,16 @@ export function IgContentDesktop({ ig }: { ig: IgData }) {
     cardBody = (
       <>
       <div
-        ref={tableShellRef}
+        ref={tableFadeRef}
         className={cn(
-          'mx-4 overflow-x-auto overflow-y-hidden overscroll-x-contain rounded-xl border border-border/75 bg-surface-table [contain:paint] sm:mx-5',
+          'scroll-fade-x mx-4 overflow-x-auto overflow-y-hidden overscroll-x-contain rounded-xl border border-border/75 bg-surface-table [contain:paint] sm:mx-5',
           paginated ? 'mb-3 sm:mb-3.5' : 'mb-4 sm:mb-5',
         )}
         data-ig-content-table
       >
         <table ref={tableRef} className="data-table ig-content-table text-left text-sm">
           {renderTableHeader()}
-          <tbody>
+          <tbody ref={liveListRef}>
             {pagedRows.map((post, idx) => {
               const clickable = post.id != null;
               const isOpen = post.id != null && post.id === openId;

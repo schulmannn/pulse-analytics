@@ -19,8 +19,11 @@ const wobble = (i: number, amp: number, period = 6) => Math.round(Math.sin((i / 
 function buildHistory() {
   const rows: Array<Record<string, number | string>> = [];
   let subs = 10_900;
-  for (let d = 89; d >= 0; d--) {
-    const age = 89 - d; // 0 = oldest, 89 = today
+  // Архив подписчиков ГЛУБЖЕ ряда просмотров (365 дн. у календаря активности) — это инвариант
+  // демо-стенда: карточка с разрешимой датой обязана честно пустеть за пределами графика постов,
+  // тогда как уровень подписчиков там ещё есть (tg-top-posts.spec держит оба конца).
+  for (let d = 419; d >= 0; d--) {
+    const age = 419 - d; // 0 = oldest, 419 = today
     const joins = 46 + Math.round(14 * Math.abs(Math.sin(age / 4))) + wobble(age, 7) + Math.round(age * 0.15);
     const leaves = 22 + Math.abs(wobble(age, 8, 5));
     subs += joins - leaves;
@@ -136,15 +139,24 @@ const TG_VELOCITY = {
 };
 
 const growthValues = HISTORY_ROWS.slice(-30).map((r) => Number(r.subscribers));
-const viewsValues = HISTORY_ROWS.slice(-30).map((r) => Number(r.views));
-const reactValues = HISTORY_ROWS.slice(-30).map((r) => Number(r.reactions));
+// The yearly activity calendar reads the exact same interactions/views row as production. Give the
+// public demo a complete deterministic year so the widget demonstrates its density and quantiles.
+const DAILY_VIEW_ROWS = Array.from({ length: 365 }, (_, index) => {
+  const offset = 364 - index;
+  const weekly = index % 7 === 5 || index % 7 === 6 ? 0.72 : 1;
+  const views = Math.max(0, Math.round((3100 + index * 5 + wobble(index, 980, 13)) * weekly));
+  return { day: day(offset), views, reactions: Math.round(views * 0.052) };
+});
+const viewsValues = DAILY_VIEW_ROWS.map((row) => row.views);
+const reactValues = DAILY_VIEW_ROWS.map((row) => row.reactions);
 // Telegram StatsGraph x values are epoch milliseconds. Keeping the demo in the same unit is
 // essential: page-period windowing otherwise interprets every point as a date in January 1970.
-const xAxis = HISTORY_ROWS.slice(-30).map((r) => periodDateTimestamp(String(r.day)));
+const followerXAxis = HISTORY_ROWS.slice(-30).map((r) => periodDateTimestamp(String(r.day)));
+const interactionsXAxis = DAILY_VIEW_ROWS.map((row) => periodDateTimestamp(row.day));
 const TG_GRAPHS = {
-  growth: { x: xAxis, series: [{ name: 'Подписчики', values: growthValues }] },
-  followers: { x: xAxis, series: [{ name: 'Подписчики', values: growthValues }] },
-  interactions: { x: xAxis, series: [{ name: 'Просмотры', values: viewsValues }, { name: 'Реакции', values: reactValues }] },
+  growth: { x: followerXAxis, series: [{ name: 'Подписчики', values: growthValues }] },
+  followers: { x: followerXAxis, series: [{ name: 'Подписчики', values: growthValues }] },
+  interactions: { x: interactionsXAxis, series: [{ name: 'Просмотры', values: viewsValues }, { name: 'Реакции', values: reactValues }] },
   top_hours: { hours: Array.from({ length: 24 }, (_, h) => h), values: Array.from({ length: 24 }, (_, h) => 40 + Math.round(60 * Math.max(0, Math.sin(((h - 6) / 24) * Math.PI * 2)))) },
   views_by_source: [
     { label: 'Подписчики', value: 71 },

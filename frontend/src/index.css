@@ -1993,6 +1993,28 @@
     animation: value-swap-in var(--motion-fast) var(--ease-standard);
   }
 
+  /* ── Horizontal edge fade (2026-08-13) ────────────────────────────────────────────────────
+     The scroll hook exposes only the edges with hidden content. A 24px mask keeps dense rails
+     legible without overlay gradients, blur, extra hit targets or animated state. */
+  .scroll-fade-x[data-fade-start]:not([data-fade-end]) {
+    -webkit-mask-image: linear-gradient(to right, transparent 0, black 24px, black 100%);
+    mask-image: linear-gradient(to right, transparent 0, black 24px, black 100%);
+  }
+  .scroll-fade-x[data-fade-end]:not([data-fade-start]) {
+    -webkit-mask-image: linear-gradient(to right, black 0, black calc(100% - 24px), transparent 100%);
+    mask-image: linear-gradient(to right, black 0, black calc(100% - 24px), transparent 100%);
+  }
+  .scroll-fade-x[data-fade-start][data-fade-end] {
+    -webkit-mask-image: linear-gradient(to right, transparent 0, black 24px, black calc(100% - 24px), transparent 100%);
+    mask-image: linear-gradient(to right, transparent 0, black 24px, black calc(100% - 24px), transparent 100%);
+  }
+  @media print {
+    .report-table-shell {
+      -webkit-mask-image: none !important;
+      mask-image: none !important;
+    }
+  }
+
   /* ── Loader canon (полировка 2026-07-28) ───────────────────────────────────────────────────
      ЕДИНАЯ индетерминантная загрузка: hairline-бар с бегающим сегментом + три стаггер-точки
      (components/ui/loader). Один цвет, без градиентов/glow. Под reduced-motion остаётся статичная
