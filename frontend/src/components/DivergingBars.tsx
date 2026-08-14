@@ -13,9 +13,15 @@ interface DivergingBarsProps {
   values: number[];
   /** Per-bar x-labels; thinned to a readable stride, like BarChart. */
   labels?: string[];
+  /** Подписи ОСИ вместо дат (короткое окно ≤ 8 точек: буквы дней недели, канон weekdayAxisLabels).
+      Буквы узкие — подписан каждый столбец. Тултип (`titles`) держит полные даты. */
+  axisLabels?: string[];
   titles?: string[];
   height?: number;
 }
+
+// Approximate glyph width of the 11px tabular labels (канон BarChart/LineChart).
+const CHAR_W = 6.6;
 
 interface Hover {
   i: number;
@@ -27,7 +33,7 @@ interface Hover {
     тинтованной карточке бары автоматически берут её пастель через accent-скоуп). Fills the
     height an ancestor dictates — the fixed widget tile or the expand overlay — via
     ExpandedChartHeightContext (like BarChart), else the caller's `height`, else 120px. */
-export function DivergingBars({ values, labels, titles, height }: DivergingBarsProps) {
+export function DivergingBars({ values, labels, axisLabels, titles, height }: DivergingBarsProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const [hover, setHover] = useState<Hover | null>(null);
@@ -67,7 +73,9 @@ export function DivergingBars({ values, labels, titles, height }: DivergingBarsP
   const plot = useMemo(() => {
     if (!values || values.length === 0) return null;
 
-    const hasLabels = !!labels && labels.length > 0;
+    // Буквенная ось короткого окна: буквы узкие, подписан КАЖДЫЙ столбец (канон BarChart).
+    const letterAxis = axisLabels && axisLabels.length === values.length ? axisLabels : null;
+    const hasLabels = (!!labels && labels.length > 0) || !!letterAxis;
     const labelPad = hasLabels ? 20 : 0;
     // The dictated height covers the whole element; reserve the label band inside it so the bars
     // area (mid line ± bars) never grows past the tile.
@@ -81,7 +89,9 @@ export function DivergingBars({ values, labels, titles, height }: DivergingBarsP
     const step = W / values.length;
     const barWidth = step * 0.7;
     const gap = step * 0.3;
-    const labelIndexes = axisLabelIndexSet(values.length, W, { minLabelPx: expanded ? 68 : 78, maxLabels: expanded ? 12 : 7 });
+    const labelIndexes = letterAxis
+      ? new Set(values.map((_, i) => i))
+      : axisLabelIndexSet(values.length, W, { minLabelPx: expanded ? 68 : 78, maxLabels: expanded ? 12 : 7 });
 
     // SIGNED extents (px up/down from the midline) — the one dimension the data owns; the morph
     // below tweens these, and the boxes/opacity derive from the tweened sign+magnitude per frame.
@@ -95,25 +105,44 @@ export function DivergingBars({ values, labels, titles, height }: DivergingBarsP
 
     const labelsLayer = hasLabels
       ? values.map((_, i) => {
-          const show = labels?.[i] && labelIndexes.has(i);
+          const axisText = letterAxis ? letterAxis[i] : labels?.[i];
+          const show = axisText && labelIndexes.has(i);
           if (!show) return null;
+          const isLast = i === values.length - 1;
+          const x = i * step + step / 2;
+          // Пилюля текущей (последней) метки — канон семьи графиков (BarChart/LineChart):
+          // солидная заливка цветом серии, чернила — фон; тонированная карточка перекрашивает
+          // токен в своём скоупе. viewBox 1:1 с px — rect не искажается.
+          const pill = isLast
+            ? (() => {
+                const textW = String(axisText).length * CHAR_W;
+                const pillH = 15;
+                const pillW = Math.max(textW + 12, pillH);
+                return { x: Math.max(1, Math.min(x - pillW / 2, W - pillW - 1)), w: pillW, h: pillH };
+              })()
+            : null;
           return (
-            <text
-              key={`l${i}`}
-              x={i * step + step / 2}
-              y={h + 14}
-              textAnchor="middle"
-              data-chart-axis-label="x"
-              className="pointer-events-none select-none fill-muted-foreground text-2xs font-medium tabular-nums"
-            >
-              {labels?.[i]}
-            </text>
+            <g key={`l${i}`} data-axis-current={isLast ? '' : undefined}>
+              {pill && (
+                <rect x={pill.x} y={h + 2.5} width={pill.w} height={pill.h} rx={pill.h / 2} fill="hsl(var(--chart-role-primary))" className="pointer-events-none" />
+              )}
+              <text
+                x={x}
+                y={h + 14}
+                textAnchor="middle"
+                data-chart-axis-label="x"
+                fill={isLast ? 'hsl(var(--background))' : undefined}
+                className={`pointer-events-none select-none text-2xs font-medium tabular-nums ${isLast ? '' : 'fill-muted-foreground'}`}
+              >
+                {axisText}
+              </text>
+            </g>
           );
         })
       : null;
 
     return { W, h, mid, step, barWidth, gap, extents, valid, labelsLayer, labelPad };
-  }, [values, labels, width, ctxHeight, height, expanded]);
+  }, [values, labels, axisLabels, width, ctxHeight, height, expanded]);
 
   // ── UPDATE morph (canon BarChart): the signed silhouette flows into the new shape ─────────
   // A sign flip mid-flight honestly passes through the midline (the bar shrinks to 0 and re-grows

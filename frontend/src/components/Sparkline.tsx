@@ -336,11 +336,16 @@ export function Sparkline({
               {axisTicks.map((tick, index) =>
                 index === axisTicks.length - 1 ? (
                   // Пилюля не выше строки: leading-none (11px) + py-px (2px) = 13px < min-h-4,
-                  // фикс-тайл 264px не растёт ни на пиксель.
+                  // фикс-тайл 264px не растёт ни на пиксель. ЦВЕТ = цвет серии (владелец,
+                  // референс steep): солидная заливка тем же `color`, что рисует линию, чернила —
+                  // фон карточки. На тонированных карточках токен серии переопределён в скоупе
+                  // карточки, и пилюля перекрашивается вместе с линией — вечно-синий primary
+                  // там выбивался.
                   <span
                     key={tick.i}
                     data-axis-current=""
-                    className="shrink-0 rounded-full bg-primary/10 px-1.5 py-px font-medium leading-none text-accent-foreground"
+                    className="shrink-0 rounded-full px-1.5 py-px font-medium leading-none"
+                    style={{ backgroundColor: color, color: 'hsl(var(--background))' }}
                   >
                     {tick.text}
                   </span>

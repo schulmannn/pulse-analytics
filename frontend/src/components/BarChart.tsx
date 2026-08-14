@@ -440,15 +440,16 @@ export function BarChart({
               {showLabel && (
                 <g data-axis-current={isLast ? '' : undefined}>
                   {pill && (
-                    // Пара «bg-primary/10 + accent-foreground» — канон primary-tint-ink
-                    // (AA-композит), тот же, что у HTML-пилюль оси спарков.
+                    // Цвет пилюли = цвет серии (владелец, референс steep): солидный
+                    // chart-role-primary, чернила — фон; тонированные карточки переопределяют
+                    // токен в своём скоупе, и пилюля перекрашивается вместе со столбцами.
                     <rect
                       x={pill.x}
                       y={chartHeight - 17.5}
                       width={pill.w}
                       height={pill.h}
                       rx={pill.h / 2}
-                      fill="hsl(var(--primary) / 0.1)"
+                      fill="hsl(var(--chart-role-primary))"
                       className="pointer-events-none"
                     />
                   )}
@@ -457,7 +458,8 @@ export function BarChart({
                     y={chartHeight - 6}
                     textAnchor={anchor}
                     data-chart-axis-label="x"
-                    className={`pointer-events-none select-none text-2xs font-medium tabular-nums ${isLast ? 'fill-accent-foreground' : 'fill-muted-foreground'}`}
+                    fill={isLast ? 'hsl(var(--background))' : undefined}
+                    className={`pointer-events-none select-none text-2xs font-medium tabular-nums ${isLast ? '' : 'fill-muted-foreground'}`}
                   >
                     {axisText}
                   </text>
