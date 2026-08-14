@@ -18,7 +18,7 @@ import { SourceIdentity } from '@/components/SourceIdentity';
 
 import { Skeleton } from '@/components/ui/skeleton';
 import { serializeContentPeriod } from '@/lib/contentFilters';
-import { fmt } from '@/lib/format';
+import { fmt, weekdayAxisFromDayKeys } from '@/lib/format';
 import {
   buildMentionsTimeline,
   capMentionsTimeline,
@@ -299,6 +299,7 @@ function MentionsTimelinePage() {
           <LineChart
             values={chartTimeline.values}
             labels={chartTimeline.labels}
+            axisLabels={weekdayAxisFromDayKeys(chartTimeline.days)}
             titles={chartTimeline.titles}
             yMin={0}
             markAnomalies
@@ -312,6 +313,7 @@ function MentionsTimelinePage() {
           <BarChart
             values={chartTimeline.values}
             labels={chartTimeline.labels}
+            axisLabels={weekdayAxisFromDayKeys(chartTimeline.days)}
             titles={chartTimeline.titles}
             ghost={showComparison ? chartTimeline.ghost : undefined}
             ghostLabel="Пред. период"

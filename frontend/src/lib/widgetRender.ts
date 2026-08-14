@@ -3,7 +3,7 @@
 // React component so the label/formatting logic is unit-testable (the component itself is just
 // wiring the charts). No React here.
 
-import { fmt, parseDayKey, weekdayAxisLabels } from '@/lib/format';
+import { fmt, weekdayAxisFromDayKeys } from '@/lib/format';
 import type { MetricUnit, WidgetViz } from '@/lib/widgetMetrics';
 import type { WidgetResult } from '@/lib/resolveWidgetMetric';
 
@@ -51,20 +51,6 @@ export interface ChartSeries {
   axisLabels?: string[];
 }
 
-/**
- * Ось букв для конфиг-виджетов: серия УЖЕ нарезана резолвером под окно виджета, поэтому окно
- * оцениваем по самой серии — все ключи дневные И календарный размах ≤ 8 дней. Недельные и
- * месячные корзины отсекаются parseDayKey (их ключи — не дневные), недельный grain — вызывающим.
- */
-function weekdayAxisFromDates(dates: string[]): string[] | undefined {
-  if (dates.length < 2 || dates.length > 8) return undefined;
-  const first = parseDayKey(dates[0]);
-  const last = parseDayKey(dates[dates.length - 1]);
-  if (!first || !last) return undefined;
-  const spanDays = Math.round((last.getTime() - first.getTime()) / 86_400_000) + 1;
-  return weekdayAxisLabels(dates, spanDays);
-}
-
 /** Adapt a WidgetResult's series into the {values,labels,titles} the chart components take. */
 export function seriesToChart(result: WidgetResult): ChartSeries {
   const series = result.series ?? [];
@@ -80,7 +66,8 @@ export function seriesToChart(result: WidgetResult): ChartSeries {
     p.value == null ? `${labels[i]}: данных нет` : `${labels[i]}: ${f(p.value)}${suffix}`,
   );
   // Недельные ключи «выглядят» дневными (понедельник корзины) — буква дня там лгала бы.
-  const axisLabels = week ? undefined : weekdayAxisFromDates(series.map((p) => p.date));
+  // Месячные/квартальные корзины отсекает parseDayKey внутри хелпера (их ключи — не дневные).
+  const axisLabels = week ? undefined : weekdayAxisFromDayKeys(series.map((p) => p.date));
   return { values, labels, titles, axisLabels };
 }
 

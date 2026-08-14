@@ -207,7 +207,7 @@ export function ReportChart({
   if (viz === 'bar') {
     return (
       <ChartExpandedContext.Provider value={true}>
-        <BarChart values={series.values} labels={series.labels} titles={titles} height={200} />
+        <BarChart values={series.values} labels={series.labels} axisLabels={series.axisLabels} titles={titles} height={200} />
       </ChartExpandedContext.Provider>
     );
   }
@@ -216,6 +216,7 @@ export function ReportChart({
     <LineChart
       values={series.values}
       labels={series.labels}
+      axisLabels={series.axisLabels}
       titles={titles}
       height={200}
       fullAxes
@@ -281,6 +282,7 @@ export function ReportMetricCard({ title, total, trend, series, valueFmt, zeroBa
         <LineChart
           values={series.values}
           labels={series.labels}
+          axisLabels={series.axisLabels}
           titles={series.values.map((v, i) => (v == null ? `${series.labels[i]}: данных нет` : `${series.labels[i]}: ${valueFmt(v)}`))}
           height={rheaChart ? 200 : 170}
           fullAxes

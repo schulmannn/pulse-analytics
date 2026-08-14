@@ -6,7 +6,7 @@ import { CHART_MAX_POINTS } from '@/lib/msSeries';
 import { useCardShowsPeriod, useWidgetPeriod } from '@/lib/period';
 import { useWidgetInView } from '@/lib/widgetViewport';
 import { pctDelta, subscriberChange } from '@/lib/delta';
-import { fmt } from '@/lib/format';
+import { fmt, weekdayAxisFromDayKeys } from '@/lib/format';
 import { freshness, latestHistoryDay } from '@/lib/freshness';
 import { overviewHealthBanner } from '@/lib/connectionHealth';
 import { cn } from '@/lib/utils';
@@ -273,7 +273,20 @@ export function SubscriberGrowth() {
       drillLabel="Рост подписчиков"
     >
       {values.length > 1 ? (
-        <Sparkline values={values} labels={labels} area strokeWidth={2} interactive formatValue={fmt.num} className="h-full min-h-14 w-full" />
+        // caption="" резервирует строку оси — единственный hero без неё среди твинов (FeaturedKpi /
+        // IG KpiHero / Ym·MsStoryBody) обнаружен ревизией осей 2026-08-14; буквы короткого окна —
+        // по размаху ключей серии.
+        <Sparkline
+          values={values}
+          labels={labels}
+          axisLabels={weekdayAxisFromDayKeys(spark.map((r) => r.day))}
+          area
+          strokeWidth={2}
+          interactive
+          caption=""
+          formatValue={fmt.num}
+          className="h-full min-h-14 w-full"
+        />
       ) : (
         <p className="mt-4 text-xs text-muted-foreground">Недостаточно истории для графика.</p>
       )}

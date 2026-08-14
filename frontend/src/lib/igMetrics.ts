@@ -3,7 +3,7 @@
 // "what the numbers mean" logic is testable and the panels stay presentational.
 import type { IgBreakdowns, IgHistoryRow, IgInsights, IgOnline, IgPost, IgStory } from '@/api/schemas';
 import { pctDelta, type MetricDelta } from '@/lib/delta';
-import { fmt } from '@/lib/format';
+import { fmt, weekdayAxisFromDayKeys } from '@/lib/format';
 
 export const DAY_MS = 24 * 60 * 60 * 1000;
 export const DAY_NAMES = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
@@ -230,6 +230,8 @@ export function windowIgSeries(series: Point[], days: number, unit: string) {
     // FULL per-point labels (not pickLabels' 3) — LineChart picks first/mid/last itself, and
     // BarChart needs one label per bar to stride; the 3-label form mislabels the bars.
     labels: w.map((p) => fmtDay(p.day)),
+    // Буквы короткого дневного окна (ревизия осей 2026-08-14); полные даты держат labels/titles.
+    axisLabels: weekdayAxisFromDayKeys(w.map((p) => p.day)),
     titles: w.map((p) => `${fmtDay(p.day)}: ${fmt.num(p.value)} ${unit}`),
     total,
     prevTotal,

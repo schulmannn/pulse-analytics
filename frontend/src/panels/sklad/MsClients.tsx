@@ -17,7 +17,7 @@ import { RadialGauge } from '@/components/RadialGauge';
 import { Sparkline } from '@/components/Sparkline';
 import { pctDelta, type MetricDelta } from '@/lib/delta';
 import { lttbDownsample } from '@/lib/downsample';
-import { fmt, pluralRu } from '@/lib/format';
+import { fmt, pluralRu, weekdayAxisFromDayKeys } from '@/lib/format';
 import { usePagePeriod, usePeriod } from '@/lib/period';
 import { msPreviousPeriod, useMsPagePeriod, type MsPeriod } from '@/lib/msPeriod';
 import {
@@ -67,6 +67,7 @@ export function MsClients() {
     return {
       count: sampled.length,
       labels: sampled.map((r) => fmt.day(r.day)),
+      axisLabels: weekdayAxisFromDayKeys(sampled.map((r) => r.day)),
       // Лицо карточки — одна суммарная серия заказов (канон story card); разбивка «Новые /
       // Повторные» с двумя линиями и датами живёт в MsCustomerExplorer (/metrics/ms-customers).
       values: sampled.map((r) => r.new_orders + r.repeat_orders),
@@ -135,6 +136,7 @@ export function MsClients() {
             <Sparkline
               values={chart.values}
               labels={chart.labels}
+              axisLabels={chart.axisLabels}
               area
               strokeWidth={2}
               interactive
@@ -239,6 +241,8 @@ export function MsCustomerExplorer({
       primary: pairs.map((pair) => pair.primary),
       repeat: metric === 'repeatShare' ? undefined : pairs.map((pair) => pair.repeat ?? 0),
       labels: points.map((point) => fmt.day(point.day)),
+      // Буквы короткого дневного окна; недельные корзины — датами.
+      axisLabels: grain === 'day' ? weekdayAxisFromDayKeys(points.map((point) => point.day)) : undefined,
       titles: points.map((point, index) => {
         const pair = pairs[index];
         if (metric === 'repeatShare') return `${fmt.day(point.day)}: ${pair.primary?.toFixed(1) ?? '—'}%`;
@@ -269,7 +273,7 @@ export function MsCustomerExplorer({
     return <EmptyState compact size="chart" title="Недостаточно данных за выбранный период." />;
   }
 
-  const { primary, repeat, labels, titles, totals } = model;
+  const { primary, repeat, labels, axisLabels, titles, totals } = model;
   const headline = totals.value == null
     ? '—'
     : metric === 'orders'
@@ -292,6 +296,7 @@ export function MsCustomerExplorer({
           comparisonDelta={false}
           formatValue={formatValue}
           labels={labels}
+          axisLabels={axisLabels}
           titles={titles}
           height={expandedHeight ?? undefined}
         />
@@ -304,6 +309,7 @@ export function MsCustomerExplorer({
           comparisonDelta={false}
           formatValue={formatValue}
           labels={labels}
+          axisLabels={axisLabels}
           titles={titles}
           yMin={0}
           height={expandedHeight ?? undefined}

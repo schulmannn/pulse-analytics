@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { lttbDownsample } from '@/lib/downsample';
 import { CHART_MAX_POINTS } from '@/lib/msSeries';
-import { fmt, weekdayAxisLabels } from '@/lib/format';
+import { fmt, weekdayAxisFromDayKeys, weekdayAxisLabels } from '@/lib/format';
 import { pctDelta, type MetricDelta } from '@/lib/delta';
 import { DeltaPill } from '@/components/DeltaPill';
 import { EmptyState } from '@/components/EmptyState';
@@ -251,6 +251,7 @@ export function TrendCard({
                   <LineChart
                     values={line.map((p) => p.value)}
                     labels={pickLabels(line)}
+                    axisLabels={weekdayAxisFromDayKeys(line.map((p) => p.day))}
                     titles={line.map((p) => `${fmtDay(p.day)}: ${fmt.num(p.value)}`)}
                   />
                 </ChartCardBody>

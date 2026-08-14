@@ -10,7 +10,7 @@ import { SegmentedControl } from '@/components/SegmentedControl';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { ChartSkeleton, TableSkeleton } from '@/components/ui/dataSkeleton';
-import { fmt, pluralRu, smoothSvgPath } from '@/lib/format';
+import { fmt, pluralRu, smoothSvgPath, weekdayAxisFromDayKeys } from '@/lib/format';
 import { usePagePeriod } from '@/lib/period';
 import { msPreviousPeriod, useMsPagePeriod, type MsPeriod } from '@/lib/msPeriod';
 import { useSelectedChannel } from '@/lib/channel-context';
@@ -294,6 +294,8 @@ export function MsChannelChart({
       count: points.length,
       values: points.map((p) => metricValue(metric, p)),
       labels: points.map((p) => fmt.day(p.day)),
+      // Буквы короткого дневного окна; недельные/месячные корзины — датами.
+      axisLabels: grain === 'day' ? weekdayAxisFromDayKeys(points.map((p) => p.day)) : undefined,
       titles: points.map((p) => `${fmt.day(p.day)}: ${fmtMetric(metric, metricValue(metric, p))}`),
       total: metricTotal(data.series, metric),
     };
@@ -349,7 +351,7 @@ export function MsChannelChart({
       />
     );
   }
-  const { values, labels, titles, total } = model;
+  const { values, labels, axisLabels, titles, total } = model;
   const channelCaption =
     selected.length === 0 ? 'Все каналы' : `${selected.length} ${pluralRu(selected.length, ['канал', 'канала', 'каналов'])}`;
   // Средний чек агрегируется по бакетам с заказами — подписываем это честно (день/неделя/месяц).
@@ -358,9 +360,9 @@ export function MsChannelChart({
   return (
     <ChartCardBody value={fmtMetric(metric, total)} caption={caption}>
       {kind === 'bar' ? (
-        <BarChart values={values.map((v) => v ?? 0)} labels={labels} titles={titles} height={expandedHeight ?? undefined} />
+        <BarChart values={values.map((v) => v ?? 0)} labels={labels} axisLabels={axisLabels} titles={titles} height={expandedHeight ?? undefined} />
       ) : (
-        <LineChart values={values} labels={labels} titles={titles} yMin={0} height={expandedHeight ?? undefined} />
+        <LineChart values={values} labels={labels} axisLabels={axisLabels} titles={titles} yMin={0} height={expandedHeight ?? undefined} />
       )}
     </ChartCardBody>
   );
