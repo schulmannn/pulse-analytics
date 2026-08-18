@@ -27,10 +27,13 @@ export function IconMorph({
   b: ReactNode;
   className?: string;
 }) {
+  // Слои — grid-stack (обе иконки в одной ячейке), НЕ absolute: юнит-гвоздь Snippet пинит
+  // «в разметке копи-плашки нет absolute» (кнопка не имеет права лежать поверх длинного
+  // значения), и грид держит стопку без позиционирования вовсе.
   const layer =
-    'absolute inset-0 inline-flex items-center justify-center transition-[opacity,transform] dur-fast ease-house';
+    'col-start-1 row-start-1 inline-flex items-center justify-center transition-[opacity,transform] dur-fast ease-house';
   return (
-    <span aria-hidden="true" className={cn('relative inline-flex size-4 shrink-0', className)}>
+    <span aria-hidden="true" className={cn('inline-grid size-4 shrink-0 place-items-center', className)}>
       <span className={cn(layer, active ? 'scale-50 opacity-0 motion-reduce:scale-100' : 'scale-100 opacity-100')}>
         {a}
       </span>
