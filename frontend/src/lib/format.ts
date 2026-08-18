@@ -19,50 +19,106 @@ export function pluralRu(n: number, forms: [one: string, few: string, many: stri
  * UTC (D6.5). A day key names a calendar date, not an instant — it must read the same in
  * every timezone. Full ISO timestamps are NOT day keys and keep instant semantics.
  */
-/**
- * Ось короткого дневного окна: латинские однобуквенные дни недели (fmt.weekday) для рядов
- * ≤ 8 точек В ОКНЕ ≤ 8 дней. Порог по ОКНУ обязателен: разреженный ряд из 5 точек в 30-дневном
- * окне содержал бы два разных понедельника с одинаковой «M» — буквы честны, только пока день
- * недели в окне уникален. undefined = ось остаётся датами.
- */
-export function weekdayAxisLabels(
-  dayKeys: string[],
-  windowDays: number | null | undefined,
-): string[] | undefined {
-  if (windowDays == null || windowDays <= 0 || windowDays > 8) return undefined;
-  if (dayKeys.length < 2 || dayKeys.length > 8) return undefined;
-  const letters = dayKeys.map((key) => fmt.weekday(key));
-  return letters.every((letter) => letter.length > 0) ? letters : undefined;
+// Английские аббревиатуры месяцев для оси длинных окон (владелец, 2026-08-14: латиница ок).
+const MONTH_EN = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** Ключ оси (day-key строка, ms-таймстамп или полный ISO) → Date; не-дневные строковые корзины
+    (месяц «2026-05», квартал, год) отсекаются — у них нет ни дня недели, ни первой точки месяца. */
+function axisKeyToDate(v: string | number | null | undefined): Date | null {
+  if (v == null || v === '') return null;
+  const d =
+    typeof v === 'number'
+      ? new Date(v)
+      : parseDayKey(v) ?? (v.length > 10 ? new Date(v) : null);
+  return d != null && !isNaN(d.getTime()) ? d : null;
 }
 
 /**
- * Ось букв по РАЗМАХУ самих ключей — для поверхностей, у которых точное окно не под рукой:
- * все ключи дневные (day-key строки ИЛИ ms-таймстампы) и календарный размах первого-последнего
- * ≤ 8 дней. У оконных серий размах практически равен окну; у разреженной серии в длинном окне
- * буквы честны, пока укладываются в одну календарную неделю (день недели уникален). Месячные
- * и прочие не-дневные строковые ключи отсекает parseDayKey.
+ * Общее ядро временно́й оси (канон 2026-08-14, три режима по длине окна):
+ *  - ≤ 8 дней и ≤ 8 точек — латинские буквы дней недели (M T W T F S S) на каждой точке;
+ *  - ≥ 90 дней — РАЗРЕЖЕННАЯ ось английских месяцев: аббревиатура у первой точки каждого
+ *    месяца, '' между тиками; тиков ≤ 8 — шаг по месяцам считается ОТ ТЕКУЩЕГО назад, так что
+ *    последняя метка (на ней пилюля «сейчас») живёт всегда;
+ *  - между порогами — undefined, ось остаётся датами.
+ * Порог по ОКНУ у букв обязателен: разреженный ряд из 5 точек в 30-дневном окне нёс бы два
+ * разных понедельника с одинаковой «M».
  */
-export function weekdayAxisFromDayKeys(
-  dayKeys: Array<string | number | null | undefined>,
+function timeAxisCore(
+  dates: Array<Date | null>,
+  windowDays: number,
+  opts?: { monthsOnly?: boolean },
 ): string[] | undefined {
-  if (dayKeys.length < 2 || dayKeys.length > 8) return undefined;
-  const toDate = (v: string | number | null | undefined): Date | null => {
-    if (v == null || v === '') return null;
-    // Строки: day-key («2026-08-14») или ПОЛНЫЙ ISO-таймстамп (>10 символов, IG end_time).
-    // Короткие не-дневные ключи (месяц «2026-05», год) отсекаются — у корзины буквы дня нет.
-    const d =
-      typeof v === 'number'
-        ? new Date(v)
-        : parseDayKey(v) ?? (v.length > 10 ? new Date(v) : null);
-    return d != null && !isNaN(d.getTime()) ? d : null;
-  };
-  const first = toDate(dayKeys[0]);
-  const last = toDate(dayKeys[dayKeys.length - 1]);
+  if (dates.length < 2 || !dates.every((d) => d != null)) return undefined;
+  if (windowDays <= 0) return undefined;
+  // monthsOnly — для НЕДЕЛЬНЫХ корзин: их ключ (понедельник) имеет честный месяц, но буква дня
+  // у корзины лгала бы («M» про целую неделю), поэтому режим букв для них выключен.
+  if (!opts?.monthsOnly && windowDays <= 8 && dates.length <= 8) {
+    return dates.map((d) => ['S', 'M', 'T', 'W', 'T', 'F', 'S'][(d as Date).getDay()] ?? '');
+  }
+  if (windowDays < 90) return undefined;
+  // Первая точка каждого календарного месяца (включая частичный месяц на кромке окна).
+  const monthStarts: number[] = [];
+  let prevKey = '';
+  dates.forEach((d, i) => {
+    const key = `${(d as Date).getFullYear()}-${(d as Date).getMonth()}`;
+    if (key !== prevKey) {
+      monthStarts.push(i);
+      prevKey = key;
+    }
+  });
+  if (monthStarts.length < 2) return undefined;
+  const MAX_TICKS = 8;
+  const step = Math.ceil(monthStarts.length / MAX_TICKS);
+  const kept = new Set<number>();
+  for (let k = monthStarts.length - 1; k >= 0; k -= step) kept.add(monthStarts[k]);
+  const out = dates.map(() => '');
+  for (const i of kept) out[i] = MONTH_EN[(dates[i] as Date).getMonth()] ?? '';
+  return out.some((t) => t.length > 0) ? out : undefined;
+}
+
+/**
+ * Временна́я ось по ИЗВЕСТНОМУ окну (строители, у которых windowDays под рукой — kpiDerive,
+ * igWindowMetrics): ≤ 8 дней → буквы дней недели, ≥ 90 → английские месяцы, между — даты.
+ */
+export function timeAxisLabels(
+  dayKeys: string[],
+  windowDays: number | null | undefined,
+): string[] | undefined {
+  if (windowDays == null) return undefined;
+  const dates = dayKeys.map(axisKeyToDate);
+  // «Всё» (windowDays = 0) безгранично — окном честно служит размах самой серии: у молодого
+  // канала весь архив может быть неделей (буквы честны), у взрослого — годами (месяцы).
+  if (windowDays === 0) {
+    const first = dates[0];
+    const last = dates[dates.length - 1];
+    if (!first || !last) return undefined;
+    return timeAxisCore(dates, Math.round((last.getTime() - first.getTime()) / 86_400_000) + 1);
+  }
+  return timeAxisCore(dates, windowDays);
+}
+
+export interface TimeAxisOpts {
+  /** Только режим месяцев (недельные корзины: буква дня у корзины лгала бы). */
+  monthsOnly?: boolean;
+}
+
+/**
+ * Временна́я ось по РАЗМАХУ самих ключей — для поверхностей без точного окна: у оконных серий
+ * размах практически равен окну. Ключи — day-key строки, ms-таймстампы или полные ISO; недельные
+ * корзины проходят (их ключ — понедельник, месяц у него честный), месячные/квартальные отсекает
+ * axisKeyToDate → ось остаётся датами.
+ */
+export function timeAxisFromDayKeys(
+  dayKeys: Array<string | number | null | undefined>,
+  opts?: TimeAxisOpts,
+): string[] | undefined {
+  if (dayKeys.length < 2) return undefined;
+  const dates = dayKeys.map(axisKeyToDate);
+  const first = dates[0];
+  const last = dates[dates.length - 1];
   if (!first || !last) return undefined;
   const spanDays = Math.round((last.getTime() - first.getTime()) / 86_400_000) + 1;
-  if (spanDays <= 0 || spanDays > 8) return undefined;
-  const letters = dayKeys.map((v) => (v == null ? '' : fmt.weekday(v)));
-  return letters.every((letter) => letter.length > 0) ? letters : undefined;
+  return timeAxisCore(dates, spanDays, opts);
 }
 
 export function parseDayKey(s: string): Date | null {

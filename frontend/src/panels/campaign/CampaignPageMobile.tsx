@@ -24,7 +24,7 @@ import {
   timelineSeries,
 } from '@/lib/campaignSummary';
 import { campaignSourceKey } from '@/lib/campaignSources';
-import { fmt, weekdayAxisFromDayKeys } from '@/lib/format';
+import { fmt, timeAxisFromDayKeys } from '@/lib/format';
 import { markdownToPlainText } from '@/lib/markdown';
 import { cn } from '@/lib/utils';
 import { CampaignPostsTable } from '@/panels/campaign/CampaignPostsTable';
@@ -197,7 +197,7 @@ export function CampaignPageMobile(props: CampaignViewProps) {
                 fixedSize="full"
                 drillTo={campaignMetricPath(campaign.id, 'timeline', searchParams, 'tg_views')}
               >
-                <LineChart values={series.tgViews} labels={series.labels} axisLabels={series.days ? weekdayAxisFromDayKeys(series.days) : undefined} titles={series.titles} showPoints fullAxes />
+                <LineChart values={series.tgViews} labels={series.labels} axisLabels={series.days ? timeAxisFromDayKeys(series.days) : undefined} titles={series.titles} showPoints fullAxes />
               </ChartSection>
             )}
             {series.hasIg && (
@@ -206,7 +206,7 @@ export function CampaignPageMobile(props: CampaignViewProps) {
                 fixedSize="full"
                 drillTo={campaignMetricPath(campaign.id, 'timeline', searchParams, 'ig_reach')}
               >
-                <LineChart values={series.igReach} labels={series.labels} axisLabels={series.days ? weekdayAxisFromDayKeys(series.days) : undefined} titles={series.titles} showPoints fullAxes />
+                <LineChart values={series.igReach} labels={series.labels} axisLabels={series.days ? timeAxisFromDayKeys(series.days) : undefined} titles={series.titles} showPoints fullAxes />
               </ChartSection>
             )}
             <ChartSection
@@ -214,7 +214,7 @@ export function CampaignPageMobile(props: CampaignViewProps) {
               fixedSize="half"
               drillTo={campaignMetricPath(campaign.id, 'timeline', searchParams, 'posts')}
             >
-              <BarChart values={series.posts} labels={series.labels} axisLabels={series.days ? weekdayAxisFromDayKeys(series.days) : undefined} titles={series.titles} />
+              <BarChart values={series.posts} labels={series.labels} axisLabels={series.days ? timeAxisFromDayKeys(series.days) : undefined} titles={series.titles} />
             </ChartSection>
             <ChartSection
               title="Форматы"

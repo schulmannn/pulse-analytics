@@ -6,7 +6,7 @@ import { CHART_MAX_POINTS } from '@/lib/msSeries';
 import { useCardShowsPeriod, useWidgetPeriod } from '@/lib/period';
 import { useWidgetInView } from '@/lib/widgetViewport';
 import { pctDelta, subscriberChange } from '@/lib/delta';
-import { fmt, weekdayAxisFromDayKeys } from '@/lib/format';
+import { fmt, timeAxisFromDayKeys } from '@/lib/format';
 import { freshness, latestHistoryDay } from '@/lib/freshness';
 import { overviewHealthBanner } from '@/lib/connectionHealth';
 import { cn } from '@/lib/utils';
@@ -279,7 +279,7 @@ export function SubscriberGrowth() {
         <Sparkline
           values={values}
           labels={labels}
-          axisLabels={weekdayAxisFromDayKeys(spark.map((r) => r.day))}
+          axisLabels={timeAxisFromDayKeys(spark.map((r) => r.day))}
           area
           strokeWidth={2}
           interactive

@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { lttbDownsample } from '@/lib/downsample';
 import { CHART_MAX_POINTS } from '@/lib/msSeries';
-import { fmt, weekdayAxisFromDayKeys, weekdayAxisLabels } from '@/lib/format';
+import { fmt, timeAxisFromDayKeys, timeAxisLabels } from '@/lib/format';
 import { pctDelta, type MetricDelta } from '@/lib/delta';
 import { DeltaPill } from '@/components/DeltaPill';
 import { EmptyState } from '@/components/EmptyState';
@@ -134,7 +134,7 @@ export function KpiHero({
   // Кап длинной линии (канон CLAUDE.md): на «Всё» дневной архив уходил в чарт целиком —
   // LTTB прореживает до CHART_MAX_POINTS, labels строятся из тех же выбранных точек.
   const shown = lttbDownsample(daily, CHART_MAX_POINTS, (p) => p.value);
-  const axisLabels = weekdayAxisLabels(shown.map((p) => p.day), windowDays);
+  const axisLabels = timeAxisLabels(shown.map((p) => p.day), windowDays);
   // Канон hero-карточки Обзора — безосевой area-Sparkline (TG-твин FeaturedKpi): ряд дат на лице
   // не рисуем, значения по дням читаются hover-тултипом (caption обязателен — без него Sparkline
   // не резервирует строку оси); полные оси живут на /metrics/ig-* (drillTo).
@@ -251,7 +251,7 @@ export function TrendCard({
                   <LineChart
                     values={line.map((p) => p.value)}
                     labels={pickLabels(line)}
-                    axisLabels={weekdayAxisFromDayKeys(line.map((p) => p.day))}
+                    axisLabels={timeAxisFromDayKeys(line.map((p) => p.day))}
                     titles={line.map((p) => `${fmtDay(p.day)}: ${fmt.num(p.value)}`)}
                   />
                 </ChartCardBody>
@@ -450,7 +450,7 @@ export function IgAudienceBody({ ig }: { ig: IgData }) {
             <Sparkline
               values={level.map((p) => p.value)}
               labels={level.map((p) => fmtDay(p.day))}
-              axisLabels={weekdayAxisLabels(level.map((p) => p.day), ig.window.days)}
+              axisLabels={timeAxisLabels(level.map((p) => p.day), ig.window.days)}
               area
               strokeWidth={2}
               interactive

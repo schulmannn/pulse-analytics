@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { dayKeyToTs, fmt, parseDayKey, ruSeriesName, sparkAreaPath, sparkPath, weekdayAxisLabels } from '@/lib/format';
+import { dayKeyToTs, fmt, parseDayKey, ruSeriesName, sparkAreaPath, sparkPath, timeAxisFromDayKeys, timeAxisLabels } from '@/lib/format';
 
 describe('parseDayKey', () => {
   it('parses a bare day key as LOCAL midnight of that calendar date', () => {
@@ -209,7 +209,7 @@ describe('spark paths', () => {
   });
 });
 
-describe('fmt.weekday + weekdayAxisLabels — буквенная ось короткого окна', () => {
+describe('fmt.weekday + timeAxisLabels — буквенная ось короткого окна', () => {
   it('однобуквенные ЛАТИНСКИЕ дни недели: Mon=M … Sun=S (русская свёртка неоднозначна)', () => {
     // 2026-06-08 — понедельник.
     expect(['2026-06-08', '2026-06-09', '2026-06-10', '2026-06-11', '2026-06-12', '2026-06-13', '2026-06-14'].map((d) => fmt.weekday(d)))
@@ -218,23 +218,82 @@ describe('fmt.weekday + weekdayAxisLabels — буквенная ось коро
     expect(fmt.weekday('не дата')).toBe('');
   });
 
-  it('weekdayAxisLabels: буквы только для окна ≤ 8 дней и ряда 2–8 точек', () => {
+  it('timeAxisLabels: буквы только для окна ≤ 8 дней и ряда 2–8 точек', () => {
     const week = ['2026-06-08', '2026-06-09', '2026-06-10', '2026-06-11', '2026-06-12', '2026-06-13', '2026-06-14'];
-    expect(weekdayAxisLabels(week, 7)).toEqual(['M', 'T', 'W', 'T', 'F', 'S', 'S']);
+    expect(timeAxisLabels(week, 7)).toEqual(['M', 'T', 'W', 'T', 'F', 'S', 'S']);
     // Разреженные дни ВНУТРИ короткого окна — буквы честны (день недели в окне уникален).
-    expect(weekdayAxisLabels(['2026-06-09', '2026-06-11', '2026-06-13'], 7)).toEqual(['T', 'T', 'S']);
+    expect(timeAxisLabels(['2026-06-09', '2026-06-11', '2026-06-13'], 7)).toEqual(['T', 'T', 'S']);
   });
 
-  it('weekdayAxisLabels: длинное окно НЕ получает буквы — два понедельника с одной «M» лгут', () => {
-    expect(weekdayAxisLabels(['2026-06-01', '2026-06-08', '2026-06-15'], 30)).toBeUndefined();
-    expect(weekdayAxisLabels(['2026-06-08', '2026-06-09'], 0)).toBeUndefined();
-    expect(weekdayAxisLabels(['2026-06-08', '2026-06-09'], null)).toBeUndefined();
+  it('timeAxisLabels: длинное окно НЕ получает буквы — два понедельника с одной «M» лгут', () => {
+    expect(timeAxisLabels(['2026-06-01', '2026-06-08', '2026-06-15'], 30)).toBeUndefined();
+    // «Всё» (0) меряется размахом серии: двухдневный архив честно несёт буквы.
+    expect(timeAxisLabels(['2026-06-08', '2026-06-09'], 0)).toEqual(['M', 'T']);
+    expect(timeAxisLabels(['2026-06-08', '2026-06-09'], null)).toBeUndefined();
     // Одна точка — не ось; девять точек — окно уже не «короткое».
-    expect(weekdayAxisLabels(['2026-06-08'], 7)).toBeUndefined();
-    expect(weekdayAxisLabels(Array.from({ length: 9 }, (_, i) => `2026-06-${String(8 + i).padStart(2, '0')}`), 9)).toBeUndefined();
+    expect(timeAxisLabels(['2026-06-08'], 7)).toBeUndefined();
+    expect(timeAxisLabels(Array.from({ length: 9 }, (_, i) => `2026-06-${String(8 + i).padStart(2, '0')}`), 9)).toBeUndefined();
   });
 
-  it('weekdayAxisLabels: непарсибельный ключ отменяет всю ось (никаких пустых тиков)', () => {
-    expect(weekdayAxisLabels(['2026-06-08', 'total'], 7)).toBeUndefined();
+  it('timeAxisLabels: непарсибельный ключ отменяет всю ось (никаких пустых тиков)', () => {
+    expect(timeAxisLabels(['2026-06-08', 'total'], 7)).toBeUndefined();
+  });
+});
+
+describe('timeAxis — EN-месяцы длинного окна (владелец, 2026-08-14)', () => {
+  const DAY = 24 * 60 * 60 * 1000;
+  /** n дневных ключей, заканчивающихся endKey (UTC-арифметика, ключи календарные). */
+  const dailyKeys = (endKey: string, n: number) => {
+    const end = Date.parse(`${endKey}T00:00:00Z`);
+    return Array.from({ length: n }, (_, i) =>
+      new Date(end - (n - 1 - i) * DAY).toISOString().slice(0, 10),
+    );
+  };
+
+  it('окно ≥ 90 дней: месяц у ПЕРВОЙ точки каждого месяца (включая частичный на кромке), между тиками пусто', () => {
+    // 2026-05-17 … 2026-08-14, ровно 90 дней.
+    const keys = dailyKeys('2026-08-14', 90);
+    const axis = timeAxisFromDayKeys(keys)!;
+    expect(axis).toHaveLength(90);
+    expect(axis[0]).toBe('May'); // частичный май на кромке окна тоже подписан
+    expect(axis[keys.indexOf('2026-06-01')]).toBe('Jun');
+    expect(axis[keys.indexOf('2026-07-01')]).toBe('Jul');
+    expect(axis[keys.indexOf('2026-08-01')]).toBe('Aug');
+    expect(axis.filter((t) => t.length > 0)).toEqual(['May', 'Jun', 'Jul', 'Aug']);
+  });
+
+  it('между порогами (9–89 дней) ось остаётся датами', () => {
+    expect(timeAxisFromDayKeys(dailyKeys('2026-08-14', 30))).toBeUndefined();
+    expect(timeAxisFromDayKeys(dailyKeys('2026-08-14', 89))).toBeUndefined();
+  });
+
+  it('очень длинное окно: тиков ≤ 8, ТЕКУЩИЙ месяц всегда жив (шаг считается от него)', () => {
+    const keys = dailyKeys('2026-08-14', 730);
+    const axis = timeAxisFromDayKeys(keys)!;
+    const ticks = axis.filter((t) => t.length > 0);
+    expect(ticks.length).toBeLessThanOrEqual(8);
+    // Последний непустой тик — месяц последнего ключа (на нём пилюля «сейчас»).
+    const lastIdx = axis.reduce((acc, t, i) => (t.length > 0 ? i : acc), -1);
+    expect(axis[lastIdx]).toBe('Aug');
+    expect(lastIdx).toBe(keys.indexOf('2026-08-01'));
+  });
+
+  it('monthsOnly (недельные корзины): буквы дней выключены, месяцы работают', () => {
+    // Короткая недельная серия — БЕЗ букв (буква дня у корзины-недели лгала бы).
+    expect(timeAxisFromDayKeys(['2026-08-03', '2026-08-10'], { monthsOnly: true })).toBeUndefined();
+    // Длинная недельная серия месяцы несёт: понедельники за ~5 месяцев.
+    const mondays = Array.from({ length: 20 }, (_, i) =>
+      new Date(Date.parse('2026-08-10T00:00:00Z') - (19 - i) * 7 * DAY).toISOString().slice(0, 10),
+    );
+    const axis = timeAxisFromDayKeys(mondays, { monthsOnly: true })!;
+    expect(axis.filter((t) => t.length > 0).length).toBeGreaterThanOrEqual(4);
+    expect(axis.some((t) => t === 'Aug')).toBe(true);
+  });
+
+  it('timeAxisLabels (окно известно строителю): ≥ 90 дней — месяцы, ≤ 8 — буквы', () => {
+    const keys = dailyKeys('2026-08-14', 120);
+    const axis = timeAxisLabels(keys, 120)!;
+    expect(axis.filter((t) => t.length > 0).every((t) => /^[A-Z][a-z]{2}$/.test(t))).toBe(true);
+    expect(timeAxisLabels(dailyKeys('2026-08-14', 30), 30)).toBeUndefined();
   });
 });

@@ -5,7 +5,7 @@ import type { TgFull, TgGraphs } from '@/api/schemas';
 import { lttbDownsample } from '@/lib/downsample';
 import { CHART_MAX_POINTS } from '@/lib/msSeries';
 import { normalizeTgPosts } from '@/lib/posts';
-import { dayKeyToTs, fmt, ruSeriesName, pluralRu, weekdayAxisFromDayKeys } from '@/lib/format';
+import { dayKeyToTs, fmt, ruSeriesName, pluralRu, timeAxisFromDayKeys } from '@/lib/format';
 import { withShares } from '@/lib/breakdownShare';
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
@@ -125,9 +125,10 @@ export function windowGraphSeries(values: number[], xs: number[], win: CalendarW
     wxs = rows.map((r) => r.anchor);
   }
   const labels = wValues.map((_, i) => (wxs[i] ? fmt.day(wxs[i]!) : ''));
-  // Ось букв короткого дневного окна (ревизия осей 2026-08-14): только дневной grain — у
-  // недельной/месячной корзины буква дня лгала бы. Полные даты остаются в labels/titles.
-  const axisLabels = grain === 'day' ? weekdayAxisFromDayKeys(wxs) : undefined;
+  // Временна́я ось (канон timeAxisCore): короткое окно — буквы дней, длинное (≥90 дн) — EN-месяцы.
+  // Grain-гарды не нужны: буквы у недельных корзин невозможны по размаху, а месяц у недельного/
+  // месячного якоря честный. Полные даты остаются в labels/titles.
+  const axisLabels = timeAxisFromDayKeys(wxs, { monthsOnly: grain !== 'day' });
   const suffix = grain === 'week' ? ' · неделя' : grain === 'month' ? ' · месяц' : '';
   const titles = wValues.map((v, i) => `${labels[i]}: ${fmt.num(v)} ${unit}${suffix}`);
   // Headline for the steep card anatomy: the window's total + the PREVIOUS same-length window's
@@ -249,7 +250,7 @@ function deriveTgAnalytics(
   );
   // Буквы недели включаются только у молодых/разреженных каналов: фикс-окно 14 дней шире
   // порога ≤ 8, но при < 8 реальных днях данных ось честно переходит на буквы.
-  const vbdAxisLabels = weekdayAxisFromDayKeys(last14Days.map((d) => d.ts));
+  const vbdAxisLabels = timeAxisFromDayKeys(last14Days.map((d) => d.ts));
   // Ghost overlay = the previous equal-length window (the "vs прошлый период" comparison on the chart).
   const prev14Days = sortedDays.slice(-28, -14);
   const vbdPrev = prev14Days.length >= 2 ? prev14Days.map((d) => Number(viewsByDayRaw[d.key] ?? 0)) : undefined;
@@ -475,6 +476,9 @@ export function deriveFollowerFlows(
   let values: number[];
   let labels: string[];
   let titles: string[];
+  // Ключи оси ВЫРОВНЕНЫ с итоговыми values: у недельной корзины — якоря-понедельники,
+  // у дневной — сырые timestamp'ы (иначе месяц-тик встал бы мимо своего бара).
+  let axisKeys: number[];
   if (opts?.grain === 'week') {
     const buckets = new Map<string, { sum: number; anchor: number }>();
     for (const row of selected.current) {
@@ -493,6 +497,7 @@ export function deriveFollowerFlows(
     titles = weekRows.map(
       (r) => `${fmt.day(r.anchor)}: ${r.sum >= 0 ? '+' : ''}${fmt.num(r.sum)} за неделю`,
     );
+    axisKeys = weekRows.map((r) => r.anchor);
   } else {
     values = selected.current.map((row) => row.net);
     labels = selected.current.map((row) =>
@@ -502,15 +507,13 @@ export function deriveFollowerFlows(
       const label = Number.isFinite(row.timestamp) ? fmt.day(row.timestamp) : '';
       return `${label}: ${row.net >= 0 ? '+' : ''}${fmt.num(row.net)} за день`;
     });
+    axisKeys = selected.current.map((row) => row.timestamp);
   }
   return {
     values,
     labels,
-    // Буквы короткого дневного окна (ревизия осей 2026-08-14); недельные корзины — датами.
-    axisLabels:
-      opts?.grain === 'week'
-        ? undefined
-        : weekdayAxisFromDayKeys(selected.current.map((row) => row.timestamp)),
+    // Временна́я ось (timeAxisCore): буквы дней короткого окна / EN-месяцы длинного.
+    axisLabels: timeAxisFromDayKeys(axisKeys, { monthsOnly: opts?.grain === 'week' }),
     titles,
     total: selected.current.reduce((sum, row) => sum + row.net, 0),
     prevTotal: selected.previous

@@ -128,7 +128,7 @@ export interface SeriesBarValuesOptions {
   /** Extra ledger rows PREPENDED to the stats (e.g. «Сейчас» — the current level beside
       a delta chart). */
   extraRows?: LedgerRow[];
-  /** Ось букв короткого дневного окна (канон weekdayAxisFromDayKeys) — прокидывается в чарт. */
+  /** Ось букв короткого дневного окна (канон timeAxisFromDayKeys) — прокидывается в чарт. */
   axisLabels?: string[];
 }
 
