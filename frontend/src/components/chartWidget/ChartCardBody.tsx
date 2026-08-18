@@ -1,13 +1,36 @@
 import { useContext, type ReactNode } from 'react';
 import { DeltaPill } from '@/components/DeltaPill';
 import { ChartExpandedContext } from '@/components/ExpandableChart';
-import { ValueSwap } from '@/components/ValueSwap';
+import { KpiNumber } from '@/components/KpiNumber';
+import { fmt } from '@/lib/format';
 import type { MetricDelta } from '@/lib/delta';
+
+/** Мин/макс видимого окна для строки-сводки карточки. По умолчанию — регистр fmt.kpi (тот же,
+    что у леджера разворота OverlayStats); денежные/процентные карточки передают свой format. */
+export interface RangeSummary {
+  lo: number;
+  hi: number;
+  format?: (n: number) => string;
+}
+
+/** {lo, hi} потоковой серии для `range` — от СЫРОГО окна (до LTTB-капа), null-пропуски
+    отбрасываются. Меньше двух точек — сводки нет. Кумулятивным уровням (подписчики) range
+    не передавать: их мин/макс дублирует концы ряда. */
+export function seriesRange(
+  values: ReadonlyArray<number | null | undefined> | null | undefined,
+): { lo: number; hi: number } | null {
+  const nums = (values ?? []).filter((v): v is number => v != null && Number.isFinite(v));
+  if (nums.length < 2) return null;
+  return { lo: Math.min(...nums), hi: Math.max(...nums) };
+}
 
 export interface ChartCardBodyProps {
   label?: ReactNode;
   value: string;
   delta?: MetricDelta | null;
+  /** Мин/макс окна под DeltaPill — вынос леджера разворота на лицо карточки (владелец
+      2026-08-18, «hi/lo chrome»). Только ≥ md: структурная строка, мобильную вёрстку не меняем. */
+  range?: RangeSummary | null;
   caption?: ReactNode;
   onValueClick?: () => void;
   /** Accessible metric name for the clickable headline value. */
@@ -25,6 +48,7 @@ export function ChartCardBody({
   label,
   value,
   delta,
+  range,
   caption,
   onValueClick,
   drillLabel,
@@ -53,7 +77,8 @@ export function ChartCardBody({
     <div className="flex h-full min-h-0 items-end gap-4" data-chart-card-body>
       <div className="flex shrink-0 flex-col items-start gap-1.5 pb-0.5" data-chart-card-headline>
         {label != null && <div className="text-xs tracking-wide text-muted-foreground">{label}</div>}
-        {/* ValueSwap: при смене периода число снапает (канон), обёртка мягко проявляется. */}
+        {/* KpiNumber: цифры морфятся при смене периода (канон 2026-08-18, паритет с морфом
+            графиков); нечисловые строки остаются на снапе ValueSwap внутри него. */}
         <div className="flex items-center gap-1.5">
           {onValueClick ? (
             <button
@@ -63,16 +88,28 @@ export function ChartCardBody({
               onClick={onValueClick}
               className={`${numberClass} rounded text-left transition-colors hover:text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40`}
             >
-              <ValueSwap swapKey={value}>{value}</ValueSwap>
+              <KpiNumber text={value} />
             </button>
           ) : (
             <div className={numberClass}>
-              <ValueSwap swapKey={value}>{value}</ValueSwap>
+              <KpiNumber text={value} />
             </div>
           )}
           {valueAdornment}
         </div>
         <DeltaPill delta={delta} />
+        {range != null && (
+          <div
+            data-chart-card-range
+            className="hidden items-baseline gap-1.5 text-2xs tabular-nums tracking-wide text-muted-foreground md:flex"
+          >
+            <span>Мин</span>
+            <span className="font-medium text-foreground">{(range.format ?? fmt.kpi)(range.lo)}</span>
+            <span aria-hidden="true">·</span>
+            <span>Макс</span>
+            <span className="font-medium text-foreground">{(range.format ?? fmt.kpi)(range.hi)}</span>
+          </div>
+        )}
         {caption != null && <div className="text-2xs text-muted-foreground">{caption}</div>}
       </div>
       <div className="min-h-0 min-w-0 flex-1 self-stretch" data-chart-card-plot>{children}</div>

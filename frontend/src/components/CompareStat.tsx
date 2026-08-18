@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { DeltaPill } from '@/components/DeltaPill';
-import { ValueSwap } from '@/components/ValueSwap';
+import { KpiNumber } from '@/components/KpiNumber';
 import type { MetricDelta } from '@/lib/delta';
 
 /**
@@ -41,10 +41,10 @@ export function CompactStatHeadline({
           onClick={onDrill}
           className={`${numberClass} rounded text-left transition-colors hover:text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40`}
         >
-          <ValueSwap swapKey={text}>{text}</ValueSwap>
+          <KpiNumber text={text} />
         </button>
       ) : (
-        <div className={numberClass}><ValueSwap swapKey={text}>{text}</ValueSwap></div>
+        <div className={numberClass}><KpiNumber text={text} /></div>
       )}
       {live ? <DeltaPill delta={delta} /> : null}
     </div>
@@ -88,10 +88,10 @@ export function CenteredStat({
             onClick={onDrill}
             className={`${numberClass} rounded transition-colors hover:text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40`}
           >
-            <ValueSwap swapKey={text}>{text}</ValueSwap>
+            <KpiNumber text={text} />
           </button>
         ) : (
-          <div className={numberClass}><ValueSwap swapKey={text}>{text}</ValueSwap></div>
+          <div className={numberClass}><KpiNumber text={text} /></div>
         )}
         {showDelta ? (
           <div className="flex items-center justify-center gap-1.5 text-xs font-medium tabular-nums text-muted-foreground">
