@@ -914,12 +914,15 @@ export function TgAnalytics({
           key: 'gauge',
           label: 'Дуга',
           render: (
-            <div className="flex h-full min-h-0 flex-col justify-center gap-3">
+            <div className="flex h-full min-h-0 flex-col justify-center gap-2">
+              {/* max-w-44: дуга + легенда обязаны влезать в тело фикс-тайла 264px (клип без
+                  скролла — канон плотности); на max-w-56 легенду срезало нижней кромкой. */}
               <GaugeArc
                 share={joinedShare}
                 centerValue={fmt.pctAbs(joinedShare * 100)}
                 centerLabel="доля подписок"
                 ariaLabel={`Подписалось ${fmt.num(flow.joinedTotal)} (${fmt.pctAbs(joinedShare * 100)}), отписалось ${fmt.num(flow.leftTotal)}, всего ${fmt.num(flowTotal)} за период`}
+                className="max-w-44"
               />
               {/* Легенда честно мапится на части дуги: заливка = подписки, трек = отписки. */}
               <div aria-hidden="true" className="flex items-center justify-center gap-4 text-2xs tabular-nums text-muted-foreground">
