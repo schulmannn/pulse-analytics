@@ -10,6 +10,7 @@ import { withShares } from '@/lib/breakdownShare';
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
 import { DivergingBars } from '@/components/DivergingBars';
+import { GaugeArc } from '@/components/GaugeArc';
 import { ChartCardBody, ChartSection } from '@/components/ChartWidget';
 import { WidgetGroup } from '@/components/widgets/WidgetGroup';
 import { breakdownVariants, seriesBarValuesVariant } from '@/components/widgets/variants';
@@ -890,9 +891,12 @@ export function TgAnalytics({
     },
     [graphs],
   );
-  // Аудит: красно-зелёный донат был единственной круговой в продукте. Единственное представление —
-  // две строки Breakdown БЕЗ color (нейтральный приглушённый трек --chart-role-primary);
-  // «N всего» из центра доната живёт футером (FollowerFlowTotal).
+  // История формы (важно): красно-зелёный ДОНАТ здесь когда-то сняли — за оценочные цвета и за
+  // «единственную круговую в продукте». Оба довода устарели (RadialShare давно в проде; новая
+  // дуга МОНОХРОМНА), и владелец вернул круговую форму референсом (2026-08-18, Amicro gauge):
+  // дефолт — спидометр-дуга GaugeArc «доля подписок в валовом движении», «Список» остаётся
+  // вариантом (и сохранённым выбором тех, кто его предпочёл). «N всего» живёт футером
+  // (FollowerFlowTotal) под обоими вариантами.
   const churnVariants = useCallback(
     (period: WidgetPeriodValue) => {
       const flow = deriveFollowerFlows(graphs, calendarWindowForPeriod(period));
@@ -904,7 +908,36 @@ export function TgAnalytics({
       // одна и та же строчная идиома «значение · доля» обязана печататься одним форматом рядом с
       // соседними разбивками этой же страницы.
       const rowShare = (value: number) => (flowTotal > 0 ? value / flowTotal : undefined);
+      const joinedShare = flowTotal > 0 ? flow.joinedTotal / flowTotal : 0;
       return [
+        {
+          key: 'gauge',
+          label: 'Дуга',
+          render: (
+            <div className="flex h-full min-h-0 flex-col justify-center gap-2">
+              {/* max-w-44: дуга + легенда обязаны влезать в тело фикс-тайла 264px (клип без
+                  скролла — канон плотности); на max-w-56 легенду срезало нижней кромкой. */}
+              <GaugeArc
+                share={joinedShare}
+                centerValue={fmt.pctAbs(joinedShare * 100)}
+                centerLabel="доля подписок"
+                ariaLabel={`Подписалось ${fmt.num(flow.joinedTotal)} (${fmt.pctAbs(joinedShare * 100)}), отписалось ${fmt.num(flow.leftTotal)}, всего ${fmt.num(flowTotal)} за период`}
+                className="max-w-44"
+              />
+              {/* Легенда честно мапится на части дуги: заливка = подписки, трек = отписки. */}
+              <div aria-hidden="true" className="flex items-center justify-center gap-4 text-2xs tabular-nums text-muted-foreground">
+                <span className="flex items-center gap-1.5">
+                  <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: 'hsl(var(--chart-role-primary))' }} />
+                  Подписалось {fmt.num(flow.joinedTotal)}
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: 'hsl(var(--muted))' }} />
+                  Отписалось {fmt.num(flow.leftTotal)}
+                </span>
+              </div>
+            </div>
+          ),
+        },
         {
           key: 'list',
           label: 'Список',

@@ -153,9 +153,26 @@ const reactValues = DAILY_VIEW_ROWS.map((row) => row.reactions);
 // essential: page-period windowing otherwise interprets every point as a date in January 1970.
 const followerXAxis = HISTORY_ROWS.slice(-30).map((r) => periodDateTimestamp(String(r.day)));
 const interactionsXAxis = DAILY_VIEW_ROWS.map((row) => periodDateTimestamp(row.day));
+// Валовое движение базы для «Чистого прироста» и «Динамики оттока»: подписки/отписки по дням,
+// согласованные с дневными дельтами уровня (joined − left = Δ базы). Раньше здесь лежал ОДИН
+// ряд-уровень — deriveFollowerFlows требует пары, и обе карточки в публичном демо были скрыты
+// (витрина без двух виджетов; вскрылось на ревизии слабых виджетов 2026-08-18).
+const followerDeltas = growthValues.map((value, index, arr) =>
+  index === 0 ? 0 : value - Number(arr[index - 1]),
+);
+const followerLeft = followerDeltas.map((delta, index) =>
+  Math.max(2, Math.round(14 + wobble(index, 9, 7) - Math.min(delta, 0) * 0.4)),
+);
+const followerJoined = followerDeltas.map((delta, index) => Math.max(0, delta + followerLeft[index]));
 const TG_GRAPHS = {
   growth: { x: followerXAxis, series: [{ name: 'Подписчики', values: growthValues }] },
-  followers: { x: followerXAxis, series: [{ name: 'Подписчики', values: growthValues }] },
+  followers: {
+    x: followerXAxis,
+    series: [
+      { name: 'Подписалось', values: followerJoined },
+      { name: 'Отписалось', values: followerLeft },
+    ],
+  },
   interactions: { x: interactionsXAxis, series: [{ name: 'Просмотры', values: viewsValues }, { name: 'Реакции', values: reactValues }] },
   top_hours: { hours: Array.from({ length: 24 }, (_, h) => h), values: Array.from({ length: 24 }, (_, h) => 40 + Math.round(60 * Math.max(0, Math.sin(((h - 6) / 24) * Math.PI * 2)))) },
   views_by_source: [
