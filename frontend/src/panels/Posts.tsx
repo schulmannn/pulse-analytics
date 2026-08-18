@@ -1,5 +1,7 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { Check, Download } from 'lucide-react';
+import { IconMorph, useMorphFlash } from '@/components/ui/icon-morph';
 import { useCampaignPosts, useChannels, useRemoveCampaignPosts, useTgFull } from '@/api/queries';
 import type { CampaignPostInput } from '@/api/schemas';
 import { normalizeTgPosts, type NormalizedPost } from '@/lib/posts';
@@ -233,7 +235,9 @@ function PostsTable({ allPosts, loadedCount }: { allPosts: NormalizedPost[]; loa
   // only the currently loaded rows, never a full historical archive. Window bounds name the file.
   const channel = channelsData?.channels.find((c) => c.id === channelId);
   const exportWindow = calendarWindowForPeriod({ days: pageDays, range: pageRange });
-  const onExport = () =>
+  // Морф Download→Check после выгрузки (кнопочная моторика 2026-08-18).
+  const [exported, flashExported] = useMorphFlash();
+  const onExport = () => {
     downloadCsv(
       exportFilename({
         network: 'telegram',
@@ -244,6 +248,8 @@ function PostsTable({ allPosts, loadedCount }: { allPosts: NormalizedPost[]; loa
       }),
       tgContentRows(rows),
     );
+    flashExported();
+  };
   // Preserve the pre-redesign mobile list contract: reach-desc, top 25, unaffected by desktop-only
   // search/format/sort controls. Mobile layout and controls remain outside this task.
   const mobileRows = sortPosts(scope, 'reach', 'desc').slice(0, 25);
@@ -321,8 +327,15 @@ function PostsTable({ allPosts, loadedCount }: { allPosts: NormalizedPost[]; loa
             disabled={rows.length === 0}
             aria-label="Экспорт показанных публикаций в CSV"
             title={rows.length === 0 ? 'Нет публикаций для экспорта' : `CSV: ${rows.length} показанных публикаций`}
-            className="hidden text-muted-foreground md:inline-flex"
+            className="hidden gap-1.5 text-muted-foreground md:inline-flex"
           >
+            {/* Морф Download→Check — подтверждение выгрузки (кнопочная моторика 2026-08-18). */}
+            <IconMorph
+              active={exported}
+              a={<Download className="size-3.5" />}
+              b={<Check className="size-3.5" />}
+              className="size-3.5"
+            />
             Экспорт таблицы
           </Button>
         </div>
