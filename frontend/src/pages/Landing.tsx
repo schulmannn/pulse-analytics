@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { ArrowRight } from 'lucide-react';
 import type { CSSProperties, ReactNode } from 'react';
 import { AtlavueMark } from '@/components/AtlavueMark';
 
@@ -353,8 +354,12 @@ function HeroCopy({ onEnterDemo }: { onEnterDemo: () => void }) {
         Аналитика Telegram и Instagram без лишнего шума
       </p>
       <div className="landing-enter mt-8 flex flex-wrap items-center gap-3" style={itemStyle(0.29)}>
-        <Link to="/register" className="btn-pill bg-primary px-5 py-3 text-[15px] font-medium text-primary-foreground transition-colors hover:bg-primary/90">
+        {/* Стрелка доезжает на ховере (кнопочная моторика 2026-08-18, референс Amicro slide-arrow;
+            гейт hover-fine — на таче стрелка просто стоит). Маркетинговая поверхность — движению
+            здесь можно чуть больше, чем в приложении. */}
+        <Link to="/register" className="group inline-flex items-center gap-2 btn-pill bg-primary px-5 py-3 text-[15px] font-medium text-primary-foreground transition-colors hover:bg-primary/90">
           Создать аккаунт
+          <ArrowRight aria-hidden="true" className="size-4 transition-transform dur-fast ease-house hover-fine:group-hover:translate-x-0.5 motion-reduce:group-hover:translate-x-0" />
         </Link>
         <button type="button" onClick={onEnterDemo} className="btn-pill border border-border bg-card px-5 py-3 text-[15px] font-medium text-foreground transition-colors hover:bg-muted">
           Посмотреть демо
@@ -671,8 +676,9 @@ function CtaBand({ onEnterDemo }: { onEnterDemo: () => void }) {
         <h2 className="text-[clamp(28px,4vw,36px)] font-medium tracking-tight text-foreground">Начните за минуту</h2>
         <p className="mt-4 max-w-[28em] text-[17px] text-ink2">Подключите канал или откройте демо без регистрации.</p>
         <div className="mt-7 flex flex-wrap items-center justify-center gap-3">
-          <Link to="/register" className="btn-pill bg-primary px-5 py-3 text-[15px] font-medium text-primary-foreground transition-colors hover:bg-primary/90">
+          <Link to="/register" className="group inline-flex items-center gap-2 btn-pill bg-primary px-5 py-3 text-[15px] font-medium text-primary-foreground transition-colors hover:bg-primary/90">
             Создать аккаунт
+            <ArrowRight aria-hidden="true" className="size-4 transition-transform dur-fast ease-house hover-fine:group-hover:translate-x-0.5 motion-reduce:group-hover:translate-x-0" />
           </Link>
           <button type="button" onClick={onEnterDemo} className="btn-pill border border-border bg-card px-5 py-3 text-[15px] font-medium text-foreground transition-colors hover:bg-muted">
             Посмотреть демо

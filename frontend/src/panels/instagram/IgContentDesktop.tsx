@@ -1,7 +1,8 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useSearchParams } from 'react-router-dom';
-import { ChevronDown, ChevronRight, X } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, Download, X } from 'lucide-react';
+import { IconMorph, useMorphFlash } from '@/components/ui/icon-morph';
 import {
   WorkspaceInspector,
   WorkspaceMetadataItem,
@@ -242,6 +243,8 @@ export function IgContentDesktop({ ig }: { ig: IgData }) {
   const scope = posts;
   const visible = filterIgPosts(scope, { q: filters.q, format: filters.format });
   const rows = sortIgPosts(visible, filters.sort, filters.order);
+  // Морф Download→Check после выгрузки CSV (кнопочная моторика 2026-08-18).
+  const [exported, flashExported] = useMorphFlash();
 
   // Pagination is conditional: ≤ PAGE_SIZE rows render whole with no footer. Past that, slice a page
   // and clamp the current page so filter/scope changes that shrink the set never leave an empty view.
@@ -407,7 +410,7 @@ export function IgContentDesktop({ ig }: { ig: IgData }) {
           type="button"
           variant="outline"
           size="sm"
-          onClick={() =>
+          onClick={() => {
             exportIgPosts(
               rows,
               exportFilename({
@@ -417,13 +420,21 @@ export function IgContentDesktop({ ig }: { ig: IgData }) {
                 from: ig.window.since,
                 to: ig.window.until,
               }),
-            )
-          }
+            );
+            flashExported();
+          }}
           disabled={rows.length === 0}
           aria-label="Экспорт показанных публикаций в CSV"
           title={rows.length === 0 ? 'Нет публикаций для экспорта' : `CSV: ${rows.length} показанных публикаций`}
-          className="text-muted-foreground"
+          className="gap-1.5 text-muted-foreground"
         >
+          {/* Морф Download→Check — подтверждение выгрузки (кнопочная моторика 2026-08-18). */}
+          <IconMorph
+            active={exported}
+            a={<Download className="size-3.5" />}
+            b={<Check className="size-3.5" />}
+            className="size-3.5"
+          />
           Экспорт таблицы
         </Button>
       </div>

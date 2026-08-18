@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { TriangleAlert } from 'lucide-react';
+import { RefreshCw, TriangleAlert } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import {
@@ -73,14 +73,24 @@ export function ErrorState({ title = 'Не удалось загрузить', r
       </EmptyHeader>
       {onRetry ? (
         <EmptyContent className={cn(compact ? 'gap-2' : 'gap-3', 'tile-short:gap-0.5')}>
+          {/* pending-канон общей кнопки (#465): точки-прелоадер вместо текстового свапа
+              «Загрузка…». Иконка Reload доворачивается на ховере (гейт hover-fine — только
+              точные указатели; кнопочная моторика 2026-08-18, референс Amicro rotate). */}
           <Button
             type="button"
             size="sm"
             variant={compact ? 'outline' : 'default'}
             onClick={onRetry}
-            disabled={retrying}
+            pending={retrying}
+            className="group"
           >
-            {retrying ? 'Загрузка…' : 'Повторить'}
+            {!retrying && (
+              <RefreshCw
+                aria-hidden="true"
+                className="size-3.5 transition-transform dur-base ease-house hover-fine:group-hover:rotate-180 motion-reduce:group-hover:rotate-0"
+              />
+            )}
+            Повторить
           </Button>
         </EmptyContent>
       ) : null}

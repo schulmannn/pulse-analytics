@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
+import { Check, Download } from 'lucide-react';
 import { fetchMsRfmCustomersPage, useMsRfmSegmentCustomers, type MsRfmCustomers } from '@/api/queries';
+import { IconMorph, useMorphFlash } from '@/components/ui/icon-morph';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { Button } from '@/components/ui/button';
@@ -122,6 +124,8 @@ export function MsRfmSegmentCustomers({ period, segment }: { period: MsPeriod; s
   const [acc, setAcc] = useState<Acc>(() => EMPTY(windowKey));
   const [offset, setOffset] = useState(0);
   const [exporting, setExporting] = useState(false);
+  // Морф Download→Check после успешной выгрузки (кнопочная моторика 2026-08-18).
+  const [exported, flashExported] = useMorphFlash();
   const [exportError, setExportError] = useState<string | null>(null);
   // «Телефоны»/«Почты»: какое поле сейчас собирается (disabled на время сборки) и 2-секундный
   // фидбек на самой кнопке («Скопировано N» / «Нет данных»).
@@ -195,6 +199,7 @@ export function MsRfmSegmentCustomers({ period, segment }: { period: MsPeriod; s
         fetchMsRfmCustomersPage(channelId, period, segment, MS_RFM_EXPORT_PAGE, exportOffset),
       );
       downloadCsv(rfmExportFilename(segment), rfmCustomersCsvRows(all));
+      flashExported(); // морф Download→Check — только на УСПЕХЕ (ошибка уходит в ErrorState ниже)
     } catch (error) {
       setExportError(error instanceof Error ? error.message : 'ошибка');
     } finally {
@@ -253,15 +258,24 @@ export function MsRfmSegmentCustomers({ period, segment }: { period: MsPeriod; s
           <div className="flex shrink-0 items-center gap-3">
             {contactAction('phone', 'Телефоны')}
             {contactAction('email', 'Почты')}
+            {/* pending-канон кнопки + морф Download→Check на успехе (кнопочная моторика 2026-08-18). */}
             <Button
               type="button"
               variant="outline"
               size="sm"
               onClick={handleExport}
-              disabled={exporting}
-              className="shrink-0"
+              pending={exporting}
+              className="shrink-0 gap-1.5"
             >
-              {exporting ? 'Готовим…' : 'Выгрузить CSV'}
+              {!exporting && (
+                <IconMorph
+                  active={exported}
+                  a={<Download className="size-3.5" />}
+                  b={<Check className="size-3.5" />}
+                  className="size-3.5"
+                />
+              )}
+              Выгрузить CSV
             </Button>
           </div>
         </div>

@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { Check, Copy } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { IconMorph } from '@/components/ui/icon-morph';
 import { cn } from '@/lib/utils';
 
 export interface SnippetProps {
@@ -80,8 +82,16 @@ export function Snippet({
             variant="secondary"
             size="xs"
             onClick={copy}
-            className="shrink-0 bg-background px-2 font-sans text-2xs"
+            className="shrink-0 gap-1.5 bg-background px-2 font-sans text-2xs"
           >
+            {/* Микро-морф Copy→Check (IconMorph): смена иконки несёт состояние «скопировано» —
+                вместе с текстовым свапом ниже, который остаётся источником для AT. */}
+            <IconMorph
+              active={copied}
+              a={<Copy className="size-3.5 text-muted-foreground" />}
+              b={<Check className="size-3.5 text-foreground" />}
+              className="size-3.5"
+            />
             {copied ? copiedLabel : copyLabel}
           </Button>
         </div>

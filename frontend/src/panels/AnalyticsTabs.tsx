@@ -1,5 +1,7 @@
 import { useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { Check, Download } from 'lucide-react';
+import { IconMorph, useMorphFlash } from '@/components/ui/icon-morph';
 import { fmt, pluralRu } from '@/lib/format';
 import { TgAnalytics } from '@/panels/TgAnalytics';
 import { useChannels, useTgFull, useTgGraphs } from '@/api/queries';
@@ -169,20 +171,30 @@ function TgAnalyticsExportButton() {
     [source, win?.from, win?.to, graphs],
   );
 
+  // Морф Download→Check после выгрузки (кнопочная моторика 2026-08-18): экспорт синхронный и
+  // раньше не подтверждался ничем.
+  const [exported, flashExported] = useMorphFlash();
   return (
     <button
       type="button"
-      onClick={() =>
+      onClick={() => {
         downloadAnalyticsCsv(
           exportFilename({ network: 'telegram', section: 'analytics', source, from: win?.from, to: win?.to }),
           rows,
-        )
-      }
+        );
+        flashExported();
+      }}
       disabled={rows.length === 0}
       aria-label="Экспорт метрик аналитики за выбранный период в CSV"
       title={rows.length === 0 ? 'Нет метрик за выбранный период' : undefined}
-      className="mb-1 hidden shrink-0 btn-pill border border-border bg-background px-3.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50 md:inline-flex"
+      className="mb-1 hidden shrink-0 items-center gap-1.5 btn-pill border border-border bg-background px-3.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50 md:inline-flex"
     >
+      <IconMorph
+        active={exported}
+        a={<Download className="size-3.5" />}
+        b={<Check className="size-3.5" />}
+        className="size-3.5"
+      />
       Экспорт метрик
     </button>
   );
