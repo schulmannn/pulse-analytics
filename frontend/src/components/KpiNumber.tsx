@@ -16,11 +16,40 @@ const NumberFlow = lazy(() => import('@number-flow/react'));
  * (даты, «—», «<0.1%», минус U+2212), рендерится прежним ValueSwap — поведение не меняется.
  */
 
-/** Тайминги зеркалят токены моторики: --motion-morph (700ms) и --ease-standard из index.css /
-    design-motion-lint HOUSE_CURVE. Правка кривой или длительности обязана менять все места
-    синхронно — см. канон Ковальски. */
-const MORPH_TIMING = { duration: 700, easing: 'cubic-bezier(0.23, 1, 0.32, 1)' } as const;
-const FADE_TIMING = { duration: 200, easing: 'ease-out' } as const;
+/** WAAPI-таймингам NumberFlow нужны JS-значения, а канон запрещает инлайнить кривую — поэтому
+    токены моторики (--ease-standard, --motion-morph, --motion-fast) читаются из computed style:
+    единственный источник остаётся в index.css. Парсер длительности понимает обе формы записи —
+    минификатор превращает '700ms' в '.7s' (грабля морф-волны #406). SSR/jsdom — статичный
+    фолбэк, на клиенте значения кэшируются при первом рендере. */
+function parseDurationMs(raw: string, fallback: number): number {
+  const v = raw.trim();
+  const n = Number.parseFloat(v);
+  if (!Number.isFinite(n)) return fallback;
+  return v.endsWith('ms') ? n : n * 1000;
+}
+
+interface HouseTimings {
+  morph: { duration: number; easing: string };
+  fade: { duration: number; easing: string };
+}
+
+let cachedTimings: HouseTimings | null = null;
+
+function houseTimings(): HouseTimings {
+  if (cachedTimings) return cachedTimings;
+  const fallback: HouseTimings = {
+    morph: { duration: 700, easing: 'ease' },
+    fade: { duration: 200, easing: 'ease' },
+  };
+  if (typeof window === 'undefined' || typeof document === 'undefined') return fallback;
+  const style = getComputedStyle(document.documentElement);
+  const easing = style.getPropertyValue('--ease-standard').trim() || fallback.morph.easing;
+  cachedTimings = {
+    morph: { duration: parseDurationMs(style.getPropertyValue('--motion-morph'), 700), easing },
+    fade: { duration: parseDurationMs(style.getPropertyValue('--motion-fast'), 200), easing },
+  };
+  return cachedTimings;
+}
 
 /** Разделители разрядов домашних строк: пробел, NBSP (toLocaleString('ru-RU')), узкий NBSP. */
 const GROUP_SEP = /[   ]/;
@@ -83,6 +112,7 @@ export function KpiNumber({
   // Ядро без суффикса — для статичного фолбэка Suspense (те же символы, что отдаст NumberFlow).
   const core = text.slice(0, text.length - parsed.suffix.length);
   const suffixSpan = parsed.suffix ? <span className={unitClassName}>{parsed.suffix}</span> : null;
+  const timings = houseTimings();
   return (
     <span className={cn('inline-flex items-baseline', className)}>
       <Suspense
@@ -104,9 +134,9 @@ export function KpiNumber({
             maximumFractionDigits: parsed.fractionDigits,
             ...(parsed.plus ? { signDisplay: 'always' as const } : null),
           }}
-          transformTiming={MORPH_TIMING}
-          spinTiming={MORPH_TIMING}
-          opacityTiming={FADE_TIMING}
+          transformTiming={timings.morph}
+          spinTiming={timings.morph}
+          opacityTiming={timings.fade}
         />
         {suffixSpan}
       </Suspense>
