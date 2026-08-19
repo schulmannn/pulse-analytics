@@ -182,8 +182,18 @@ test('desktop Instagram Overview keeps the split KPI hierarchy intact', async ({
   await expect(audienceSection.getByText('по дням')).toHaveCount(0);
   await expect(audienceSection.locator('svg[data-chart-kind="sparkline"]')).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Неделя аккаунта' })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Главное изменение' })).toBeVisible();
+  // Соседняя карточка держит два сильнейших инсайта строками во всю высоту тайла (было: один
+  // буллет под заголовком «Главное изменение», две трети пустовали).
+  await expect(page.getByRole('heading', { name: 'Главное', exact: true })).toBeVisible();
+  // Гейт «нет внутренних скроллов» меряется ДО скролла ниже: тела карточек грузятся по appearance,
+  // и прокрутка добудила бы нижние — гейт стал бы мерить другую доску, чем на всех прогонах раньше.
   expect(await overflowingCards(page)).toEqual([]);
+  const igWeekSection = page.getByRole('heading', { name: 'Неделя аккаунта' }).locator('xpath=ancestor::section[1]');
+  // Скролл обязателен: на узких вьюпортах карточка стоит ниже экрана и её тело ещё скелетон —
+  // без этого проверялся бы он, а не леджер. Сам леджер виден ВСЕГДА: до правки факты жили правой
+  // колонкой под гейтом 2xl, то есть на 1440px их не было вовсе.
+  await igWeekSection.scrollIntoViewIfNeeded();
+  await expect(igWeekSection.getByText('Пик охвата')).toBeVisible();
 
   // Просмотры / Взаимодействия carry an active-window chart over the CANONICAL account daily
   // series — the old previous-period empty copy is gone (the chart never depends on prior-window

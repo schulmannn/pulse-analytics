@@ -417,7 +417,7 @@ function demoMsPayload(url: URL, opts: { max?: boolean } = {}): unknown | undefi
 export async function bootDemo(
   page: Page,
   route = '/',
-  opts: { theme?: 'light' | 'dark'; msMax?: boolean } = {},
+  opts: { theme?: 'light' | 'dark'; msMax?: boolean; msFixtures?: boolean } = {},
 ): Promise<void> {
   // Covered demo endpoints (TG + IG, см. lib/demoFixtures + lib/demoIgFixtures) resolve inside
   // api/client.ts and never reach the network. Any uncovered optional request (media today, future
@@ -432,13 +432,19 @@ export async function bootDemo(
       body: JSON.stringify(msPayload ?? { error: 'not_available_in_demo' }),
     });
   });
+  // МС/ЯМ-неймспейсы у демо ТОЖЕ покрыты клиентскими фикстурами (lib/demoMsFixtures,
+  // lib/demoYmFixtures) — иначе публичное демо без сессии ловило 401. Но перехват идёт ДО сети и
+  // подменил бы стаб выше, по которому написаны МС-спеки (компакт-лимиты, сортировки, msMax-длина).
+  // Флаг pulse_demo_net_msym возвращает эти два неймспейса сети; `msFixtures: true` его снимает —
+  // так проверяется сама витрина демо (demo-sklad.spec).
   await page.addInitScript(
-    (theme) => {
+    ({ theme, netMsYm }) => {
       localStorage.setItem('pulse_demo', '1');
       localStorage.setItem('pulse_channel', '0');
+      if (netMsYm) localStorage.setItem('pulse_demo_net_msym', '1');
       if (theme) localStorage.setItem('pulse_theme', theme);
     },
-    opts.theme ?? '',
+    { theme: opts.theme ?? '', netMsYm: !opts.msFixtures },
   );
   await page.goto(route);
   // Wait for the authed shell (present on every route incl. an empty /home), then settle so
