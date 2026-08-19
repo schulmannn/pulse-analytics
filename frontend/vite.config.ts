@@ -10,6 +10,9 @@ export default defineConfig({
   base: '/',
   // Tailwind v4 через first-party Vite-плагин (быстрее PostCSS-пути; postcss.config.js удалён).
   plugins: [react(), tailwindcss()],
+  // Лениво-импортируемая зависимость (components/KpiNumber): без пре-бандла dev-сервер открывает
+  // её посреди сессии («new dependency discovered» → reload), и e2e ловит зависший Suspense-фолбэк.
+  optimizeDeps: { include: ['@number-flow/react'] },
   resolve: {
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
   },

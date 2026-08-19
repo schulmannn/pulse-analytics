@@ -85,4 +85,15 @@ describe('KpiNumber', () => {
     expect(html).toContain('text-muted-foreground');
     expect(html).not.toContain('value-swap');
   });
+
+  it('держит контракт плоского текста: РОВНО одна light-копия ядра (SSR = фолбэк до чанка)', () => {
+    const html = renderToStaticMarkup(<KpiNumber text="12.6k" />);
+    const flat = html.replace(/<[^>]+>/g, '');
+    // Suspense-фолбэк: видимое ядро + видимый суффикс, БЕЗ sr-only дубля — иначе strict-mode
+    // getByText ловит два элемента «145» (ym-overview:377). sr-only появляется только вместе
+    // с загруженным NumberFlow, когда визуальный слой уходит под aria-hidden.
+    expect(flat).toBe('12.6k');
+    expect(html).not.toContain('sr-only');
+    expect(html).not.toContain('value-swap');
+  });
 });

@@ -113,33 +113,35 @@ export function KpiNumber({
   const core = text.slice(0, text.length - parsed.suffix.length);
   const suffixSpan = parsed.suffix ? <span className={unitClassName}>{parsed.suffix}</span> : null;
   const timings = houseTimings();
+  // Контракт плоского текста (CI-грабля этого же PR): цифры NumberFlow живут в shadow DOM
+  // фрагментами-спанами — textContent/innerText/getByText строку «12.6» не видят. Поэтому ядро
+  // живёт в light DOM РОВНО ОДНОЙ копией в каждый момент: до подгрузки чанка — видимым текстом
+  // (старый рендер), после — sr-only-спаном при aria-hidden визуальном слое (иначе strict-mode
+  // getByText ловит дубль, see ym-overview:377). select-none — чтобы выделение мышью не
+  // копировало цифры дважды. Суффикс — всегда видимый обычный текст.
   return (
     <span className={cn('inline-flex items-baseline', className)}>
-      <Suspense
-        fallback={
-          <>
-            <span>{core}</span>
-            {suffixSpan}
-          </>
-        }
-      >
-        <NumberFlow
-          value={parsed.value}
-          // Локаль повторяет символы источника: группировка ru-RU (NBSP, как в fmt.num), дробь —
-          // точка en-US (мантисса fmt.short / проценты). Обе строки собирает тот же Intl движка.
-          locales={parsed.grouped ? 'ru-RU' : 'en-US'}
-          format={{
-            useGrouping: parsed.grouped,
-            minimumFractionDigits: parsed.fractionDigits,
-            maximumFractionDigits: parsed.fractionDigits,
-            ...(parsed.plus ? { signDisplay: 'always' as const } : null),
-          }}
-          transformTiming={timings.morph}
-          spinTiming={timings.morph}
-          opacityTiming={timings.fade}
-        />
-        {suffixSpan}
+      <Suspense fallback={<span>{core}</span>}>
+        <span className="sr-only select-none">{core}</span>
+        <span aria-hidden="true" className="inline-flex">
+          <NumberFlow
+            value={parsed.value}
+            // Локаль повторяет символы источника: группировка ru-RU (NBSP, как в fmt.num), дробь —
+            // точка en-US (мантисса fmt.short / проценты). Обе строки собирает тот же Intl движка.
+            locales={parsed.grouped ? 'ru-RU' : 'en-US'}
+            format={{
+              useGrouping: parsed.grouped,
+              minimumFractionDigits: parsed.fractionDigits,
+              maximumFractionDigits: parsed.fractionDigits,
+              ...(parsed.plus ? { signDisplay: 'always' as const } : null),
+            }}
+            transformTiming={timings.morph}
+            spinTiming={timings.morph}
+            opacityTiming={timings.fade}
+          />
+        </span>
       </Suspense>
+      {suffixSpan}
     </span>
   );
 }
