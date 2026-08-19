@@ -114,9 +114,13 @@ export function WidgetGroup({ id, className, defaultOrder, children }: WidgetGro
         // An untouched default card may still close an accidental tail gap. Once the owner has
         // explicitly chosen S/M/L (dialog or corner drag), that footprint is authoritative: silently
         // stretching it back to a full row would make resize look broken after pointer-up.
+        // Карточки с data-widget-no-stretch отказались от этого закрытия хвоста: их содержимое
+        // шириной не пользуется (дуга, разбивка, семь столбцов по дням), и растянутая на весь ряд
+        // карточка читается как маленький график посреди пустоты — короткий ряд честнее.
         if (
           lastRow.length === 1 &&
           !lastRow[0].hasAttribute('data-widget-user-sized') &&
+          !lastRow[0].hasAttribute('data-widget-no-stretch') &&
           lastRow[0].offsetWidth < root.clientWidth * 0.8
         ) {
           lastRow[0].style.gridColumn = '1 / -1';

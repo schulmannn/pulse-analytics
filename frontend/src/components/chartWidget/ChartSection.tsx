@@ -124,6 +124,7 @@ export function ChartSection(props: ChartSectionProps) {
       style={model.layout.outerStyle}
       data-widget-size={effectiveSize}
       data-widget-user-sized={model.layout.userSized ? '' : undefined}
+      data-widget-no-stretch={props.noStretch ? '' : undefined}
       onPointerDown={
         reorder
           ? (event) => {

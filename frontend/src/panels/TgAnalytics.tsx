@@ -917,14 +917,17 @@ export function TgAnalytics({
           label: 'Дуга',
           render: (
             <div className="flex h-full min-h-0 flex-col justify-center gap-2">
-              {/* max-w-44: дуга + легенда обязаны влезать в тело фикс-тайла 264px (клип без
-                  скролла — канон плотности); на max-w-56 легенду срезало нижней кромкой. */}
+              {/* Ширина дуги задаёт её высоту (viewBox 200×148), а тело фикс-тайла — потолок:
+                  на max-w-56 легенду срезало нижней кромкой, а max-w-44 (176px → 130px высоты)
+                  сходился ровно в ноль на десктопе и не влезал на мобиле — гейт «нет внутренних
+                  скроллов» ловил там клип 4px. max-w-40 = 160px → 118px: запас 12px на десктопе
+                  и 5px на мобильном тайле, дуга по-прежнему крупная. */}
               <GaugeArc
                 share={joinedShare}
                 centerValue={fmt.pctAbs(joinedShare * 100)}
                 centerLabel="доля подписок"
                 ariaLabel={`Подписалось ${fmt.num(flow.joinedTotal)} (${fmt.pctAbs(joinedShare * 100)}), отписалось ${fmt.num(flow.leftTotal)}, всего ${fmt.num(flowTotal)} за период`}
-                className="max-w-44"
+                className="max-w-40"
               />
               {/* Легенда честно мапится на части дуги: заливка = подписки, трек = отписки. */}
               <div aria-hidden="true" className="flex items-center justify-center gap-4 text-2xs tabular-nums text-muted-foreground">
@@ -1034,7 +1037,11 @@ export function TgAnalytics({
           'grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-6',
           // Аудитория: каждая секция — самостоятельная ячейка сетки; при нечётном числе
           // half-плиток последняя дотягивается до полного ряда, чтобы рядом не зияла пустая дыра.
-          group === 'audience' && 'lg:[&>section:last-child:nth-child(odd)]:col-span-6',
+          // Исключение — карточки с data-widget-no-stretch: их содержимое шириной не пользуется
+          // (семь столбцов по дням), и растянутая на 1110px плитка читается хуже короткого ряда.
+          // Тот же признак уважает и JS-закрытие хвоста в WidgetGroup — правило одно на оба слоя.
+          group === 'audience' &&
+            'lg:[&>section:last-child:nth-child(odd):not([data-widget-no-stretch])]:col-span-6',
         )}
       >
         {/* Сводка показателей — ОБЫЧНАЯ карточка. Обе «голые» ленты (плавающий strip и strip с
@@ -1206,7 +1213,7 @@ export function TgAnalytics({
         )}
 
         {inGroup('dynamics') && netGrowthPresent && (
-          <ChartSection title="Динамика оттока" drillTo="/metrics/tg-churn" periodControl variants={churnVariants}>
+          <ChartSection title="Динамика оттока" drillTo="/metrics/tg-churn" periodControl noStretch variants={churnVariants}>
             <FollowerFlowTotal graphs={graphs} />
           </ChartSection>
         )}
@@ -1222,11 +1229,12 @@ export function TgAnalytics({
         )}
 
         {inGroup('audience') && maxWdAvg > 0 && (
-          /* D6.3: секция — последняя в «Аудитории» и при нечётном числе плиток растягивается
-             на обе колонки; 7 столбиков с кэпом 48px, размазанные по full-width ряду, = «острова
-             в пустоте». max-w держит чарт компактным (в 1×-плитке кэп не срабатывает), а mx-auto
-             ставит его в середину растянутой ячейки — прижатый влево блок читался как обрезанный. */
-          <ChartSection title="Количество постов" drillTo="/metrics/tg-post-count" periodControl variants={postCountVariants} />
+          /* Секция — последняя в «Аудитории» и при нечётном числе плиток раньше растягивалась на
+             весь ряд: 7 столбиков с кэпом 48px оказывались «островами в пустоте» посреди 1110px.
+             noStretch оставляет карточку обычной третью ряда — ширины семи столбцам хватает, а
+             хвост ряда честно короткий. max-w/mx-auto внутри остаются для оверлея «Развернуть»,
+             где ширина свободная. */
+          <ChartSection title="Количество постов" drillTo="/metrics/tg-post-count" periodControl noStretch variants={postCountVariants} />
         )}
       </WidgetGroup>
     </div>
