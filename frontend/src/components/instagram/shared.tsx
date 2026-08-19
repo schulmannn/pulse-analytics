@@ -9,7 +9,7 @@ import { EmptyState } from '@/components/EmptyState';
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
 import { ChartBand } from '@/components/ChartBand';
-import { ChartCardBody, ChartSection as WidgetChartSection } from '@/components/ChartWidget';
+import { ChartCardBody, ChartSection as WidgetChartSection, seriesRange } from '@/components/ChartWidget';
 import { CenteredStat, CompactStatHeadline } from '@/components/CompareStat';
 import { Sparkline } from '@/components/Sparkline';
 import type { WidgetSize } from '@/lib/widgetPrefsStore';
@@ -241,13 +241,15 @@ export function TrendCard({
         // Кап линии (канон CLAUDE.md): «Всё» отдаёт многосотневный дневной архив — итог/дельта
         // выше посчитаны от ПОЛНОГО окна, прореживается только рисуемая линия.
         const line = lttbDownsample(w, CHART_MAX_POINTS, (p) => p.value);
+        // Мин/макс — только у потоков: у уровневой серии сводка дублирует концы окна.
+        const range = seriesKind === 'flow' ? seriesRange(w.map((p) => p.value)) : null;
         return [
           {
             key: 'line',
             label: 'Линия',
             render:
               w.length > 1 ? (
-                <ChartCardBody value={fmt.kpi(value)} delta={delta} caption={caption}>
+                <ChartCardBody value={fmt.kpi(value)} delta={delta} range={range} caption={caption}>
                   <LineChart
                     values={line.map((p) => p.value)}
                     labels={pickLabels(line)}

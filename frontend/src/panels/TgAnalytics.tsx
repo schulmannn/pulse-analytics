@@ -1,5 +1,5 @@
 import { useCallback, useMemo } from 'react';
-import { ValueSwap } from '@/components/ValueSwap';
+import { KpiNumber } from '@/components/KpiNumber';
 import { useTgFull, useTgGraphs } from '@/api/queries';
 import type { TgFull, TgGraphs } from '@/api/schemas';
 import { lttbDownsample } from '@/lib/downsample';
@@ -11,7 +11,7 @@ import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
 import { DivergingBars } from '@/components/DivergingBars';
 import { GaugeArc } from '@/components/GaugeArc';
-import { ChartCardBody, ChartSection } from '@/components/ChartWidget';
+import { ChartCardBody, ChartSection, seriesRange } from '@/components/ChartWidget';
 import { WidgetGroup } from '@/components/widgets/WidgetGroup';
 import { breakdownVariants, seriesBarValuesVariant } from '@/components/widgets/variants';
 import { Breakdown } from '@/components/Breakdown';
@@ -628,7 +628,7 @@ function TgAnalyticsSummary({ full }: { full: TgFull | undefined }) {
         <div key={item.label} className="min-w-0">
           <div className="truncate text-2xs tracking-wide text-muted-foreground">{item.label}</div>
           <div className="mt-1.5 text-2xl font-medium tabular-nums tracking-tight text-foreground">
-            <ValueSwap swapKey={item.value}>{item.value}</ValueSwap>
+            <KpiNumber text={item.value} />
           </div>
           <div className="mt-1 truncate text-2xs text-muted-foreground" title={item.captionTitle}>{item.caption}</div>
         </div>
@@ -755,13 +755,14 @@ export function TgAnalytics({
           ? windowGraphSeries(viewSeries.values, interGroup.x, calendarWindowForPeriod(period), 'просмотров', { ...series, grain: 'week' })
           : w;
       const delta = w.prevTotal != null && w.prevTotal > 0 ? pctDelta(w.total, w.prevTotal) : null;
+      const range = seriesRange(w.values);
       const caption = delta ? 'к пред. периоду' : period.days === 0 ? 'за всё время' : undefined;
       return [
         {
           key: 'line',
           label: 'Линия',
           render: (
-            <ChartCardBody value={fmt.kpi(w.total)} delta={delta} caption={caption}>
+            <ChartCardBody value={fmt.kpi(w.total)} delta={delta} range={range} caption={caption}>
               <LineChart values={line.values} labels={line.labels} axisLabels={line.axisLabels} titles={line.titles} markAnomalies />
             </ChartCardBody>
           ),
@@ -771,7 +772,7 @@ export function TgAnalytics({
           key: 'bar',
           label: 'Столбцы',
           render: (
-            <ChartCardBody value={fmt.kpi(w.total)} delta={delta} caption={caption}>
+            <ChartCardBody value={fmt.kpi(w.total)} delta={delta} range={range} caption={caption}>
               <BarChart values={bars.values} labels={bars.labels} axisLabels={bars.axisLabels} titles={bars.titles} />
             </ChartCardBody>
           ),
@@ -793,13 +794,14 @@ export function TgAnalytics({
           ? windowGraphSeries(shareSeries.values, interGroup.x, calendarWindowForPeriod(period), 'репостов', { ...series, grain: 'week' })
           : w;
       const delta = w.prevTotal != null && w.prevTotal > 0 ? pctDelta(w.total, w.prevTotal) : null;
+      const range = seriesRange(w.values);
       const caption = delta ? 'к пред. периоду' : period.days === 0 ? 'за всё время' : undefined;
       return [
         {
           key: 'line',
           label: 'Линия',
           render: (
-            <ChartCardBody value={fmt.kpi(w.total)} delta={delta} caption={caption}>
+            <ChartCardBody value={fmt.kpi(w.total)} delta={delta} range={range} caption={caption}>
               <LineChart values={line.values} labels={line.labels} axisLabels={line.axisLabels} titles={line.titles} />
             </ChartCardBody>
           ),
@@ -808,7 +810,7 @@ export function TgAnalytics({
           key: 'bar',
           label: 'Столбцы',
           render: (
-            <ChartCardBody value={fmt.kpi(w.total)} delta={delta} caption={caption}>
+            <ChartCardBody value={fmt.kpi(w.total)} delta={delta} range={range} caption={caption}>
               <BarChart values={bars.values} labels={bars.labels} axisLabels={bars.axisLabels} titles={bars.titles} />
             </ChartCardBody>
           ),

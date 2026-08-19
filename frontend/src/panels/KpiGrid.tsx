@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import type { ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ValueSwap } from '@/components/ValueSwap';
+import { KpiNumber } from '@/components/KpiNumber';
 import { ChartBand } from '@/components/ChartBand';
 import { useChannels, useHistory, useTgFull } from '@/api/queries';
 import { useSelectedChannel } from '@/lib/channel-context';
@@ -15,7 +15,8 @@ import { BarChart } from '@/components/BarChart';
 import { MetricInfo } from '@/components/InfoTooltip';
 import { DeltaPill } from '@/components/DeltaPill';
 import { Skeleton } from '@/components/ui/skeleton';
-import { ChartCardBody } from '@/components/ChartWidget';
+import { ChartCardBody, seriesRange } from '@/components/ChartWidget';
+import type { RangeSummary } from '@/components/ChartWidget';
 import { CenteredStat, CompactStatHeadline } from '@/components/CompareStat';
 import { useCardShowsPeriod, usePagePeriod, useWidgetPeriod, widgetPeriodValue } from '@/lib/period';
 import { useWidgetInView } from '@/lib/widgetViewport';
@@ -67,12 +68,6 @@ function CompactSkeleton() {
   );
 }
 
-/** Split a formatted value ("7.9k" / "8.20%") into [number, unit] so the unit reads quieter. */
-function splitUnit(value: string): [string, string] {
-  const match = value.match(/^([\d\s.,]+)(.*)$/);
-  return match ? [match[1], match[2]] : [value, ''];
-}
-
 /**
  * Telegram KPI cards with a clear hierarchy: two featured metrics (large number + gradient
  * sparkline) lead, the rest follow as a compact stat strip with trend-coloured sparklines.
@@ -106,6 +101,7 @@ export function KpiGrid() {
         trend={viewsTrend}
         caption={viewsCaption}
         spark={viewsSpark}
+        range={seriesRange(viewsSpark?.values)}
         info={getDrillMetric('views')}
         onDrill={() => openMetric('views')}
       />
@@ -157,6 +153,7 @@ export function TgViewsBody({ state, viz }: { state: TgKpiState; viz?: 'line' | 
       trend={viewsTrend}
       caption={viewsCaption}
       spark={viewsSpark}
+      range={seriesRange(viewsSpark?.values)}
       viz={viz}
       info={getDrillMetric('views')}
       onDrill={() => navigate('/metrics/views')}
@@ -343,12 +340,14 @@ interface FeaturedKpiProps {
   onDrill?: () => void;
   /** «Линия» / «Столбцы» из карусели вариантов карточки — см. TgTrendStat. */
   viz?: 'line' | 'bar';
+  /** Мин/макс окна (только потоковые серии — см. seriesRange). */
+  range?: RangeSummary | null;
 }
 
 /** Hero KPI — the steep card anatomy (owner rule): label + big number + comparison pinned
     bottom-LEFT, the area sparkline filling the width to the RIGHT of the number block. The ledger
     below is untouched — the hero zone just turned horizontal. */
-function FeaturedKpi({ label, labelHidden = false, value, trend, caption, spark, info, onDrill, viz = 'line' }: FeaturedKpiProps) {
+function FeaturedKpi({ label, labelHidden = false, value, trend, caption, spark, info, onDrill, viz = 'line', range }: FeaturedKpiProps) {
   // Кап длинной серии перед рендером (канон CLAUDE.md): на окне «Всё» архивный viewsSpark несёт
   // до 730 дневных точек — в 200×32-спарклайне это суб-пиксельная мазня. Пары {value,label}
   // прореживаются ВМЕСТЕ, чтобы hover-читалка называла именно отобранные LTTB точки; хедлайн,
@@ -383,6 +382,7 @@ function FeaturedKpi({ label, labelHidden = false, value, trend, caption, spark,
       valueAdornment={info && labelHidden ? <MetricInfo def={info} /> : undefined}
       value={value}
       delta={trend}
+      range={range}
       caption={caption ?? undefined}
       onValueClick={onDrill}
       drillLabel={label}
@@ -468,7 +468,6 @@ interface StatTileProps {
  * gap-px over a bg-border container draws the 1px dividers; the cell sits on the paper canvas.
  */
 function StatTile({ label, value, trend, deltaText, info, onDrill }: StatTileProps) {
-  const [num, unit] = splitUnit(value);
   // No per-cell background/border now — cells separate by grid SPACING. A drillable cell gets a
   // quiet rounded hover surface; vertical-only padding so it never widens the grid (a horizontal
   // negative-margin bleed overflowed the card by ~12px on the edge cells).
@@ -485,10 +484,8 @@ function StatTile({ label, value, trend, deltaText, info, onDrill }: StatTilePro
       </div>
       <div className="mt-1.5 flex items-baseline gap-2">
         <DrillValue label={label} onDrill={onDrill} className="text-2xl font-medium tabular-nums tracking-tight">
-          <ValueSwap swapKey={value}>
-            {num}
-            {unit ? <span className="text-base font-medium text-muted-foreground">{unit}</span> : null}
-          </ValueSwap>
+          {/* KpiNumber сам делит строку на число и тихий юнит — раньше это делал splitUnit. */}
+          <KpiNumber text={value} unitClassName="text-base font-medium text-muted-foreground" />
         </DrillValue>
         {deltaText ? (
           <span className={cn('shrink-0 text-xs font-medium tabular-nums', deltaColor)}>{deltaText}</span>

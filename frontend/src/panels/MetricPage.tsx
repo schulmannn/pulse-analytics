@@ -23,7 +23,7 @@ import type { NormalizedPost } from '@/lib/posts';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ErrorState } from '@/components/ErrorState';
 import { DeltaPill } from '@/components/DeltaPill';
-import { ValueSwap } from '@/components/ValueSwap';
+import { KpiNumber } from '@/components/KpiNumber';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { SegSelect } from '@/components/metric/SegSelect';
 import { LineChart } from '@/components/LineChart';
@@ -779,7 +779,7 @@ export function MetricPage() {
         ) : null}
         <div className="mt-2 flex flex-wrap items-baseline gap-x-2.5 gap-y-1 lg:hidden">
           <span className="text-3xl font-medium leading-none tabular-nums tracking-tight">
-            <ValueSwap swapKey={meta.total}>{meta.total}</ValueSwap>
+            <KpiNumber text={meta.total} />
           </span>
           <DeltaPill delta={meta.trend} />
           <span className="text-xs tracking-wide text-muted-foreground">{periodLabel}</span>
