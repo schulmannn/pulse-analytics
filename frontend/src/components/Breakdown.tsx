@@ -32,6 +32,12 @@ export function Breakdown({ items }: BreakdownProps) {
     return <EmptyState compact size="chart" title="Нет данных" />;
   }
 
+  // Внутри фикс-тайла строки ДЕЛЯТ высоту тела поровну, а не жмутся к верхней кромке: у разбивки
+  // из трёх строк (например «Тональность реакций») нижняя треть карточки пустовала, тогда как
+  // соседние разбивки из четырёх строк заполняли тайл. Потолок строки (max-h-14) не даёт двум
+  // строкам разъехаться в толстые полосы. Оверлей «Развернуть» и страничные поверхности живут
+  // свободной высотой — там прежний естественный ритм.
+  const fillSlot = !expanded && ctxHeight != null;
   const fit =
     !expanded && ctxHeight != null ? Math.max(2, Math.floor(ctxHeight / ROW_PITCH)) : items.length;
   const shown = items.length > fit ? items.slice(0, Math.max(1, fit - 1)) : items;
@@ -40,7 +46,7 @@ export function Breakdown({ items }: BreakdownProps) {
   const maxValue = Math.max(...items.map((item) => item.value), 1);
 
   return (
-    <div className="space-y-2">
+    <div className={fillSlot ? 'flex h-full flex-col gap-2' : 'space-y-2'}>
       {shown.map((item, i) => {
         const percentage = (item.value / maxValue) * 100;
         // Fill alpha is a theme token (--row-tint-*): the light-theme 0.15 pastel turns muddy
@@ -53,7 +59,9 @@ export function Breakdown({ items }: BreakdownProps) {
         return (
           <div
             key={i}
-            className="relative flex items-center justify-between overflow-hidden rounded p-2"
+            className={`relative flex items-center justify-between overflow-hidden rounded p-2${
+              fillSlot ? ' min-h-9 max-h-12 flex-1' : ''
+            }`}
           >
             <div
               className="absolute bottom-0 left-0 top-0 rounded-sm transition-[width] dur-base ease-house"
@@ -76,7 +84,7 @@ export function Breakdown({ items }: BreakdownProps) {
         );
       })}
       {extra > 0 && (
-        <div className="px-2 text-2xs text-muted-foreground">+{extra} ещё — полный список в «Развернуть»</div>
+        <div className="shrink-0 px-2 text-2xs text-muted-foreground">+{extra} ещё — полный список в «Развернуть»</div>
       )}
     </div>
   );

@@ -38,6 +38,11 @@ export interface ChartSectionProps {
   drillTo?: string;
   /** Removes every expand affordance for views that are already expanded. */
   noExpand?: boolean;
+  /** Карточка НЕ участвует в закрытии хвостового пробела ряда (WidgetGroup растягивает одиночку
+      последнего ряда на всю ширину). Ставить там, где содержимое шириной не пользуется — дуга,
+      разбивка, недельная семёрка столбцов: растянутая на 1110px карточка даёт не «широкий
+      график», а маленький график посреди пустоты. */
+  noStretch?: boolean;
   /** Marks a period-aware body. Feed pages use their top bar; Home exposes the widget's own value. */
   periodControl?: boolean;
   /** Thin full-width summary row without card chrome. */
