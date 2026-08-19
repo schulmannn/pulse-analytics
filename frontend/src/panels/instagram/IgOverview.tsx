@@ -75,11 +75,14 @@ export function IgOverview({ ig }: { ig: IgData }) {
       <ChartSection id="ig-overview-engagement" title="Вовлечённость" defaultSize="third" drillTo="/metrics/ig-er">
         <IgEngagementBody ig={ig} />
       </ChartSection>
-      {/* The S/M/L grid pairs the narrative with one strongest rule-based insight at M/M;
-          no unsupported footprint and no second wall of text. */}
+      {/* Ряд «рассказ + выводы»: слева недельный нарратив с леджером, справа — два сильнейших
+          инсайта строками во всю высоту тайла. Раньше справа стоял ОДИН буллет под заголовком
+          «Главное изменение», и две трети карточки пустовали. Третью строку сюда не ставить —
+          она переполняет 264px на узком тайле (см. InsightsBlock, там замеры); полный список
+          живёт карточкой «Главное» в Аналитике (limit 4, во всю ширину). */}
       <IgNarrativeWeekBlock id="ig-overview-week" homeKey="ig-week" fixedSize="half" title="Неделя аккаунта" />
-      <ChartSection id="ig-overview-change" title="Главное изменение" fixedSize="half" noExpand>
-        <InsightsBlock insights={ig.insights} limit={1} />
+      <ChartSection id="ig-overview-change" title="Главное" fixedSize="half" noExpand>
+        <InsightsBlock insights={ig.insights} limit={2} variant="list" />
       </ChartSection>
       <ChartSection
         id="ig-overview-top-posts"

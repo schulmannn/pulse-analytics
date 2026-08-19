@@ -35,26 +35,37 @@ export function IgNarrativeWeekBody() {
   }
   if (!input) return null; // недостижимо после гейтов выше — сужение типа для tsc
 
-  // Факт-колонка (≥lg) — зеркало TG-«Недели канала» (#111): короткий рассказ оставлял правую
-  // половину full-width карточки пустой. Факты из ТОГО ЖЕ входа (никаких новых запросов):
-  // пик охвата, движение базы за 7 дней, текущая база — числа сходятся с рассказом по построению.
+  // Недельный леджер — зеркало TG-«Недели канала»: там он ПОЛОСА под рассказом, здесь была
+  // правая колонка под гейтом 2xl, то есть на обычном десктопе карточка жила коротким текстом и
+  // пустотой справа. Факты из ТОГО ЖЕ входа (никаких новых запросов): пик охвата, публикации
+  // недели, база с движением — числа сходятся с рассказом по построению.
   const reach7 = input.reachDaily.slice(-7);
   const peak = reach7.length ? reach7.reduce((a, b) => (b.v > a.v ? b : a)) : null;
   const net7 = input.followsDaily.slice(-7).reduce((s, p) => s + p.v, 0);
+  const net7Text = `${net7 > 0 ? '+' : '−'}${fmt.num(Math.abs(net7))}`;
+  const hasNet7 = input.followsDaily.length > 0 && net7 !== 0;
   const facts: { label: string; value: string }[] = [];
   if (peak && peak.v > 0) facts.push({ label: 'Пик охвата', value: `${fmt.short(peak.v)} · ${fmt.day(peak.day)}` });
-  if (input.followsDaily.length > 0 && net7 !== 0)
-    facts.push({ label: 'Движение базы', value: `${net7 > 0 ? '+' : '−'}${fmt.num(Math.abs(net7))}` });
-  if (input.followersNow != null) facts.push({ label: 'База', value: fmt.kpi(input.followersNow) });
+  // «Публикаций» — медиа недели С ОХВАТОМ: ровно тот набор, по которому рассказ ищет героя
+  // (mediaWeek), поэтому счёт и герой не могут разойтись. Медиа без охвата в карточке не участвует.
+  const weekMedia = input.mediaWeek ?? [];
+  if (weekMedia.length > 0) facts.push({ label: 'Публикаций', value: fmt.num(weekMedia.length) });
+  // База несёт движение приклеенным хвостом (как TG: «24,5K · +128»); без базы движение честно
+  // выходит отдельным фактом, а не теряется.
+  if (input.followersNow != null)
+    facts.push({ label: 'База', value: `${fmt.kpi(input.followersNow)}${hasNet7 ? ` · ${net7Text}` : ''}` });
+  else if (hasNet7) facts.push({ label: 'Движение базы', value: net7Text });
 
   // IG-медиа-чипы живут по permalink (карточек IG-постов в приложении нет) → onPost не нужен.
   return (
-    <div className="flex gap-6">
-      <div className="min-w-0 flex-1">
+    <div className="flex h-full flex-col gap-3">
+      {/* overflow-y-auto — страховка половинной карточки (264px): хвост рассказа доскроллится,
+          а не обрежется посреди строки. Леджер при этом остаётся приколоченным к низу. */}
+      <div className="min-w-0 flex-1 overflow-y-auto">
         <NarrativeProse paragraphs={buildIgWeekNarrative(input).paragraphs} />
       </div>
       {facts.length > 0 && (
-        <aside className="hidden w-44 shrink-0 space-y-3 border-l border-border pl-5 2xl:block">
+        <aside className="flex shrink-0 flex-wrap gap-x-8 gap-y-2 border-t border-border pt-3">
           {facts.map((f) => (
             <div key={f.label}>
               <div className="text-2xs tracking-wide text-muted-foreground">{f.label}</div>

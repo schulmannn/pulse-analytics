@@ -316,6 +316,21 @@ const ANNOTATIONS = () => ({
   ],
 });
 
+/**
+ * e2e-спеки МойСклада держат СВОИ payload'ы сетевыми стабами Playwright (helpers.demoMsPayload) и
+ * проверяют по ним продуктовые инварианты — компакт-лимиты карточек, сортировки, длинные списки под
+ * виртуализацию. Клиентская фикстура перехватывает запрос ДО сети и подменила бы их молча, поэтому
+ * bootDemo поднимает этот флаг и МС/ЯМ-неймспейсы уступают дорогу стабу спеки. В приложении флага
+ * нет никогда: витрину демо обслуживают фикстуры (ветки ниже).
+ */
+function specOwnsMsYm(): boolean {
+  try {
+    return typeof localStorage !== 'undefined' && localStorage.getItem('pulse_demo_net_msym') === '1';
+  } catch {
+    return false;
+  }
+}
+
 export function demoFixture(path: string): unknown | undefined {
   const p = path.split('?')[0];
   // Весь IG-неймспейс — клиентские фикстуры (см. шапку файла: у публичного демо нет сессии,
@@ -324,6 +339,15 @@ export function demoFixture(path: string): unknown | undefined {
   // IG-модуля раздувал КАЖДУЮ роут-группу за bundle-size бюджет; ветка возвращает Promise,
   // который apiGet прозрачно await'ит (для остальных путей ответ по-прежнему синхронный).
   if (p.startsWith('/api/ig/')) return import('@/lib/demoIgFixtures').then((m) => m.igDemoFixture(path));
+  // МойСклад и Яндекс.Метрика — та же история и то же лекарство: /api/ms/* и /api/ym/* стоят за
+  // requireAuth, у публичного демо сессии нет, и «Склад»/«Метрика» показывали «Не удалось получить
+  // данные». Импорт тоже ДИНАМИЧЕСКИЙ — статический раздул бы каждую роут-группу за bundle-бюджет.
+  if (p.startsWith('/api/ms/')) {
+    return specOwnsMsYm() ? undefined : import('@/lib/demoMsFixtures').then((m) => m.msDemoFixture(path));
+  }
+  if (p.startsWith('/api/ym/')) {
+    return specOwnsMsYm() ? undefined : import('@/lib/demoYmFixtures').then((m) => m.ymDemoFixture(path));
+  }
   if (p === '/api/channels') return CHANNELS;
   if (/^\/api\/channels\/\d+\/annotations$/.test(p)) return ANNOTATIONS();
   if (p === '/api/tg/full') return TG_FULL;

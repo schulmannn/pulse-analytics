@@ -114,7 +114,10 @@ export function buildIgInsights(i: IgInsightInput): IgInsight[] {
   if (i.bestFormat && i.bestFormat.total > 0 && i.bestFormat.sharePct >= 40) {
     out.push({
       tone: 'up',
-      text: `${i.bestFormat.label} собирают больше всего взаимодействий.`,
+      // Подпись формата — существительное в единственном числе («Лента», «Карусель», «Reels»),
+      // поэтому фраза строится вокруг слова «Формат»: подстановка в подлежащее давала «Лента
+      // собирают». Раньше огреха пряталась за limit=1 на Обзоре, теперь строка видна в топ-3.
+      text: `Формат «${i.bestFormat.label}» собирает больше всего взаимодействий.`,
       evidence: `${i.bestFormat.sharePct.toFixed(0)}% (${fmtInt(i.bestFormat.interactions)} из ${fmtInt(i.bestFormat.total)})`,
       confidence: i.bestFormat.total >= 1000 ? 'high' : 'medium',
       priority: 70,
