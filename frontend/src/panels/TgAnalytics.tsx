@@ -15,6 +15,7 @@ import { ChartCardBody, ChartSection, seriesRange } from '@/components/ChartWidg
 import { WidgetGroup } from '@/components/widgets/WidgetGroup';
 import { breakdownVariants, seriesBarValuesVariant } from '@/components/widgets/variants';
 import { Breakdown } from '@/components/Breakdown';
+import { ChartFill } from '@/components/ChartFill';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { pctDelta } from '@/lib/delta';
 import { EmptyState } from '@/components/EmptyState';
@@ -983,9 +984,15 @@ export function TgAnalytics({
           key: 'bar',
           label: 'Столбцы',
           render: (
-            <div>
-              <div className="mb-2 text-2xs tracking-wide text-muted-foreground">Ср. просмотры</div>
-              <BarChart values={wdAvgValues} labels={WD_LABELS} titles={wdAvgValues.map((v, i) => `${WD_LABELS[i]}: ${fmt.num(v)} ср. просмотров`)} />
+            // Флекс-колонка во всю высоту тела: подпись занимает своё, график меряет ОСТАТОК
+            // (BarChart берёт высоту у контейнера, когда тот её диктует). В обёртке с auto-высотой
+            // он рисовал дефолтные 200px, и тайл переполнялся на 23px — гейт «нет внутренних
+            // скроллов» это ловит, но до сих пор мерил только карточки первого экрана.
+            <div className="flex h-full min-h-0 flex-col">
+              <div className="mb-2 shrink-0 text-2xs tracking-wide text-muted-foreground">Ср. просмотры</div>
+              <ChartFill>
+                <BarChart values={wdAvgValues} labels={WD_LABELS} titles={wdAvgValues.map((v, i) => `${WD_LABELS[i]}: ${fmt.num(v)} ср. просмотров`)} />
+              </ChartFill>
             </div>
           ),
         },
@@ -1196,7 +1203,7 @@ export function TgAnalytics({
               />
             </div>
             {/* reserve = высота ряда переключателя (28px) + mb-1: столько тела уже занято. */}
-            <Breakdown items={sourceMetric === 'views' ? vbsItems : nfsItems} reserve={32} />
+            <Breakdown items={sourceMetric === 'views' ? vbsItems : nfsItems} reserve={36} />
           </ChartSection>
         )}
         {inGroup('audience') && langItems.length > 0 && (

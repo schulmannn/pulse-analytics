@@ -1,4 +1,7 @@
 import type { ReactNode } from 'react';
+import { useContext } from 'react';
+import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
+import { useMediaQuery } from '@/lib/useMediaQuery';
 import { fmt } from '@/lib/format';
 
 /**
@@ -119,6 +122,13 @@ export interface ShareRowsProps {
 }
 
 
+// Шаг строки списка. На ширине ≥640px строка однострочная, ниже — двухколоночная и занимает
+// две линии (см. grid-классы <li> ниже), поэтому шаг там вдвое больше.
+const ROW_PITCH_WIDE = 26;
+const ROW_PITCH_NARROW = 48;
+// Строка хвоста «ещё N» и сноска — не строки списка, но место занимают.
+const TAIL_H = 18;
+
 export function ShareRows({
   rows,
   total,
@@ -137,6 +147,9 @@ export function ShareRows({
       value: Number.isFinite(row.value) ? Math.max(0, row.value) : 0,
     }))
     .sort((a, b) => b.value - a.value || a.key.localeCompare(b.key));
+  const ctxHeight = useContext(ExpandedChartHeightContext);
+  const expandedCtx = useContext(ChartExpandedContext);
+  const wideRow = useMediaQuery('(min-width: 640px)');
   const safeTotal = Number.isFinite(total) && total >= 0 ? total : null;
   const denom = safeTotal != null && safeTotal > 0 ? safeTotal : null;
   const pctOf = (v: number) => (denom == null ? null : (v / denom) * 100);
@@ -145,7 +158,16 @@ export function ShareRows({
   // Хвост сворачивается ТОЛЬКО в компакте. Разворот — полный список по построению: страница
   // разреза для того и открывается, и прятать там строки значило бы отвечать не на заданный
   // вопрос. Длинный список делает читаемым не сокрытие, а доля от целого и накопленный процент.
-  const head = expanded ? ranked : ranked.slice(0, compactRows);
+  // Сколько строк показать — считаем от ВЫСОТЫ ТЕЛА тайла, а не только от compactRows.
+  // Фикс-число переполняло карточку там, где строка выше: на мобиле гейт «нет внутренних
+  // скроллов» ловил это на тринадцати разрезах Метрики разом (+28px каждый). Свободная
+  // высота (страница разреза, оверлей «Развернуть») высоту не публикует — там прежнее число.
+  const budget = ctxHeight == null ? null : ctxHeight - (ranked.length > compactRows || footnote != null ? TAIL_H : 0);
+  const fitRows =
+    budget == null || expandedCtx
+      ? compactRows
+      : Math.max(1, Math.min(compactRows, Math.floor(budget / (wideRow ? ROW_PITCH_WIDE : ROW_PITCH_NARROW))));
+  const head = expanded ? ranked : ranked.slice(0, fitRows);
   const tail = ranked.slice(head.length);
   const tailValue = tail.reduce((acc, r) => acc + Math.max(0, r.value), 0);
 

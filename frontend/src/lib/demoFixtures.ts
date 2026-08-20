@@ -58,6 +58,17 @@ const POST_SEED: Array<{ text: string; media: string; tags?: string[] }> = [
   { text: 'Мини-исследование: когда ваша аудитория онлайн', media: 'text', tags: ['#аналитика'] },
   { text: 'Спасибо за 12 000 подписчиков! Дальше — интереснее 🚀', media: 'photo' },
 ];
+// Часы публикаций — детерминированный разброс по «рабочему» окну. Без него все посты демо
+// приходились на один час (дата строилась как «сейчас минус N суток»): тепловая карта 7×24
+// вырождалась в одну вертикальную полосу, а «лучшее время» менялось в течение дня.
+const POST_HOURS = [9, 12, 15, 19, 11, 21, 14, 10, 18, 13, 20, 16];
+/** Дата поста: смещение в сутках + СВОЙ час (в локальной зоне — по ней же группируют сетки). */
+const isoAtHour = (offsetDays: number, hour: number) => {
+  const d = new Date(now - offsetDays * DAY_MS);
+  d.setHours(hour, (hour * 7) % 60, 0, 0);
+  return d.toISOString();
+};
+
 function buildPosts() {
   return POST_SEED.map((p, i) => {
     const views = 5600 - i * 210 + wobble(i, 620);
@@ -65,7 +76,7 @@ function buildPosts() {
     return {
       id: 2001 + i,
       text: p.text,
-      date: iso(i * 2 + 1),
+      date: isoAtHour(i * 2 + 1, POST_HOURS[i % POST_HOURS.length]),
       views,
       reactions,
       forwards: Math.round(views * 0.013),
