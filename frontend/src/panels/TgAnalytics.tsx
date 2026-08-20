@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { KpiNumber } from '@/components/KpiNumber';
 import { useTgFull, useTgGraphs } from '@/api/queries';
 import type { TgFull, TgGraphs } from '@/api/schemas';
@@ -15,6 +15,7 @@ import { ChartCardBody, ChartSection, seriesRange } from '@/components/ChartWidg
 import { WidgetGroup } from '@/components/widgets/WidgetGroup';
 import { breakdownVariants, seriesBarValuesVariant } from '@/components/widgets/variants';
 import { Breakdown } from '@/components/Breakdown';
+import { SegmentedControl } from '@/components/SegmentedControl';
 import { pctDelta } from '@/lib/delta';
 import { EmptyState } from '@/components/EmptyState';
 import {
@@ -655,6 +656,11 @@ export function TgAnalytics({
   campaign,
 }: { group?: TgAnalyticsGroup; campaign?: TgAnalyticsCampaign } = {}) {
   const inGroup = (g: TgAnalyticsGroup) => !group || group === g;
+  // Вкладка «Источников»: просмотры и новые подписчики — ОДНО измерение (источник) и две метрики,
+  // поэтому это одна карточка с переключателем, а не две (канон жанра: так же устроены разбивки у
+  // Plausible и Dub). Выбор живёт в state страницы: он и заголовок карточки не трогает, и уводит
+  // «Развернуть» на метрик-страницу ТОЙ метрики, что открыта.
+  const [sourceMetric, setSourceMetric] = useState<'views' | 'followers'>('views');
   // ONE wide fetch (limit 100 = server cap): every widget below filters this shared payload to the
   // resolved window. Source feeds take it from the shared top bar; Home widgets keep their own
   // saved period. ChartSection owns this distinction through PagePeriodProvider.
@@ -1159,11 +1165,39 @@ export function TgAnalytics({
           />
         )}
 
-        {inGroup('audience') && vbsItems.length > 0 && (
-          <ChartSection title="Просмотры по источникам" drillTo="/metrics/tg-views-by-source" variants={breakdownVariants(vbsItems)} />
-        )}
-        {inGroup('audience') && nfsItems.length > 0 && (
-          <ChartSection title="Новые подписчики по источникам" drillTo="/metrics/tg-followers-by-source" variants={breakdownVariants(nfsItems)} />
+        {inGroup('audience') && (vbsItems.length > 0 || nfsItems.length > 0) && (
+          // id держит прежний ключ prefs-store («Просмотры по источникам»), чтобы сохранённые
+          // размер/цвет/порядок карточки не слетели от смены заголовка.
+          <ChartSection
+            id="Просмотры по источникам"
+            title="Источники"
+            drillTo={sourceMetric === 'views' ? '/metrics/tg-views-by-source' : '/metrics/tg-followers-by-source'}
+          >
+            {/* Переключатель — В ТЕЛЕ, а не в шапке (та же подача, что у «Статусов заказов» на
+                МойСкладе). В шапке он делит строку с заголовком, и на узком десктопе (1024 → тайл
+                215px) заголовок обрезался в «Исто…». Цена — одна строка списка: разбивка
+                показывает три источника из четырёх и «+1 ещё», полный список в «Развернуть». */}
+            <div className="mb-1 flex shrink-0 justify-end">
+              <SegmentedControl
+                ariaLabel="Метрика разбивки по источникам"
+                size="sm"
+                value={sourceMetric}
+                onChange={setSourceMetric}
+                options={[
+                  // Обе метрики есть не всегда: пустую вкладку не показываем вовсе, иначе
+                  // переключатель обещал бы данные, которых нет.
+                  // Родительный падеж не случаен: карточка называется «Источники», и вкладки
+                  // читаются как «источники просмотров / подписчиков». Именительный давал коллизию
+                  // — в разбивке просмотров ЕСТЬ строка «Подписчики» (просмотры от подписчиков), и
+                  // вкладка с тем же словом означала бы совсем другое.
+                  ...(vbsItems.length > 0 ? [{ value: 'views' as const, content: 'Просмотров' }] : []),
+                  ...(nfsItems.length > 0 ? [{ value: 'followers' as const, content: 'Подписчиков' }] : []),
+                ]}
+              />
+            </div>
+            {/* reserve = высота ряда переключателя (28px) + mb-1: столько тела уже занято. */}
+            <Breakdown items={sourceMetric === 'views' ? vbsItems : nfsItems} reserve={32} />
+          </ChartSection>
         )}
         {inGroup('audience') && langItems.length > 0 && (
           <ChartSection title="Языки аудитории" drillTo="/metrics/tg-languages" variants={breakdownVariants(langItems)} />

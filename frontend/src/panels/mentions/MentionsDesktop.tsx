@@ -137,6 +137,8 @@ export function MentionsDesktop() {
   const notifyDialog = notifyOpen ? <MentionNotifyDialog onClose={() => setNotifyOpen(false)} /> : null;
 
   const data = archive.data;
+  const quota = data?.quota ?? null;
+  const skipped = data?.skipped ?? [];
   const sourceOptions: MentionSourceOption[] = data?.source_options ?? [];
   const selectedSource = filters.source
     ? sourceOptions.find((option) => option.channel_id === filters.source) ?? null
@@ -333,7 +335,19 @@ export function MentionsDesktop() {
             )}
           </div>
           {settings?.configured && settings.can_edit && (
-            <span className="text-2xs text-muted-foreground">Поиск запускается вручную и расходует ограниченную квоту Telegram.</span>
+            // Остаток квоты ЧИСЛОМ, а не фразой «ограниченную»: мобильная поверхность печатает
+            // «квота: N/M бесплатных», и десктоп знал о своих лимитах меньше телефона. Числа нет
+            // только до первого ответа архива — тогда остаётся прежняя формулировка.
+            <span className="text-2xs text-muted-foreground">
+              {quota
+                ? <>Поиск запускается вручную · осталось <span className="tabular-nums text-foreground">{quota.remains ?? '—'}</span> из {quota.total ?? '—'} бесплатных запросов Telegram.</>
+                : 'Поиск запускается вручную и расходует ограниченную квоту Telegram.'}
+            </span>
+          )}
+          {/* Пропущенные по квоте источники — та же честность, что на телефоне: без этой строки
+              пустой результат по каналу читался бы как «упоминаний нет». */}
+          {skipped.length > 0 && (
+            <span className="text-2xs text-destructive/90">пропущено по квоте: {skipped.join(', ')}</span>
           )}
           {settings && !settings.can_edit && (
             <span className="text-2xs text-muted-foreground">Поиск может запускать владелец или администратор.</span>

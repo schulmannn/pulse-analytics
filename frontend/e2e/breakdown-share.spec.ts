@@ -27,10 +27,15 @@ test.describe('Разбивки-части целого: «значение · �
     await bootDemo(page, '/analytics?tab=audience');
 
     // Целая доля печатается без «.0» — «71%», не «71.0%» (приёмка волны).
-    await expect(cardBy(page, 'Просмотры по источникам')).toContainText('71 · 71%');
+    // «Источники» — одна карточка с переключателем метрики: просмотры и новые подписчики это одно
+    // измерение, поэтому доля проверяется на ОБЕИХ вкладках, а не на двух отдельных карточках.
+    const sources = cardBy(page, 'Источники');
+    await expect(sources).toContainText('71 · 71%');
     await expect(cardBy(page, 'Языки аудитории')).toContainText('68 · 68%');
-    await expect(cardBy(page, 'Новые подписчики по источникам')).toContainText(SHARE_ROW);
     await expect(cardBy(page, 'Тональность реакций')).toContainText(SHARE_ROW);
+    // Именно кнопка: слово «Подписчики» встречается и строкой данных во вкладке просмотров.
+    await sources.getByRole('button', { name: 'Подписчиков' }).click();
+    await expect(sources).toContainText(SHARE_ROW);
   });
 
   test('средние остаются без долей', async ({ page }, testInfo) => {
