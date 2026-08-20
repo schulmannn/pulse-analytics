@@ -14,7 +14,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { SettingsGroup, SettingsRow } from '@/components/settings/primitives';
+import { SettingsGroup, SettingsIconTile, SettingsRow } from '@/components/settings/primitives';
 
 /** «Instagram» — connect (OAuth) / disconnect for the selected channel, one settings row. */
 export function InstagramSection() {
@@ -28,11 +28,12 @@ export function InstagramSection() {
   return (
     <SettingsGroup>
       {status.isPending ? (
-        <div className="px-4 py-4">
+        <div className="px-5 py-4 @min-[32rem]:py-5">
           <Skeleton className="h-10 w-full" />
         </div>
       ) : s?.connected ? (
         <SettingsRow
+          leading={<SettingsIconTile name="instagram" />}
           title={
             <span className="flex items-center gap-2">
               <span
@@ -96,6 +97,7 @@ export function InstagramSection() {
         />
       ) : (
         <SettingsRow
+          leading={<SettingsIconTile name="instagram" />}
           title="Подключение Instagram"
           description={
             s?.server_ready

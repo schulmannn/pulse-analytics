@@ -79,7 +79,7 @@ export function ProfileSection() {
 
   return (
     <SettingsGroup>
-      <div className="px-4 py-5 @min-[34rem]:py-6">
+      <div className="px-5 py-5 @min-[34rem]:py-6">
         <div className="flex flex-col gap-4 @min-[34rem]:flex-row @min-[34rem]:items-center">
           <span className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-full bg-avatar text-base font-medium text-ink2 ring-1 ring-border">
             {avatar ? (
@@ -137,7 +137,7 @@ export function ProfileSection() {
           </p>
         ) : null}
       </div>
-      <div className="px-4 py-4 @min-[34rem]:py-5">
+      <div className="px-5 py-4 @min-[34rem]:py-5">
         <p className="text-sm font-medium text-foreground">Email</p>
         <p className="mt-1 break-all text-sm text-ink2">{email || '—'}</p>
         <p className="mt-1 text-xs leading-relaxed text-ink3">
@@ -185,7 +185,7 @@ function ThemeControl() {
             aria-pressed={active}
             onClick={() => setMode(option.value)}
             className={cn(
-              'min-w-0 rounded-xl border p-2 text-left transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/50',
+              'min-w-0 rounded-xl border p-2.5 text-left transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/50',
               active
                 ? 'border-primary bg-primary/10 text-foreground'
                 : 'border-border bg-background text-muted-foreground hover:bg-muted/60 hover:text-foreground',
@@ -208,7 +208,7 @@ function ThemePreview({ mode }: { mode: ThemeMode }) {
     return (
       <span
         aria-hidden="true"
-        className="grid h-14 grid-cols-2 overflow-hidden rounded-lg border border-border"
+        className="grid h-16 grid-cols-2 overflow-hidden rounded-lg border border-border"
       >
         <ThemePreviewPanel className="force-light border-r" />
         <ThemePreviewPanel className="dark" />
@@ -219,7 +219,7 @@ function ThemePreview({ mode }: { mode: ThemeMode }) {
     <span
       aria-hidden="true"
       className={cn(
-        'block h-14 overflow-hidden rounded-lg border border-border',
+        'block h-16 overflow-hidden rounded-lg border border-border',
         mode === 'light' ? 'force-light' : 'dark',
       )}
       style={{ borderColor: 'hsl(var(--border))' }}
@@ -316,7 +316,7 @@ export function SecuritySection() {
   };
 
   return (
-    <div className="space-y-7">
+    <div className="space-y-8">
       <SettingsGroup>
         <SettingsRow
           title="Пароль"

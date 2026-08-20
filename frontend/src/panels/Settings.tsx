@@ -1,7 +1,10 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { useMe } from '@/api/queries';
+import { useChannels, useMe } from '@/api/queries';
+import { pluralRu } from '@/lib/format';
 import { SettingsIcon } from '@/components/settings/primitives';
+import { PLAN_LABEL, usePlan } from '@/lib/plan';
+import { useTeam } from '@/lib/team';
 import {
   AppearanceSection,
   ProfileSection,
@@ -87,7 +90,7 @@ export function Settings() {
   const isSuperuser = me.data?.role === 'superuser';
 
   return (
-    <div className="@container w-full max-w-[880px]">
+    <div className="@container w-full max-w-[928px]">
       <header className="mb-5 md:hidden">
         <h1 className="text-2xl font-medium tracking-tight text-foreground">
           Настройки
@@ -104,7 +107,7 @@ export function Settings() {
         className="mb-6 @min-[44rem]:hidden"
       />
 
-      <div className="@min-[44rem]:grid @min-[44rem]:grid-cols-[200px_minmax(0,640px)] @min-[44rem]:gap-10">
+      <div className="@min-[44rem]:grid @min-[44rem]:grid-cols-[200px_minmax(0,672px)] @min-[44rem]:gap-12">
         <nav
           aria-label="Разделы настроек"
           className="hidden @min-[44rem]:sticky @min-[44rem]:top-18 @min-[44rem]:block @min-[44rem]:self-start"
@@ -113,8 +116,8 @@ export function Settings() {
             <div key={group.key}>
               <p
                 className={cn(
-                  'px-2.5 pb-1.5 text-2xs font-medium tracking-wider text-muted-foreground',
-                  groupIndex === 0 ? 'pt-1' : 'pt-5',
+                  'px-2.5 pb-1.5 text-2xs font-medium uppercase tracking-wider text-ink3',
+                  groupIndex === 0 ? 'pt-1' : 'pt-6',
                 )}
               >
                 {group.label}
@@ -165,15 +168,18 @@ export function Settings() {
           data-settings-section={section}
           className="min-w-0"
         >
-          <header className="pb-5">
-            <h2
-              id={`settings-${section}-title`}
-              tabIndex={-1}
-              className="rounded-sm text-lg font-medium tracking-tight text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
-            >
-              {active.label}
-            </h2>
-            <p className="mt-1 max-w-[60ch] text-sm leading-relaxed text-muted-foreground">
+          <header className="mb-7 border-b border-border pb-6">
+            <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
+              <h2
+                id={`settings-${section}-title`}
+                tabIndex={-1}
+                className="rounded-sm text-2xl font-medium tracking-tight text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+              >
+                {active.label}
+              </h2>
+              <SectionMeta section={section} />
+            </div>
+            <p className="mt-1.5 max-w-[60ch] text-sm leading-relaxed text-muted-foreground">
               {active.description}
             </p>
           </header>
@@ -247,6 +253,48 @@ function SettingsTabsRow({
         </Link>
       )}
     </div>
+  );
+}
+
+/**
+ * Тихая техническая выкладка в шапке секции — счётчик, который у страницы уже есть в кэше
+ * (никаких новых запросов ради подписи). Рендерится только для активной секции.
+ */
+function SectionMeta({ section }: { section: SettingsSectionKey }) {
+  if (section === 'billing') return <BillingMeta />;
+  if (section === 'team') return <TeamMeta />;
+  if (section === 'channels') return <ChannelsMeta />;
+  return null;
+}
+
+function MetaText({ children }: { children: ReactNode }) {
+  return (
+    <span className="text-xs tabular-nums text-ink3" data-settings-section-meta="">
+      {children}
+    </span>
+  );
+}
+
+function BillingMeta() {
+  const plan = usePlan();
+  return <MetaText>{PLAN_LABEL[plan]}</MetaText>;
+}
+
+function TeamMeta() {
+  const plan = usePlan();
+  const team = useTeam();
+  const limit = plan === 'max' ? 10 : plan === 'pro' ? 3 : null;
+  if (limit == null) return null;
+  // Владелец занимает первое место — ростер показывает его той же строкой.
+  return <MetaText>{`${Math.min(team.length + 1, limit)} из ${limit} мест`}</MetaText>;
+}
+
+function ChannelsMeta() {
+  const { data } = useChannels();
+  const count = data?.channels.length ?? 0;
+  if (!data?.enabled || count === 0) return null;
+  return (
+    <MetaText>{`${count} ${pluralRu(count, ['источник', 'источника', 'источников'])}`}</MetaText>
   );
 }
 
