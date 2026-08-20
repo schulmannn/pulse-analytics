@@ -214,10 +214,15 @@ the strip height and cost CLS. Exactly **one** sticky second layer per page: nes
 
 **Settings preferences.** `/settings` uses a vertical section rail when its own container is at least
 `44rem` wide, and the canonical line-tab row when that container is narrower. Only one detail section
-is mounted at a time. Setting groups are bordered `rounded-xl` cards whose `divide-y` is the single
-source of row hairlines; children do not add competing outer separators. Keep the detail column narrow
-and align row controls to one right edge. A settings view has at most one solid-primary action, while
-rare or destructive flows stay behind quiet or destructive controls.
+is mounted at a time. Setting groups are TONAL panels — `bg-card` + hairline + `rounded-2xl` (the card
+radius family), whose `divide-y` is the single source of row hairlines; children do not add competing
+outer separators, and nested surfaces inside a panel (plan cards, key rows, icon tiles) recess to
+`bg-background` one radius step tighter. Group titles are uppercase `text-2xs` kickers so row titles
+stay the loudest text inside a panel. Each section opens with one header moment: `text-2xl` title,
+muted description, an optional right-aligned quiet meta readout (a counter the page already has in
+cache — never a new fetch), and a bottom hairline. Keep the detail column narrow and align row
+controls to one right edge. A settings view has at most one solid-primary action, while rare or
+destructive flows stay behind quiet or destructive controls.
 
 ## Content density (card ↔ detail)
 

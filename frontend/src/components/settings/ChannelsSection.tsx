@@ -93,9 +93,9 @@ export function ChannelsSection() {
   };
 
   return (
-    <div className="space-y-7">
+    <div className="space-y-8">
       <SettingsGroup title="Добавить канал">
-        <div className="px-4 py-4">
+        <div className="px-5 py-4 @min-[32rem]:py-5">
           <div className="text-sm font-medium text-foreground">Telegram-канал</div>
           <p className="mt-0.5 max-w-[56ch] text-xs leading-relaxed text-ink3">
             Укажите @username публичного канала — начнём собирать статистику.
@@ -112,7 +112,7 @@ export function ChannelsSection() {
                 aria-invalid={errorMessage ? true : undefined}
                 aria-describedby={errorMessage ? 'add-channel-err' : undefined}
                 disabled={createChannelMutation.isPending}
-                className="w-full rounded border bg-background py-2 pl-7 pr-3 font-mono text-sm focus:outline-hidden focus:ring-1 focus:ring-primary"
+                className="w-full rounded-md border bg-background py-2 pl-7 pr-3 font-mono text-sm focus:outline-hidden focus:ring-1 focus:ring-primary"
               />
             </div>
             <Button
@@ -130,7 +130,7 @@ export function ChannelsSection() {
 
       {channels.length === 0 ? (
         <SettingsGroup title="Подключённые каналы">
-          <div className="px-4 py-4">
+          <div className="px-5 py-4">
             <EmptyState title="Список каналов пуст" reason="Добавьте первый канал выше." />
           </div>
         </SettingsGroup>
@@ -142,13 +142,13 @@ export function ChannelsSection() {
             const initial = (channel.username || channel.title || 'T').slice(0, 1).toUpperCase();
             const keysOpen = activeChannelKeysId === channel.id && !isCentral;
             return (
-              <div key={channel.id} className="px-4 py-4">
+              <div key={channel.id} className="px-5 py-4 @min-[32rem]:py-5">
                 <div className="flex flex-col gap-3 @min-[32rem]:flex-row @min-[32rem]:items-start @min-[32rem]:justify-between @min-[32rem]:gap-6">
-                  <div className="flex min-w-0 items-start gap-3">
+                  <div className="flex min-w-0 items-start gap-3.5">
                     <ChannelAvatar
                       source={channel.source}
                       initial={initial}
-                      className="h-9 w-9 rounded text-sm"
+                      className="h-10 w-10 rounded-lg text-sm ring-1 ring-border"
                     />
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
@@ -302,7 +302,7 @@ function ChannelKeysPanel({ channelId }: { channelId: number }) {
             <div
               key={k.id}
               className={cn(
-                'flex items-center justify-between rounded border border-border/40 bg-background p-2 font-mono text-xs',
+                'flex items-center justify-between rounded-md border border-border/40 bg-background p-2 font-mono text-xs',
                 k.revoked && 'opacity-50',
               )}
             >
@@ -348,18 +348,18 @@ function ChannelKeysPanel({ channelId }: { channelId: number }) {
 function ChannelsSkeleton() {
   return (
     <div className="space-y-8">
-      <div className="space-y-3">
-        <Skeleton className="h-4 w-40" />
-        <div className="rounded border border-border p-4">
+      <div className="space-y-2.5">
+        <Skeleton className="h-3.5 w-32" />
+        <div className="rounded-2xl border border-border bg-card p-5">
           <Skeleton className="h-9 w-full" />
         </div>
       </div>
-      <div className="space-y-3">
-        <Skeleton className="h-4 w-48" />
-        <div className="divide-y divide-border rounded border border-border">
+      <div className="space-y-2.5">
+        <Skeleton className="h-3.5 w-44" />
+        <div className="divide-y divide-border rounded-2xl border border-border bg-card">
           {Array.from({ length: 3 }).map((_, i) => (
-            <div key={i} className="p-4">
-              <Skeleton className="h-9 w-full" />
+            <div key={i} className="p-5">
+              <Skeleton className="h-10 w-full" />
             </div>
           ))}
         </div>

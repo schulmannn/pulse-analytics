@@ -2,7 +2,12 @@ import type { ReactNode, SVGProps } from 'react';
 import { buttonVariants } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
-/** Shared settings building blocks: bordered detail groups and container-responsive rows. */
+/**
+ * Shared settings building blocks. A group is a TONAL panel (`bg-card` + hairline + rounded-2xl —
+ * the card radius family), not an outline-only box: on the near-black canvas the lifted slate
+ * surface carries the structure, the border only sharpens the edge. Group titles are uppercase
+ * kickers so row titles stay the loudest text inside a panel.
+ */
 export function SettingsGroup({
   title,
   description,
@@ -18,16 +23,21 @@ export function SettingsGroup({
   return (
     <section>
       {title ? (
-        <h3 className={cn('text-sm font-medium', danger ? 'text-destructive' : 'text-foreground')}>
+        <h3
+          className={cn(
+            'text-2xs font-medium uppercase tracking-wider',
+            danger ? 'text-destructive' : 'text-ink3',
+          )}
+        >
           {title}
         </h3>
       ) : null}
       {description ? <p className="mt-1 text-xs leading-relaxed text-ink3">{description}</p> : null}
       <div
         className={cn(
-          '@container divide-y divide-border rounded-xl border',
+          '@container divide-y divide-border rounded-2xl border bg-card',
           danger ? 'border-destructive/30' : 'border-border',
-          (title || description) && 'mt-3',
+          (title || description) && 'mt-2.5',
         )}
       >
         {children}
@@ -40,6 +50,8 @@ interface SettingsRowProps {
   title: ReactNode;
   /** Muted xs description under the title (calm, generous line-height). */
   description?: ReactNode;
+  /** Optional left visual — an icon tile or avatar; keeps the text block aligned. */
+  leading?: ReactNode;
   /** Right-aligned control (button / segmented / input); wraps under the text on mobile. */
   control?: ReactNode;
   /** Optional full-width content below the title/control line (errors, expanded panels). */
@@ -48,20 +60,38 @@ interface SettingsRowProps {
 }
 
 /** One setting row: title and supporting copy on the left, control on the right; stacks on phones. */
-export function SettingsRow({ title, description, control, footer, className }: SettingsRowProps) {
+export function SettingsRow({ title, description, leading, control, footer, className }: SettingsRowProps) {
   return (
-    <div className={cn('px-4 py-4 @min-[32rem]:py-5', className)}>
+    <div className={cn('px-5 py-4 @min-[32rem]:py-5', className)}>
       <div className="flex flex-col gap-3 @min-[32rem]:flex-row @min-[32rem]:items-center @min-[32rem]:justify-between @min-[32rem]:gap-6">
-        <div className="min-w-0">
-          <div className="text-sm font-medium text-foreground">{title}</div>
-          {description ? (
-            <div className="mt-1 max-w-[56ch] text-xs leading-relaxed text-ink3">{description}</div>
-          ) : null}
+        <div className={cn('min-w-0', leading != null && 'flex items-center gap-3.5')}>
+          {leading}
+          <div className="min-w-0">
+            <div className="text-sm font-medium text-foreground">{title}</div>
+            {description ? (
+              <div className="mt-1 max-w-[56ch] text-xs leading-relaxed text-ink3">{description}</div>
+            ) : null}
+          </div>
         </div>
         {control ? <div className="flex shrink-0 flex-wrap items-center gap-2">{control}</div> : null}
       </div>
       {footer}
     </div>
+  );
+}
+
+/** Recessed square tile for a connection/service glyph — the darker canvas inside a lifted panel. */
+export function SettingsIconTile({ name, className }: { name: SettingsIconName; className?: string }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={cn(
+        'flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-background ring-1 ring-border',
+        className,
+      )}
+    >
+      <SettingsIcon name={name} className="h-4.5 w-4.5 text-ink2" />
+    </span>
   );
 }
 
