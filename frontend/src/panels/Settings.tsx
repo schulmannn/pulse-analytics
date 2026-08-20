@@ -1,10 +1,8 @@
 import { useCallback, useEffect, useRef, type ReactNode } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useChannels, useMe } from '@/api/queries';
 import { pluralRu } from '@/lib/format';
 import { SettingsIcon } from '@/components/settings/primitives';
-import { PLAN_LABEL, usePlan } from '@/lib/plan';
-import { useTeam } from '@/lib/team';
 import {
   AppearanceSection,
   ProfileSection,
@@ -13,10 +11,21 @@ import {
 import { BillingSection } from '@/components/settings/BillingSection';
 import { ChannelsSection } from '@/components/settings/ChannelsSection';
 import { DataSection } from '@/components/settings/DataSection';
-import { InstagramSection } from '@/components/settings/InstagramSection';
 import { TeamSection } from '@/components/settings/TeamSection';
 import {
+  Dialog,
+  DialogClose,
+  DialogOverlay,
+  DialogPortal,
+  DialogSurface,
+  DialogTitle,
+  useRestoreOpenerFocus,
+} from '@/components/ui/dialog';
+import { PLAN_LABEL, usePlan } from '@/lib/plan';
+import { useTeam } from '@/lib/team';
+import {
   isSettingsSection,
+  LEGACY_SECTION_ALIASES,
   SETTINGS_GROUPS,
   SETTINGS_SECTIONS,
   type SettingsSectionKey,
@@ -24,27 +33,43 @@ import {
 import { cn } from '@/lib/utils';
 import { useScrollEdgeFade } from '@/lib/useScrollEdgeFade';
 
+/**
+ * /settings — модальный оверлей поверх приложения, не отдельная страница (решение владельца,
+ * 2026-08). Роут остаётся: deep-links `?section=` работают, ProtectedApp рендерит за диалогом
+ * страницу-источник (или Главную при прямом заходе). Закрытие возвращает в историю; ≥44rem
+ * контейнера — рейл слева, уже — line-tabs. Горизонтальных линий у хрома нет — секции разделяет
+ * воздух и тональные панели, единственная линия — вертикальный hairline рейла.
+ */
 export function Settings() {
   const [params, setParams] = useSearchParams();
+  const navigate = useNavigate();
+  const location = useLocation();
   const me = useMe();
+  const restoreOpener = useRestoreOpenerFocus();
   const rawSection = params.get('section');
-  const section: SettingsSectionKey = isSettingsSection(rawSection)
-    ? rawSection
-    : 'account';
+  const requested =
+    rawSection != null && rawSection in LEGACY_SECTION_ALIASES
+      ? LEGACY_SECTION_ALIASES[rawSection]
+      : rawSection;
+  const section: SettingsSectionKey = isSettingsSection(requested) ? requested : 'account';
   const active = SETTINGS_SECTIONS.find((item) => item.key === section) ?? SETTINGS_SECTIONS[0];
   const pendingHeadingFocus = useRef<SettingsSectionKey | null>(null);
 
+  // Неизвестный ключ вычищается, легаси-ключ (instagram) переписывается на новый дом — replace,
+  // state сохраняется, чтобы фон-«подложка» модалки не сбрасывался.
   useEffect(() => {
     if (rawSection === null || isSettingsSection(rawSection)) return;
+    const legacy = LEGACY_SECTION_ALIASES[rawSection];
     setParams(
       (previous) => {
         const merged = new URLSearchParams(previous);
-        merged.delete('section');
+        if (legacy) merged.set('section', legacy);
+        else merged.delete('section');
         return merged;
       },
-      { replace: true },
+      { replace: true, state: location.state },
     );
-  }, [rawSection, setParams]);
+  }, [rawSection, setParams, location.state]);
 
   useEffect(() => {
     if (pendingHeadingFocus.current !== section) return;
@@ -67,14 +92,11 @@ export function Settings() {
           else merged.set('section', next);
           return merged;
         },
-        { replace: true },
+        { replace: true, state: location.state },
       );
 
       requestAnimationFrame(() => {
-        const scroller = document.querySelector<HTMLElement>('[data-dashboard-scroll]');
-        if (scroller && window.matchMedia('(min-width: 768px)').matches) {
-          scroller.scrollTo(0, 0);
-        } else window.scrollTo(0, 0);
+        document.querySelector<HTMLElement>('[data-settings-scroll]')?.scrollTo(0, 0);
 
         if (next === section && moveFocus) {
           document
@@ -84,109 +106,164 @@ export function Settings() {
         }
       });
     },
-    [section, setParams],
+    [section, setParams, location.state],
   );
+
+  // Закрытие: шаг назад по истории (открыватель запушил /settings); прямой заход без истории
+  // приземляется на Главную. Полная перезагрузка не нужна — это просто оверлей.
+  const close = useCallback(() => {
+    const idx = (window.history.state as { idx?: number } | null)?.idx ?? 0;
+    if (idx > 0) navigate(-1);
+    else navigate('/home', { replace: true });
+  }, [navigate]);
 
   const isSuperuser = me.data?.role === 'superuser';
 
   return (
-    <div className="@container w-full max-w-[928px]">
-      <header className="mb-5 md:hidden">
-        <h1 className="text-2xl font-medium tracking-tight text-foreground">
-          Настройки
-        </h1>
-        <p className="mt-1 max-w-[56ch] text-sm leading-relaxed text-muted-foreground">
-          Аккаунт, рабочее пространство и подключённые источники в одном месте.
-        </p>
-      </header>
-
-      <SettingsTabsRow
-        section={section}
-        setSection={setSection}
-        isSuperuser={isSuperuser}
-        className="mb-6 @min-[44rem]:hidden"
-      />
-
-      <div className="@min-[44rem]:grid @min-[44rem]:grid-cols-[200px_minmax(0,672px)] @min-[44rem]:gap-12">
-        <nav
-          aria-label="Разделы настроек"
-          className="hidden @min-[44rem]:sticky @min-[44rem]:top-18 @min-[44rem]:block @min-[44rem]:self-start"
+    <Dialog open onOpenChange={(open) => { if (!open) close(); }}>
+      <DialogPortal>
+        <DialogOverlay />
+        <DialogSurface
+          aria-describedby={undefined}
+          tabIndex={-1}
+          onCloseAutoFocus={restoreOpener}
+          onOpenAutoFocus={(event) => {
+            // Дефолтный автофокус Radix зажигает focus-кольцо на первом пункте рейла (а фокус
+            // заголовка зажигал бы его на h2). Начальный фокус — сама поверхность диалога:
+            // читалка объявляет «Настройки», колец нет, Tab ведёт в рейл уже с честным кольцом.
+            event.preventDefault();
+            (event.currentTarget as HTMLElement | null)?.focus({ preventScroll: true });
+          }}
+          className={cn(
+            '@container fixed inset-0 z-modal flex flex-col overflow-hidden bg-background',
+            'sm:inset-auto sm:left-1/2 sm:top-1/2 sm:h-[min(44rem,calc(100dvh-3rem))] sm:w-[calc(100vw-2.5rem)] sm:max-w-[64rem] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-2xl sm:border sm:border-border',
+            'anim-dur-fast data-[state=open]:animate-in data-[state=open]:ease-house data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:ease-exit data-[state=closed]:anim-dur-exit data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 motion-reduce:duration-0',
+          )}
         >
-          {SETTINGS_GROUPS.map((group, groupIndex) => (
-            <div key={group.key}>
-              <p
-                className={cn(
-                  'px-2.5 pb-1.5 text-2xs font-medium uppercase tracking-wider text-ink3',
-                  groupIndex === 0 ? 'pt-1' : 'pt-6',
-                )}
+          <DialogTitle className="sr-only">Настройки</DialogTitle>
+
+          {/* Узкий контейнер (телефон / маленькое окно): свой хром с закрытием + line-tabs. */}
+          <div className="@min-[44rem]:hidden">
+            <div className="flex items-center justify-between gap-3 pl-4 pr-2 pt-2">
+              <span className="text-base font-medium text-foreground">Настройки</span>
+              <DialogClose
+                aria-label="Закрыть настройки"
+                data-mobile-touch-target=""
+                className="flex h-11 w-11 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/50"
               >
-                {group.label}
-              </p>
-              <div className="space-y-0.5">
-                {group.items.map((item) => {
-                  const selected = item.key === section;
-                  return (
-                    <button
-                      key={item.key}
-                      type="button"
-                      data-settings-nav-item={item.key}
-                      aria-current={selected ? 'true' : undefined}
-                      onClick={(event) => setSection(item.key, event.detail === 0)}
+                <SettingsIcon name="close" className="h-4 w-4" />
+              </DialogClose>
+            </div>
+            <SettingsTabsRow
+              section={section}
+              setSection={setSection}
+              isSuperuser={isSuperuser}
+              className="mx-4 mt-1"
+            />
+          </div>
+
+          <div className="flex min-h-0 flex-1">
+            <nav
+              aria-label="Разделы настроек"
+              className="hidden w-[220px] shrink-0 flex-col overflow-y-auto border-r border-border px-3 pb-4 pt-4 @min-[44rem]:flex"
+            >
+              <span aria-hidden="true" className="px-2.5 pb-4 text-sm font-medium text-foreground">
+                Настройки
+              </span>
+              <div>
+                {SETTINGS_GROUPS.map((group, groupIndex) => (
+                  <div key={group.key}>
+                    <p
                       className={cn(
-                        'flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left text-sm transition-colors',
-                        selected
-                          ? 'bg-hover-row font-medium text-foreground'
-                          : 'text-ink2 hover:bg-hover-row/60 hover:text-foreground',
+                        'px-2.5 pb-1.5 text-2xs font-medium uppercase tracking-wider text-ink3',
+                        groupIndex === 0 ? 'pt-0' : 'pt-6',
                       )}
                     >
-                      <SettingsIcon name={item.icon} className="h-4 w-4 shrink-0" />
-                      <span className="truncate">{item.label}</span>
-                    </button>
-                  );
-                })}
+                      {group.label}
+                    </p>
+                    <div className="space-y-0.5">
+                      {group.items.map((item) => {
+                        const selected = item.key === section;
+                        return (
+                          <button
+                            key={item.key}
+                            type="button"
+                            data-settings-nav-item={item.key}
+                            aria-current={selected ? 'true' : undefined}
+                            onClick={(event) => setSection(item.key, event.detail === 0)}
+                            className={cn(
+                              'flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left text-sm transition-colors',
+                              selected
+                                ? 'bg-hover-row font-medium text-foreground'
+                                : 'text-ink2 hover:bg-hover-row/60 hover:text-foreground',
+                            )}
+                          >
+                            <SettingsIcon name={item.icon} className="h-4 w-4 shrink-0" />
+                            <span className="truncate">{item.label}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+                {isSuperuser && (
+                  <div className="mt-4 border-t border-border pt-3">
+                    <Link
+                      to="/admin"
+                      className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left text-sm text-ink2 transition-colors hover:bg-hover-row/60 hover:text-foreground"
+                    >
+                      <SettingsIcon name="shield" className="h-4 w-4 shrink-0" />
+                      <span className="min-w-0 flex-1 truncate">Админ</span>
+                      <SettingsIcon name="external" className="h-3.5 w-3.5 shrink-0 text-ink3" />
+                    </Link>
+                  </div>
+                )}
+              </div>
+            </nav>
+
+            <div className="relative min-w-0 flex-1">
+              <DialogClose
+                aria-label="Закрыть настройки"
+                className="absolute right-3 top-3 z-10 hidden h-8 w-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/50 @min-[44rem]:flex"
+              >
+                <SettingsIcon name="close" className="h-4 w-4" />
+              </DialogClose>
+              <div
+                data-settings-scroll
+                className="h-full overflow-y-auto overscroll-contain"
+              >
+                <div className="px-4 py-5 @min-[44rem]:px-8 @min-[44rem]:py-7">
+                  <div
+                    id="settings-detail"
+                    role="tabpanel"
+                    aria-labelledby={`settings-tab-${section}`}
+                    data-settings-section={section}
+                    className="w-full max-w-[672px]"
+                  >
+                    <header className="mb-6">
+                      <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
+                        <h2
+                          id={`settings-${section}-title`}
+                          tabIndex={-1}
+                          className="rounded-sm text-2xl font-medium tracking-tight text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+                        >
+                          {active.label}
+                        </h2>
+                        <SectionMeta section={section} />
+                      </div>
+                      <p className="mt-1.5 max-w-[60ch] text-sm leading-relaxed text-muted-foreground">
+                        {active.description}
+                      </p>
+                    </header>
+                    {renderSection(section, setSection)}
+                  </div>
+                </div>
               </div>
             </div>
-          ))}
-          {isSuperuser && (
-            <div className="mt-3 border-t border-border pt-3">
-              <Link
-                to="/admin"
-                className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left text-sm text-ink2 transition-colors hover:bg-hover-row/60 hover:text-foreground"
-              >
-                <SettingsIcon name="shield" className="h-4 w-4 shrink-0" />
-                <span className="min-w-0 flex-1 truncate">Админ</span>
-                <SettingsIcon name="external" className="h-3.5 w-3.5 shrink-0 text-ink3" />
-              </Link>
-            </div>
-          )}
-        </nav>
-
-        <div
-          id="settings-detail"
-          role="tabpanel"
-          aria-labelledby={`settings-tab-${section}`}
-          data-settings-section={section}
-          className="min-w-0"
-        >
-          <header className="mb-7 border-b border-border pb-6">
-            <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
-              <h2
-                id={`settings-${section}-title`}
-                tabIndex={-1}
-                className="rounded-sm text-2xl font-medium tracking-tight text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
-              >
-                {active.label}
-              </h2>
-              <SectionMeta section={section} />
-            </div>
-            <p className="mt-1.5 max-w-[60ch] text-sm leading-relaxed text-muted-foreground">
-              {active.description}
-            </p>
-          </header>
-          {renderSection(section, setSection)}
-        </div>
-      </div>
-    </div>
+          </div>
+        </DialogSurface>
+      </DialogPortal>
+    </Dialog>
   );
 }
 
@@ -315,8 +392,6 @@ function renderSection(
       return <DataSection onOpenChannels={() => setSection('channels')} />;
     case 'channels':
       return <ChannelsSection />;
-    case 'instagram':
-      return <InstagramSection />;
     default:
       return <ProfileSection />;
   }

@@ -45,7 +45,6 @@ export const TITLES: Record<string, string> = {
   '/posts': 'Контент',
   '/mentions': 'Упоминания',
   '/reports': 'Отчёты',
-  '/settings': 'Настройки',
   '/admin': 'Админ',
   '/bugs': 'Баги',
   '/connect': 'Подключение данных',
@@ -76,6 +75,9 @@ export const FEED_ROUTES = [
   // /connect рендерит собственную шапку («Подключение источников» + назад-ссылка) — topbar-полоса
   // «Подключение данных» над ней читалась дублем (владелец).
   '/connect',
+  // /settings — модальный оверлей поверх фоновой страницы: топбар с «Настройки» рисовал бы
+  // заголовок НАД чужим фоном за диалогом. Заголовок носит сам диалог.
+  '/settings',
 ];
 
 /** Topbar h1 for the current route; metric pages resolve to the metric's display name. */

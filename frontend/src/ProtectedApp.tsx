@@ -1,6 +1,6 @@
 import { Suspense, lazy } from 'react';
 import type { ComponentType, ReactNode } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useLocation, type Location } from 'react-router-dom';
 import type { Me } from '@/api/schemas';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
@@ -82,8 +82,20 @@ export default function ProtectedApp({ me }: { me: Me }) {
 }
 
 function ProtectedRoutes({ me }: { me: Me }) {
+  // /settings — модальный оверлей, не страница: Routes рендерит ФОНОВУЮ локацию (страницу, с
+  // которой настройки открыли — открыватель кладёт её в state.settingsBackground), а диалог
+  // монтируется поверх. Прямой заход без state показывает за модалкой Главную. URL при этом
+  // остаётся /settings?section=…, так что deep-links и history работают как раньше.
+  const location = useLocation();
+  const isSettings = location.pathname === '/settings';
+  const settingsBackground = (location.state as { settingsBackground?: Location } | null)
+    ?.settingsBackground;
+  const background = isSettings
+    ? (settingsBackground ?? { pathname: '/home', search: '', hash: '' })
+    : location;
   return (
-    <Routes>
+    <>
+    <Routes location={background}>
       <Route element={<ProtectedLayout me={me} />}>
         {/* Personal Home — a per-user board of pinned widgets. Static import (it's light) and
             declared BEFORE the catch-all `:section?` so /home resolves here, not to the TG feed. */}
@@ -105,7 +117,6 @@ function ProtectedRoutes({ me }: { me: Me }) {
         <Route path="ai/:chatId" element={<PanelSuspense><AiChatPage /></PanelSuspense>} />
         {/* Pre-multi-reports bookmarks land on the index. */}
         <Route path="report" element={<Navigate to="/reports" replace />} />
-        <Route path="settings" element={<PanelSuspense><Settings /></PanelSuspense>} />
         <Route path="admin" element={<PanelSuspense><Admin /></PanelSuspense>} />
         <Route path="bugs" element={<PanelSuspense><Bugs /></PanelSuspense>} />
         <Route path="connect" element={<PanelSuspense><Connect /></PanelSuspense>} />
@@ -136,6 +147,14 @@ function ProtectedRoutes({ me }: { me: Me }) {
         <Route path="*" element={<NotFound />} />
       </Route>
     </Routes>
+    {isSettings && (
+      <ErrorBoundary>
+        <Suspense fallback={null}>
+          <Settings />
+        </Suspense>
+      </ErrorBoundary>
+    )}
+    </>
   );
 }
 

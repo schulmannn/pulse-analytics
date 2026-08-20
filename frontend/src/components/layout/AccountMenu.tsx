@@ -1,4 +1,4 @@
-import { NavLink, useNavigate } from 'react-router-dom';
+import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useLogout } from '@/api/queries';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -82,6 +82,7 @@ export function AccountMenuContent({
   onClose: () => void;
 }) {
   const navigate = useNavigate();
+  const location = useLocation();
   const logoutMutation = useLogout();
   const { demo, exitDemo } = useDemo();
   const handleLogout = () =>
@@ -126,14 +127,19 @@ export function AccountMenuContent({
         </>
       )}
 
+      {/* settingsBackground: настройки — модальный оверлей, за ним остаётся текущая страница. */}
       <DropdownMenuItem asChild>
-        <NavLink to="/settings" onClick={onClose}>
+        <NavLink to="/settings" state={{ settingsBackground: location }} onClick={onClose}>
           <Icon name="gear" className="text-muted-foreground" />
           Настройки
         </NavLink>
       </DropdownMenuItem>
       <DropdownMenuItem asChild>
-        <NavLink to="/settings?section=billing" onClick={onClose}>
+        <NavLink
+          to="/settings?section=billing"
+          state={{ settingsBackground: location }}
+          onClick={onClose}
+        >
           <Icon name="card" className="text-muted-foreground" />
           Подписка
         </NavLink>

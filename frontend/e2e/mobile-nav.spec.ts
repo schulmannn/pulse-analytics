@@ -318,22 +318,27 @@ test('mobile 390: settings tabs fit, keep URL state and focus the destination', 
 
   const tablist = page.getByRole('tablist', { name: 'Разделы настроек' });
   const tabs = tablist.getByRole('tab');
-  await expect(tabs).toHaveCount(8);
-  for (const tab of await tabs.all()) {
-    await expect(tab).toBeVisible();
-    expect((await tab.boundingBox())?.height).toBeGreaterThanOrEqual(44);
-  }
+  await expect(tabs).toHaveCount(7);
+  // Poll: входной zoom-in-95 модалки настроек на долю секунды масштабирует rect'ы вкладок.
+  await expect
+    .poll(async () => {
+      const heights = await tabs.evaluateAll((elements) =>
+        elements.map((element) => element.getBoundingClientRect().height),
+      );
+      return heights.length === 7 && heights.every((height) => height >= 44);
+    })
+    .toBe(true);
   await expect(tablist.getByRole('tab', { name: 'Профиль' })).toHaveAttribute(
     'aria-current',
     'true',
   );
 
-  const instagram = tablist.getByRole('tab', { name: 'Instagram' });
-  await instagram.focus();
+  const channels = tablist.getByRole('tab', { name: 'Каналы' });
+  await channels.focus();
   await page.keyboard.press('Enter');
-  await expect(page).toHaveURL(/[?&]section=instagram(?:&|$)/);
-  await expect(page.getByRole('heading', { name: 'Instagram', level: 2 })).toBeFocused();
-  await expect(page.locator('[data-settings-section="channels"]')).toHaveCount(0);
+  await expect(page).toHaveURL(/[?&]section=channels(?:&|$)/);
+  await expect(page.getByRole('heading', { name: 'Каналы', level: 2 })).toBeFocused();
+  await expect(page.locator('[data-settings-section="data"]')).toHaveCount(0);
 
   await expect(page.locator('button[aria-label^="Выбрать раздел настроек"]')).toHaveCount(0);
   await expect(page.getByRole('dialog', { name: 'Разделы настроек' })).toHaveCount(0);

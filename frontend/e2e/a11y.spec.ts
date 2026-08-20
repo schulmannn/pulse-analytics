@@ -150,9 +150,9 @@ test('axe: no serious violations — mobile settings sections', async ({ page },
   await expect(page.getByRole('heading', { name: 'Подписка', level: 2 })).toBeVisible();
   await expectNoSeriousViolations(page, testInfo, 'settings-billing');
 
-  await page.getByRole('tab', { name: 'Instagram', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Instagram', level: 2 })).toBeVisible();
-  await expectNoSeriousViolations(page, testInfo, 'settings-instagram');
+  await page.getByRole('tab', { name: 'Каналы', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Каналы', level: 2 })).toBeVisible();
+  await expectNoSeriousViolations(page, testInfo, 'settings-channels');
 });
 
 test('keyboard: widget edit dialog traps Tab and restores focus to the ⋯ trigger', async ({ page }) => {

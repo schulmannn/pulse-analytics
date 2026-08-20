@@ -16,8 +16,8 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { SettingsGroup, SettingsIconTile, SettingsRow } from '@/components/settings/primitives';
 
-/** «Instagram» — connect (OAuth) / disconnect for the selected channel, one settings row. */
-export function InstagramSection() {
+/** Instagram-подключение (OAuth/disconnect выбранного канала) — группа внутри секции «Каналы». */
+export function InstagramGroup() {
   const status = useIgOauthStatus();
   const connect = useConnectIg();
   const disconnect = useDisconnectIg();
@@ -26,7 +26,7 @@ export function InstagramSection() {
     connect.error instanceof Error ? connect.error.message : null;
 
   return (
-    <SettingsGroup>
+    <SettingsGroup title="Instagram">
       {status.isPending ? (
         <div className="px-5 py-4 @min-[32rem]:py-5">
           <Skeleton className="h-10 w-full" />
