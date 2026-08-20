@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useSearchParams } from 'react-router-dom';
-import { Check, ChevronDown, ChevronRight, Download, X } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, Download } from 'lucide-react';
 import { IconMorph, useMorphFlash } from '@/components/ui/icon-morph';
 import {
   WorkspaceInspector,
@@ -14,6 +14,7 @@ import { useIgTags, useRemoveCampaignPosts } from '@/api/queries';
 import { ChartSection } from '@/components/ChartWidget';
 import { PillSelect } from '@/components/PillSelect';
 import { SearchField } from '@/components/SearchField';
+import { FilterChip } from '@/components/FilterChip';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -508,27 +509,6 @@ export function IgContentDesktop({ ig }: { ig: IgData }) {
           </DropdownMenu>
         </div>
       </div>
-      {/* Активные фильтры — снимаемые чипы на общем Badge; модель уже в URL (igContentFilters),
-          чипы лишь визуализируют её и снимают по одному. */}
-      {hasContentFilters && (
-        <div className="flex flex-wrap items-center gap-1.5" data-testid="ig-filter-chips">
-          {filters.q.trim() !== '' && (
-            <RemovableFilterChip
-              label={`Поиск: «${filters.q.trim()}»`}
-              removeLabel="Убрать поиск"
-              onRemove={() => update({ q: '' })}
-            />
-          )}
-          {filters.format !== 'all' && (
-            <RemovableFilterChip
-              variant="secondary"
-              label={`Формат: ${FORMAT_OPTIONS.find((option) => option.value === filters.format)?.label ?? filters.format}`}
-              removeLabel="Убрать фильтр формата"
-              onRemove={() => update({ format: 'all' })}
-            />
-          )}
-        </div>
-      )}
     </>
   );
 
@@ -642,6 +622,32 @@ export function IgContentDesktop({ ig }: { ig: IgData }) {
           className="fixed z-sticky overflow-hidden border-b border-border/75 bg-surface-table shadow-sm"
           style={{ top: stickyHeader.top, left: stickyHeader.left, width: stickyHeader.width }}
         >
+          {/* Активные фильтры показываются ЗДЕСЬ, а не в тулбаре: в тулбаре рядом стоят поле поиска
+              и селект формата, которые уже несут те же значения и умеют их снимать, — чип там был
+              бы повтором. В прокрученной таблице тулбара на экране нет, и это единственное место,
+              где видно, чем сужена выдача; снять фильтр можно тут же. */}
+          {hasContentFilters && (
+            <div
+              className="flex flex-wrap items-center gap-1.5 border-b border-border/60 px-3 py-1.5"
+              data-testid="ig-filter-chips"
+            >
+              {filters.q.trim() !== '' && (
+                <FilterChip
+                  label={`Поиск: «${filters.q.trim()}»`}
+                  removeLabel="Убрать поиск"
+                  onRemove={() => update({ q: '' })}
+                />
+              )}
+              {filters.format !== 'all' && (
+                <FilterChip
+                  variant="secondary"
+                  label={`Формат: ${FORMAT_OPTIONS.find((option) => option.value === filters.format)?.label ?? filters.format}`}
+                  removeLabel="Убрать фильтр формата"
+                  onRemove={() => update({ format: 'all' })}
+                />
+              )}
+            </div>
+          )}
           <table
             aria-label="Закреплённые заголовки таблицы публикаций"
             className="data-table ig-content-table text-left text-sm"
@@ -899,31 +905,7 @@ export function IgContentDesktop({ ig }: { ig: IgData }) {
  * Снимаемый чип активного фильтра: тот же Badge, что несут NetworkBadge и статусы, плюс кнопка
  * снятия с честным русским `aria-label` (Astryx-токен подписывал её английским «Remove …»).
  */
-function RemovableFilterChip({
-  label,
-  removeLabel,
-  onRemove,
-  variant = 'default',
-}: {
-  label: string;
-  removeLabel: string;
-  onRemove: () => void;
-  variant?: 'default' | 'secondary';
-}) {
-  return (
-    <Badge variant={variant} className="max-w-full gap-1 pr-1">
-      <span className="truncate">{label}</span>
-      <button
-        type="button"
-        aria-label={removeLabel}
-        onClick={onRemove}
-        className="-mr-0.5 inline-flex size-4 shrink-0 items-center justify-center rounded-full opacity-70 transition-opacity hover:opacity-100 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40"
-      >
-        <X className="size-3" aria-hidden="true" />
-      </button>
-    </Badge>
-  );
-}
+
 
 /**
  * The adjacent desktop inspector — a focused, read-first summary of the row selected in the table,
