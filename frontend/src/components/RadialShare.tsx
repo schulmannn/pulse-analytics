@@ -89,6 +89,11 @@ export function RadialShare({
       столбик «кольцо + легенда» не хватает. */
   layout?: 'column' | 'row';
 }) {
+  // Хуки — строго до ранних return ниже (правило React; биом ловит это как
+  // useHookAtTopLevel): у компонента есть выходы «нет данных», и вызов контекста после них
+  // менял бы порядок хуков между рендерами.
+  const ctxHeight = useContext(ExpandedChartHeightContext);
+  const legendWide = useMediaQuery('(min-width: 640px)');
   const [hover, setHover] = useState<string | null>(null);
   const detachSvgListeners = useRef<(() => void) | null>(null);
   // The arcs are passive parts of one named graphic. Pointer hover only mirrors a value already
@@ -182,8 +187,6 @@ export function RadialShare({
   // Сколько строк легенды влезает: тело тайла минус кольцо и строка «Ещё N». Без этого счёта
   // легенда на узком тайле идёт одной колонкой и выталкивает содержимое за нижнюю кромку.
   // Свободная высота (страница разреза, разворот) — прежнее число строк.
-  const ctxHeight = useContext(ExpandedChartHeightContext);
-  const legendWide = useMediaQuery('(min-width: 640px)');
   const legendBudget = ctxHeight == null || layout === 'row' ? null : ctxHeight - RING_MIN_H - LEGEND_REST_H;
   const legendFit =
     legendBudget == null
