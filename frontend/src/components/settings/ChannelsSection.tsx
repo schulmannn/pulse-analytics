@@ -21,13 +21,15 @@ import { Button } from '@/components/ui/button';
 import { Snippet } from '@/components/ui/snippet';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useConfirm } from '@/components/ConfirmDialogProvider';
+import { InstagramGroup } from '@/components/settings/InstagramSection';
 import {
   BTN_DESTRUCTIVE,
   SettingsGroup,
   SettingsIcon,
 } from '@/components/settings/primitives';
 
-/** «Каналы» — add a Telegram channel + the connected list with collector API keys. */
+/** «Каналы» — add a Telegram channel, the connected list with collector API keys, and the
+    Instagram OAuth connection (merged here: one «Подключения» surface, not two nav rows). */
 export function ChannelsSection() {
   const confirm = useConfirm();
   const { data, isLoading, isError, error, refetch } = useChannels();
@@ -212,6 +214,8 @@ export function ChannelsSection() {
           })}
         </SettingsGroup>
       )}
+
+      <InstagramGroup />
     </div>
   );
 }

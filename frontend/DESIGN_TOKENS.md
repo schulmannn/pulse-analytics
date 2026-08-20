@@ -212,17 +212,21 @@ wraps to two rows on narrow desktops, so a constant would be wrong). The strip i
 the strip height and cost CLS. Exactly **one** sticky second layer per page: nested control rows
 (the campaign scope row inside «Форматы») scroll away as before, and `<md` the whole page is unchanged.
 
-**Settings preferences.** `/settings` uses a vertical section rail when its own container is at least
-`44rem` wide, and the canonical line-tab row when that container is narrower. Only one detail section
-is mounted at a time. Setting groups are TONAL panels — `bg-card` + hairline + `rounded-2xl` (the card
-radius family), whose `divide-y` is the single source of row hairlines; children do not add competing
-outer separators, and nested surfaces inside a panel (plan cards, key rows, icon tiles) recess to
-`bg-background` one radius step tighter. Group titles are uppercase `text-2xs` kickers so row titles
-stay the loudest text inside a panel. Each section opens with one header moment: `text-2xl` title,
-muted description, an optional right-aligned quiet meta readout (a counter the page already has in
-cache — never a new fetch), and a bottom hairline. Keep the detail column narrow and align row
-controls to one right edge. A settings view has at most one solid-primary action, while rare or
-destructive flows stay behind quiet or destructive controls.
+**Settings preferences.** `/settings` is a MODAL overlay above the app, not a page: the route stays
+(deep-links `?section=` keep working), `ProtectedApp` renders the opener's page behind it via a
+background location (Главная on a direct load), and closing steps back through history. Inside the
+dialog the master-detail rule keys on the DIALOG container: a vertical section rail at ≥`44rem`, the
+canonical line-tab row narrower (phones get the full-screen sheet). Only one detail section is
+mounted at a time. The dialog chrome draws NO horizontal hairlines — the single structural line is
+the rail's vertical `border-r`; the section header moment (`text-2xl` title, muted description, an
+optional right-aligned quiet meta readout — a counter the page already has in cache, never a new
+fetch) is separated by air, not a rule. Setting groups are TONAL panels — `bg-card` + hairline +
+`rounded-2xl` (the card radius family), whose `divide-y` is the single source of row hairlines;
+children do not add competing outer separators, and nested surfaces inside a panel (plan cards, key
+rows, icon tiles) recess to `bg-background` one radius step tighter. Group titles are uppercase
+`text-2xs` kickers so row titles stay the loudest text inside a panel. Keep the detail column narrow
+and align row controls to one right edge. A settings view has at most one solid-primary action,
+while rare or destructive flows stay behind quiet or destructive controls.
 
 ## Content density (card ↔ detail)
 

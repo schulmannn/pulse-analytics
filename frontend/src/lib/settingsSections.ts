@@ -7,8 +7,7 @@ export type SettingsSectionKey =
   | 'billing'
   | 'team'
   | 'data'
-  | 'channels'
-  | 'instagram';
+  | 'channels';
 
 export interface SettingsSection {
   key: SettingsSectionKey;
@@ -69,14 +68,7 @@ const CHANNELS: SettingsSection = {
   key: 'channels',
   label: 'Каналы',
   icon: 'signal',
-  description: 'Telegram-каналы, коллекторы и ключи доступа.',
-};
-
-const INSTAGRAM: SettingsSection = {
-  key: 'instagram',
-  label: 'Instagram',
-  icon: 'instagram',
-  description: 'OAuth-подключение и состояние аккаунта Instagram.',
+  description: 'Telegram-каналы, коллекторы и подключение Instagram.',
 };
 
 export const SETTINGS_GROUPS: readonly SettingsGroupDef[] = [
@@ -93,9 +85,14 @@ export const SETTINGS_GROUPS: readonly SettingsGroupDef[] = [
   {
     key: 'connections',
     label: 'Подключения',
-    items: [CHANNELS, INSTAGRAM],
+    items: [CHANNELS],
   },
 ];
+
+/** Устаревшие deep-link ключи: «Instagram» слит в «Каналы» (2026-08), старые ссылки не 404-ятся. */
+export const LEGACY_SECTION_ALIASES: Record<string, SettingsSectionKey> = {
+  instagram: 'channels',
+};
 
 export const SETTINGS_SECTIONS: readonly SettingsSection[] = SETTINGS_GROUPS.flatMap(
   (group) => group.items,

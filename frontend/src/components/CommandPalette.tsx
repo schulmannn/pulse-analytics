@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { ReactNode } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useChannels, useLogout, useMe } from '@/api/queries';
 import { accountExitLabel, runAccountExit } from '@/lib/accountExit';
 import { useSelectedChannel } from '@/lib/channel-context';
@@ -63,8 +63,7 @@ const SETTINGS_SEARCH: Record<SettingsSectionKey, string> = {
   billing: 'тариф подписка оплата billing plan subscription pro max',
   team: 'команда участники роли приглашение team members invite',
   data: 'данные экспорт сбор состояние data export health',
-  channels: 'каналы ключи api telegram collector channels keys',
-  instagram: 'instagram подключение oauth инстаграм connect',
+  channels: 'каналы ключи api telegram collector channels keys instagram инстаграм oauth подключение',
 };
 
 // Search history (MRU command ids) — the palette opens on «Недавнее», like Claude's search.
@@ -102,6 +101,7 @@ function PaletteDialog({ close }: { close: () => void }) {
   // History is read at mount — i.e. per open (another tab may have added entries since last time).
   const [recents] = useState<string[]>(loadRecents);
   const navigate = useNavigate();
+  const location = useLocation();
   const me = useMe();
   const channelsQuery = useChannels();
   const logout = useLogout();
@@ -127,7 +127,12 @@ function PaletteDialog({ close }: { close: () => void }) {
     label: route.label,
     search: route.search,
     icon: iconFor(route.icon),
-    run: () => navigate(route.path),
+    // Настройки — модальный оверлей: текущая страница остаётся за ним фоном.
+    run: () =>
+      navigate(
+        route.path,
+        route.path === '/settings' ? { state: { settingsBackground: location } } : undefined,
+      ),
   }));
 
   // Metric pages — first-class search targets (steep's «Jump to» reaches metrics too).
@@ -156,7 +161,10 @@ function PaletteDialog({ close }: { close: () => void }) {
       label: `Настройки: ${item.label}`,
       search: `настройки settings ${item.label} ${item.description} ${SETTINGS_SEARCH[item.key]}`.toLowerCase(),
       icon: <SettingsIcon name={item.icon} className="h-4 w-4 shrink-0" />,
-      run: () => navigate(item.key === 'account' ? '/settings' : `/settings?section=${item.key}`),
+      run: () =>
+        navigate(item.key === 'account' ? '/settings' : `/settings?section=${item.key}`, {
+          state: { settingsBackground: location },
+        }),
     }),
   );
 
