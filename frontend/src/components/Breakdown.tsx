@@ -16,12 +16,20 @@ interface BreakdownItem {
 
 interface BreakdownProps {
   items: BreakdownItem[];
+  /** Сколько пикселей тела тайла уже занято соседом (переключателем метрики над списком). Без
+      этого разбивка считает высоту по ВСЕМУ телу и рисует на строку больше, чем влезает —
+      лишняя обрезается нижней кромкой. */
+  reserve?: number;
 }
 
 // One row's vertical pitch: p-2 row (36px) + space-y-2 gap.
+const ROW_GAP = 8;
 const ROW_PITCH = 44;
+/** Высота строки «+N ещё» (text-2xs). Она НЕ строка списка: раньше под неё резервировалась целая
+    строка в 44px, и разбивка с переключателем показывала два источника из четырёх вместо трёх. */
+const HINT_H = 15;
 
-export function Breakdown({ items }: BreakdownProps) {
+export function Breakdown({ items, reserve = 0 }: BreakdownProps) {
   // Inside a fixed-height tile the card feeds its body height here — show only the rows that
   // FIT plus a «+N ещё» line, so a widget never scrolls (steep). The expand overlay
   // (ChartExpandedContext) and free-height surfaces keep the full list.
@@ -38,9 +46,11 @@ export function Breakdown({ items }: BreakdownProps) {
   // строкам разъехаться в толстые полосы. Оверлей «Развернуть» и страничные поверхности живут
   // свободной высотой — там прежний естественный ритм.
   const fillSlot = !expanded && ctxHeight != null;
-  const fit =
-    !expanded && ctxHeight != null ? Math.max(2, Math.floor(ctxHeight / ROW_PITCH)) : items.length;
-  const shown = items.length > fit ? items.slice(0, Math.max(1, fit - 1)) : items;
+  const avail = ctxHeight != null ? ctxHeight - reserve : null;
+  // Сколько строк влезает БЕЗ подсказки (n строк занимают n*pitch − gap) и сколько С подсказкой.
+  const fitAll = !expanded && avail != null ? Math.max(2, Math.floor((avail + ROW_GAP) / ROW_PITCH)) : items.length;
+  const fitWithHint = avail != null ? Math.max(1, Math.floor((avail - HINT_H) / ROW_PITCH)) : items.length;
+  const shown = items.length > fitAll ? items.slice(0, fitWithHint) : items;
   const extra = items.length - shown.length;
 
   const maxValue = Math.max(...items.map((item) => item.value), 1);

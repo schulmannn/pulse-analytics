@@ -230,6 +230,9 @@ const MENTION_PREV_VIEWS = sumBy(MENTION_PREV_DAILY, 'views');
 
 const MENTIONS = {
   available: true,
+  // Остаток дневной квоты поиска — витрина обязана показывать и лимиты продукта: десктоп печатает
+  // «осталось N из M», и без этого поля демо показывало бы только общую фразу.
+  quota: { remains: 7, total: 10 },
   total: MENTION_CUR_TOTAL,
   unique_channels: MENTION_CHANNELS.length,
   total_views: MENTION_CUR_VIEWS,
