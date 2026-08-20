@@ -533,8 +533,30 @@ export async function openDetailOverlayByKeyboard(page: Page): Promise<void> {
  * Every card body (or any residual scroll container) that overflows its tile — the exact "no inner
  * scrollbars" invariant. Returns [] when clean; each entry names the widget for triage.
  */
-export function overflowingCards(page: Page) {
-  return page.evaluate(() =>
+/**
+ * Карточки с внутренним скроллом — прямой гейт канона плотности.
+ *
+ * ВАЖНО про честность замера: тела карточек грузятся по появлению в кадре (useWidgetInView), и
+ * до прокрутки нижняя половина доски — пустые боксы, которые «влезают» всегда. Гейт годами мерил
+ * только первый экран: переполнения «Пол», «Динамика аудитории», «По дням недели» и тринадцати
+ * разрезов Метрики спокойно жили в проде. Поэтому здесь доска ПРОКРУЧИВАЕТСЯ до конца, затем
+ * ждём исчезновения скелетонов (иначе меряем состояние загрузки) и только потом меряем.
+ */
+export async function overflowingCards(page: Page) {
+  const scroller = page.locator('[data-dashboard-scroll]');
+  const hasScroller = (await scroller.count()) > 0;
+  for (let i = 0; i < 12; i++) {
+    if (hasScroller) await scroller.first().evaluate((el) => el.scrollBy(0, 700));
+    else await page.mouse.wheel(0, 700);
+    await page.waitForTimeout(200);
+  }
+  // Скелетоны считаются содержимым карточки: их высота тоже обязана влезать в тайл.
+  for (let i = 0; i < 20; i++) {
+    if ((await page.locator('.animate-pulse').count()) === 0) break;
+    await page.waitForTimeout(400);
+  }
+  await page.waitForTimeout(500);
+  const result = await page.evaluate(() =>
     [...document.querySelectorAll('div.overflow-hidden, div.overflow-y-auto, div.overflow-auto')]
       .filter((el) => el.scrollHeight > el.clientHeight + 1)
       .map((el) => ({
@@ -542,4 +564,9 @@ export function overflowingCards(page: Page) {
         over: el.scrollHeight - el.clientHeight,
       })),
   );
+  // Возвращаем доску наверх: гейт не должен менять состояние страницы для следующих проверок.
+  if (hasScroller) await scroller.first().evaluate((el) => el.scrollTo(0, 0));
+  else await page.mouse.wheel(0, -20000);
+  await page.waitForTimeout(300);
+  return result;
 }

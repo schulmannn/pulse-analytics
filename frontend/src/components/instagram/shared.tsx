@@ -368,7 +368,14 @@ export function SubscriberMovement({
   ];
   return (
     <div className={compact ? 'space-y-2' : 'space-y-3'}>
-      <div className={`grid grid-cols-1 border-t border-border sm:grid-cols-3 ${compact ? 'gap-x-4 gap-y-2 pt-3' : 'gap-x-6 gap-y-4 pt-4'}`}>
+      {/* Компакт всегда в ТРИ колонки: одной колонкой три ячейки давали 201px в теле тайла на
+          174px, и «Чистый прирост» срезало нижней кромкой (гейт «нет внутренних скроллов»).
+          Полноразмерная подача (страница метрики) держит прежний перенос по sm. */}
+      <div
+        className={`grid border-t border-border ${
+          compact ? 'grid-cols-3 gap-x-3 gap-y-2 pt-3' : 'grid-cols-1 gap-x-6 gap-y-4 pt-4 sm:grid-cols-3'
+        }`}
+      >
         {cells.map((c) => (
           <div key={c.label} className={compact ? '' : 'py-1'}>
             <div className={`${compact ? 'text-2xs' : 'text-xs'} tracking-wide text-muted-foreground`}>{c.label}</div>

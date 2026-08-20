@@ -1,3 +1,6 @@
+import { useContext } from 'react';
+import { ExpandedChartHeightContext } from '@/components/ExpandableChart';
+import { useMediaQuery } from '@/lib/useMediaQuery';
 import { useCallback, useRef, useState } from 'react';
 import { fmt } from '@/lib/format';
 import { useMorphValues } from '@/lib/useMorphValues';
@@ -55,6 +58,12 @@ function ringPath(from: number, to: number): string {
     'Z',
   ].join(' ');
 }
+
+// Бюджет легенды в фикс-тайле: пол кольца (min-h-20), строка «Ещё N» и высота одной строки
+// легенды (замерено 30px на узком тайле, где строка идёт в две линии).
+const RING_MIN_H = 80;
+const LEGEND_REST_H = 16;
+const LEGEND_ITEM_H = 30;
 
 export function RadialShare({
   segments,
@@ -170,17 +179,29 @@ export function RadialShare({
   // Без этого 7 возрастных групп съедали высоту тайла, и flex-1 регион дуги схлопывался в
   // крошечное кольцо (владелец: «график стал слишком маленьким»). Дуга рисует ВСЕ сегменты,
   // hover/центр читают каждый, aria-label перечисляет всё — сжимается только легенда.
-  const legendShown = Number.isFinite(legendMax) ? arcs.slice(0, legendMax) : arcs;
-  const legendRest = Number.isFinite(legendMax) ? arcs.slice(legendMax) : [];
+  // Сколько строк легенды влезает: тело тайла минус кольцо и строка «Ещё N». Без этого счёта
+  // легенда на узком тайле идёт одной колонкой и выталкивает содержимое за нижнюю кромку.
+  // Свободная высота (страница разреза, разворот) — прежнее число строк.
+  const ctxHeight = useContext(ExpandedChartHeightContext);
+  const legendWide = useMediaQuery('(min-width: 640px)');
+  const legendBudget = ctxHeight == null || layout === 'row' ? null : ctxHeight - RING_MIN_H - LEGEND_REST_H;
+  const legendFit =
+    legendBudget == null
+      ? legendMax
+      : Math.max(1, Math.min(legendMax, Math.floor(legendBudget / LEGEND_ITEM_H) * (legendWide ? 2 : 1)));
+  const legendShown = Number.isFinite(legendFit) ? arcs.slice(0, legendFit) : arcs;
+  const legendRest = Number.isFinite(legendFit) ? arcs.slice(legendFit) : [];
   const legendRestSum = legendRest.reduce((acc, a) => acc + a.value, 0);
   const legendRestPct = legendRest.reduce((acc, a) => acc + a.pct, 0);
 
   return (
     <div className={layout === 'row' ? 'flex h-full min-h-0 items-center gap-5' : 'flex h-full min-h-0 flex-col'}>
-      {/* min-h держит кольцо читаемым независимо от числа строк легенды. */}
+      {/* min-h держит кольцо читаемым, но НЕ распирает тайл: на 104px карточка «Пол»
+          переполнялась на 21px (кольцо 104 + легенда 94 против тела 181). 80px — нижняя
+          граница, при которой дуга и центр ещё читаются. */}
       {/* Кап высоты и в column-режиме: flex-1 без потолка раздувал кольцо на всю высоту высокой
           карточки (IG «Пол» — гигантская дуга без пользы; владелец). Кольцо — модуль, не фон. */}
-      <div className={layout === 'row' ? 'relative h-full max-h-32 w-32 shrink-0' : 'relative mx-auto min-h-[104px] w-full max-w-52 flex-1 [max-height:10rem]'}>
+      <div className={layout === 'row' ? 'relative h-full max-h-32 w-32 shrink-0' : 'relative mx-auto min-h-20 w-full max-w-52 flex-1 [max-height:10rem]'}>
         {/* aria-label вместо svg <title>: у <title> есть побочный нативный браузерный тултип —
             нестилизуемый прямоугольник с острыми углами (канон: только свои скруглённые читалки). */}
         <svg

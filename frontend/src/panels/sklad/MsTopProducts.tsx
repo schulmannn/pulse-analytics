@@ -2,6 +2,7 @@ import { useContext, useState } from 'react';
 import type { MsAssortmentComparison, MsMetricComparison, MsProductSort, MsTopSummary } from '@/api/queries';
 import { useMsAssortmentComparison, useMsTopProducts } from '@/api/queries';
 import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
+import { useMediaQuery } from '@/lib/useMediaQuery';
 import { ChartCardBody } from '@/components/chartWidget/ChartCardBody';
 import { LineChart } from '@/components/LineChart';
 import { SegmentedControl } from '@/components/SegmentedControl';
@@ -332,9 +333,27 @@ function MsConcentrationKpis({
 /** Список топ-товаров. Компакт передаёт `limit=5`; разворот-рейтинг показывает весь состав ответа.
     В компакте (half-тайл 264px) строки плотнее и без колонки «шт.» (кол-во уходит в title), иначе
     пятая строка режется кромкой карточки, а названию остаётся ~160px («Свеча в …»). */
+// Бюджет компакта: над списком стоит ряд переключателя метрики, и на узком экране его кнопки
+// имеют сенсорный размер (min-h-11 = 44px) — ряд занимает 48px против 36px на десктопе.
+// Замеры строк: 28px на узком, 24px на широком.
+const CONTROL_ROW_NARROW = 48;
+const CONTROL_ROW_WIDE = 36;
+const PRODUCT_ROW_NARROW = 28;
+const PRODUCT_ROW_WIDE = 24;
+
 function MsTopProductsList({ rows, metric, limit }: { rows: TopRow[]; metric: MsProductSort; limit?: number }) {
   const compact = limit != null;
-  const shown = compact ? rows.slice(0, limit) : rows;
+  // Сколько строк реально влезает: тело тайла минус ряд переключателя. Фикс-пятёрка
+  // переполняла карточку на узком экране на 24px — там и ряд выше (сенсорные цели), и
+  // строки. Свободная высота (разворот) считает как раньше.
+  const ctxHeight = useContext(ExpandedChartHeightContext);
+  const wide = useMediaQuery('(min-width: 640px)');
+  const budget = ctxHeight == null ? null : ctxHeight - (wide ? CONTROL_ROW_WIDE : CONTROL_ROW_NARROW);
+  const fit =
+    !compact || budget == null
+      ? limit
+      : Math.max(2, Math.min(limit, Math.floor(budget / (wide ? PRODUCT_ROW_WIDE : PRODUCT_ROW_NARROW))));
+  const shown = compact ? rows.slice(0, fit) : rows;
   return (
     <ul>
       {shown.map((row, i) => (

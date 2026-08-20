@@ -1,3 +1,5 @@
+import { useContext } from 'react';
+import { ExpandedChartHeightContext } from '@/components/ExpandableChart';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 
@@ -45,6 +47,12 @@ export function ChartSkeleton({
  * numeric cells — so the placeholder reads as column/row structure, not a grey block. Sits directly
  * on the surface (no card chrome); the caller supplies row/column counts to match its own table.
  */
+// Замеры строки-заглушки: ряд py-3 с полосой h-4 = 41px, шапка с border-b = 23px. Нужны, чтобы
+// состояние загрузки влезало в фикс-тайл: с четырьмя рядами оно было 202px против тела 174px,
+// и тринадцать разрезов Метрики на узком экране грузились с обрезанным низом.
+const SKELETON_ROW_H = 41;
+const SKELETON_HEAD_H = 23;
+
 export function TableSkeleton({
   rows = 5,
   columns = 4,
@@ -59,6 +67,12 @@ export function TableSkeleton({
   className?: string;
 }) {
   const cells = Array.from({ length: Math.max(columns, 1) });
+  // Высота тела тайла (её публикует карточка). Свободная высота — сколько просили.
+  const ctxHeight = useContext(ExpandedChartHeightContext);
+  const fitRows =
+    ctxHeight == null
+      ? rows
+      : Math.max(2, Math.min(rows, Math.floor((ctxHeight - (header ? SKELETON_HEAD_H : 0)) / SKELETON_ROW_H)));
   return (
     <div role="status" aria-busy="true" aria-label={label} className={cn('w-full', className)}>
       <div aria-hidden="true">
@@ -70,7 +84,7 @@ export function TableSkeleton({
           </div>
         )}
         <div className="divide-y divide-border">
-          {Array.from({ length: Math.max(rows, 1) }).map((_, r) => (
+          {Array.from({ length: Math.max(fitRows, 1) }).map((_, r) => (
             <div key={r} className="flex items-center gap-4 py-3">
               {cells.map((_, c) => (
                 <Skeleton key={c} className={cn('h-4', c === 0 ? 'flex-1' : 'w-12')} />
