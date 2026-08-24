@@ -30,6 +30,11 @@ describe('shouldRedirectOnUnauthorized', () => {
     expect(
       shouldRedirectOnUnauthorized({ status: 401 }, '/login', false),
     ).toBe(false);
+    // Публичная страница приглашения сама спрашивает сессию: «её нет» — это ветка сценария,
+    // а не истёкшая сессия. Редирект здесь ломал ссылку из письма.
+    expect(
+      shouldRedirectOnUnauthorized({ status: 401 }, '/invite', false),
+    ).toBe(false);
     expect(
       shouldRedirectOnUnauthorized({ status: 401 }, '/home', true),
     ).toBe(false);

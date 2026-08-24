@@ -100,6 +100,23 @@ HISTORY_ROWS.slice(-30).forEach((r) => {
 });
 
 // ── Fixture payloads (one per endpoint) ──
+
+// «Команда» в демо: витрина состава без сети. Мутации демо и так блокирует apiSend (кроме
+// /api/auth/*), поэтому приглашение здесь честно упрётся в «демо только на чтение».
+const TEAM = {
+  workspace: { id: 1, name: 'notem' },
+  members: [
+    { uid: 1, email: 'demo@atlavue.app', role: 'owner', created_at: '2026-01-12T09:00:00' },
+    { uid: 2, email: 'editor@atlavue.app', role: 'member', created_at: '2026-02-03T11:20:00' },
+  ],
+  invites: [
+    { id: 1, email: 'analyst@atlavue.app', role: 'viewer', created_at: '2026-02-10T08:00:00', expires_at: '2026-12-31T08:00:00' },
+  ],
+  memberships: [],
+  seats: { used: 2, limit: 10 },
+  email_configured: true,
+};
+
 const CHANNELS = {
   enabled: true,
   channels: [
@@ -362,6 +379,7 @@ export function demoFixture(path: string): unknown | undefined {
   if (p.startsWith('/api/ym/')) {
     return specOwnsMsYm() ? undefined : import('@/lib/demoYmFixtures').then((m) => m.ymDemoFixture(path));
   }
+  if (p === '/api/team') return TEAM;
   if (p === '/api/channels') return CHANNELS;
   if (/^\/api\/channels\/\d+\/annotations$/.test(p)) return ANNOTATIONS();
   if (p === '/api/tg/full') return TG_FULL;

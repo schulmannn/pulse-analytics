@@ -14,6 +14,7 @@ const { createCampaignsRepo } = require('./repos/campaignsRepo');
 const { createUsersRepo } = require('./repos/usersRepo');
 const { createChannelsRepo } = require('./repos/channelsRepo');
 const { createSourcesRepo } = require('./repos/sourcesRepo');
+const { createTeamRepo } = require('./repos/teamRepo');
 const { createIntegrationsRepo } = require('./repos/integrationsRepo');
 const { createMentionSettingsRepo } = require('./repos/mentionSettingsRepo');
 const { createMentionNotifyRepo } = require('./repos/mentionNotifyRepo');
@@ -190,6 +191,15 @@ function createDatabase(config, overrides = {}) {
     transaction,
     ensureExternalSource: sourcesRepo.ensureExternalSource,
   });
+  // Команда: приглашения в воркспейс + управление участниками (миграция 037). ensurePersonalWorkspace
+  // — инъекция из channelsRepo (repos не импортят друг друга): пригласить можно и с аккаунта, где
+  // ещё нет ни одного источника, то есть воркспейс приходится создавать лениво. ПОСЛЕ channelsRepo (TDZ).
+  const teamRepo = createTeamRepo({
+    pool,
+    enabled,
+    transaction,
+    ensurePersonalWorkspace: channelsRepo.ensurePersonalWorkspace,
+  });
   // ensureExternalSource / transaction — инъекция (repos не импортят друг друга; связывание только тут).
   const integrationsRepo = createIntegrationsRepo({
     pool,
@@ -259,6 +269,7 @@ function createDatabase(config, overrides = {}) {
     users: usersRepo,
     channels: channelsRepo,
     sources: sourcesRepo,
+    team: teamRepo, // MAX_WORKSPACE_SEATS, INVITE_ROLES, ensureTeamWorkspace, listWorkspaceMembers, listWorkspaceInvites, listForeignMemberships, countWorkspaceSeats, createWorkspaceInvite, getWorkspaceInviteByToken, acceptWorkspaceInvite, revokeWorkspaceInvite, setWorkspaceMemberRole, removeWorkspaceMember
     integrations: integrationsRepo,
     bugs: bugsRepo,
     analytics: analyticsRepo,

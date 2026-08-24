@@ -1,9 +1,9 @@
 import { useChannels } from '@/api/queries';
+import { useTeam } from '@/api/team';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { cn } from '@/lib/utils';
 import { PLAN_LABEL, setPlan, usePlan, type PlanId } from '@/lib/plan';
-import { useTeam } from '@/lib/team';
 import { SettingsGroup, SettingsIcon } from '@/components/settings/primitives';
 
 /**
@@ -29,7 +29,9 @@ const PLANS: PlanDef[] = [
     price: 0,
     blurb: 'Личный дашборд для одного канала.',
     features: ['1 источник данных', 'История 30 дней', 'Базовые виджеты и графики', '1 отчёт'],
-    limits: { sources: 1, seats: 1, history: '30 дней' },
+    // seats — места для КОЛЛЕГ, владелец не в счёт (тот же счёт, что в TEAM_LIMIT и в ростере).
+    // На Free команды нет вовсе, поэтому 0, а не «одно место под самого себя».
+    limits: { sources: 1, seats: 0, history: '30 дней' },
   },
   {
     id: 'pro',
@@ -115,13 +117,14 @@ export function BillingSection() {
 
 /**
  * Живое использование против лимитов плана. Источники — из общего реестра каналов (кэш сайдбара),
- * команда — владелец + приглашённые из локального ростера; история — статичная глубина архива.
+ * команда — серверный ростер воркспейса (`/api/team`); история — статичная глубина архива.
+ * Места считаются ДЛЯ КОЛЛЕГ, владелец не в счёт — та же величина, что печатают шапка и тело
+ * раздела «Команда» (раньше три поверхности считали её тремя способами).
  */
 function PlanUsage({ limits }: { limits: PlanDef['limits'] }) {
   const { data } = useChannels();
-  const team = useTeam();
+  const team = useTeam({ enabled: limits.seats > 0 });
   const sources = data?.enabled === false ? null : (data?.channels.length ?? null);
-  const seatsTaken = Math.min(team.length + 1, limits.seats);
 
   return (
     <div className="grid gap-x-6 gap-y-4 px-5 py-4 @min-[30rem]:grid-cols-3 @min-[32rem]:py-5">
@@ -130,7 +133,7 @@ function PlanUsage({ limits }: { limits: PlanDef['limits'] }) {
         value={sources}
         cap={limits.sources}
       />
-      <UsageMeter label="Команда" value={seatsTaken} cap={limits.seats} />
+      <UsageMeter label="Коллеги" value={team.data?.seats.used ?? null} cap={limits.seats} />
       <div className="min-w-0">
         <div className="text-xs text-ink3">История</div>
         <div className="mt-1 text-sm font-medium tabular-nums text-foreground">{limits.history}</div>
@@ -141,16 +144,18 @@ function PlanUsage({ limits }: { limits: PlanDef['limits'] }) {
 }
 
 function UsageMeter({ label, value, cap }: { label: string; value: number | null; cap: number }) {
-  const percent = value == null ? 0 : Math.min(100, Math.round((value / cap) * 100));
+  // cap = 0 (команда на Free) — деление дало бы NaN в ширине полосы; такой лимит показываем
+  // словами, а не «0 из 0».
+  const unavailable = cap <= 0;
+  const percent = value == null || unavailable ? 0 : Math.min(100, Math.round((value / cap) * 100));
+  const text = unavailable ? 'нет на плане' : value == null ? '—' : `${value} из ${cap}`;
   return (
     <div className="min-w-0">
       <div className="text-xs text-ink3">{label}</div>
-      <div className="mt-1 text-sm font-medium tabular-nums text-foreground">
-        {value == null ? '—' : `${value} из ${cap}`}
-      </div>
+      <div className="mt-1 text-sm font-medium tabular-nums text-foreground">{text}</div>
       <Progress
-        value={value == null ? 0 : percent}
-        aria-label={`${label}: ${value ?? 0} из ${cap}`}
+        value={percent}
+        aria-label={`${label}: ${text}`}
         className="mt-2 h-1"
       />
     </div>

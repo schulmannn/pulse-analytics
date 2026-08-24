@@ -36,6 +36,7 @@ const { registerIgRoutes } = require('./routes/ig');
 const { registerMsRoutes } = require('./routes/moysklad');
 const { registerYmRoutes } = require('./routes/metrika');
 const { registerAccountRoutes } = require('./routes/account');
+const { registerTeamRoutes } = require('./routes/team');
 const { registerHistoryRoutes } = require('./routes/history');
 const { registerAiRoutes } = require('./routes/ai');
 
@@ -53,7 +54,8 @@ function createApp(deps) {
     limiter, authLimiter, mediaLimiter,
     hashPassword, verifyPassword, DUMMY_HASH, signSession, SESSION_TTL,
     SESSION_ABSOLUTE_TTL, GOOGLE_CLIENT_ID,
-    appBase, sha256, newToken, VERIFY_TTL, RESET_TTL, sendEmail, emailShell, emailBtn, escHtml,
+    appBase, sha256, newToken, VERIFY_TTL, RESET_TTL, INVITE_TTL,
+    sendEmail, emailConfigured, emailShell, emailBtn, escHtml,
     igFetch, refreshIgIfNeeded, igConfigured, igCrypto, igMock, msCrypto, msFetch, msBackfill,
     ymCrypto, ymFetch, nearestOf,
     cacheGet, cacheSet, cache, IG_ACCOUNT, IG_TOKEN, IG_GRAPH, AUTH_SECRET,
@@ -177,6 +179,31 @@ function createApp(deps) {
     emailShell,
     GOOGLE_CLIENT_ID,
     clearSessionCookie,
+  });
+
+  // Команда: приглашения в воркспейс и участники (routes/team.js). Живёт рядом с account —
+  // тот же токен-по-почте контур, что verify/reset, плюс публичный приём приглашения по ссылке.
+  registerTeamRoutes({
+    app,
+    db,
+    requireAuth,
+    authLimiter,
+    audit,
+    log,
+    appBase,
+    sha256,
+    newToken,
+    INVITE_TTL,
+    sendEmail,
+    emailConfigured,
+    emailShell,
+    emailBtn,
+    escHtml,
+    hashPassword,
+    signSession,
+    SESSION_TTL,
+    SESSION_ABSOLUTE_TTL,
+    setSessionCookie,
   });
 
   // Instagram data routes + the per-request resolveIg middleware are isolated in routes/ig.js.

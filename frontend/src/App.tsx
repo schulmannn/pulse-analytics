@@ -15,6 +15,7 @@ const LoginPage = lazyFrom(() => import('@/pages/Auth'), 'LoginPage');
 const RegisterPage = lazyFrom(() => import('@/pages/Auth'), 'RegisterPage');
 const VerifyPage = lazyFrom(() => import('@/pages/Auth'), 'VerifyPage');
 const ResetPage = lazyFrom(() => import('@/pages/Auth'), 'ResetPage');
+const InvitePage = lazyFrom(() => import('@/pages/Auth'), 'InvitePage');
 const Privacy = lazyFrom(() => import('@/pages/Legal'), 'Privacy');
 const DataDeletion = lazyFrom(() => import('@/pages/Legal'), 'DataDeletion');
 
@@ -46,6 +47,8 @@ export default function App() {
         <Route path="register" element={<AuthSuspense><RegisterPage /></AuthSuspense>} />
         <Route path="verify" element={<AuthSuspense><VerifyPage /></AuthSuspense>} />
         <Route path="reset" element={<AuthSuspense><ResetPage /></AuthSuspense>} />
+        {/* Приглашение в команду: публичный роут — ссылка из письма открывается без сессии. */}
+        <Route path="invite" element={<AuthSuspense><InvitePage /></AuthSuspense>} />
         <Route
           path="privacy"
           element={<Suspense fallback={<PublicPageFallback />}><Privacy /></Suspense>}

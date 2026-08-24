@@ -21,8 +21,9 @@ import {
   DialogTitle,
   useRestoreOpenerFocus,
 } from '@/components/ui/dialog';
-import { PLAN_LABEL, usePlan } from '@/lib/plan';
-import { useTeam } from '@/lib/team';
+import { isPaidPlan, PLAN_LABEL, usePlan } from '@/lib/plan';
+import { useTeam } from '@/api/team';
+import { TEAM_LIMIT } from '@/lib/team';
 import {
   isSettingsSection,
   LEGACY_SECTION_ALIASES,
@@ -359,11 +360,14 @@ function BillingMeta() {
 
 function TeamMeta() {
   const plan = usePlan();
-  const team = useTeam();
-  const limit = plan === 'max' ? 10 : plan === 'pro' ? 3 : null;
-  if (limit == null) return null;
-  // Владелец занимает первое место — ростер показывает его той же строкой.
-  return <MetaText>{`${Math.min(team.length + 1, limit)} из ${limit} мест`}</MetaText>;
+  const limit = isPaidPlan(plan) ? TEAM_LIMIT[plan] : null;
+  // На free команды нет — запрос ростера там не нужен вовсе.
+  const team = useTeam({ enabled: limit != null });
+  if (limit == null || !team.data) return null;
+  // Считаем МЕСТА ДЛЯ КОЛЛЕГ (владелец не в счёт) — ровно ту же величину, что печатает сама
+  // секция «Команда». Раньше шапка считала владельца, а тело — нет, и на одном экране висели
+  // «2 из 10» и «Занято 1 из 10».
+  return <MetaText>{`${team.data.seats.used} из ${limit} мест`}</MetaText>;
 }
 
 function ChannelsMeta() {
