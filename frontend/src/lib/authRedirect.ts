@@ -9,6 +9,14 @@ function hasStatus(error: unknown, status: number): boolean {
   );
 }
 
+/**
+ * Публичные роуты, которые САМИ спрашивают сессию и должны пережить ответ «её нет».
+ * `/invite` (приглашение в команду) читает `useMe`, чтобы выбрать ветку: принять одним кликом,
+ * сказать «вы вошли не тем адресом» или завести аккаунт прямо здесь. Без этого исключения
+ * ожидаемый 401 уносил получателя письма на /login — то есть ссылка из письма не работала.
+ */
+const PUBLIC_PATHS = new Set(['/login', '/invite']);
+
 /** Raw AuthGate owns the public probe, so every TanStack 401 belongs to protected work. */
 export function shouldRedirectOnUnauthorized(
   error: unknown,
@@ -16,7 +24,7 @@ export function shouldRedirectOnUnauthorized(
   demoMode: boolean,
 ): boolean {
   if (!hasStatus(error, 401) || demoMode) return false;
-  if (pathname === '/login') return false;
+  if (PUBLIC_PATHS.has(pathname)) return false;
   return true;
 }
 

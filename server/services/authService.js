@@ -44,6 +44,10 @@ function createAuthService({ config, db }) {
 
   const VERIFY_TTL = 24 * 60 * 60 * 1000;
   const RESET_TTL  = 60 * 60 * 1000;
+  // Приглашение в команду живёт дольше verify/reset: коллега может открыть письмо не сегодня, а
+  // цена просроченной ссылки — просто «выслать ещё раз» (routes/team.js перевыпускает поверх той же
+  // строки). Ссылка ничего не открывает без совпадения email, поэтому неделя безопасна.
+  const INVITE_TTL = 7 * 24 * 60 * 60 * 1000;
   const sha256   = (s) => crypto.createHash('sha256').update(String(s)).digest('hex');
   const newToken = () => crypto.randomBytes(32).toString('base64url');
   // Fixed-cost hash so login spends scrypt time even when the email doesn't exist
@@ -198,7 +202,7 @@ function createAuthService({ config, db }) {
   return {
     AUTH_SECRET, ADMIN_EMAIL, SESSION_TTL, SESSION_ABSOLUTE_TTL, GOOGLE_CLIENT_ID,
     signSession, parseToken,
-    VERIFY_TTL, RESET_TTL, sha256, newToken, DUMMY_HASH,
+    VERIFY_TTL, RESET_TTL, INVITE_TTL, sha256, newToken, DUMMY_HASH,
     bootstrapAdmin, claimOwnerChannel,
     requireAuth, requireSuper, migrateSessionCookie,
     setSessionCookie, clearSessionCookie,

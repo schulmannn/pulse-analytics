@@ -1,15 +1,22 @@
 import { useState, type FormEvent, type ReactNode } from 'react';
-import { useMe } from '@/api/queries';
+import {
+  useInviteMember,
+  useRemoveMember,
+  useRevokeInvite,
+  useSetMemberRole,
+  useTeam,
+} from '@/api/team';
 import { isPaidPlan, PLAN_LABEL, usePlan } from '@/lib/plan';
 import {
-  addMember,
-  removeMember,
+  INVITE_ROLES,
+  isValidEmail,
+  ROLE_HINT,
   ROLE_LABEL,
-  setMemberRole,
   TEAM_LIMIT,
-  useTeam,
+  type MemberRole,
   type TeamRole,
 } from '@/lib/team';
+import { cn } from '@/lib/utils';
 import { PillSelect } from '@/components/PillSelect';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -21,9 +28,10 @@ import {
 } from '@/components/settings/primitives';
 
 /**
- * «Команда» — plan-gated members preview. Free plan sees the upsell; paid plans manage a
- * local roster (owner row + invited members with roles). Invites are a stub: nothing is
- * emailed and no access is granted — the row says so honestly.
+ * «Команда» — участники рабочего пространства. Ростер серверный (`/api/team`): приглашение
+ * выпускает токен, шлёт письмо со ссылкой на /invite, а принявший попадает в workspace_members
+ * и с этого момента виден всем tenant-предикатам доступа. Free-план видит апселл — это витрина
+ * тарифа (lib/plan.ts), доступ она не охраняет; настоящий потолок мест держит сервер.
  */
 export function TeamSection({ onOpenBilling }: { onOpenBilling: () => void }) {
   const plan = usePlan();
@@ -39,14 +47,13 @@ function TeamUpsell({ onOpenBilling }: { onOpenBilling: () => void }) {
         title="Команда доступна на Pro и Max"
         description="Приглашайте коллег в общий дашборд: роли «Редактор» и «Наблюдатель», до 10 участников на Max."
         control={
-          <Button
+          <button
             type="button"
-            variant="secondary"
-            size="sm"
             onClick={onOpenBilling}
+            className="btn-pill bg-primary px-4 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90"
           >
             Смотреть тарифы
-          </Button>
+          </button>
         }
       />
     </SettingsGroup>
@@ -56,33 +63,74 @@ function TeamUpsell({ onOpenBilling }: { onOpenBilling: () => void }) {
 const initialsOf = (email: string) =>
   email.replace(/@.*/, '').replace(/[^\p{L}\d]/gu, '').slice(0, 2).toUpperCase() || '?';
 
-const ROLE_OPTIONS: TeamRole[] = ['editor', 'viewer'];
+const roleOptions = INVITE_ROLES.map((r) => ({ value: r, label: ROLE_LABEL[r] }));
+
+/** Незнакомая роль из будущей миграции подписывается своим идентификатором, а не пустотой. */
+const roleLabelOf = (role: string) => ROLE_LABEL[role as MemberRole] ?? role;
+
+const errorText = (error: unknown) =>
+  error instanceof Error ? error.message : 'Не удалось выполнить запрос';
 
 function TeamRoster({ plan }: { plan: 'pro' | 'max' }) {
-  const me = useMe();
   const team = useTeam();
-  const limit = TEAM_LIMIT[plan];
-  const full = team.length >= limit;
+  const invite = useInviteMember();
+  const revoke = useRevokeInvite();
+  const setRole = useSetMemberRole();
+  const remove = useRemoveMember();
 
   const [email, setEmail] = useState('');
-  const [role, setRole] = useState<TeamRole>('viewer');
-  const [err, setErr] = useState<string | null>(null);
+  const [role, setRoleValue] = useState<TeamRole>('viewer');
+  const [localErr, setLocalErr] = useState<string | null>(null);
 
-  const onInvite = (e: FormEvent) => {
-    e.preventDefault();
-    const problem = addMember(email, role);
-    setErr(problem);
-    if (!problem) {
-      setEmail('');
-      setRole('viewer');
+  const planLimit = TEAM_LIMIT[plan];
+  const used = team.data?.seats.used ?? 0;
+  const full = used >= planLimit;
+  const members = team.data?.members ?? [];
+  const invites = team.data?.invites ?? [];
+  const busy = invite.isPending || revoke.isPending || setRole.isPending || remove.isPending;
+
+  const onInvite = (event: FormEvent) => {
+    event.preventDefault();
+    const value = email.trim().toLowerCase();
+    if (!isValidEmail(value)) {
+      setLocalErr('Похоже, это не email');
+      return;
     }
+    setLocalErr(null);
+    invite.mutate(
+      { email: value, role },
+      {
+        onSuccess: () => {
+          setEmail('');
+          setRoleValue('viewer');
+        },
+      },
+    );
   };
+
+  if (team.isError) {
+    return (
+      <SettingsGroup>
+        <SettingsRow title="Команда недоступна" description={errorText(team.error)} />
+      </SettingsGroup>
+    );
+  }
+
+  // Письмо уходит через Resend; без ключа сервер только пишет его в лог — говорим это вслух,
+  // иначе поверхность обещает доставку, которой нет.
+  const emailOff = team.data ? team.data.email_configured === false : false;
+  const description = team.isLoading
+    ? 'Загружаем состав команды…'
+    : `Занято ${used} из ${planLimit} мест для коллег на плане ${PLAN_LABEL[plan]}.`
+      + (emailOff
+        ? ' Почта на сервере не настроена — приглашение создастся, но письмо не уйдёт.'
+        : ' Коллега получит письмо со ссылкой; доступ откроется, когда он её примет.');
 
   return (
     <SettingsGroup>
       <SettingsRow
         title="Пригласить участника"
-        description={`Занято ${team.length} из ${limit} мест на плане ${PLAN_LABEL[plan]}. Приглашения в предпросмотре — письмо не отправляется, доступ не выдаётся.`}
+        description={description}
         footer={
           <>
             <form onSubmit={onInvite} className="mt-3 flex flex-col gap-2 @min-[32rem]:flex-row">
@@ -91,65 +139,127 @@ function TeamRoster({ plan }: { plan: 'pro' | 'max' }) {
                 value={email}
                 onChange={(e) => {
                   setEmail(e.target.value);
-                  setErr(null);
+                  setLocalErr(null);
+                  invite.reset();
                 }}
                 placeholder="email коллеги"
-                disabled={full}
+                disabled={full || invite.isPending}
                 className="w-full flex-1"
               />
               <div className="flex shrink-0 items-center gap-2">
                 <PillSelect<TeamRole>
                   value={role}
-                  options={ROLE_OPTIONS.map((r) => ({ value: r, label: ROLE_LABEL[r] }))}
-                  onValueChange={(v) => setRole(v)}
-                  disabled={full}
+                  options={roleOptions}
+                  onValueChange={(v) => setRoleValue(v)}
+                  disabled={full || invite.isPending}
                   ariaLabel="Роль"
                 />
                 <Button
                   type="submit"
                   size="sm"
-                  disabled={full || email.trim().length === 0}
+                  pending={invite.isPending}
+                  disabled={full || invite.isPending || email.trim().length === 0}
                 >
-                  Пригласить
+                  {invite.isPending ? 'Отправляем…' : 'Пригласить'}
                 </Button>
               </div>
             </form>
-            {err && <p className="mt-2 text-xs font-medium text-destructive">{err}</p>}
+            <p className="mt-2 text-xs text-ink3">{ROLE_HINT[role]}</p>
+            {full && (
+              <p className="mt-2 text-xs text-ink3">
+                Все места плана заняты — отзовите приглашение или повысьте тариф.
+              </p>
+            )}
+            {(localErr || invite.isError) && (
+              <p role="alert" className="mt-2 text-xs font-medium text-destructive">
+                {localErr ?? errorText(invite.error)}
+              </p>
+            )}
+            <div aria-live="polite">
+              {invite.isSuccess && (
+                <p className="mt-2 text-xs text-ink2">
+                  {invite.data?.delivered === false
+                    ? 'Приглашение создано, но письмо отправить не удалось — попробуйте выслать ещё раз.'
+                    : 'Приглашение отправлено.'}
+                </p>
+              )}
+            </div>
           </>
         }
       />
-      {/* Owner — the signed-in account, implicit and irremovable. */}
-      <MemberRow
-        email={me.data?.email ?? '—'}
-        badge="Владелец"
-        control={<span className="text-xs text-muted-foreground">Полный доступ</span>}
-      />
-      {team.map((m) => (
+
+      {members.map((m) => (
         <MemberRow
-          key={m.email}
+          key={m.uid}
           email={m.email}
-          badge="Приглашён"
+          badge={roleLabelOf(m.role)}
+          control={
+            m.role === 'owner' ? (
+              <span className="text-xs text-muted-foreground">Полный доступ</span>
+            ) : (
+              <>
+                <PillSelect<TeamRole>
+                  value={(INVITE_ROLES as string[]).includes(m.role) ? (m.role as TeamRole) : 'viewer'}
+                  options={roleOptions}
+                  onValueChange={(v) => setRole.mutate({ uid: m.uid, role: v })}
+                  disabled={busy}
+                  ariaLabel={`Роль ${m.email}`}
+                />
+                <Button
+                  type="button"
+                  variant="destructive"
+                  size="icon-xs"
+                  disabled={busy}
+                  onClick={() => remove.mutate(m.uid)}
+                  aria-label={`Убрать ${m.email}`}
+                >
+                  <SettingsIcon name="close" className="h-3.5 w-3.5" />
+                </Button>
+              </>
+            )
+          }
+        />
+      ))}
+
+      {invites.map((inv) => (
+        <MemberRow
+          key={`invite-${inv.id}`}
+          email={inv.email}
+          badge={`Приглашён · ${roleLabelOf(inv.role)}`}
           badgeMuted
           control={
             <>
-              <PillSelect<TeamRole>
-                value={m.role}
-                options={ROLE_OPTIONS.map((r) => ({ value: r, label: ROLE_LABEL[r] }))}
-                onValueChange={(v) => setMemberRole(m.email, v)}
-                ariaLabel={`Роль ${m.email}`}
-              />
+              <span className="text-xs text-muted-foreground">Ждёт ответа</span>
               <Button
                 type="button"
                 variant="destructive"
                 size="icon-xs"
-                onClick={() => removeMember(m.email)}
-                aria-label={`Убрать ${m.email}`}
+                disabled={busy}
+                onClick={() => revoke.mutate(inv.id)}
+                aria-label={`Отозвать приглашение ${inv.email}`}
               >
                 <SettingsIcon name="close" className="h-3.5 w-3.5" />
               </Button>
             </>
           }
         />
+      ))}
+
+      {(setRole.isError || remove.isError || revoke.isError) && (
+        <div className="px-5 pb-3">
+          <p role="alert" className="text-xs font-medium text-destructive">
+            {errorText(setRole.error ?? remove.error ?? revoke.error)}
+          </p>
+        </div>
+      )}
+
+      {/* Приглашённому: куда его позвали. Без этой строки он открывает «Команду» и видит свой
+          пустой личный воркспейс, не понимая, где общий доступ. */}
+      {(team.data?.memberships ?? []).map((ws) => (
+        <div key={ws.id} className="border-t border-border px-5 py-3.5 text-xs text-ink2">
+          Вы участник пространства «{ws.name}»
+          {ws.owner_email ? ` (${ws.owner_email})` : ''} — роль «{roleLabelOf(ws.role)}».
+        </div>
       ))}
     </SettingsGroup>
   );
@@ -169,7 +279,12 @@ function MemberRow({
   return (
     <div className="flex items-center justify-between gap-4 px-5 py-3.5">
       <div className="flex min-w-0 items-center gap-2.5">
-        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-avatar text-2xs font-medium text-ink2">
+        <span
+          className={cn(
+            'flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-avatar text-2xs font-medium text-ink2',
+            badgeMuted && 'opacity-60',
+          )}
+        >
           {initialsOf(email)}
         </span>
         <div className="min-w-0">

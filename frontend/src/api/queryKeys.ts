@@ -96,6 +96,7 @@ export const qk = {
   ymAll: Object.values(ymFamilies).map((family) => family.all),
 
   // ── Аккаунт-кластер ──
+  team: ['team'] as const,
   adminUsers: ['admin-users'] as const,
   bugs: ['bugs'] as const,
   annotations: (channelId: number | null) => ['annotations', channelId] as const,
