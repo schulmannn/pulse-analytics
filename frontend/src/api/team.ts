@@ -58,6 +58,19 @@ export const TeamResponseSchema = z
     // пишется в лог. Поверхность обязана сказать это вслух.
     email_configured: z.boolean().optional().default(true),
     delivered: z.boolean().optional(),
+    // Причина, по которой письмо не ушло (исход sendEmailDetailed + ответ Resend). null при успехе.
+    delivery: z
+      .object({
+        outcome: z.string().optional().nullable(),
+        status: z.coerce.number().optional().nullable(),
+        error: z.string().optional().nullable(),
+      })
+      .passthrough()
+      .optional()
+      .nullable(),
+    // Ссылка приходит ТОЛЬКО в ответ на выпуск/перевыпуск: сырой токен нигде не хранится,
+    // в ростере (GET /api/team) его нет и быть не может.
+    invite_link: z.string().optional().nullable(),
   })
   .passthrough();
 export type TeamResponse = z.infer<typeof TeamResponseSchema>;
@@ -111,6 +124,17 @@ function useTeamWrite<TBody>(send: (body: TBody) => Promise<TeamResponse>) {
 export function useInviteMember() {
   return useTeamWrite((body: { email: string; role: TeamRole }) =>
     apiSend('POST', '/api/team/invites', body, TeamResponseSchema),
+  );
+}
+
+/**
+ * Получить ссылку на уже выпущенное приглашение — запасной путь, когда почта подвела.
+ * Сервер ПЕРЕВЫПУСКАЕТ токен (сырой нигде не хранится), поэтому прежняя ссылка из письма
+ * перестаёт работать — вызывающий обязан это показать.
+ */
+export function useInviteLink() {
+  return useTeamWrite((id: number) =>
+    apiSend('POST', `/api/team/invites/${id}/link`, undefined, TeamResponseSchema),
   );
 }
 

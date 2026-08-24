@@ -178,6 +178,38 @@ test('уже участник + потолок мест', { skip }, async () => 
   assert.strictEqual(overflow.result.limit, limit);
 });
 
+test('перевыпуск ссылки: старый токен умирает, новый живёт, чужой воркспейс не трогается', { skip }, async () => {
+  const owner = await mkUser('link');
+  const ws = await db.ensureTeamWorkspace(owner.id);
+  const target = mail('link');
+  const first = await invite(ws.id, target, 'viewer', { by: owner.id });
+
+  // Кулдаун на перевыпуск НЕ распространяется: письма этот путь не шлёт.
+  const rawNew = `${nonce}-relink`;
+  const reissued = await db.reissueWorkspaceInviteToken(
+    ws.id, first.result.invite.id, sha256(rawNew), inHours(24));
+  assert.ok(reissued, 'перевыпуск живого приглашения проходит');
+  assert.strictEqual(reissued.id, first.result.invite.id, 'та же строка, не новая');
+  assert.strictEqual(reissued.email, target);
+  assert.strictEqual(await db.getWorkspaceInviteByToken(sha256(first.raw)), null, 'прежняя ссылка мертва');
+  assert.strictEqual((await db.getWorkspaceInviteByToken(sha256(rawNew))).status, 'live');
+  assert.strictEqual(await db.countWorkspaceSeats(ws.id), 1, 'перевыпуск не съедает второе место');
+
+  // Чужой воркспейс по id не перевыпускает.
+  const other = await mkUser('link2');
+  const otherWs = await db.ensureTeamWorkspace(other.id);
+  assert.strictEqual(
+    await db.reissueWorkspaceInviteToken(otherWs.id, first.result.invite.id, sha256('x'), inHours(24)),
+    null, 'приглашение чужого воркспейса не перевыпускается');
+  assert.strictEqual((await db.getWorkspaceInviteByToken(sha256(rawNew))).status, 'live', 'токен не тронут');
+
+  // Отозванное и принятое приглашение ссылку не отдают.
+  await db.revokeWorkspaceInvite(ws.id, first.result.invite.id);
+  assert.strictEqual(
+    await db.reissueWorkspaceInviteToken(ws.id, first.result.invite.id, sha256('y'), inHours(24)),
+    null, 'отозванное приглашение не оживает перевыпуском');
+});
+
 test('владелец неприкосновенен: роль не понижается, строка не удаляется', { skip }, async () => {
   const owner = await mkUser('o6');
   const ws = await db.ensureTeamWorkspace(owner.id);

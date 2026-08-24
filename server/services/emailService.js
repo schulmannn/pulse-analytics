@@ -174,7 +174,7 @@ function createEmailService({ config, fetchImpl, sleep, now } = {}) {
   // under a ≤1s sleep budget. Success and permanent rejection return immediately; retryable (429) and
   // ambiguous (network/5xx/409) retry until exhausted/over-budget, then return their classification.
   // Never logs or returns the API key, recipient, HTML or full response bodies.
-  async function sendEmailDetailed(to, subject, html, { idempotencyKey } = {}) {
+  async function sendEmailDetailed(to, subject, html, { idempotencyKey, text } = {}) {
     if (!RESEND_API_KEY) {
       // Parity with legacy sendEmail's dev branch: no provider → treat as sent so local/report flows
       // complete. The scheduled job additionally gates on configured(), so this never runs in prod.
@@ -193,7 +193,9 @@ function createEmailService({ config, fetchImpl, sleep, now } = {}) {
       'Idempotency-Key': key,
     };
     // Same payload string across every retry — Resend requires an identical body for a reused key.
-    const payload = JSON.stringify({ from: EMAIL_FROM, to, subject, html });
+    // text — текстовая альтернатива (multipart). Письмо без text/plain выглядит для фильтров
+    // хуже, а получателю в клиенте, который режет ссылки, только она и оставляет рабочий адрес.
+    const payload = JSON.stringify(text ? { from: EMAIL_FROM, to, subject, html, text } : { from: EMAIL_FROM, to, subject, html });
     let backoffSpent = 0;
     for (let attempt = 1; ; attempt++) {
       const cls = await resendAttempt(headers, payload);
