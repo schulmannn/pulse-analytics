@@ -155,6 +155,13 @@ function loadConfig(env = process.env) {
       // что и видимый ответ — 2048 рисковал бы обрывом на середине.
       maxOutputTokens: Number(env.AI_MAX_OUTPUT_TOKENS || 4096),
     }),
+    cdek: Object.freeze({
+      // Потолок строк одной выгрузки СДЭК. Годовой файл склада — ~1100 строк, так что 100 000
+      // это запас, а не ограничение; смысл кэпа в том, чтобы разбор оставался синхронным и
+      // предсказуемым по памяти. Файл, который в него не влезет, — сигнал вынести разбор в job,
+      // а не молча поднять число.
+      maxRows: Number(env.CDEK_MAX_ROWS || 100000),
+    }),
     cache: Object.freeze({
       // In-memory response cache (infrastructure/memoryCache) — bounded LRU. maxEntries caps retained
       // responses from the unbounded key space (per-channel × per-param); ttlMs is

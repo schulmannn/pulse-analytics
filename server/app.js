@@ -35,6 +35,7 @@ const { registerIgOauthRoutes } = require('./routes/ig-oauth');
 const { registerIgRoutes } = require('./routes/ig');
 const { registerMsRoutes } = require('./routes/moysklad');
 const { registerYmRoutes } = require('./routes/metrika');
+const { registerCdekRoutes } = require('./routes/cdek');
 const { registerAccountRoutes } = require('./routes/account');
 const { registerTeamRoutes } = require('./routes/team');
 const { registerHistoryRoutes } = require('./routes/history');
@@ -57,7 +58,7 @@ function createApp(deps) {
     appBase, sha256, newToken, VERIFY_TTL, RESET_TTL, INVITE_TTL,
     sendEmail, sendEmailDetailed, emailConfigured, emailShell, emailBtn, escHtml,
     igFetch, refreshIgIfNeeded, igConfigured, igCrypto, igMock, msCrypto, msFetch, msBackfill,
-    ymCrypto, ymFetch, nearestOf,
+    ymCrypto, ymFetch, cdekImport, nearestOf,
     cacheGet, cacheSet, cache, IG_ACCOUNT, IG_TOKEN, IG_GRAPH, AUTH_SECRET,
     tgCrypto, collectQrChannelsNow, collectManagedPostStatsNow, TG_TOKEN, TG_CHANNEL,
     tgBot, tgBotWebhookSecret, runMentionNotifyTest,
@@ -99,6 +100,7 @@ function createApp(deps) {
   app.use((req, res, next) => {
     if (req.path === '/api/collector/ingest'
       || req.path === '/api/me/avatar'   // own 1mb parser — a 100KB-400KB data URL is a valid avatar
+      || req.path === '/api/cdek/import' // raw file upload — own 10mb express.raw parser
       || /\/screenshot$/.test(req.path)) return next();
     jsonSmall(req, res, next);
   });
@@ -245,6 +247,12 @@ function createApp(deps) {
   // routes/metrika.js, зеркало МС-блока выше: ymCrypto/ymFetch из composition, тот же
   // x-channel-id-резолв, точечная инвалидация ym:*-ключей, audit ym_connect/ym_disconnect.
   registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cacheGet, cacheSet, cache, log });
+
+  // Роуты СДЭК Fulfillment (038) — первый источник БЕЗ API: наполняется ручной загрузкой Excel.
+  // Ни токена, ни крона: сервис импорта (cdekImport из composition) разбирает файл и пишет архив
+  // одной идемпотентной транзакцией. express инъектируется ради собственного raw-парсера тела —
+  // тот же приём, что у registerCollectorRoutes.
+  registerCdekRoutes({ app, express, requireAuth, db, audit, cdekImport });
 
   registerChannelsRoutes({ app, db, requireAuth, audit, getDbReady });
 
