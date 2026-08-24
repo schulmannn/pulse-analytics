@@ -86,7 +86,7 @@ async function bootCdek(page: Page, opts: { imports?: unknown[]; uploadStatus?: 
     localStorage.setItem('pulse_channel', '5');
     localStorage.setItem('pulse_theme', 'dark');
   });
-  await page.goto('/cdek');
+  await page.goto('/cdek/imports');
   await page.locator('main').waitFor({ state: 'visible', timeout: 25_000 });
   return uploads;
 }
