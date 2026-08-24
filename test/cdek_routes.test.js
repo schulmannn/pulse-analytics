@@ -28,6 +28,13 @@ function build({ db = {}, cdekImport = {} } = {}) {
       getCdekImport: async () => null,
       createCdekChannel: async ({ name }) => ({ id: 12, title: name }),
       saveCdekSource: async () => true,
+      getCdekSummaryForActor: async () => ({ current: null, previous: null }),
+      getCdekSeriesForActor: async () => ({ grain: 'day', current: [], previous: [] }),
+      getCdekBreakdownForActor: async () => [],
+      getCdekCoverageForActor: async () => [],
+      getCdekBoundsForActor: async () => null,
+      CDEK_BREAKDOWN_MAX_GROUPS: 2000,
+      CDEK_COVERAGE_MAX_DAYS: 800,
       ...db,
     },
     audit: async (_req, event, meta) => { audits.push({ event, meta }); },
@@ -192,4 +199,132 @@ test('переигровка тоже под ролью admin', async () => {
   });
   const res = await call(routes, 'POST /api/cdek/imports/:id/replay', { params: { id: '7' } });
   assert.equal(res.status, 403);
+});
+
+// ── Чтение аналитики ──────────────────────────────────────────────────────────────────────────
+
+const TOTALS = {
+  revenue_kopecks: '307631932', orders: '1035', items: '1061',
+  orders_all: '1095', orders_cancelled: '59', orders_returned: '1',
+};
+
+test('кривой диапазон — 400 до похода в базу', async () => {
+  let touched = false;
+  const { routes } = build({ db: { getCdekSummaryForActor: async () => { touched = true; return null; } } });
+  const res = await call(routes, 'GET /api/cdek/summary', { query: { from: '2026-03-10', to: '2026-03-01' } });
+  assert.equal(res.status, 400);
+  assert.match(res.body.error, /Некорректный диапазон/);
+  assert.equal(touched, false);
+});
+
+test('итоги: копейки переводятся в рубли, средний чек считает сервер', async () => {
+  // Средний чек, посчитанный клиентом из округлённых рублей, разошёлся бы с выручкой и заказами,
+  // которые показаны рядом на той же карточке.
+  const { routes } = build({
+    db: { getCdekSummaryForActor: async () => ({ current: TOTALS, previous: { ...TOTALS, revenue_kopecks: '200000000', orders: '800' } }) },
+  });
+  const res = await call(routes, 'GET /api/cdek/summary', { query: { from: '2025-07-31', to: '2026-07-30' } });
+  assert.equal(res.body.current.revenue, 3076319.32);
+  assert.equal(res.body.current.orders, 1035);
+  assert.equal(res.body.current.avg_check, 3076319.32 / 1035);
+  assert.equal(res.body.current.orders_cancelled, 59);
+  assert.ok(Math.abs(res.body.current.cancel_share - 59 / 1095) < 1e-12);
+  assert.equal(res.body.previous.orders, 800);
+  assert.deepEqual(res.body.previous_window, { from: '2024-07-31', to: '2025-07-30' });
+});
+
+test('«Всё» не отдаёт выдуманного предыдущего окна ни в итогах, ни в ряду', async () => {
+  const { routes } = build({
+    db: {
+      getCdekSummaryForActor: async () => ({ current: TOTALS, previous: TOTALS }),
+      getCdekSeriesForActor: async () => ({
+        grain: 'month',
+        current: [{ day: '2026-03-01', revenue_kopecks: '100', orders: '1', items: '1' }],
+        previous: [{ day: '2025-03-01', revenue_kopecks: '999', orders: '9', items: '9' }],
+      }),
+    },
+  });
+  const summary = await call(routes, 'GET /api/cdek/summary', { query: { days: '0' } });
+  assert.equal(summary.body.window.all, true);
+  assert.equal(summary.body.previous, null);
+  assert.equal(summary.body.previous_window, null);
+
+  const series = await call(routes, 'GET /api/cdek/series', { query: { days: '0' } });
+  assert.equal(series.body.grain, 'month');
+  assert.deepEqual(series.body.previous, [], 'сравнивать всю историю не с чем');
+  assert.equal(series.body.current[0].revenue, 1);
+});
+
+test('разрез: хвост сворачивается в «Прочее», знаменатель остаётся честным', async () => {
+  const rows = Array.from({ length: 5 }, (_, i) => ({
+    key: `p${i}`, revenue_kopecks: String((5 - i) * 10000), orders: '2', items: '2',
+    prev_revenue_kopecks: '1000', prev_orders: '1',
+  }));
+  const { routes } = build({ db: { getCdekBreakdownForActor: async () => rows } });
+  const res = await call(routes, 'GET /api/cdek/breakdown', { query: { dim: 'product', limit: '2' } });
+  assert.equal(res.body.rows.length, 2);
+  assert.equal(res.body.other.groups, 3);
+  assert.equal(res.body.other.revenue, 300 + 200 + 100);
+  assert.equal(res.body.total.revenue, 500 + 400 + 300 + 200 + 100, 'итог считает ВСЕ группы, а не показанные');
+  assert.equal(res.body.truncated, false);
+});
+
+test('разрез по статусам смотрит на все заказы, а не только на «выручку»', async () => {
+  // Отфильтруй мы отменённые как не-выручку, разбивка ПО статусам показала бы ровно те статусы,
+  // которые сама и отобрала.
+  let seen = null;
+  const { routes } = build({
+    db: { getCdekBreakdownForActor: async (_id, _actor, opts) => { seen = opts; return []; } },
+  });
+  await call(routes, 'GET /api/cdek/breakdown', { query: { dim: 'status', include: 'completed' } });
+  assert.equal(seen.include, 'all');
+  await call(routes, 'GET /api/cdek/breakdown', { query: { dim: 'channel', include: 'completed' } });
+  assert.equal(seen.include, 'completed', 'остальные измерения режим уважают');
+});
+
+test('пустой ключ разреза отдаётся как null — это отсутствие канала, а не его имя', async () => {
+  const { routes } = build({
+    db: {
+      getCdekBreakdownForActor: async () => [
+        { key: '', revenue_kopecks: '100', orders: '1', items: '1', prev_revenue_kopecks: '0', prev_orders: '0' },
+      ],
+    },
+  });
+  const res = await call(routes, 'GET /api/cdek/breakdown', { query: {} });
+  assert.equal(res.body.rows[0].key, null);
+});
+
+test('календарь покрытия при «Всё» берёт размах архива, а не выдумывает окно', async () => {
+  let seen = null;
+  const { routes } = build({
+    db: {
+      getCdekBoundsForActor: async () => ({ first_day: '2025-07-31', last_day: '2026-07-30', orders: 1100 }),
+      getCdekCoverageForActor: async (_id, _actor, opts) => {
+        seen = opts;
+        return [{ day: '2025-07-31', revenue_kopecks: '100000', orders: '1', covered: true }];
+      },
+    },
+  });
+  const res = await call(routes, 'GET /api/cdek/coverage', { query: { days: '0' } });
+  assert.deepEqual([seen.from, seen.to], ['2025-07-31', '2026-07-30']);
+  assert.equal(res.body.days[0].revenue, 1000);
+  assert.equal(res.body.days[0].covered, true);
+});
+
+test('пустой архив: календарь отвечает пусто, а не пятисоткой', async () => {
+  const { routes } = build({ db: { getCdekBoundsForActor: async () => null } });
+  const res = await call(routes, 'GET /api/cdek/coverage', { query: { days: '0' } });
+  assert.deepEqual(res.body, { from: null, to: null, days: [], bounds: null });
+});
+
+test('чтение доступно роли viewer — под admin только запись', async () => {
+  const { routes } = build({
+    db: {
+      getChannelOrDefault: async () => ({ id: 5, owner_uid: 42, source: 'cdek', member_role: 'viewer' }),
+      getCdekSummaryForActor: async () => ({ current: TOTALS, previous: null }),
+    },
+  });
+  const res = await call(routes, 'GET /api/cdek/summary', { query: { days: '30' } });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.current.orders, 1035);
 });

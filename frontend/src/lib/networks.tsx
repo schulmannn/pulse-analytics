@@ -55,8 +55,11 @@ export const NETWORKS = [
       { to: '/posts', label: 'Контент', icon: 'posts' },
       { to: '/mentions', label: 'Упоминания', icon: 'mentions' },
     ],
-    // Standalone Instagram/МойСклад/Метрика sources have no Telegram side.
-    hasChannel: (c) => c.source !== 'ig' && c.source !== 'ms' && c.source !== 'ym',
+    // Standalone Instagram/МойСклад/Метрика/СДЭК sources have no Telegram side. Список исключений,
+    // а не белый список: канал коллектора приезжает с разными source ('qr', 'collector', 'central'),
+    // и все они — Telegram. Зато каждый НОВЫЙ не-телеграмный источник обязан попасть сюда, иначе
+    // он молча притворится телеграм-каналом с пустыми данными.
+    hasChannel: (c) => c.source !== 'ig' && c.source !== 'ms' && c.source !== 'ym' && c.source !== 'cdek',
   },
   {
     key: 'ig',
