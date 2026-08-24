@@ -5,6 +5,7 @@ import {
   useRevokeInvite,
   useSetMemberRole,
   useTeam,
+  type TeamResponse,
 } from '@/api/team';
 import { isPaidPlan, PLAN_LABEL, usePlan } from '@/lib/plan';
 import {
@@ -70,6 +71,26 @@ const roleLabelOf = (role: string) => ROLE_LABEL[role as MemberRole] ?? role;
 
 const errorText = (error: unknown) =>
   error instanceof Error ? error.message : 'Не удалось выполнить запрос';
+
+/**
+ * Что сказать после «Пригласить». Раньше здесь всегда стояло «Приглашение отправлено» — и это
+ * ВРАЛО ровно в том случае, который встречается первым: без RESEND_API_KEY сервер только пишет
+ * письмо в лог, а форма рапортовала об отправке. Теперь ответ разбирается по трём состояниям,
+ * и провал называет причину провайдера, а не оставляет человека гадать.
+ */
+function deliveryText(data: TeamResponse | undefined): string {
+  if (!data) return 'Приглашение создано.';
+  if (data.email_configured === false) {
+    return 'Приглашение создано, но письмо НЕ отправлено: на сервере не настроена почта (RESEND_API_KEY).';
+  }
+  if (data.delivered === false) {
+    const reason = [data.delivery?.status, data.delivery?.error].filter(Boolean).join(' · ');
+    return reason
+      ? `Приглашение создано, но почтовый провайдер отклонил письмо (${reason}). Ссылку можно выслать заново.`
+      : 'Приглашение создано, но письмо отправить не удалось — попробуйте выслать ещё раз.';
+  }
+  return 'Приглашение отправлено.';
+}
 
 function TeamRoster({ plan }: { plan: 'pro' | 'max' }) {
   const team = useTeam();
@@ -177,11 +198,7 @@ function TeamRoster({ plan }: { plan: 'pro' | 'max' }) {
             )}
             <div aria-live="polite">
               {invite.isSuccess && (
-                <p className="mt-2 text-xs text-ink2">
-                  {invite.data?.delivered === false
-                    ? 'Приглашение создано, но письмо отправить не удалось — попробуйте выслать ещё раз.'
-                    : 'Приглашение отправлено.'}
-                </p>
+                <p className="mt-2 text-xs text-ink2">{deliveryText(invite.data)}</p>
               )}
             </div>
           </>

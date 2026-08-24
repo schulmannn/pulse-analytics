@@ -516,6 +516,7 @@ function createComposition(config, overrides = {}) {
       RESET_TTL,
       INVITE_TTL,
       sendEmail,
+      sendEmailDetailed,
       emailConfigured,
       emailShell,
       emailBtn,

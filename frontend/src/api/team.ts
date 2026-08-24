@@ -58,6 +58,16 @@ export const TeamResponseSchema = z
     // пишется в лог. Поверхность обязана сказать это вслух.
     email_configured: z.boolean().optional().default(true),
     delivered: z.boolean().optional(),
+    // Причина, по которой письмо не ушло (исход sendEmailDetailed + ответ Resend). null при успехе.
+    delivery: z
+      .object({
+        outcome: z.string().optional().nullable(),
+        status: z.coerce.number().optional().nullable(),
+        error: z.string().optional().nullable(),
+      })
+      .passthrough()
+      .optional()
+      .nullable(),
   })
   .passthrough();
 export type TeamResponse = z.infer<typeof TeamResponseSchema>;

@@ -16,7 +16,7 @@
 function registerTeamRoutes({
   app, db, requireAuth, authLimiter, audit, log,
   appBase, sha256, newToken, INVITE_TTL,
-  sendEmail, emailConfigured, escHtml,
+  sendEmailDetailed, emailConfigured, escHtml,
   hashPassword, signSession, SESSION_TTL, SESSION_ABSOLUTE_TTL, setSessionCookie,
 }) {
   const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
@@ -121,11 +121,12 @@ function registerTeamRoutes({
       const workspace = await db.ensureTeamWorkspace(req.user.uid);
       if (!workspace) return res.status(503).json({ error: 'Рабочее пространство недоступно' });
       const raw = newToken();
+      const tokenHash = sha256(raw);
       const result = await db.createWorkspaceInvite({
         workspaceId: workspace.id,
         email,
         role,
-        tokenHash: sha256(raw),
+        tokenHash,
         invitedBy: req.user.uid,
         expiresAt: new Date(Date.now() + INVITE_TTL),
       });
@@ -144,18 +145,38 @@ function registerTeamRoutes({
       const link = `${base}/invite?token=${raw}`;
       // Тема несёт КТО и КУДА: в списке писем это видно ещё до открытия.
       const subject = `${String(req.user.email).split('@')[0]} зовёт вас в ${workspace.name}`;
-      const delivered = await sendEmail(
+      /* sendEmailDetailed, а не булев sendEmail: приглашение — единственное письмо, чей провал
+         видит ЖИВОЙ человек в интерфейсе, и «не ушло» без причины не даёт ему ничего сделать.
+         Структурный исход несёт status и имя ошибки Resend (напр. 403 при отправке с песочного
+         onboarding@resend.dev на чужой адрес) — его и логируем, и показываем.
+         Ключ идемпотентности привязан к ВЫПУЩЕННОМУ токену: повтор с тем же токеном не шлёт
+         второе письмо, а перевыпуск (новый токен) — шлёт. */
+      const sent = await sendEmailDetailed(
         email,
         subject,
         inviteEmailHtml(link, workspace.name, req.user.email, role, base),
-        link,
+        { idempotencyKey: `invite:${result.invite.id}:${tokenHash.slice(0, 16)}` },
       );
+      const delivered = sent.outcome === 'sent';
       audit(req, 'team.invited', { workspace_id: workspace.id, role, reissued: !!result.reissued }).catch(() => {});
       if (!delivered) {
-        log('warn', 'team_invite_email_failed', { workspace_id: workspace.id, invite_id: result.invite.id });
+        log('warn', 'team_invite_email_failed', {
+          workspace_id: workspace.id,
+          invite_id: result.invite.id,
+          outcome: sent.outcome,
+          status: sent.status || null,
+          provider_error: sent.name || sent.reason || null,
+        });
       }
       const state = await teamState(req.user.uid);
-      res.json({ ok: true, delivered: !!delivered, invite: result.invite, ...state });
+      res.json({
+        ok: true,
+        delivered,
+        // Причина отказа — для человека у формы: сервер знает её, и молчать о ней нечестно.
+        delivery: delivered ? null : { outcome: sent.outcome, status: sent.status || null, error: sent.name || sent.reason || null },
+        invite: result.invite,
+        ...state,
+      });
     } catch (e) { next(e); }
   });
 
