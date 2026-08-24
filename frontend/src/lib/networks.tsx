@@ -108,6 +108,22 @@ export const NETWORKS = [
     // Отдельный канал source='ym', создаётся при подключении OAuth-токена счётчика.
     hasChannel: (c) => c.source === 'ym',
   },
+  {
+    // «СДЭК Fulfillment» — первый источник БЕЗ API: заказы приезжают выгрузкой Excel, которую
+    // пользователь загружает руками. Отсюда и единственный пока раздел «Загрузки»: у источника,
+    // который наполняют вручную, честность данных — это в первую очередь вопрос «что и за какой
+    // период вообще залито». «Обзор» встанет первым разделом, когда появится.
+    key: 'cdek',
+    name: 'СДЭК',
+    color: '#00B33C',
+    home: '/cdek',
+    prefix: '/cdek',
+    nav: [
+      { to: '/cdek', label: 'Загрузки', icon: 'upload', end: true },
+    ],
+    // Отдельный канал source='cdek', создаётся кнопкой на /connect.
+    hasChannel: (c) => c.source === 'cdek',
+  },
 ] as const satisfies readonly NetworkDef[];
 
 /** Network key union — extends automatically when a registry entry is added. */
@@ -142,6 +158,7 @@ export function networkForPath(pathname: string): Network {
  *   everything else                  → null (agnostic — the store decides)
  */
 export function routeNetworkOwner(pathname: string): Network | null {
+  if (pathname === '/cdek' || pathname.startsWith('/cdek/')) return 'cdek';
   if (pathname === '/sklad' || pathname.startsWith('/sklad/')) return 'ms';
   if (pathname === '/metrika' || pathname.startsWith('/metrika/')) return 'ym';
   if (pathname === '/instagram' || pathname.startsWith('/instagram/')) return 'ig';
@@ -194,6 +211,19 @@ export function NetworkGlyph({ k, className }: { k: string; className?: string }
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={className} aria-hidden="true">
         <circle cx="12" cy="12" r="8.5" />
         <path d="M12 12V3.5M12 12l6 6" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  if (k === 'cdek') {
+    // «СДЭК» — фура доставки. Короб взять нельзя: он уже занят «МойСкладом», а два коробка в
+    // одном переключателе источников читались бы как один и тот же склад.
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={className} aria-hidden="true">
+        <path d="M14 17.5V7a1.5 1.5 0 0 0-1.5-1.5h-8A1.5 1.5 0 0 0 3 7v9.5a1 1 0 0 0 1 1h1" strokeLinejoin="round" />
+        <path d="M14 9h3.2a1 1 0 0 1 .8.4l2.8 3.6a1 1 0 0 1 .2.6v3a1 1 0 0 1-1 1h-1" strokeLinejoin="round" />
+        <path d="M9 17.5h6" strokeLinecap="round" />
+        <circle cx="7" cy="17.5" r="1.9" />
+        <circle cx="17" cy="17.5" r="1.9" />
       </svg>
     );
   }

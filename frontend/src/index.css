@@ -193,6 +193,19 @@
   border-radius: 9999px;
 }
 
+/* Штриховка ПРОПУСКА для не-SVG поверхностей (клетки календаря покрытия). Та же лексика, что у
+   ChartGapPattern: нейтральный muted под 45°, шаг 6px — «данных нет» обязано выглядеть одинаково
+   и на графике, и в сетке, иначе пропуск в одном месте читается как ноль в другом. */
+@utility gap-hatch {
+  background-image: repeating-linear-gradient(
+    45deg,
+    color-mix(in oklab, var(--color-muted-foreground) 16%, transparent) 0,
+    color-mix(in oklab, var(--color-muted-foreground) 16%, transparent) 1px,
+    transparent 1px,
+    transparent 5px
+  );
+}
+
 /* ── Widget-slot container queries ─────────────────────────────────────────────────────────────
    Тело виджета (WidgetBody slot) — именованный CQ-контейнер `tile`: содержимое карточки меряет
    СВОЙ слот, а не вьюпорт. Full-карточки авто-высотные — контейнер только по inline-оси (height-

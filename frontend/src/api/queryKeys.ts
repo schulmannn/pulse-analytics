@@ -90,6 +90,21 @@ export const qk = {
     window: (channelId: number | null, period: MsPeriod, limit: number, sort: string) =>
       ['ms-top-products', channelId, ...msPeriodKey(period), limit, sort],
   },
+  // ── СДЭК Fulfillment (source='cdek'): источник с ручной загрузкой Excel ──
+  // Отдельные семьи, а не одна: после загрузки инвалидируются ВСЕ три (архив вырос, покрытие
+  // изменилось, история пополнилась), а вот при смене канала статус и история независимы.
+  cdekStatus: {
+    all: ['cdek-status'] as const,
+    byChannel: (channelId: number | null) => ['cdek-status', channelId] as const,
+  },
+  cdekImports: {
+    all: ['cdek-imports'] as const,
+    byChannel: (channelId: number | null) => ['cdek-imports', channelId] as const,
+  },
+  cdekCoverage: {
+    all: ['cdek-coverage'] as const,
+    byChannel: (channelId: number | null) => ['cdek-coverage', channelId] as const,
+  },
   ...ymFamilies,
   /** Префиксы ВСЕХ семей Метрики одним списком: `invalidateYm` после смены счётчика обязан
       пройтись по ним, а не по трём — иначе 14 карточек разрезов до 5 минут врут прошлым счётчиком. */

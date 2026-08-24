@@ -47,6 +47,7 @@ export interface OrbitHealthMap {
   instagram: OrbitNetworkHealth;
   moysklad: OrbitNetworkHealth;
   metrika: OrbitNetworkHealth;
+  cdek: OrbitNetworkHealth;
 }
 
 const ORBIT_OK: OrbitNetworkHealth = { health: 'ok', reason: null };
@@ -90,6 +91,10 @@ export function orbitHealth({ telegram, instagram, now = Date.now() }: OrbitHeal
     // names, channel rows or archive freshness: absence of a documented signal is honestly `ok`.
     moysklad: ORBIT_OK,
     metrika: ORBIT_OK,
+    // У СДЭКа нет ни токена, ни фонового сбора — ломаться нечему. «Данные устарели» здесь не
+    // health-сигнал, а свойство ручной загрузки: об этом честнее говорит календарь покрытия на
+    // самой странице источника, чем тревожная точка в орбите.
+    cdek: ORBIT_OK,
   };
 }
 

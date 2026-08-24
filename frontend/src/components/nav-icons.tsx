@@ -40,6 +40,7 @@ const PATHS = {
   external: ['M7 17 17 7', 'M9 7h8v8'],
   image: ['M4 5h16v14H4z', 'M8.5 10h.01', 'm5 17 4-4 3 3 2.5-2.5L19 18'],
   playCircle: ['M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z', 'm10 8.5 5 3.5-5 3.5z'],
+  upload: ['M12 16V4', 'm7 9 5-5 5 5', 'M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3'],
 } as const;
 
 export type IconName = keyof typeof PATHS;

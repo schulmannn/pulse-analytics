@@ -112,7 +112,16 @@ function registerCdekRoutes({ app, express, requireAuth, db, audit, cdekImport }
       if (!channel) return;
       const buffer = Buffer.isBuffer(req.body) ? req.body : null;
       if (!buffer || !buffer.length) return res.status(400).json({ error: 'Пустой файл' });
-      const filename = String(req.headers['x-filename'] || 'выгрузка.xlsx').slice(0, 200);
+      // Имя приезжает percent-encoded: кириллица в HTTP-заголовке недопустима. Битую
+      // последовательность не роняем на пользователя — берём как есть.
+      const rawName = String(req.headers['x-filename'] || 'выгрузка.xlsx');
+      let filename;
+      try {
+        filename = decodeURIComponent(rawName);
+      } catch {
+        filename = rawName;
+      }
+      filename = filename.slice(0, 200);
 
       const result = await cdekImport.importFile({
         channelId: channel.id,

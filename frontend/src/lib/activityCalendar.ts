@@ -3,6 +3,9 @@ import { parseDayKey } from '@/lib/format';
 export interface ActivityCalendarPoint {
   day: string;
   views: number;
+  /** Есть ли за этот день данные вообще. Источник с ручной загрузкой обязан отличать «ноль
+      заказов» от «выгрузка не залита»; у источников с автосбором поле не задаётся. */
+  covered?: boolean;
 }
 
 export interface ActivityCalendarDay {
@@ -10,6 +13,8 @@ export interface ActivityCalendarDay {
   value: number;
   level: 0 | 1 | 2 | 3 | 4;
   isToday: boolean;
+  /** false = данных за день нет (не «ноль»). См. defaultCovered в buildActivityCalendar. */
+  covered: boolean;
 }
 
 export interface ActivityCalendarWeek {
@@ -75,20 +80,29 @@ export function activityLevel(value: number, thresholds: [number, number, number
  * Builds an exact trailing-365-day, Monday-first calendar. Bare API day keys are parsed at local
  * midnight; absent observations stay honest zero cells, while alignment/future slots stay `null`.
  */
+/**
+ * @param defaultCovered чем считать день, которого нет во входных точках. У источников с
+ * автосбором (Telegram) пропуск точки — это просто ноль, поэтому true. У источника с ручной
+ * загрузкой пропуск означает «за этот день выгрузку не заливали», и это надо показать штриховкой,
+ * а не нулём: иначе дыра в загрузке читается как провал продаж.
+ */
 export function buildActivityCalendar(
   points: readonly ActivityCalendarPoint[],
   now: Date = new Date(),
+  { defaultCovered = true }: { defaultCovered?: boolean } = {},
 ): ActivityCalendarModel {
   const today = localMidnight(now);
   const start = addDays(today, -(DAY_COUNT - 1));
   const gridStart = addDays(start, -((start.getDay() + 6) % 7));
   const todayKey = dayKey(today);
   const valuesByDay = new Map<string, number>();
+  const coveredByDay = new Map<string, boolean>();
 
   for (const point of points) {
     const parsed = parseDayKey(point.day);
     if (!parsed || parsed < start || parsed > today || !Number.isFinite(point.views)) continue;
     valuesByDay.set(point.day, Math.max(0, point.views));
+    coveredByDay.set(point.day, point.covered ?? true);
   }
 
   const values = Array.from(valuesByDay.values()).filter((value) => value > 0);
@@ -117,6 +131,7 @@ export function buildActivityCalendar(
         value,
         level: activityLevel(value, thresholds),
         isToday: key === todayKey,
+        covered: coveredByDay.get(key) ?? defaultCovered,
       };
       days.push(cell);
       total += value;
