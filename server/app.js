@@ -127,6 +127,13 @@ function createApp(deps) {
   // cleanup. Only its /js asset is still served from public/ (public/index.html is no
   // longer routed — the SPA fallback owns '/').
   app.use('/js', express.static(path.join(__dirname, '../public/js')));
+  // Картинки для писем (маскот в приглашении). Отдаются с ТОГО ЖЕ origin, что и ссылки в письмах
+  // (appBase, защищённый от Host-header poisoning) — стороннего хостинга у нас нет. Почтовые
+  // клиенты тянут их без сессии, поэтому директория держит только публичную статику.
+  app.use('/email', express.static(path.join(__dirname, '../public/email'), {
+    maxAge: '30d',
+    index: false,
+  }));
 
   app.use('/api/', limiter);
 
@@ -196,8 +203,6 @@ function createApp(deps) {
     INVITE_TTL,
     sendEmail,
     emailConfigured,
-    emailShell,
-    emailBtn,
     escHtml,
     hashPassword,
     signSession,

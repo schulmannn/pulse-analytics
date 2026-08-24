@@ -16,21 +16,62 @@
 function registerTeamRoutes({
   app, db, requireAuth, authLimiter, audit, log,
   appBase, sha256, newToken, INVITE_TTL,
-  sendEmail, emailConfigured, emailShell, emailBtn, escHtml,
+  sendEmail, emailConfigured, escHtml,
   hashPassword, signSession, SESSION_TTL, SESSION_ABSOLUTE_TTL, setSessionCookie,
 }) {
   const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
   const normalizeEmail = (value) => String(value || '').toLowerCase().trim();
   const dbOff = (res) => res.status(503).json({ error: 'БД не подключена' });
 
-  const inviteEmailHtml = (link, workspace, inviter, roleLabel) => emailShell(
-    'Приглашение в Atlavue',
-    `<p>${escHtml(inviter)} приглашает вас в рабочее пространство <b>${escHtml(workspace)}</b> — роль «${escHtml(roleLabel)}».</p>`
-    + emailBtn(link, 'Принять приглашение')
-    + '<p style="color:#64748d;font-size:13px">Ссылка действует 7 дней и открывает доступ только к данным этого пространства. '
-    + 'Если вы не ждали приглашения — просто проигнорируйте письмо.</p>');
-
   const ROLE_LABEL = { admin: 'Администратор', member: 'Редактор', viewer: 'Наблюдатель' };
+  const ROLE_CAN = {
+    admin: 'управлять источниками и ключами',
+    member: 'смотреть данные и вести заметки',
+    viewer: 'только просмотр',
+  };
+
+  /* Приглашение — единственное письмо со СВОЕЙ вёрсткой (остальные живут на emailShell/emailBtn):
+     это первое, что видит человек об Atlavue, поэтому у него есть марка, маскот и роль строкой
+     данных. Таблицы + инлайн-стили — то, что переживает Gmail/Outlook/Mail.ru; SVG почта вырезает,
+     поэтому Сыщик — PNG с нашего же origin. Ячейка маскота несёт ЯВНЫЙ bgcolor: тёмная тема почты
+     инвертирует фон, но не картинку, и чёрный силуэт на прозрачном фоне иначе исчезает. */
+  const inviteEmailHtml = (link, workspace, inviter, role, base) => {
+    const mono = 'font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;color:#8a8880;letter-spacing:0.08em;text-transform:uppercase';
+    const sans = "font-family:system-ui,-apple-system,'Segoe UI',sans-serif";
+    return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background:#f3f2ee"><tr><td align="center" style="padding:28px 16px 36px">
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="600" style="width:600px;max-width:100%;background:#ffffff;border:1px solid #e4e2db;border-radius:12px">
+  <tr><td style="padding:26px 30px 0">
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%"><tr>
+      <td style="${sans};font-size:15px;font-weight:600;color:#1a1a17;letter-spacing:-0.01em">Atlavue</td>
+      <td align="right" style="${mono}">Приглашение</td>
+    </tr></table>
+  </td></tr>
+  <tr><td style="padding:20px 30px 0"><div style="height:1px;background:#e4e2db;line-height:1px">&nbsp;</div></td></tr>
+  <tr><td style="padding:26px 30px 0">
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%"><tr>
+      <td width="76" valign="top" bgcolor="#ffffff" style="padding-right:18px;background:#ffffff">
+        <img src="${escHtml(base)}/email/detective.png" width="76" height="89" alt=""
+             style="display:block;width:76px;height:89px;border:0;outline:none;text-decoration:none">
+      </td>
+      <td valign="top" style="${sans}">
+        <div style="font-size:23px;font-weight:600;color:#1a1a17;letter-spacing:-0.02em;line-height:1.25">Вас зовут в «${escHtml(workspace)}»</div>
+        <div style="font-size:15px;color:#5c5b53;line-height:1.55;margin-top:10px"><b style="color:#1a1a17;font-weight:500">${escHtml(inviter)}</b> открывает вам доступ к аналитике своего пространства.</div>
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin-top:16px">
+          <tr><td style="${mono};padding:0 14px 4px 0">Роль</td><td style="${mono};padding:0 0 4px">Что можно</td></tr>
+          <tr>
+            <td style="${sans};font-size:14px;color:#1a1a17;font-weight:500;padding-right:14px">${escHtml(ROLE_LABEL[role] || role)}</td>
+            <td style="${sans};font-size:14px;color:#5c5b53">${escHtml(ROLE_CAN[role] || '')}</td>
+          </tr>
+        </table>
+      </td>
+    </tr></table>
+  </td></tr>
+  <tr><td style="padding:24px 30px 28px">
+    <a href="${escHtml(link)}" style="display:block;text-align:center;padding:13px 20px;background:#2d6be0;color:#ffffff;border-radius:8px;text-decoration:none;${sans};font-size:15px;font-weight:500">Принять приглашение</a>
+  </td></tr>
+</table>
+</td></tr></table>`;
+  };
 
   /* Общий сбор состояния «Команды». Один и тот же кадр отдают и GET, и мутации — фронт после
      любой правки получает согласованный ростер вместо отдельного рефетча. `seats.limit` —
@@ -97,13 +138,16 @@ function registerTeamRoutes({
       if (result.outcome === 'full') {
         return res.status(409).json({ error: `Все места заняты (максимум ${result.limit})` });
       }
-      // Ссылка собирается ДО отправки из доверенного origin (appBase защищён от Host-header
-      // poisoning) — тот же приём, что у verify/reset.
-      const link = `${appBase(req)}/invite?token=${raw}`;
+      // Ссылка и картинка письма собираются ДО отправки из доверенного origin (appBase защищён от
+      // Host-header poisoning) — тот же приём, что у verify/reset.
+      const base = appBase(req);
+      const link = `${base}/invite?token=${raw}`;
+      // Тема несёт КТО и КУДА: в списке писем это видно ещё до открытия.
+      const subject = `${String(req.user.email).split('@')[0]} зовёт вас в ${workspace.name}`;
       const delivered = await sendEmail(
         email,
-        `Приглашение в Atlavue — ${workspace.name}`,
-        inviteEmailHtml(link, workspace.name, req.user.email, ROLE_LABEL[role] || role),
+        subject,
+        inviteEmailHtml(link, workspace.name, req.user.email, role, base),
         link,
       );
       audit(req, 'team.invited', { workspace_id: workspace.id, role, reissued: !!result.reissued }).catch(() => {});
