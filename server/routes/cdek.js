@@ -323,6 +323,10 @@ function registerCdekRoutes({ app, express, requireAuth, db, audit, cdekImport }
           items: int(r.items),
           prev_revenue: rub(r.prev_revenue_kopecks),
           prev_orders: int(r.prev_orders),
+          // Разброс цены за штуку — null, когда строк в окне нет (а не ноль: цены не было).
+          price_min: rub(r.price_min_kopecks),
+          price_median: rub(r.price_median_kopecks),
+          price_max: rub(r.price_max_kopecks),
         })),
         other: tail.length ? tail.reduce(fold, zero) : null,
         total: groups.reduce(fold, zero),
