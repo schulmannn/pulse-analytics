@@ -5,7 +5,6 @@ import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { TableSkeleton } from '@/components/ui/dataSkeleton';
 import { LoaderDots } from '@/components/ui/loader';
-import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/nav-icons';
 import { ApiError } from '@/api/client';
 import { useCdekCoverage, useCdekImports, useCdekReplay, useCdekStatus, useCdekUpload, type CdekImport } from '@/api/cdek';
@@ -176,7 +175,7 @@ function DropZone({ busy, onFile }: { busy: boolean; onFile: (file: File) => voi
   const inputRef = useRef<HTMLInputElement>(null);
   const [over, setOver] = useState(false);
 
-  const drop = (e: DragEvent<HTMLDivElement>) => {
+  const drop = (e: DragEvent<HTMLButtonElement>) => {
     e.preventDefault();
     setOver(false);
     const file = e.dataTransfer?.files?.[0];
@@ -184,20 +183,8 @@ function DropZone({ busy, onFile }: { busy: boolean; onFile: (file: File) => voi
   };
 
   return (
-    <div
-      onDragOver={(e) => {
-        e.preventDefault();
-        if (!busy) setOver(true);
-      }}
-      onDragLeave={() => setOver(false)}
-      onDrop={drop}
-      className={cn(
-        'flex flex-col items-center justify-center rounded-lg border border-dashed px-6 py-8 text-center transition-colors',
-        over ? 'border-primary bg-primary/5' : 'border-border',
-        busy && 'opacity-70',
-      )}
-      data-cdek-dropzone=""
-    >
+    <>
+      {/* Поле файла — СНАРУЖИ кнопки: интерактивный элемент внутри <button> невалиден. */}
       <input
         ref={inputRef}
         type="file"
@@ -212,6 +199,26 @@ function DropZone({ busy, onFile }: { busy: boolean; onFile: (file: File) => voi
           if (file) onFile(file);
         }}
       />
+      {/* Вся зона — НАСТОЯЩАЯ кнопка, а не div с ролью: клавиатура, фокус и семантика достаются
+          даром, вложенной кнопки внутри нет (она ломала бы обход с клавиатуры). */}
+      <button
+        type="button"
+        disabled={busy}
+        aria-busy={busy || undefined}
+        onClick={() => inputRef.current?.click()}
+        onDragOver={(e) => {
+          e.preventDefault();
+          if (!busy) setOver(true);
+        }}
+        onDragLeave={() => setOver(false)}
+        onDrop={drop}
+        className={cn(
+          'flex w-full cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed px-6 py-8 text-center transition-colors',
+          over ? 'border-primary bg-primary/5' : 'border-border',
+          busy && 'cursor-default opacity-70',
+        )}
+        data-cdek-dropzone=""
+      >
       {busy ? (
         <p className="flex items-center gap-2 text-sm text-muted-foreground">
           Разбираем выгрузку <LoaderDots />
@@ -220,16 +227,15 @@ function DropZone({ busy, onFile }: { busy: boolean; onFile: (file: File) => voi
         <>
           <Icon name="upload" className="mb-2 size-6 text-muted-foreground" />
           <p className="text-sm text-foreground">Перетащите файл выгрузки сюда</p>
-          <Button type="button" variant="ghost" className="mt-1" onClick={() => inputRef.current?.click()}>
-            или выберите на диске
-          </Button>
+          <p className="mt-1 text-sm font-medium text-primary">или выберите на диске</p>
           <p className="mt-2 text-2xs text-muted-foreground">
             .xlsx или .csv из личного кабинета СДЭКа, до {fileSize(MAX_BYTES)}. Повторная выгрузка с нахлёстом по датам —
             нормально: заказы обновятся, а не задвоятся.
           </p>
         </>
       )}
-    </div>
+      </button>
+    </>
   );
 }
 
