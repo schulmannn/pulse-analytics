@@ -36,7 +36,9 @@ export const TeamInviteSchema = z
 
 export const TeamResponseSchema = z
   .object({
-    workspace: z.object({ id: z.coerce.number(), name: z.string() }).passthrough(),
+    workspace: z
+      .object({ id: z.coerce.number(), name: z.string(), name_max: z.coerce.number().optional().default(64) })
+      .passthrough(),
     members: z.array(TeamMemberSchema).optional().default([]),
     invites: z.array(TeamInviteSchema).optional().default([]),
     // Воркспейсы, где пользователь — приглашённый участник, а не владелец.
@@ -118,6 +120,17 @@ function useTeamWrite<TBody>(send: (body: TBody) => Promise<TeamResponse>) {
     mutationFn: send,
     onSuccess: (data) => qc.setQueryData(qk.team, data),
   });
+}
+
+/**
+ * Переименовать команду. По умолчанию имя — локальная часть email владельца (так его завела
+ * миграция воркспейсов), из-за чего приглашение звало «в schulmannn»; это поле закрывает хвост.
+ * Имя попадает в тему письма, его заголовок и в строку «Вы участник пространства …».
+ */
+export function useRenameTeam() {
+  return useTeamWrite((name: string) =>
+    apiSend('PATCH', '/api/team', { name }, TeamResponseSchema),
+  );
 }
 
 /** Пригласить коллегу: сервер выпускает токен и шлёт письмо со ссылкой на /invite. */

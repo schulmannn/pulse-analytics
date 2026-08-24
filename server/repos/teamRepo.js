@@ -23,6 +23,9 @@ const INVITE_ROLES = ['admin', 'member', 'viewer'];
 // Не чаще одного письма в минуту на (воркспейс, email) — тот же приём, что кулдаун email_tokens:
 // повторное «Пригласить» иначе превращается в кнопку почтового флуда по чужому ящику.
 const INVITE_COOLDOWN_SECONDS = 60;
+// Потолок имени команды. Оно печатается в теме письма и в заголовке — длинное режет вёрстку
+// почтового клиента, а не наш CSS, поэтому кап живёт на сервере, а не только в инпуте.
+const WORKSPACE_NAME_MAX = 64;
 
 const normalizeEmail = (email) => String(email || '').toLowerCase().trim();
 
@@ -35,6 +38,21 @@ function createTeamRepo({ pool, enabled, transaction, ensurePersonalWorkspace })
     if (wsId == null) return null;
     const { rows } = await pool.query(
       'SELECT id, name, owner_uid FROM workspaces WHERE id=$1', [wsId]);
+    return rows[0] || null;
+  }
+
+  /* Переименование команды. Имя воркспейса — ЧИСТО отображаемое: по нему нигде не ищут и ничего
+     не связывают (единственные читатели — экран «Команда», превью приглашения, письмо и
+     GDPR-экспорт), поэтому смена безопасна и не требует миграции ссылок.
+     По умолчанию имя = локальная часть email владельца (миграция 010), из-за чего письмо звало
+     «в schulmannn» — этот метод и закрывает тот хвост. */
+  async function renameWorkspace(workspaceId, name) {
+    if (!enabled || !workspaceId) return null;
+    const trimmed = String(name || '').trim();
+    if (!trimmed || trimmed.length > WORKSPACE_NAME_MAX) return null;
+    const { rows } = await pool.query(
+      'UPDATE workspaces SET name = $2 WHERE id = $1 RETURNING id, name, owner_uid',
+      [workspaceId, trimmed]);
     return rows[0] || null;
   }
 
@@ -267,8 +285,8 @@ function createTeamRepo({ pool, enabled, transaction, ensurePersonalWorkspace })
   }
 
   return {
-    MAX_WORKSPACE_SEATS, INVITE_ROLES, INVITE_COOLDOWN_SECONDS,
-    ensureTeamWorkspace, listWorkspaceMembers, listWorkspaceInvites, listForeignMemberships,
+    MAX_WORKSPACE_SEATS, INVITE_ROLES, INVITE_COOLDOWN_SECONDS, WORKSPACE_NAME_MAX,
+    ensureTeamWorkspace, renameWorkspace, listWorkspaceMembers, listWorkspaceInvites, listForeignMemberships,
     countWorkspaceSeats, createWorkspaceInvite, getWorkspaceInviteByToken, acceptWorkspaceInvite,
     reissueWorkspaceInviteToken, revokeWorkspaceInvite, setWorkspaceMemberRole, removeWorkspaceMember,
   };

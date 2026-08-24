@@ -65,6 +65,30 @@ test('ensureTeamWorkspace: личный воркспейс создаётся л
   assert.strictEqual(await db.countWorkspaceSeats(first.id), 0, 'владелец места не занимает');
 });
 
+test('переименование команды: имя доезжает до приглашённого и в превью ссылки', { skip }, async () => {
+  const owner = await mkUser('rename');
+  const ws = await db.ensureTeamWorkspace(owner.id);
+  assert.strictEqual(ws.name, owner.email.split('@')[0], 'по умолчанию имя = локальная часть email');
+
+  assert.strictEqual(await db.renameWorkspace(ws.id, '   '), null, 'пустое имя не сохраняется');
+  assert.strictEqual(
+    await db.renameWorkspace(ws.id, 'x'.repeat(db.WORKSPACE_NAME_MAX + 1)), null,
+    'имя длиннее капа не сохраняется');
+  assert.strictEqual((await db.ensureTeamWorkspace(owner.id)).name, ws.name, 'отказы имя не тронули');
+
+  const renamed = await db.renameWorkspace(ws.id, '  Нотем  ');
+  assert.strictEqual(renamed.name, 'Нотем', 'пробелы по краям срезаются');
+
+  // Имя — то, что видит приглашённый: и в превью ссылки, и в строке членства.
+  const guestMail = mail('renamed');
+  const inv = await invite(ws.id, guestMail, 'viewer', { by: owner.id });
+  assert.strictEqual((await db.getWorkspaceInviteByToken(sha256(inv.raw))).workspace_name, 'Нотем');
+
+  const guest = await db.createUser({ email: guestMail, pass_hash: 'x', role: 'user', status: 'active' });
+  await db.acceptWorkspaceInvite({ tokenHash: sha256(inv.raw), uid: guest.id, email: guestMail });
+  assert.strictEqual((await db.listForeignMemberships(guest.id))[0].name, 'Нотем');
+});
+
 test('полный круг: приглашение → приём → участник с ролью из приглашения', { skip }, async () => {
   const owner = await mkUser('o');
   const ws = await db.ensureTeamWorkspace(owner.id);

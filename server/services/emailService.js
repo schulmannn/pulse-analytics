@@ -178,7 +178,9 @@ function createEmailService({ config, fetchImpl, sleep, now } = {}) {
     if (!RESEND_API_KEY) {
       // Parity with legacy sendEmail's dev branch: no provider → treat as sent so local/report flows
       // complete. The scheduled job additionally gates on configured(), so this never runs in prod.
-      console.log('[email:dev] scheduled report send skipped (RESEND_API_KEY unset)');
+      // Строку читают ДВА вызывающих (отчёты и приглашения) — поэтому она называет адресата и тему,
+      // а не «scheduled report»: иначе лог врал бы про происхождение письма.
+      console.log(`[email:dev] to=${to} · "${subject}" (RESEND_API_KEY unset — not sent)`);
       return { outcome: 'sent', dev: true };
     }
     const key = String(idempotencyKey || '');

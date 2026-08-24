@@ -1,6 +1,7 @@
 import { useState, type FormEvent, type ReactNode } from 'react';
 import {
   useInviteLink,
+  useRenameTeam,
   useInviteMember,
   useRemoveMember,
   useRevokeInvite,
@@ -156,7 +157,13 @@ function TeamRoster({ plan }: { plan: 'pro' | 'max' }) {
         : ' Коллега получит письмо со ссылкой; доступ откроется, когда он её примет.');
 
   return (
-    <SettingsGroup>
+    <div className="space-y-8">
+      <TeamNameGroup
+        name={team.data?.workspace.name ?? ''}
+        max={team.data?.workspace.name_max ?? 64}
+        disabled={team.isLoading}
+      />
+      <SettingsGroup>
       <SettingsRow
         title="Пригласить участника"
         description={description}
@@ -315,6 +322,74 @@ function TeamRoster({ plan }: { plan: 'pro' | 'max' }) {
           {ws.owner_email ? ` (${ws.owner_email})` : ''} — роль «{roleLabelOf(ws.role)}».
         </div>
       ))}
+      </SettingsGroup>
+    </div>
+  );
+}
+
+/**
+ * Название команды. По умолчанию воркспейс называется локальной частью email владельца (так его
+ * завела миграция), поэтому приглашение звало «в schulmannn». Имя уходит в тему письма, его
+ * заголовок и в строку «Вы участник пространства …» у приглашённых — то есть это то, как команду
+ * видят СНАРУЖИ, а не внутренняя подпись.
+ */
+function TeamNameGroup({ name, max, disabled }: { name: string; max: number; disabled: boolean }) {
+  const rename = useRenameTeam();
+  const [draft, setDraft] = useState<string | null>(null);
+  // draft === null → поле показывает серверное значение; ненулевой draft = несохранённая правка.
+  const value = draft ?? name;
+  const trimmed = value.trim();
+  const dirty = trimmed !== name && trimmed.length > 0;
+
+  const save = (event: FormEvent) => {
+    event.preventDefault();
+    if (!dirty) return;
+    rename.mutate(trimmed, { onSuccess: () => setDraft(null) });
+  };
+
+  return (
+    <SettingsGroup>
+      <SettingsRow
+        title="Название команды"
+        description="Его видят приглашённые — в письме и в списке пространств. По умолчанию подставлено из вашего email."
+        footer={
+          <>
+            <form onSubmit={save} className="mt-3 flex flex-col gap-2 @min-[32rem]:flex-row">
+              <Input
+                value={value}
+                onChange={(e) => {
+                  setDraft(e.target.value);
+                  rename.reset();
+                }}
+                placeholder="Например, «Нотем»"
+                maxLength={max}
+                disabled={disabled || rename.isPending}
+                aria-label="Название команды"
+                className="w-full flex-1"
+              />
+              <Button
+                type="submit"
+                size="sm"
+                pending={rename.isPending}
+                disabled={!dirty || rename.isPending}
+                className="shrink-0"
+              >
+                {rename.isPending ? 'Сохраняем…' : 'Сохранить'}
+              </Button>
+            </form>
+            {rename.isError && (
+              <p role="alert" className="mt-2 text-xs font-medium text-destructive">
+                {errorText(rename.error)}
+              </p>
+            )}
+            <div aria-live="polite">
+              {rename.isSuccess && !dirty && (
+                <p className="mt-2 text-xs text-ink2">Название сохранено.</p>
+              )}
+            </div>
+          </>
+        }
+      />
     </SettingsGroup>
   );
 }
