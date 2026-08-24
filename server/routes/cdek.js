@@ -337,6 +337,61 @@ function registerCdekRoutes({ app, express, requireAuth, db, audit, cdekImport }
     }
   });
 
+  // GET /api/cdek/hourly — ритм заказов: день недели × час в зоне источника.
+  app.get('/api/cdek/hourly', requireAuth, async (req, res, next) => {
+    try {
+      const ctx = await resolveRead(req, res);
+      if (!ctx) return;
+      const cells = await db.getCdekHourlyForActor(ctx.channel.id, req.user, {
+        ...ctx.period, tz: ctx.tz, include: ctx.include,
+      });
+      res.json({
+        window: { days: ctx.period.days, from: ctx.period.from, to: ctx.period.to, all: ctx.period.all },
+        cells: cells.map((c) => ({ weekday: int(c.weekday), hour: int(c.hour), orders: int(c.orders) })),
+      });
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  // GET /api/cdek/orders?status=&channel=&q=&limit= — лента заказов окна.
+  app.get('/api/cdek/orders', requireAuth, async (req, res, next) => {
+    try {
+      const ctx = await resolveRead(req, res);
+      if (!ctx) return;
+      const data = await db.getCdekOrdersForActor(ctx.channel.id, req.user, {
+        ...ctx.period,
+        tz: ctx.tz,
+        include: ctx.include,
+        status: req.query.status,
+        channel: req.query.channel,
+        q: req.query.q,
+        limit: req.query.limit,
+      });
+      res.json({
+        window: { days: ctx.period.days, from: ctx.period.from, to: ctx.period.to, all: ctx.period.all },
+        total: data.total,
+        // Лента ограничена лимитом — честно говорим, что показано не всё, а не молча обрезаем.
+        truncated: data.rows.length >= db.CDEK_ORDERS_MAX_ROWS,
+        orders: data.rows.map((r) => ({
+          order_id: r.order_id,
+          created_at: r.created_at,
+          status: r.status,
+          channel: r.channel,
+          carrier: r.carrier,
+          external_order_id: r.external_order_id,
+          track_number: r.track_number,
+          comment: r.comment,
+          amount: rub(r.amount_kopecks),
+          items: int(r.items),
+          positions: int(r.positions),
+        })),
+      });
+    } catch (e) {
+      next(e);
+    }
+  });
+
   // GET /api/cdek/coverage?from=&to= — выручка по дням рядом с признаком «день залит выгрузкой».
   app.get('/api/cdek/coverage', requireAuth, async (req, res, next) => {
     try {

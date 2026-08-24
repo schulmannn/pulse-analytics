@@ -83,6 +83,9 @@ const BREAKDOWN_DIMS = new Set(['channel', 'status', 'product', 'carrier']);
 const BREAKDOWN_MAX_GROUPS = 2000;
 // Потолок дней в календаре покрытия — два года с хвостом; больше не влезает ни в один экран.
 const COVERAGE_MAX_DAYS = 800;
+// Потолок строк ленты заказов. Таблица виртуализована, но ответ всё равно не должен раздуваться:
+// годовая выгрузка склада — 1100 заказов, тысяча покрывает окно с запасом.
+const ORDERS_MAX_ROWS = 1000;
 
 function createCdekRepo({ pool, enabled, transaction, ensureExternalSource, getAccessibleChannel }) {
   const allowed = (channelId, actor) =>
@@ -484,6 +487,72 @@ function createCdekRepo({ pool, enabled, transaction, ensureExternalSource, getA
     return rows;
   }
 
+  /**
+   * Ритм заказов: день недели × час в зоне ИСТОЧНИКА. Считается по ЗАКАЗАМ, а не по строкам
+   * выгрузки: многострочный заказ оформлен один раз и один раз должен попасть в клетку.
+   */
+  async function getCdekHourlyForActor(channelId, actor, opts = {}) {
+    if (!enabled || !(await allowed(channelId, actor))) return [];
+    const { rows } = await pool.query(
+      `WITH b AS (${WINDOW_BOUNDS}),
+       r AS (
+         SELECT DISTINCT o.order_id,
+                -- ISODOW: 1 = понедельник, как в шапке карты.
+                EXTRACT(ISODOW FROM o.created_ts AT TIME ZONE $6)::int AS weekday,
+                EXTRACT(HOUR FROM o.created_ts AT TIME ZONE $6)::int AS hour
+           FROM cdek_orders o CROSS JOIN b
+          WHERE o.channel_id = $1 AND o.kind = 'sale'
+            AND ${REVENUE_FILTER}
+            AND (b.cur_from IS NULL OR o.created_ts >= b.cur_from)
+            AND (b.cur_to IS NULL OR o.created_ts < b.cur_to)
+       )
+       SELECT weekday, hour, count(*)::int AS orders FROM r GROUP BY weekday, hour`,
+      windowParams(channelId, opts));
+    return rows;
+  }
+
+  /**
+   * Лента заказов окна с фильтрами и поиском. Поиск идёт по номеру заказа, внешнему номеру
+   * маркетплейса и трек-номеру — именно их приносит человек, когда ищет конкретную посылку.
+   * Пагинация keyset'ом не нужна: окно ограничено, а лимит держит ответ в разумных рамках.
+   */
+  async function getCdekOrdersForActor(channelId, actor, opts = {}) {
+    if (!enabled || !(await allowed(channelId, actor))) return { rows: [], total: 0 };
+    const limit = Math.min(Math.max(parseInt(opts.limit, 10) || 200, 1), ORDERS_MAX_ROWS);
+    const status = typeof opts.status === 'string' && opts.status ? opts.status : null;
+    const channel = typeof opts.channel === 'string' && opts.channel ? opts.channel : null;
+    const q = typeof opts.q === 'string' && opts.q.trim() ? opts.q.trim().slice(0, 64) : null;
+    const params = [...windowParams(channelId, opts), status, channel, q, limit];
+    const { rows } = await pool.query(
+      `WITH b AS (${WINDOW_BOUNDS}),
+       o AS (
+         SELECT o.*, ${WINDOW_CASE} AS win
+           FROM cdek_orders o CROSS JOIN b
+          WHERE o.channel_id = $1 AND o.kind = 'sale' AND ${REVENUE_FILTER}
+            AND ($8::text IS NULL OR o.status = $8)
+            AND ($9::text IS NULL OR COALESCE(o.channel, '') = $9)
+            AND ($10::text IS NULL OR o.order_id ILIKE '%' || $10 || '%'
+                 OR COALESCE(o.external_order_id, '') ILIKE '%' || $10 || '%'
+                 OR COALESCE(o.track_number, '') ILIKE '%' || $10 || '%')
+       ),
+       w AS (SELECT * FROM o WHERE win = 1)
+       SELECT w.order_id,
+              to_char(w.created_ts AT TIME ZONE $6, 'YYYY-MM-DD"T"HH24:MI:SS') AS created_at,
+              w.status, w.channel, w.carrier, w.external_order_id, w.track_number, w.comment,
+              COALESCE(sum(i.amount_kopecks), 0) AS amount_kopecks,
+              COALESCE(sum(i.qty), 0) AS items,
+              count(i.*)::int AS positions,
+              count(*) OVER ()::int AS total
+         FROM w LEFT JOIN cdek_order_items i
+           ON i.channel_id = $1 AND i.order_id = w.order_id
+        GROUP BY w.order_id, w.created_ts, w.status, w.channel, w.carrier,
+                 w.external_order_id, w.track_number, w.comment
+        ORDER BY w.created_ts DESC
+        LIMIT $11`,
+      params);
+    return { rows, total: rows[0] ? Number(rows[0].total) : 0 };
+  }
+
   /** Границы архива: чем подписать «Всё» и от чего отсчитывать календарь покрытия. */
   async function getCdekBoundsForActor(channelId, actor) {
     if (!enabled || !(await allowed(channelId, actor))) return null;
@@ -526,8 +595,11 @@ function createCdekRepo({ pool, enabled, transaction, ensureExternalSource, getA
     getCdekBreakdownForActor,
     getCdekCoverageForActor,
     getCdekBoundsForActor,
+    getCdekHourlyForActor,
+    getCdekOrdersForActor,
     CDEK_BREAKDOWN_MAX_GROUPS: BREAKDOWN_MAX_GROUPS,
     CDEK_COVERAGE_MAX_DAYS: COVERAGE_MAX_DAYS,
+    CDEK_ORDERS_MAX_ROWS: ORDERS_MAX_ROWS,
   };
 }
 

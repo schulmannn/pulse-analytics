@@ -292,3 +292,72 @@ export function useCdekBreakdown(period: MsPeriod, dim: string, include: CdekInc
       ),
   });
 }
+
+// ── Лента заказов и ритм ──────────────────────────────────────────────────────────────────────
+
+const CdekOrderSchema = z
+  .object({
+    order_id: z.string(),
+    created_at: z.string().nullable(),
+    status: z.string(),
+    channel: z.string().nullable(),
+    carrier: z.string().nullable(),
+    external_order_id: z.string().nullable(),
+    track_number: z.string().nullable(),
+    comment: z.string().nullable(),
+    amount: z.number().nullable(),
+    items: z.number(),
+    positions: z.number(),
+  })
+  .passthrough();
+
+const CdekOrdersSchema = z
+  .object({
+    window: CdekWindowSchema,
+    total: z.number(),
+    truncated: z.boolean(),
+    orders: z.array(CdekOrderSchema),
+  })
+  .passthrough();
+
+const CdekHourlySchema = z
+  .object({
+    window: CdekWindowSchema,
+    cells: z.array(z.object({ weekday: z.number(), hour: z.number(), orders: z.number() }).passthrough()),
+  })
+  .passthrough();
+
+export type CdekOrder = z.infer<typeof CdekOrderSchema>;
+
+export interface CdekOrderFilters {
+  status?: string;
+  channel?: string;
+  q?: string;
+}
+
+export function useCdekOrders(period: MsPeriod, filters: CdekOrderFilters = {}, include: CdekInclude = 'revenue') {
+  const { channelId } = useSelectedChannel();
+  const query = new URLSearchParams(msPeriodQuery(period));
+  query.set('include', include);
+  if (filters.status) query.set('status', filters.status);
+  if (filters.channel) query.set('channel', filters.channel);
+  if (filters.q) query.set('q', filters.q);
+  const serialized = query.toString();
+  return useQuery({
+    enabled: channelId != null,
+    queryKey: qk.cdekOrders.window(channelId, period, include, filters.status ?? '', filters.channel ?? '', filters.q ?? ''),
+    retry: false,
+    queryFn: ({ signal }) => apiGet(`/api/cdek/orders?${serialized}`, CdekOrdersSchema, { signal, channelId }),
+  });
+}
+
+export function useCdekHourly(period: MsPeriod, include: CdekInclude = 'revenue') {
+  const { channelId } = useSelectedChannel();
+  return useQuery({
+    enabled: channelId != null,
+    queryKey: qk.cdekHourly.window(channelId, period, include),
+    retry: false,
+    queryFn: ({ signal }) =>
+      apiGet(`/api/cdek/hourly?${msPeriodQuery(period)}&include=${include}`, CdekHourlySchema, { signal, channelId }),
+  });
+}
