@@ -190,3 +190,34 @@ export async function apiSend<S extends z.ZodTypeAny>(
   const data: unknown = res.status === 204 ? null : await res.json().catch(() => null);
   return parseResponse(method, path, schema, data);
 }
+
+/**
+ * Загрузка ФАЙЛА сырым телом (`application/octet-stream`), имя — заголовком `X-Filename`.
+ * Отдельный вход, а не ветка apiSend: тот по построению сериализует тело в JSON, а файл на
+ * 10 МБ через base64 распух бы на треть. Multipart не берём — ради одного поля он потребовал бы
+ * зависимости и на сервере, и здесь. Ответ проходит тот же Zod-контракт, что у остальных записей.
+ */
+export async function apiUpload<S extends z.ZodTypeAny>(
+  path: string,
+  file: File,
+  schema: S,
+  opts: ApiOptions = {},
+): Promise<z.infer<S>> {
+  if (isDemoMode()) throw new ApiError(400, 'Действие недоступно в демо-режиме');
+  const channelId = opts.channelId !== undefined ? opts.channelId : getSelectedChannel();
+  const headers = buildHeaders(channelId);
+  headers['Content-Type'] = 'application/octet-stream';
+  // Имя файла едет заголовком, а значит обязано быть латиницей по HTTP: кириллическое
+  // «выгрузка.xlsx» ломает заголовок, поэтому кодируем и раскодируем на сервере.
+  headers['X-Filename'] = encodeURIComponent(file.name);
+  const res = await fetchApi(path, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers,
+    body: file,
+    signal: opts.signal,
+  });
+  if (!res.ok) throw await readApiError(res);
+  const data: unknown = res.status === 204 ? null : await res.json().catch(() => null);
+  return parseResponse('POST', path, schema, data);
+}

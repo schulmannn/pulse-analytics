@@ -180,6 +180,27 @@ const YM_PARTS: Record<string, SectionParts> = {
   '': { Body: YmOverview, HeaderRight: TgPagePeriodControl },
 };
 
+// «СДЭК Fulfillment» — свой lazy-чанк (bundle-гейт: TG/IG-пользователь его не платит).
+const CdekImports = lazyFrom(() => import('@/panels/cdek/CdekImports'), 'CdekImports');
+
+/**
+ * Shell «СДЭК»: page-period провайдер + секционный Outlet. Провайдер стоит и здесь, хотя у
+ * «Загрузок» своего периода нет: он держит выбор периода при переходе на «Обзор» и обратно.
+ */
+function CdekShellRoute() {
+  return (
+    <PagePeriodProvider>
+      <Outlet />
+    </PagePeriodProvider>
+  );
+}
+
+const CDEK_PARTS: Record<string, SectionParts> = {
+  // Период у «Загрузок» не показываем: страница отвечает на вопрос «что вообще залито», и окно
+  // 7/30/90 дней это вопрос сузило бы до бессмыслицы.
+  '': { Body: CdekImports },
+};
+
 /** Zip the network's nav (paths + labels — the single source of truth) with the body map. A nav
     row without a body is skipped defensively rather than crashing the whole feed. */
 function buildSections(net: Network, parts: Record<string, SectionParts>): FeedSectionDef[] {
@@ -196,6 +217,7 @@ export const FEEDS: Record<Network, NetworkFeedDef> = {
   ig: { Shell: IgShellRoute, sections: buildSections('ig', IG_PARTS) },
   ms: { Shell: MsShellRoute, sections: buildSections('ms', MS_PARTS) },
   ym: { Shell: YmShellRoute, sections: buildSections('ym', YM_PARTS) },
+  cdek: { Shell: CdekShellRoute, sections: buildSections('cdek', CDEK_PARTS) },
 };
 
 /**

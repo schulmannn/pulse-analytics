@@ -7,6 +7,7 @@ import { z } from 'zod';
 import QRCode from 'qrcode';
 import { useQueryClient } from '@tanstack/react-query';
 import { useChannels, useCollectorStatus, useConnectIg, useCreateKey, useDisconnectIg, useIgOauthStatus, useMsBackfillStatus, useMsStatus, useTgQrStatus, useYmStatus } from '@/api/queries';
+import { useCdekStatus, useCreateCdekSource } from '@/api/cdek';
 import { ApiError, apiSend } from '@/api/client';
 import { qk } from '@/api/queryKeys';
 import { orbitHealth, type OrbitNetworkHealth } from '@/lib/connectionHealth';
@@ -58,8 +59,8 @@ const YmConnectSchema = z
   })
   .passthrough();
 
-type ServiceId = 'telegram' | 'instagram' | 'moysklad' | 'metrika' | 'threads' | 'youtube' | 'tiktok' | 'x' | 'vk' | 'facebook';
-type ServiceKind = 'telegram' | 'instagram' | 'moysklad' | 'metrika' | 'soon';
+type ServiceId = 'telegram' | 'instagram' | 'moysklad' | 'metrika' | 'cdek' | 'threads' | 'youtube' | 'tiktok' | 'x' | 'vk' | 'facebook';
+type ServiceKind = 'telegram' | 'instagram' | 'moysklad' | 'metrika' | 'cdek' | 'soon';
 
 interface Service {
   id: ServiceId;
@@ -77,6 +78,8 @@ const SERVICES: Service[] = [
   { id: 'moysklad', name: 'МойСклад', kind: 'moysklad' },
   // «Яндекс.Метрика» — веб-аналитика сайта: визиты/посетители/источники по OAuth-токену.
   { id: 'metrika', name: 'Яндекс.Метрика', kind: 'metrika' },
+  // «СДЭК Fulfillment» — первый источник БЕЗ API: заказы приезжают выгрузкой Excel вручную.
+  { id: 'cdek', name: 'СДЭК', kind: 'cdek' },
   { id: 'threads', name: 'Threads', kind: 'soon', soon: 'Threads-метрики отдаёт тот же токен Instagram — ближайший кандидат после IG.' },
   { id: 'youtube', name: 'YouTube', kind: 'soon', soon: 'Аналитика каналов и видео через YouTube Data API + вход Google.' },
   { id: 'tiktok', name: 'TikTok', kind: 'soon', soon: 'Статистика аккаунта через TikTok for Developers (нужна проверка приложения).' },
@@ -91,6 +94,8 @@ const GLYPHS: Record<ServiceId, ReactNode> = {
   instagram: (<><rect x="3.5" y="3.5" width="17" height="17" rx="5" /><circle cx="12" cy="12" r="4" /><circle cx="17.3" cy="6.7" r="1" className="fill-current" stroke="none" /></>),
   moysklad: (<><path d="M12 3 3.5 7.5v9L12 21l8.5-4.5v-9L12 3Z" /><path d="M3.5 7.5 12 12l8.5-4.5M12 12v9" /></>),
   metrika: (<path d="M5 20v-6M12 20V9M19 20V4" />),
+  // Фура: короб уже занят «МойСкладом», два коробка в одной орбите читались бы как один источник.
+  cdek: (<><path d="M14 17.5V7a1.5 1.5 0 0 0-1.5-1.5h-8A1.5 1.5 0 0 0 3 7v9.5a1 1 0 0 0 1 1h1" /><path d="M14 9h3.2a1 1 0 0 1 .8.4l2.8 3.6a1 1 0 0 1 .2.6v3a1 1 0 0 1-1 1h-1" /><path d="M9 17.5h6" /><circle cx="7" cy="17.5" r="1.9" /><circle cx="17" cy="17.5" r="1.9" /></>),
   threads: (<path d="M16 8c-1.5-2-6-2.5-8 0-2.5 3-1 9 3 9 3 0 4-2 4-4s-1.5-3-3.5-3-3 2-1.5 3" />),
   youtube: (<><rect x="2.5" y="6" width="19" height="12" rx="4" /><path d="m10 9.5 5 2.5-5 2.5z" /></>),
   tiktok: (<><path d="M10 8v6.5a3 3 0 1 1-3-3" /><path d="M10 8c.5 2 2 3.5 5 3.5" /></>),
@@ -139,6 +144,9 @@ export function Connect() {
   const ymChannelId = channels.find((channel) => channel.source === 'ym')?.id ?? null;
   const msStatus = useMsStatus(msChannelId);
   const ymStatus = useYmStatus(ymChannelId);
+  // У СДЭКа нет статуса подключения: источник существует ровно потому, что его завели. Наличие
+  // канала — и есть весь признак, отдельный запрос сюда ничего бы не добавил.
+  const cdekChannelId = channels.find((channel) => channel.source === 'cdek')?.id ?? null;
 
   // IG counts as connected when a per-channel OAuth account is linked OR the global env account is
   // serving data (env_fallback) — both mean real Instagram numbers are flowing.
@@ -183,6 +191,7 @@ export function Connect() {
     if (s.kind === 'instagram') return igConnected ? 'connected' : 'available';
     if (s.kind === 'moysklad') return msConnected ? 'connected' : 'available';
     if (s.kind === 'metrika') return ymConnected ? 'connected' : 'available';
+    if (s.kind === 'cdek') return cdekChannelId != null ? 'connected' : 'available';
     return tgConnected ? 'connected' : 'available';
   };
   const healthOf = (service: Service): OrbitNetworkHealth => {
@@ -390,6 +399,14 @@ export function Connect() {
               </ChannelScope>
             ) : (
               <MetrikaPanel />
+            ))}
+          {active.kind === 'cdek' &&
+            (cdekChannelId != null ? (
+              <ChannelScope channelId={cdekChannelId}>
+                <CdekPanel channelId={cdekChannelId} />
+              </ChannelScope>
+            ) : (
+              <CdekPanel channelId={null} />
             ))}
           {active.kind === 'soon' && <SoonPanel name={active.name} glyph={active.id} note={active.soon ?? ''} />}
         </div>
@@ -781,6 +798,83 @@ function MoySkladPanel() {
           <p id="moysklad-api-token-help" className="text-2xs text-muted-foreground">
             Токен хранится только на сервере в зашифрованном виде (AES-256-GCM) и не попадает в логи.
           </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── СДЭК Fulfillment: источник без API, наполняется загрузкой Excel ──
+// Здесь нет ни токена, ни OAuth: «подключить» тут означает завести источник, после чего в него
+// грузят выгрузки. Поэтому вместо поля секрета — имя, а вместо статуса связи — код склада и дата
+// последней загрузки: у ручного источника свежесть данных задаёт человек, а не фоновый сбор.
+function CdekPanel({ channelId }: { channelId: number | null }) {
+  const status = useCdekStatus(channelId);
+  const create = useCreateCdekSource();
+  const [name, setName] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const connected = channelId != null;
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (create.isPending) return;
+    setError(null);
+    try {
+      const res = await create.mutateAsync({ name: name.trim() || 'СДЭК' });
+      setName('');
+      toast(`Источник «${res.title ?? 'СДЭК'}» создан`);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Не удалось создать источник.');
+    }
+  };
+
+  return (
+    <div className="rounded-xl border border-border bg-card p-5 sm:p-6">
+      <PanelHead
+        id="cdek"
+        name="СДЭК"
+        pill={connected ? { label: 'Подключён', tone: 'ok' } : { label: 'Доступен', tone: 'go' }}
+      />
+      {connected ? (
+        <div className="mt-4 space-y-4">
+          <p className="text-sm text-muted-foreground">
+            {status.data?.warehouse_code
+              ? <>Склад <b className="font-medium text-foreground">{status.data.warehouse_code}</b>. </>
+              : 'Склад определится по первой выгрузке. '}
+            {status.data?.last_import?.created_at
+              ? `Последняя выгрузка загружена ${fmt.date(status.data.last_import.created_at)}.`
+              : 'Выгрузок пока не было — загрузите первую.'}
+          </p>
+          <Button asChild>
+            <Link to="/cdek">Открыть загрузки →</Link>
+          </Button>
+        </div>
+      ) : (
+        <div className="mt-4 space-y-4">
+          <p className="text-sm text-muted-foreground">
+            У СДЭК Fulfillment нет открытого API, поэтому заказы приезжают выгрузкой: в личном кабинете выгрузите
+            заказы за нужный период и загрузите файл сюда. Схема выгрузки известна — сопоставлять колонки руками не
+            придётся.
+          </p>
+          <form onSubmit={submit} className="flex items-center gap-2">
+            <label htmlFor="cdek-source-name" className="sr-only">Название источника</label>
+            <input
+              data-mobile-touch-target=""
+              id="cdek-source-name"
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Название источника — например, «Склад Москва»"
+              autoComplete="off"
+              aria-invalid={error ? true : undefined}
+              aria-describedby={error ? 'cdek-source-error' : undefined}
+              className="h-11 min-w-0 flex-1 rounded border border-border bg-background px-3 text-sm text-foreground outline-hidden placeholder:text-muted-foreground focus:ring-1 focus:ring-primary sm:h-9"
+            />
+            <Button type="submit" disabled={create.isPending} className="shrink-0">
+              {create.isPending ? 'Создаём…' : 'Создать источник'}
+            </Button>
+          </form>
+          {error && <p id="cdek-source-error" role="alert" className="text-xs text-ember">{error}</p>}
         </div>
       )}
     </div>
