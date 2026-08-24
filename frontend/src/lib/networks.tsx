@@ -120,6 +120,7 @@ export const NETWORKS = [
     prefix: '/cdek',
     nav: [
       { to: '/cdek', label: 'Обзор', icon: 'overview', end: true },
+      { to: '/cdek/products', label: 'Товары', icon: 'posts' },
       { to: '/cdek/imports', label: 'Загрузки', icon: 'upload' },
     ],
     // Отдельный канал source='cdek', создаётся кнопкой на /connect.

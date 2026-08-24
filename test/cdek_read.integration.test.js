@@ -248,3 +248,22 @@ test('чужой актор не читает архив ни одним из р
   assert.deepEqual(await db.getCdekCoverageForActor(channelId, actor, { from: '2026-03-01', to: '2026-03-02' }), []);
   assert.equal(await db.getCdekBoundsForActor(channelId, actor), null);
 });
+
+test('разрез по товарам несёт разброс цены за штуку, а не только среднюю', { skip }, async () => {
+  // У 48 из 54 товаров склада цена плавает (маркетплейсы режут скидку). Средняя это скрывает:
+  // «2 400 ₽» одинаково выглядит и у фиксированной цены, и у диапазона 1 818…3 750.
+  const { channelId, actor } = await seed([
+    [1, '2026-03-05 10:00:00', 1818, 'complete', 'own', 'p1'],
+    [2, '2026-03-06 10:00:00', 2450, 'complete', 'own', 'p1'],
+    [3, '2026-03-07 10:00:00', 3750, 'complete', 'own', 'p1'],
+    [4, '2026-03-08 10:00:00', 2850, 'complete', 'own', 'p2'],
+  ]);
+  const rows = await db.getCdekBreakdownForActor(channelId, actor,
+    { ...W('2026-03-01', '2026-03-31', null, null), dim: 'product' });
+  const p1 = rows.find((r) => r.key === 'p1');
+  assert.equal(Number(p1.price_min_kopecks), 181800);
+  assert.equal(Number(p1.price_max_kopecks), 375000);
+  assert.equal(Number(p1.price_median_kopecks), 245000, 'медиана, а не среднее');
+  const p2 = rows.find((r) => r.key === 'p2');
+  assert.equal(Number(p2.price_min_kopecks), Number(p2.price_max_kopecks), 'одна цена — размаха нет');
+});

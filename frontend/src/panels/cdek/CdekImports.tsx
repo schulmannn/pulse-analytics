@@ -418,9 +418,9 @@ function ImportHistory({
       <table className="data-table data-table--compact">
         <thead>
           <tr>
-            <th scope="col">Файл</th>
-            <th scope="col">Когда</th>
-            <th scope="col">Период</th>
+            <th scope="col" className="text-left">Файл</th>
+            <th scope="col" className="text-left">Когда</th>
+            <th scope="col" className="text-left">Период</th>
             <th scope="col" className="text-right">Строк</th>
             <th scope="col" className="text-right">Добавлено</th>
             <th scope="col" className="text-right">Обновлено</th>

@@ -410,7 +410,8 @@ function createCdekRepo({ pool, enabled, transaction, ensureExternalSource, getA
     const { rows } = await pool.query(
       `WITH b AS (${WINDOW_BOUNDS}),
        r AS (
-         SELECT o.order_id, i.product_id, i.amount_kopecks, i.qty, ${WINDOW_CASE} AS win,
+         SELECT o.order_id, i.product_id, i.amount_kopecks, i.qty, i.unit_price_kopecks,
+                ${WINDOW_CASE} AS win,
                 CASE $8::text
                   WHEN 'status' THEN o.status
                   WHEN 'product' THEN i.product_id
@@ -425,7 +426,14 @@ function createCdekRepo({ pool, enabled, transaction, ensureExternalSource, getA
               count(DISTINCT r.order_id) FILTER (WHERE r.win = 1) AS orders,
               COALESCE(sum(r.qty) FILTER (WHERE r.win = 1), 0) AS items,
               COALESCE(sum(r.amount_kopecks) FILTER (WHERE r.win = 0), 0) AS prev_revenue_kopecks,
-              count(DISTINCT r.order_id) FILTER (WHERE r.win = 0) AS prev_orders
+              count(DISTINCT r.order_id) FILTER (WHERE r.win = 0) AS prev_orders,
+              -- Разброс ЦЕНЫ ЗА ШТУКУ. У 48 из 54 товаров склада она плавает (маркетплейсы режут
+              -- скидку), и средняя по окну это скрывает: «2 400 ₽» одинаково выглядит и у товара с
+              -- фиксированной ценой, и у товара, который продавался от 1 818 до 3 750.
+              min(r.unit_price_kopecks) FILTER (WHERE r.win = 1) AS price_min_kopecks,
+              max(r.unit_price_kopecks) FILTER (WHERE r.win = 1) AS price_max_kopecks,
+              percentile_cont(0.5) WITHIN GROUP (ORDER BY r.unit_price_kopecks)
+                FILTER (WHERE r.win = 1) AS price_median_kopecks
          FROM r
          LEFT JOIN cdek_products p
            ON $8 = 'product' AND p.channel_id = $1 AND p.product_id = r.key

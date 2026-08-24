@@ -214,6 +214,10 @@ const CdekBreakdownRowSchema = z
     items: z.number(),
     prev_revenue: z.number().nullable(),
     prev_orders: z.number(),
+    // Разброс цены за штуку — только у разреза по товарам; null = строк в окне не было.
+    price_min: z.number().nullable().optional(),
+    price_median: z.number().nullable().optional(),
+    price_max: z.number().nullable().optional(),
   })
   .passthrough();
 
