@@ -1,6 +1,7 @@
 'use strict';
 
 const { hasWorkspaceRole } = require('../middleware/tenant');
+const { parseCdekPeriod } = require('../domain/cdekPeriod');
 
 /**
  * Роуты СДЭК Fulfillment (/api/cdek/{sources,status,import,imports,imports/:id,
@@ -180,6 +181,171 @@ function registerCdekRoutes({ app, express, requireAuth, db, audit, cdekImport }
       res.setHeader('Content-Disposition', `attachment; filename="cdek-rejected-${row.id}.csv"`);
       // BOM — иначе Excel в русской локали откроет utf-8 как windows-1251.
       res.send(`﻿${csv}`);
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  // ── Чтение аналитики ────────────────────────────────────────────────────────────────────────
+  // Все суммы наружу — в РУБЛЯХ (внутри и в БД — копейки, канон МойСклада). Кэша нет: агрегаты
+  // читаются из своей же БД по индексу, а не из чужого API, и кэш здесь стоил бы только
+  // рассогласования сразу после импорта.
+
+  const rub = (v) => (v == null ? null : Number(v) / 100);
+  const int = (v) => (v == null ? 0 : Number(v));
+
+  const INCLUDE = new Set(['revenue', 'completed', 'all']);
+  const includeOf = (req) => (INCLUDE.has(req.query.include) ? req.query.include : 'revenue');
+
+  /** Окно + канал + часовой пояс источника — общий пролог всех читающих роутов. */
+  async function resolveRead(req, res) {
+    const period = parseCdekPeriod(req.query);
+    if (period.invalid) {
+      res.status(400).json({ error: 'Некорректный диапазон дат (ожидается from<=to в формате YYYY-MM-DD)' });
+      return null;
+    }
+    const channel = await resolveCdekChannel(req, res);
+    if (!channel) return null;
+    const source = await db.getCdekSource(channel.id);
+    return { channel, period, tz: (source && source.tz) || 'Europe/Moscow', include: includeOf(req) };
+  }
+
+  const totalsOf = (row) => (row ? {
+    revenue: rub(row.revenue_kopecks),
+    orders: int(row.orders),
+    items: int(row.items),
+    // Средний чек считается ЗДЕСЬ, из тех же двух чисел, что показаны рядом: посчитанный клиентом
+    // из округлённых рублей он разошёлся бы с ними на копейки.
+    avg_check: int(row.orders) ? rub(row.revenue_kopecks) / int(row.orders) : null,
+    orders_all: int(row.orders_all),
+    orders_cancelled: int(row.orders_cancelled),
+    orders_returned: int(row.orders_returned),
+    cancel_share: int(row.orders_all) ? int(row.orders_cancelled) / int(row.orders_all) : null,
+  } : null);
+
+  // GET /api/cdek/summary?days=|from=&to=&include= — hero-числа окна и равного предыдущего.
+  app.get('/api/cdek/summary', requireAuth, async (req, res, next) => {
+    try {
+      const ctx = await resolveRead(req, res);
+      if (!ctx) return;
+      const [totals, bounds] = await Promise.all([
+        db.getCdekSummaryForActor(ctx.channel.id, req.user, { ...ctx.period, tz: ctx.tz, include: ctx.include }),
+        db.getCdekBoundsForActor(ctx.channel.id, req.user),
+      ]);
+      res.json({
+        window: { days: ctx.period.days, from: ctx.period.from, to: ctx.period.to, all: ctx.period.all },
+        // «Всё» сравнивать не с чем — предыдущего окна нет, и выдумывать его нельзя.
+        previous_window: ctx.period.all ? null : { from: ctx.period.prevFrom, to: ctx.period.prevTo },
+        include: ctx.include,
+        current: totalsOf(totals && totals.current),
+        previous: ctx.period.all ? null : totalsOf(totals && totals.previous),
+        bounds: bounds && bounds.first_day ? bounds : null,
+      });
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  // GET /api/cdek/series?...&grain=day|week|month — ряд окна и равного предыдущего.
+  app.get('/api/cdek/series', requireAuth, async (req, res, next) => {
+    try {
+      const ctx = await resolveRead(req, res);
+      if (!ctx) return;
+      const data = await db.getCdekSeriesForActor(ctx.channel.id, req.user, {
+        ...ctx.period, tz: ctx.tz, include: ctx.include,
+      });
+      const point = (r) => ({
+        day: r.day, revenue: rub(r.revenue_kopecks), orders: int(r.orders), items: int(r.items),
+      });
+      res.json({
+        window: { days: ctx.period.days, from: ctx.period.from, to: ctx.period.to, all: ctx.period.all },
+        grain: data.grain,
+        include: ctx.include,
+        current: data.current.map(point),
+        previous: ctx.period.all ? [] : data.previous.map(point),
+      });
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  // GET /api/cdek/breakdown?dim=channel|status|product|carrier&limit= — разрез окна с прошлым окном
+  // в тех же строках. Хвост за пределами limit сворачивается в «Прочее» — кольцу и рангу нужен
+  // честный знаменатель, а не молча обрезанный список.
+  const BREAKDOWN_LIMIT_DEFAULT = 12;
+  const BREAKDOWN_LIMIT_MAX = 100;
+  app.get('/api/cdek/breakdown', requireAuth, async (req, res, next) => {
+    try {
+      const ctx = await resolveRead(req, res);
+      if (!ctx) return;
+      const dim = ['channel', 'status', 'product', 'carrier'].includes(req.query.dim) ? req.query.dim : 'channel';
+      // Разбивка ПО статусам обязана видеть все статусы, включая отменённые: отфильтруй мы их
+      // «как выручку», она показала бы ровно те статусы, которые сама и отобрала.
+      const include = dim === 'status' ? 'all' : ctx.include;
+      const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || BREAKDOWN_LIMIT_DEFAULT, 1), BREAKDOWN_LIMIT_MAX);
+      const rows = await db.getCdekBreakdownForActor(ctx.channel.id, req.user, {
+        ...ctx.period, tz: ctx.tz, include, dim,
+      });
+      const truncated = rows.length > db.CDEK_BREAKDOWN_MAX_GROUPS;
+      const groups = truncated ? rows.slice(0, db.CDEK_BREAKDOWN_MAX_GROUPS) : rows;
+      const head = groups.slice(0, limit);
+      const tail = groups.slice(limit);
+      const fold = (acc, r) => ({
+        revenue: acc.revenue + rub(r.revenue_kopecks),
+        orders: acc.orders + int(r.orders),
+        items: acc.items + int(r.items),
+        prev_revenue: acc.prev_revenue + rub(r.prev_revenue_kopecks),
+        prev_orders: acc.prev_orders + int(r.prev_orders),
+        groups: acc.groups + 1,
+      });
+      const zero = { revenue: 0, orders: 0, items: 0, prev_revenue: 0, prev_orders: 0, groups: 0 };
+      res.json({
+        window: { days: ctx.period.days, from: ctx.period.from, to: ctx.period.to, all: ctx.period.all },
+        dim,
+        include,
+        rows: head.map((r) => ({
+          // Пустой ключ — это отсутствие значения («Без канала»), а не категория с именем.
+          key: r.key === '' ? null : r.key,
+          title: r.title || null,
+          article: r.article || null,
+          sku: r.sku || null,
+          revenue: rub(r.revenue_kopecks),
+          orders: int(r.orders),
+          items: int(r.items),
+          prev_revenue: rub(r.prev_revenue_kopecks),
+          prev_orders: int(r.prev_orders),
+        })),
+        other: tail.length ? tail.reduce(fold, zero) : null,
+        total: groups.reduce(fold, zero),
+        truncated,
+      });
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  // GET /api/cdek/coverage?from=&to= — выручка по дням рядом с признаком «день залит выгрузкой».
+  app.get('/api/cdek/coverage', requireAuth, async (req, res, next) => {
+    try {
+      const ctx = await resolveRead(req, res);
+      if (!ctx) return;
+      const bounds = await db.getCdekBoundsForActor(ctx.channel.id, req.user);
+      // «Всё» у календаря — это размах архива: без него нечего рисовать, а придумывать окно нельзя.
+      const from = ctx.period.from || (bounds && bounds.first_day);
+      const to = ctx.period.to || (bounds && bounds.last_day);
+      if (!from || !to) return res.json({ from: null, to: null, days: [], bounds: null });
+      const days = await db.getCdekCoverageForActor(ctx.channel.id, req.user, {
+        from, to, tz: ctx.tz, include: ctx.include,
+      });
+      res.json({
+        from,
+        to,
+        bounds: bounds && bounds.first_day ? bounds : null,
+        truncated: days.length >= db.CDEK_COVERAGE_MAX_DAYS,
+        days: days.map((d) => ({
+          day: d.day, revenue: rub(d.revenue_kopecks), orders: int(d.orders), covered: d.covered,
+        })),
+      });
     } catch (e) {
       next(e);
     }

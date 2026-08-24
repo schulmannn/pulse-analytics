@@ -38,7 +38,60 @@ function chunk(list, size) {
   return out;
 }
 
-function createCdekRepo({ pool, enabled, transaction, ensureExternalSource }) {
+/**
+ * Окно чтения в зоне ИСТОЧНИКА: from/to — календарные дни (YYYY-MM-DD) включительно, как у
+ * МойСклада. В SQL это полуинтервал [начало from, начало to+1) — так последний день входит целиком
+ * и без «23:59:59», которое теряет последнюю секунду суток. NULL по обеим границам = «Всё».
+ */
+const WINDOW_BOUNDS = `
+  SELECT ($2::date)::timestamp AT TIME ZONE $6 AS cur_from,
+         (($3::date) + 1)::timestamp AT TIME ZONE $6 AS cur_to,
+         ($4::date)::timestamp AT TIME ZONE $6 AS prev_from,
+         (($5::date) + 1)::timestamp AT TIME ZONE $6 AS prev_to`;
+
+/** Принадлежность строки окну: 1 — текущее, 0 — предыдущее, NULL — вне обоих. */
+const WINDOW_CASE = `
+  CASE
+    WHEN (b.cur_from IS NULL OR o.created_ts >= b.cur_from)
+     AND (b.cur_to IS NULL OR o.created_ts < b.cur_to) THEN 1
+    WHEN b.prev_from IS NOT NULL AND o.created_ts >= b.prev_from AND o.created_ts < b.prev_to THEN 0
+  END`;
+
+/**
+ * Что считать выручкой. Владелец решил: отгруженное — уже проданное, поэтому в деньги входят и
+ * `complete`, и `delivery`; исключаются только отменённые и возвращённые. `completed` — ручной
+ * режим «только завершённые», `all` — вообще без фильтра статуса (нужен разбивке ПО статусам:
+ * иначе она показала бы лишь те статусы, которые сама же и отобрала).
+ */
+const REVENUE_FILTER = `
+  (CASE $7::text
+     WHEN 'all' THEN true
+     WHEN 'completed' THEN o.status = 'complete'
+     ELSE o.status NOT IN ('cancel', 'return')
+   END)`;
+
+const SALE_ROWS = `
+  FROM cdek_orders o
+  JOIN cdek_order_items i ON i.channel_id = o.channel_id AND i.order_id = o.order_id
+  CROSS JOIN b
+ WHERE o.channel_id = $1 AND o.kind = 'sale'`;
+
+const INCLUDE_MODES = new Set(['revenue', 'completed', 'all']);
+const BREAKDOWN_DIMS = new Set(['channel', 'status', 'product', 'carrier']);
+// Потолок групп в разбивке: страховка от неожиданно широкого измерения (ассортимент склада
+// владельца — 54 позиции). Обрезанное честно помечается флагом, а не исчезает молча.
+const BREAKDOWN_MAX_GROUPS = 2000;
+// Потолок дней в календаре покрытия — два года с хвостом; больше не влезает ни в один экран.
+const COVERAGE_MAX_DAYS = 800;
+
+function createCdekRepo({ pool, enabled, transaction, ensureExternalSource, getAccessibleChannel }) {
+  const allowed = (channelId, actor) =>
+    (getAccessibleChannel ? getAccessibleChannel(channelId, actor) : Promise.resolve(null));
+
+  /** Параметры окна в порядке $1..$7 — общий префикс всех читающих запросов. */
+  const windowParams = (channelId, { from = null, to = null, prevFrom = null, prevTo = null, tz = 'Europe/Moscow', include = 'revenue' }) =>
+    [channelId, from, to, prevFrom, prevTo, tz, INCLUDE_MODES.has(include) ? include : 'revenue'];
+
   // ── Источник ────────────────────────────────────────────────────────────────────────────────
 
   async function getCdekSource(channelId) {
@@ -286,6 +339,156 @@ function createCdekRepo({ pool, enabled, transaction, ensureExternalSource }) {
     return { inserted, updated, deleted };
   }
 
+  // ── Чтение архива ───────────────────────────────────────────────────────────────────────────
+  // Все ридеры — ForActor: доступ проверяется ownership-чеком канала (getAccessibleChannel), даже
+  // если роут уже резолвил канал сам. Голого un-gated ридера в публичном API нет (канон
+  // analyticsRepo). Суммы наружу идут В КОПЕЙКАХ — в рубли переводит граница API.
+
+  /**
+   * Итоги окна и равного предыдущего одним запросом. Один запрос вместо двух — не про скорость:
+   * два отдельных чтения текущего и прошлого окна разъезжаются на границе суток и дают дельту,
+   * посчитанную по разным данным.
+   */
+  async function getCdekSummaryForActor(channelId, actor, opts = {}) {
+    if (!enabled || !(await allowed(channelId, actor))) return null;
+    const { rows } = await pool.query(
+      `WITH b AS (${WINDOW_BOUNDS}),
+       r AS (
+         SELECT o.order_id, o.status, i.amount_kopecks, i.qty, ${WINDOW_CASE} AS win,
+                ${REVENUE_FILTER} AS counts
+         ${SALE_ROWS}
+       )
+       SELECT win,
+              COALESCE(sum(amount_kopecks) FILTER (WHERE counts), 0) AS revenue_kopecks,
+              count(DISTINCT order_id) FILTER (WHERE counts) AS orders,
+              COALESCE(sum(qty) FILTER (WHERE counts), 0) AS items,
+              count(DISTINCT order_id) AS orders_all,
+              count(DISTINCT order_id) FILTER (WHERE status = 'cancel') AS orders_cancelled,
+              count(DISTINCT order_id) FILTER (WHERE status = 'return') AS orders_returned
+         FROM r WHERE win IS NOT NULL GROUP BY win`,
+      windowParams(channelId, opts));
+    const pick = (win) => rows.find((x) => Number(x.win) === win) || null;
+    return { current: pick(1), previous: pick(0) };
+  }
+
+  /**
+   * Дневной/недельный/месячный ряд текущего и предыдущего окна. Пустые корзины НЕ достраиваются:
+   * плотную сетку рисует фронт (densifyDayPoints у МойСклада) — он один знает, где «нет заказов»
+   * это ноль, а где данных просто нет.
+   */
+  async function getCdekSeriesForActor(channelId, actor, opts = {}) {
+    if (!enabled || !(await allowed(channelId, actor))) return { current: [], previous: [] };
+    const grain = ['day', 'week', 'month'].includes(opts.grain) ? opts.grain : 'day';
+    const { rows } = await pool.query(
+      `WITH b AS (${WINDOW_BOUNDS}),
+       r AS (
+         SELECT o.order_id, i.amount_kopecks, i.qty, ${WINDOW_CASE} AS win,
+                to_char(date_trunc($8, o.created_ts AT TIME ZONE $6), 'YYYY-MM-DD') AS day
+         ${SALE_ROWS} AND ${REVENUE_FILTER}
+       )
+       SELECT win, day,
+              COALESCE(sum(amount_kopecks), 0) AS revenue_kopecks,
+              count(DISTINCT order_id) AS orders,
+              COALESCE(sum(qty), 0) AS items
+         FROM r WHERE win IS NOT NULL GROUP BY win, day ORDER BY day`,
+      [...windowParams(channelId, opts), grain]);
+    return {
+      grain,
+      current: rows.filter((r) => Number(r.win) === 1),
+      previous: rows.filter((r) => Number(r.win) === 0),
+    };
+  }
+
+  /**
+   * Разрез окна по измерению с величинами предыдущего окна в тех же строках — иначе «вклад в
+   * изменение» и базовая колонка рангов собирались бы из двух ответов, которые могли приехать по
+   * разным границам.
+   */
+  async function getCdekBreakdownForActor(channelId, actor, opts = {}) {
+    if (!enabled || !(await allowed(channelId, actor))) return [];
+    const dim = BREAKDOWN_DIMS.has(opts.dim) ? opts.dim : 'channel';
+    const { rows } = await pool.query(
+      `WITH b AS (${WINDOW_BOUNDS}),
+       r AS (
+         SELECT o.order_id, i.product_id, i.amount_kopecks, i.qty, ${WINDOW_CASE} AS win,
+                CASE $8::text
+                  WHEN 'status' THEN o.status
+                  WHEN 'product' THEN i.product_id
+                  WHEN 'carrier' THEN COALESCE(o.carrier, '')
+                  ELSE COALESCE(o.channel, '')
+                END AS key
+         ${SALE_ROWS} AND ${REVENUE_FILTER}
+       )
+       SELECT r.key,
+              p.title, p.article, p.sku,
+              COALESCE(sum(r.amount_kopecks) FILTER (WHERE r.win = 1), 0) AS revenue_kopecks,
+              count(DISTINCT r.order_id) FILTER (WHERE r.win = 1) AS orders,
+              COALESCE(sum(r.qty) FILTER (WHERE r.win = 1), 0) AS items,
+              COALESCE(sum(r.amount_kopecks) FILTER (WHERE r.win = 0), 0) AS prev_revenue_kopecks,
+              count(DISTINCT r.order_id) FILTER (WHERE r.win = 0) AS prev_orders
+         FROM r
+         LEFT JOIN cdek_products p
+           ON $8 = 'product' AND p.channel_id = $1 AND p.product_id = r.key
+        WHERE r.win IS NOT NULL
+        GROUP BY r.key, p.title, p.article, p.sku
+        ORDER BY revenue_kopecks DESC, r.key
+        LIMIT ${BREAKDOWN_MAX_GROUPS + 1}`,
+      [...windowParams(channelId, opts), dim]);
+    return rows;
+  }
+
+  /**
+   * Покрытие по дням: выручка дня рядом с признаком «этот день вообще залит выгрузкой».
+   * Различать обязательно — без него 61 день года без заказов читается как провал продаж, хотя
+   * это дыра в загрузке.
+   */
+  async function getCdekCoverageForActor(channelId, actor, { from, to, tz = 'Europe/Moscow', include = 'revenue' } = {}) {
+    if (!enabled || !from || !to || !(await allowed(channelId, actor))) return [];
+    const { rows } = await pool.query(
+      `WITH days AS (
+         SELECT d::date AS day FROM generate_series($2::date, $3::date, interval '1 day') d
+          LIMIT ${COVERAGE_MAX_DAYS}
+       ),
+       agg AS (
+         SELECT (o.created_ts AT TIME ZONE $4)::date AS day,
+                COALESCE(sum(i.amount_kopecks), 0) AS revenue_kopecks,
+                count(DISTINCT o.order_id) AS orders
+           FROM cdek_orders o
+           JOIN cdek_order_items i ON i.channel_id = o.channel_id AND i.order_id = o.order_id
+          WHERE o.channel_id = $1 AND o.kind = 'sale'
+            AND (CASE $5::text
+                   WHEN 'all' THEN true
+                   WHEN 'completed' THEN o.status = 'complete'
+                   ELSE o.status NOT IN ('cancel', 'return')
+                 END)
+          GROUP BY 1
+       )
+       SELECT to_char(days.day, 'YYYY-MM-DD') AS day,
+              COALESCE(agg.revenue_kopecks, 0) AS revenue_kopecks,
+              COALESCE(agg.orders, 0) AS orders,
+              EXISTS (SELECT 1 FROM cdek_imports im
+                       WHERE im.channel_id = $1 AND im.status = 'done'
+                         AND im.period_from IS NOT NULL
+                         AND days.day BETWEEN im.period_from AND im.period_to) AS covered
+         FROM days LEFT JOIN agg ON agg.day = days.day
+        ORDER BY days.day`,
+      [channelId, from, to, tz, INCLUDE_MODES.has(include) ? include : 'revenue']);
+    return rows;
+  }
+
+  /** Границы архива: чем подписать «Всё» и от чего отсчитывать календарь покрытия. */
+  async function getCdekBoundsForActor(channelId, actor) {
+    if (!enabled || !(await allowed(channelId, actor))) return null;
+    const { rows } = await pool.query(
+      `SELECT to_char(min(o.created_ts AT TIME ZONE s.tz)::date, 'YYYY-MM-DD') AS first_day,
+              to_char(max(o.created_ts AT TIME ZONE s.tz)::date, 'YYYY-MM-DD') AS last_day,
+              count(*)::int AS orders
+         FROM cdek_orders o JOIN cdek_sources s ON s.channel_id = o.channel_id
+        WHERE o.channel_id = $1`,
+      [channelId]);
+    return rows[0] || null;
+  }
+
   /** Код склада, чаще всего встречающийся в архиве — витринная подпись источника. */
   async function getCdekWarehouseFromOrders(channelId) {
     if (!enabled || !channelId) return null;
@@ -310,6 +513,13 @@ function createCdekRepo({ pool, enabled, transaction, ensureExternalSource }) {
     getCdekImportFile,
     applyCdekImport,
     getCdekWarehouseFromOrders,
+    getCdekSummaryForActor,
+    getCdekSeriesForActor,
+    getCdekBreakdownForActor,
+    getCdekCoverageForActor,
+    getCdekBoundsForActor,
+    CDEK_BREAKDOWN_MAX_GROUPS: BREAKDOWN_MAX_GROUPS,
+    CDEK_COVERAGE_MAX_DAYS: COVERAGE_MAX_DAYS,
   };
 }
 

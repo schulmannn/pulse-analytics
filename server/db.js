@@ -248,11 +248,13 @@ function createDatabase(config, overrides = {}) {
   const mentionNotifyRepo = createMentionNotifyRepo({ pool, enabled });
   // СДЭК Fulfillment (038): источник с ручной загрузкой Excel — импорты и архив заказов.
   // ensureExternalSource — инъекция, как у integrationsRepo (repos не импортят друг друга).
+  // getAccessibleChannel — инъекция для ForActor-ридеров (канон analyticsRepo). ПОСЛЕ channelsRepo (TDZ).
   const cdekRepo = createCdekRepo({
     pool,
     enabled,
     transaction,
     ensureExternalSource: sourcesRepo.ensureExternalSource,
+    getAccessibleChannel: channelsRepo.getChannel,
   });
   // Личные AI-диалоги (028): все методы uid-scoped; аналитика в чат попадает только через
   // ForActor-инструменты aiChatService, не через этот repo.
@@ -285,7 +287,7 @@ function createDatabase(config, overrides = {}) {
     collector: collectorRepo,
     reports: reportsRepo, // REPORT_SCHEDULES, listReports, getReport, createReport, updateReport, deleteReport, listDueReports, markReportSent, reserveReportDelivery, clearReportDelivery, listPostsWindow
     campaigns: campaignsRepo, // CAMPAIGN_*, listCampaigns, getCampaign, create/update/deleteCampaign, add/remove/listCampaignPosts, getCampaignSummary
-    cdek: cdekRepo, // get/saveCdekSource, setCdekWarehouse, find/start/finish/failCdekImport, list/getCdekImport(File), applyCdekImport, getCdekWarehouseFromOrders
+    cdek: cdekRepo, // get/saveCdekSource, setCdekWarehouse, find/start/finish/failCdekImport, list/getCdekImport(File), applyCdekImport, getCdekWarehouseFromOrders, getCdek{Summary,Series,Breakdown,Coverage,Bounds}ForActor
     mentionSettings: mentionSettingsRepo, // getMentionSettingsInternal/ForActor, upsertMentionSettingsForActor
     mentionNotify: mentionNotifyRepo, // issueMentionNotifyLink, bindMentionNotifyByToken, get/deleteMentionNotifyBinding, unbindMentionNotifyChat, set/getMentionNotifySubscription*, listRunnableMentionNotifySubscriptions, markMentionNotifyRun, filterNewMentions
     aiChats: aiChatsRepo, // listAiChats, createAiChat, getAiChat, deleteAiChat, listAiChatMessages, appendAiChatMessage, getAiUsageToday, bumpAiUsage
