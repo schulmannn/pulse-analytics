@@ -267,3 +267,64 @@ test('разрез по товарам несёт разброс цены за �
   const p2 = rows.find((r) => r.key === 'p2');
   assert.equal(Number(p2.price_min_kopecks), Number(p2.price_max_kopecks), 'одна цена — размаха нет');
 });
+
+test('ритм считается по ЗАКАЗАМ, а не по строкам выгрузки', { skip }, async () => {
+  // Многострочный заказ оформлен ОДИН раз: попади он в клетку дважды, пик «когда покупают»
+  // сдвинулся бы к часам, в которые просто больше позиций в корзине.
+  const { channelId, actor, importId } = await seed([]);
+  await db.applyCdekImport({
+    channelId,
+    importId,
+    tz: 'Europe/Moscow',
+    orders: [{
+      order_id: 'multi', created: '2026-03-02 08:30:00', status: 'complete', carrier: 'Cdek',
+      channel: 'own', external_order_id: null, track_number: null, warehouse_code: '19821',
+      comment: null, kind: 'sale',
+      items: [
+        { product_id: 'a', unit_price_kopecks: 10000, qty: 1, qty_reserved: 1 },
+        { product_id: 'b', unit_price_kopecks: 20000, qty: 1, qty_reserved: 1 },
+        { product_id: 'c', unit_price_kopecks: 30000, qty: 1, qty_reserved: 1 },
+      ],
+    }],
+  });
+  const cells = await db.getCdekHourlyForActor(channelId, actor, W('2026-03-01', '2026-03-31', null, null));
+  assert.equal(cells.length, 1);
+  assert.equal(Number(cells[0].weekday), 1, '2 марта 2026 — понедельник');
+  assert.equal(Number(cells[0].hour), 8);
+  assert.equal(Number(cells[0].orders), 1, 'три позиции — всё ещё один заказ');
+});
+
+test('лента заказов ищет по номеру, внешнему номеру и треку', { skip }, async () => {
+  const { channelId, actor, importId } = await seed([]);
+  await db.applyCdekImport({
+    channelId, importId, tz: 'Europe/Moscow',
+    orders: [
+      { order_id: '33905564', created: '2026-03-05 10:00:00', status: 'complete', carrier: 'Cdek', channel: 'own',
+        external_order_id: null, track_number: '10145274548', warehouse_code: '19821', comment: null, kind: 'sale',
+        items: [{ product_id: 'p1', unit_price_kopecks: 285000, qty: 1, qty_reserved: 1 }] },
+      { order_id: '33905573', created: '2026-03-06 10:00:00', status: 'delivery', carrier: 'YM FBS', channel: 'yandex_market',
+        external_order_id: '3692481361', track_number: null, warehouse_code: '19821', comment: null, kind: 'sale',
+        items: [{ product_id: 'p2', unit_price_kopecks: 439000, qty: 2, qty_reserved: 2 }] },
+    ],
+  });
+  const win = W('2026-03-01', '2026-03-31', null, null);
+
+  const byTrack = await db.getCdekOrdersForActor(channelId, actor, { ...win, q: '10145274548' });
+  assert.equal(byTrack.rows.length, 1);
+  assert.equal(byTrack.rows[0].order_id, '33905564');
+
+  const byExternal = await db.getCdekOrdersForActor(channelId, actor, { ...win, q: '369248' });
+  assert.equal(byExternal.rows[0].order_id, '33905573');
+
+  const byStatus = await db.getCdekOrdersForActor(channelId, actor, { ...win, status: 'delivery' });
+  assert.equal(byStatus.rows.length, 1);
+  assert.equal(Number(byStatus.rows[0].amount_kopecks), 878000, 'сумма заказа = цена × количество');
+  assert.equal(Number(byStatus.rows[0].items), 2);
+
+  const byChannel = await db.getCdekOrdersForActor(channelId, actor, { ...win, channel: 'own' });
+  assert.equal(byChannel.rows.length, 1);
+
+  const all = await db.getCdekOrdersForActor(channelId, actor, win);
+  assert.equal(all.total, 2);
+  assert.equal(all.rows[0].order_id, '33905573', 'свежие сверху');
+});

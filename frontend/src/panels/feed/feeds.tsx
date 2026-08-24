@@ -182,6 +182,7 @@ const YM_PARTS: Record<string, SectionParts> = {
 
 // «СДЭК Fulfillment» — свой lazy-чанк (bundle-гейт: TG/IG-пользователь его не платит).
 const CdekOverview = lazyFrom(() => import('@/panels/cdek/CdekOverview'), 'CdekOverview');
+const CdekOrders = lazyFrom(() => import('@/panels/cdek/CdekOrders'), 'CdekOrders');
 const CdekProducts = lazyFrom(() => import('@/panels/cdek/CdekProducts'), 'CdekProducts');
 const CdekImports = lazyFrom(() => import('@/panels/cdek/CdekImports'), 'CdekImports');
 
@@ -199,6 +200,7 @@ function CdekShellRoute() {
 
 const CDEK_PARTS: Record<string, SectionParts> = {
   '': { Body: CdekOverview, HeaderRight: TgPagePeriodControl },
+  orders: { Body: CdekOrders, HeaderRight: TgPagePeriodControl },
   products: { Body: CdekProducts, HeaderRight: TgPagePeriodControl },
   // Период у «Загрузок» не показываем: страница отвечает на вопрос «что вообще залито», и окно
   // 7/30/90 дней это вопрос сузило бы до бессмыслицы.

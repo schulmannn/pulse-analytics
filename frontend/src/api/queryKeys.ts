@@ -112,6 +112,8 @@ export const qk = {
   cdekSummary: periodFamily('cdek-summary'),
   cdekSeries: periodFamily('cdek-series'),
   cdekBreakdown: periodFamily('cdek-breakdown'),
+  cdekOrders: periodFamily('cdek-orders'),
+  cdekHourly: periodFamily('cdek-hourly'),
   ...ymFamilies,
   /** Префиксы ВСЕХ семей Метрики одним списком: `invalidateYm` после смены счётчика обязан
       пройтись по ним, а не по трём — иначе 14 карточек разрезов до 5 минут врут прошлым счётчиком. */
