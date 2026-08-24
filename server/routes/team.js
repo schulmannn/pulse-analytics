@@ -119,7 +119,7 @@ function registerTeamRoutes({
       db.countWorkspaceSeats(workspace.id),
     ]);
     return {
-      workspace: { id: workspace.id, name: workspace.name },
+      workspace: { id: workspace.id, name: workspace.name, name_max: db.WORKSPACE_NAME_MAX },
       members,
       invites,
       memberships,
@@ -137,6 +137,27 @@ function registerTeamRoutes({
       const state = await teamState(req.user.uid);
       if (!state) return res.status(503).json({ error: 'Рабочее пространство недоступно' });
       res.json(state);
+    } catch (e) { next(e); }
+  });
+
+  /* ── Название команды ────────────────────────────────────────────────────────────────────────
+     По умолчанию имя воркспейса — локальная часть email владельца (миграция 010), поэтому
+     приглашение звало «в schulmannn». Переименование скоупится тем же ensureTeamWorkspace, что и
+     остальные мутации: пользователь правит ТОЛЬКО воркспейс, которым владеет. */
+  app.patch('/api/team', requireAuth, async (req, res, next) => {
+    if (!db.enabled) return dbOff(res);
+    const name = String((req.body && req.body.name) || '').trim();
+    if (!name) return res.status(400).json({ error: 'Название не может быть пустым' });
+    if (name.length > db.WORKSPACE_NAME_MAX) {
+      return res.status(400).json({ error: `Не длиннее ${db.WORKSPACE_NAME_MAX} символов` });
+    }
+    try {
+      const workspace = await db.ensureTeamWorkspace(req.user.uid);
+      if (!workspace) return res.status(503).json({ error: 'Рабочее пространство недоступно' });
+      const renamed = await db.renameWorkspace(workspace.id, name);
+      if (!renamed) return res.status(400).json({ error: 'Не удалось сохранить название' });
+      audit(req, 'team.renamed', { workspace_id: workspace.id }).catch(() => {});
+      res.json({ ok: true, ...(await teamState(req.user.uid)) });
     } catch (e) { next(e); }
   });
 

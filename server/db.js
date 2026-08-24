@@ -269,7 +269,7 @@ function createDatabase(config, overrides = {}) {
     users: usersRepo,
     channels: channelsRepo,
     sources: sourcesRepo,
-    team: teamRepo, // MAX_WORKSPACE_SEATS, INVITE_ROLES, ensureTeamWorkspace, listWorkspaceMembers, listWorkspaceInvites, listForeignMemberships, countWorkspaceSeats, createWorkspaceInvite, getWorkspaceInviteByToken, acceptWorkspaceInvite, reissueWorkspaceInviteToken, revokeWorkspaceInvite, setWorkspaceMemberRole, removeWorkspaceMember
+    team: teamRepo, // MAX_WORKSPACE_SEATS, INVITE_ROLES, WORKSPACE_NAME_MAX, ensureTeamWorkspace, renameWorkspace, listWorkspaceMembers, listWorkspaceInvites, listForeignMemberships, countWorkspaceSeats, createWorkspaceInvite, getWorkspaceInviteByToken, acceptWorkspaceInvite, reissueWorkspaceInviteToken, revokeWorkspaceInvite, setWorkspaceMemberRole, removeWorkspaceMember
     integrations: integrationsRepo,
     bugs: bugsRepo,
     analytics: analyticsRepo,
