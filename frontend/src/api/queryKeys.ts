@@ -23,11 +23,13 @@ import { ME_QUERY_KEY } from '@/api/authQueryKey';
  *   поэлементно с начала массива); параметризованные формы — точный ключ чтения.
  */
 
-/** Семья отчёта «Яндекс.Метрики»: префикс инвалидации (`all`) + точный ключ чтения (`window`).
-    Хвост (`limit`, цель) добавляется ПОЗИЦИОННО в том же порядке, что и в query-строке запроса. */
-const ymFamily = (name: string) => ({
+/** Семья ОКОННОГО отчёта: префикс инвалидации (`all`) + точный ключ чтения (`window`). Хвост
+    (`limit`, цель, разрез, режим выручки) добавляется ПОЗИЦИОННО в том же порядке, что и в
+    query-строке запроса. Родилась для Метрики, теперь общая — у СДЭКа те же оконные чтения, и
+    свои развёрнутые семьи стоили бы лишних байт в ОБЩЕЙ оболочке (гейт размера бандла). */
+const periodFamily = (name: string) => ({
   all: [name] as const,
-  window: (channelId: number | null, period: MsPeriod, ...tail: number[]) =>
+  window: (channelId: number | null, period: MsPeriod, ...tail: Array<string | number>) =>
     [name, channelId, ...msPeriodKey(period), ...tail],
 });
 
@@ -41,22 +43,22 @@ const ymFamilies = {
     all: ['ym-status'] as const,
     byChannel: (channelId: number | null) => ['ym-status', channelId] as const,
   },
-  ymSummary: ymFamily('ym-summary'),
-  ymSources: ymFamily('ym-sources'),
-  ymReferrers: ymFamily('ym-referrers'),
-  ymSocial: ymFamily('ym-social'),
-  ymMessengers: ymFamily('ym-messengers'),
-  ymDevices: ymFamily('ym-devices'),
-  ymCountries: ymFamily('ym-countries'),
-  ymCities: ymFamily('ym-cities'),
-  ymAge: ymFamily('ym-age'),
-  ymGender: ymFamily('ym-gender'),
-  ymGoals: ymFamily('ym-goals'),
-  ymUtm: ymFamily('ym-utm'),
-  ymPages: ymFamily('ym-pages'),
-  ymLandings: ymFamily('ym-landings'),
-  ymHourly: ymFamily('ym-hourly'),
-  ymExits: ymFamily('ym-exits'),
+  ymSummary: periodFamily('ym-summary'),
+  ymSources: periodFamily('ym-sources'),
+  ymReferrers: periodFamily('ym-referrers'),
+  ymSocial: periodFamily('ym-social'),
+  ymMessengers: periodFamily('ym-messengers'),
+  ymDevices: periodFamily('ym-devices'),
+  ymCountries: periodFamily('ym-countries'),
+  ymCities: periodFamily('ym-cities'),
+  ymAge: periodFamily('ym-age'),
+  ymGender: periodFamily('ym-gender'),
+  ymGoals: periodFamily('ym-goals'),
+  ymUtm: periodFamily('ym-utm'),
+  ymPages: periodFamily('ym-pages'),
+  ymLandings: periodFamily('ym-landings'),
+  ymHourly: periodFamily('ym-hourly'),
+  ymExits: periodFamily('ym-exits'),
 };
 
 export const qk = {
@@ -105,6 +107,11 @@ export const qk = {
     all: ['cdek-coverage'] as const,
     byChannel: (channelId: number | null) => ['cdek-coverage', channelId] as const,
   },
+  // Оконные чтения «Обзора». Ключ несёт ГРАНИЦЫ окна (msPeriodKey), а не только число дней:
+  // пресет и точный диапазон одной длины — разные данные.
+  cdekSummary: periodFamily('cdek-summary'),
+  cdekSeries: periodFamily('cdek-series'),
+  cdekBreakdown: periodFamily('cdek-breakdown'),
   ...ymFamilies,
   /** Префиксы ВСЕХ семей Метрики одним списком: `invalidateYm` после смены счётчика обязан
       пройтись по ним, а не по трём — иначе 14 карточек разрезов до 5 минут врут прошлым счётчиком. */

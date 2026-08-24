@@ -181,6 +181,7 @@ const YM_PARTS: Record<string, SectionParts> = {
 };
 
 // «СДЭК Fulfillment» — свой lazy-чанк (bundle-гейт: TG/IG-пользователь его не платит).
+const CdekOverview = lazyFrom(() => import('@/panels/cdek/CdekOverview'), 'CdekOverview');
 const CdekImports = lazyFrom(() => import('@/panels/cdek/CdekImports'), 'CdekImports');
 
 /**
@@ -196,9 +197,10 @@ function CdekShellRoute() {
 }
 
 const CDEK_PARTS: Record<string, SectionParts> = {
+  '': { Body: CdekOverview, HeaderRight: TgPagePeriodControl },
   // Период у «Загрузок» не показываем: страница отвечает на вопрос «что вообще залито», и окно
   // 7/30/90 дней это вопрос сузило бы до бессмыслицы.
-  '': { Body: CdekImports },
+  imports: { Body: CdekImports },
 };
 
 /** Zip the network's nav (paths + labels — the single source of truth) with the body map. A nav

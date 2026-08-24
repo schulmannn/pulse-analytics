@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { apiGet, apiSend, apiUpload } from '@/api/client';
 import { qk } from '@/api/queryKeys';
 import { useSelectedChannel } from '@/lib/channel-context';
+import { msPeriodQuery, type MsPeriod } from '@/lib/msPeriod';
 
 /**
  * Запросы источника «СДЭК Fulfillment» — ОТДЕЛЬНЫМ модулем, а не в общем api/queries.
@@ -149,5 +150,141 @@ export function useCreateCdekSource() {
     mutationFn: (input: { name: string; tz?: string }) =>
       apiSend('POST', '/api/cdek/sources', input, CdekSourceCreatedSchema, { channelId: null }),
     onSuccess: () => qc.invalidateQueries({ queryKey: qk.channels }),
+  });
+}
+
+// ── Оконные чтения «Обзора» ───────────────────────────────────────────────────────────────────
+// Сервер отдаёт текущее И предыдущее окно в ОДНОМ ответе, поэтому здесь нет пары запросов и нет
+// известной грабли фронта («prev-период с enabled:false отдаёт текущий кэш по fallback-ключу»):
+// отдавать нечего, оба окна приезжают вместе.
+
+const CdekWindowSchema = z
+  .object({ days: z.number(), from: z.string().nullable(), to: z.string().nullable(), all: z.boolean() })
+  .passthrough();
+
+const CdekTotalsSchema = z
+  .object({
+    revenue: z.number().nullable(),
+    orders: z.number(),
+    items: z.number(),
+    avg_check: z.number().nullable(),
+    orders_all: z.number(),
+    orders_cancelled: z.number(),
+    orders_returned: z.number(),
+    cancel_share: z.number().nullable(),
+  })
+  .passthrough();
+
+const CdekSummarySchema = z
+  .object({
+    window: CdekWindowSchema,
+    previous_window: z.object({ from: z.string().nullable(), to: z.string().nullable() }).passthrough().nullable(),
+    include: z.string(),
+    current: CdekTotalsSchema.nullable(),
+    previous: CdekTotalsSchema.nullable(),
+    bounds: z
+      .object({ first_day: z.string().nullable(), last_day: z.string().nullable(), orders: z.number() })
+      .passthrough()
+      .nullable(),
+  })
+  .passthrough();
+
+const CdekPointSchema = z
+  .object({ day: z.string(), revenue: z.number().nullable(), orders: z.number(), items: z.number() })
+  .passthrough();
+
+const CdekSeriesSchema = z
+  .object({
+    window: CdekWindowSchema,
+    grain: z.string(),
+    include: z.string(),
+    current: z.array(CdekPointSchema),
+    previous: z.array(CdekPointSchema),
+  })
+  .passthrough();
+
+const CdekBreakdownRowSchema = z
+  .object({
+    key: z.string().nullable(),
+    title: z.string().nullable(),
+    article: z.string().nullable(),
+    sku: z.string().nullable(),
+    revenue: z.number().nullable(),
+    orders: z.number(),
+    items: z.number(),
+    prev_revenue: z.number().nullable(),
+    prev_orders: z.number(),
+  })
+  .passthrough();
+
+const CdekFoldSchema = z
+  .object({
+    revenue: z.number(),
+    orders: z.number(),
+    items: z.number(),
+    prev_revenue: z.number(),
+    prev_orders: z.number(),
+    groups: z.number(),
+  })
+  .passthrough();
+
+const CdekBreakdownSchema = z
+  .object({
+    window: CdekWindowSchema,
+    dim: z.string(),
+    include: z.string(),
+    rows: z.array(CdekBreakdownRowSchema),
+    other: CdekFoldSchema.nullable(),
+    total: CdekFoldSchema,
+    truncated: z.boolean(),
+  })
+  .passthrough();
+
+export type CdekTotals = z.infer<typeof CdekTotalsSchema>;
+export type CdekPoint = z.infer<typeof CdekPointSchema>;
+export type CdekBreakdownRow = z.infer<typeof CdekBreakdownRowSchema>;
+export type CdekBreakdown = z.infer<typeof CdekBreakdownSchema>;
+
+/** Что считать выручкой. По решению владельца отгруженное — уже проданное, отсюда дефолт. */
+export type CdekInclude = 'revenue' | 'completed' | 'all';
+
+export function useCdekSummary(period: MsPeriod, include: CdekInclude = 'revenue') {
+  const { channelId } = useSelectedChannel();
+  return useQuery({
+    enabled: channelId != null,
+    queryKey: qk.cdekSummary.window(channelId, period, include),
+    retry: false,
+    queryFn: ({ signal }) =>
+      apiGet(`/api/cdek/summary?${msPeriodQuery(period)}&include=${include}`, CdekSummarySchema, { signal, channelId }),
+  });
+}
+
+export function useCdekSeries(period: MsPeriod, include: CdekInclude = 'revenue', grain?: string) {
+  const { channelId } = useSelectedChannel();
+  return useQuery({
+    enabled: channelId != null,
+    queryKey: qk.cdekSeries.window(channelId, period, include, grain ?? 'auto'),
+    retry: false,
+    queryFn: ({ signal }) =>
+      apiGet(
+        `/api/cdek/series?${msPeriodQuery(period)}&include=${include}${grain ? `&grain=${grain}` : ''}`,
+        CdekSeriesSchema,
+        { signal, channelId },
+      ),
+  });
+}
+
+export function useCdekBreakdown(period: MsPeriod, dim: string, include: CdekInclude = 'revenue', limit = 12) {
+  const { channelId } = useSelectedChannel();
+  return useQuery({
+    enabled: channelId != null,
+    queryKey: qk.cdekBreakdown.window(channelId, period, include, dim, limit),
+    retry: false,
+    queryFn: ({ signal }) =>
+      apiGet(
+        `/api/cdek/breakdown?${msPeriodQuery(period)}&include=${include}&dim=${dim}&limit=${limit}`,
+        CdekBreakdownSchema,
+        { signal, channelId },
+      ),
   });
 }
