@@ -33,11 +33,11 @@ function fakeDb(overrides = {}) {
       return { inserted: args.orders.reduce((n, o) => n + o.items.length, 0), updated: 0, deleted: 0 };
     },
     setCdekWarehouse: async (channelId, code) => { calls.warehouse.push(code); return true; },
-    finishCdekImport: async (id, payload, opts) => {
-      calls.finished.push({ id, payload, opts });
+    finishCdekImport: async (channelId, id, payload, opts) => {
+      calls.finished.push({ channelId, id, payload, opts });
       return { id, ...payload.stats, warnings: payload.warnings };
     },
-    failCdekImport: async (id, message) => { calls.failed.push({ id, message }); return true; },
+    failCdekImport: async (channelId, id, message) => { calls.failed.push({ channelId, id, message }); return true; },
     getCdekImportFile: async () => ({ filename: 'сохранённый.xlsx', file_bytes: FILE }),
     ...overrides,
   };

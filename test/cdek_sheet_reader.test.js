@@ -39,6 +39,18 @@ test('xlsx: пропущенная ячейка держит позицию ко
   assert.deepEqual(rows[1], [1, null, null, 'хвост']);
 });
 
+test('xlsx: пропущенные строки держат нумерацию, как в самом Excel', () => {
+  // Excel не пишет пустые строки в XML, но помнит их номер в атрибуте r. Если ридер уплотнит
+  // строки, номер отвергнутой строки в отчёте импорта перестанет совпадать с тем, что видит
+  // пользователь в своём файле, — и по нему уже ничего не найти.
+  const buf = buildXlsx([['ID'], [1], [], [], [4]]);
+  const { rows } = readSheetRows(buf, 'export.xlsx');
+  assert.equal(rows.length, 5);
+  assert.deepEqual(rows[1], [1]);
+  assert.deepEqual(rows[2], []);
+  assert.deepEqual(rows[4], [4], 'пятая строка осталась пятой');
+});
+
 test('xlsx: inlineStr и кэшированный результат формулы читаются как текст', () => {
   const buf = buildXlsx([
     ['A', 'B'],

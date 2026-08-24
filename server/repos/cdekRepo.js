@@ -11,6 +11,10 @@
    тенантами. Код склада поэтому хранится атрибутом (и расхождение с файлом попадает в
    предупреждения импорта), но идентичности не задаёт.
 
+   Каждый метод несёт channel_id — включая обновление строки импорта по её id: инвариант
+   «любой tenant-write содержит channel_id» не делает исключения для «внутренних» вызовов,
+   потому что именно так и появляется первый межтенантный доступ.
+
    Запись данных — одной транзакцией на импорт: заказ пере-записывается ЦЕЛИКОМ (в СДЭКе статус
    правится задним числом, и перевыгрузка с нахлёстом обязана донести правку), позиции, исчезнувшие
    из новой версии заказа, удаляются — иначе в базе останется фантомная строка, которую никакой
@@ -108,35 +112,38 @@ function createCdekRepo({ pool, enabled, transaction, ensureExternalSource }) {
    * успела финишировать первой. Данные от этого не страдают (запись идемпотентна) — снимаем свою
    * pending-строку и честно отвечаем «дубль», а не плодим второй отчёт о том же файле.
    */
-  async function finishCdekImport(id, { stats, rejected = [], warnings = [], counts = {} }, { replay = false } = {}) {
-    if (!enabled || !id) return null;
+  async function finishCdekImport(channelId, id, { stats, rejected = [], warnings = [], counts = {} }, { replay = false } = {}) {
+    if (!enabled || !channelId || !id) return null;
     try {
       const { rows } = await pool.query(
         `UPDATE cdek_imports SET status = 'done', finished_at = now(), error = NULL,
-                rows_total = $2, rows_inserted = $3, rows_updated = $4, rows_rejected = $5,
-                rows_deleted = $6, orders_total = $7, period_from = $8, period_to = $9,
-                rejected = $10::jsonb, warnings = $11::jsonb
-          WHERE id = $1 AND (status = 'pending' OR $12) RETURNING ${IMPORT_COLS}`,
-        [id, stats.rows_total, counts.inserted || 0, counts.updated || 0, stats.rows_rejected,
+                rows_total = $3, rows_inserted = $4, rows_updated = $5, rows_rejected = $6,
+                rows_deleted = $7, orders_total = $8, period_from = $9, period_to = $10,
+                rejected = $11::jsonb, warnings = $12::jsonb
+          WHERE id = $1 AND channel_id = $2 AND (status = 'pending' OR $13)
+          RETURNING ${IMPORT_COLS}`,
+        [id, channelId, stats.rows_total, counts.inserted || 0, counts.updated || 0, stats.rows_rejected,
           counts.deleted || 0, stats.orders_total, stats.period_from, stats.period_to,
           JSON.stringify(rejected), JSON.stringify(warnings), replay]);
       return rows[0] || null;
     } catch (e) {
       if (e && e.code === '23505') {
-        await pool.query('DELETE FROM cdek_imports WHERE id = $1 AND status = $2', [id, 'pending']);
+        await pool.query(
+          'DELETE FROM cdek_imports WHERE id = $1 AND channel_id = $2 AND status = $3',
+          [id, channelId, 'pending']);
         return { duplicate: true };
       }
       throw e;
     }
   }
 
-  async function failCdekImport(id, message) {
-    if (!enabled || !id) return false;
+  async function failCdekImport(channelId, id, message) {
+    if (!enabled || !channelId || !id) return false;
     // Сырой файл упавшего импорта не нужен: переигрывать нечего, а место он занимает.
     const { rowCount } = await pool.query(
-      `UPDATE cdek_imports SET status = 'error', error = $2, finished_at = now(), file_bytes = NULL
-        WHERE id = $1 AND status = 'pending'`,
-      [id, String(message || 'ошибка импорта').slice(0, 500)]);
+      `UPDATE cdek_imports SET status = 'error', error = $3, finished_at = now(), file_bytes = NULL
+        WHERE id = $1 AND channel_id = $2 AND status = 'pending'`,
+      [id, channelId, String(message || 'ошибка импорта').slice(0, 500)]);
     return rowCount > 0;
   }
 

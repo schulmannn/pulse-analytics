@@ -98,6 +98,9 @@ function buildXlsx(rows, { sheetName = 'Sheet1' } = {}) {
   };
 
   const xmlRows = rows.map((row, r) => {
+    // Excel не пишет в XML строку без единой ячейки — только пропускает её номер. Фикстура ведёт
+    // себя так же, иначе тест на нумерацию проверял бы не то, что бывает в жизни.
+    if (!row.length || row.every((c) => c === null || c === undefined)) return '';
     const cells = row.map((cell, c) => {
       if (cell === null || cell === undefined) return '';
       const ref = `${colName(c)}${r + 1}`;

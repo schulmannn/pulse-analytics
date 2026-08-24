@@ -149,7 +149,7 @@ test('гонка на финише импорта: 23505 снимает свою
       return { rows: [], rowCount: 1 };
     },
   });
-  const result = await repo.finishCdekImport(9, { stats: { rows_total: 1, rows_rejected: 0, orders_total: 1, period_from: null, period_to: null } });
+  const result = await repo.finishCdekImport(5, 9, { stats: { rows_total: 1, rows_rejected: 0, orders_total: 1, period_from: null, period_to: null } });
   assert.deepEqual(result, { duplicate: true });
   assert.ok(find(queries, /DELETE FROM cdek_imports/), 'своя незавершённая строка снимается');
 });
@@ -157,17 +157,17 @@ test('гонка на финише импорта: 23505 снимает свою
 test('переигровка снимает защиту «только pending», обычный финиш — нет', async () => {
   const { repo, queries } = repoWith();
   const stats = { rows_total: 1, rows_rejected: 0, orders_total: 1, period_from: null, period_to: null };
-  await repo.finishCdekImport(9, { stats });
-  await repo.finishCdekImport(9, { stats }, { replay: true });
+  await repo.finishCdekImport(5, 9, { stats });
+  await repo.finishCdekImport(5, 9, { stats }, { replay: true });
   const [first, second] = queries.filter((q) => /UPDATE cdek_imports SET status = 'done'/.test(q.sql));
-  assert.match(first.sql, /status = 'pending' OR \$12/);
-  assert.equal(first.params[11], false);
-  assert.equal(second.params[11], true);
+  assert.match(first.sql, /channel_id = \$2 AND \(status = 'pending' OR \$13\)/);
+  assert.equal(first.params[12], false);
+  assert.equal(second.params[12], true);
 });
 
 test('упавший импорт не хранит файл — переигрывать нечего, а место он занимает', async () => {
   const { repo, queries } = repoWith();
-  await repo.failCdekImport(9, 'Это не .xlsx');
+  await repo.failCdekImport(5, 9, 'Это не .xlsx');
   assert.match(queries[0].sql, /file_bytes = NULL/);
   assert.match(queries[0].sql, /status = 'pending'/);
 });

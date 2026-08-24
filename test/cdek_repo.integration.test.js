@@ -181,7 +181,7 @@ test('успешный импорт того же файла второй раз
   const sha = `${nonce}-same`;
   const stats = { rows_total: 1, rows_rejected: 0, orders_total: 1, period_from: '2025-09-05', period_to: '2025-09-05' };
   const first = await db.startCdekImport({ channel_id: channelId, uploaded_by: user.id, filename: 'a.xlsx', file_sha256: sha });
-  assert.ok(await db.finishCdekImport(first, { stats }));
+  assert.ok(await db.finishCdekImport(channelId, first, { stats }));
 
   const found = await db.findCdekImportByHash(channelId, sha);
   assert.equal(found.id, first);
@@ -189,7 +189,7 @@ test('успешный импорт того же файла второй раз
 
   // Гонка: вторая загрузка того же файла успела стартовать до финиша первой.
   const second = await db.startCdekImport({ channel_id: channelId, uploaded_by: user.id, filename: 'a.xlsx', file_sha256: sha });
-  assert.deepEqual(await db.finishCdekImport(second, { stats }), { duplicate: true });
+  assert.deepEqual(await db.finishCdekImport(channelId, second, { stats }), { duplicate: true });
   assert.equal(await db.getCdekImport(channelId, second), null, 'вторая pending-строка снята, а не осталась висеть');
   assert.equal((await db.listCdekImports(channelId)).filter((i) => i.status === 'done').length, 1);
 });
@@ -198,12 +198,12 @@ test('упавший импорт не мешает повторной загр�
   const { channelId, user } = await makeSource();
   const sha = `${nonce}-retry`;
   const failed = await db.startCdekImport({ channel_id: channelId, uploaded_by: user.id, filename: 'a.xlsx', file_sha256: sha, file_bytes: Buffer.from('x') });
-  await db.failCdekImport(failed, 'Это не .xlsx');
+  await db.failCdekImport(channelId, failed, 'Это не .xlsx');
   assert.equal(await db.findCdekImportByHash(channelId, sha), null, 'упавший не считается загруженным');
   assert.equal(await db.getCdekImportFile(channelId, failed), null, 'файл упавшего импорта не хранится');
 
   const retry = await db.startCdekImport({ channel_id: channelId, uploaded_by: user.id, filename: 'a.xlsx', file_sha256: sha });
-  const done = await db.finishCdekImport(retry, {
+  const done = await db.finishCdekImport(channelId, retry, {
     stats: { rows_total: 1, rows_rejected: 0, orders_total: 1, period_from: null, period_to: null },
   });
   assert.equal(done.status, 'done');
@@ -233,7 +233,7 @@ test('код склада не переезжает на другой молча
 test('отчёт импорта сохраняет отвергнутые строки и предупреждения', { skip }, async () => {
   const { channelId, user } = await makeSource();
   const id = await db.startCdekImport({ channel_id: channelId, uploaded_by: user.id, filename: 'a.xlsx', file_sha256: `${nonce}-rep` });
-  const saved = await db.finishCdekImport(id, {
+  const saved = await db.finishCdekImport(channelId, id, {
     stats: { rows_total: 10, rows_rejected: 2, orders_total: 7, period_from: '2025-09-01', period_to: '2025-09-30' },
     rejected: [{ row: 12, order_id: '1', reason: 'нет товара' }],
     warnings: ['Незнакомые статусы заказов: packing'],

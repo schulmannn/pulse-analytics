@@ -194,15 +194,21 @@ function parseSheet(xml, { shared, dateStyles, maxRows, maxCells }) {
   const start = xml.indexOf('<sheetData');
   const body = start < 0 ? '' : xml.slice(start);
   const rows = [];
-  const rowRe = /<row\b[^>]*?(?:\/>|>([\s\S]*?)<\/row>)/g;
+  const rowRe = /<row\b([^>]*?)(?:\/>|>([\s\S]*?)<\/row>)/g;
   let cells = 0;
   let m;
   while ((m = rowRe.exec(body))) {
-    if (rows.length >= maxRows) throw new SheetReadError(`В файле больше ${maxRows} строк`);
+    // Excel не пишет в XML пустые строки, но помнит их номер в атрибуте r. Держим индекс массива
+    // равным номеру строки в самом Excel: по этому номеру пользователь ищет отвергнутую строку
+    // в своём файле, и «12-я по счёту непустая» ему ничем не поможет.
+    const at = Number((m[1].match(/\br="(\d+)"/) || [])[1]);
+    const target = Number.isFinite(at) && at > 0 ? at - 1 : rows.length;
+    if (target >= maxRows) throw new SheetReadError(`В файле больше ${maxRows} строк`);
+    while (rows.length < target) rows.push([]);
     const row = [];
     const cellRe = /<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g;
     let c;
-    while ((c = cellRe.exec(m[1] || ''))) {
+    while ((c = cellRe.exec(m[2] || ''))) {
       if (++cells > maxCells) throw new SheetReadError('В файле слишком много ячеек');
       const attrs = c[1] || '';
       const inner = c[2] || '';

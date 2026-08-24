@@ -60,7 +60,7 @@ function createCdekImportService({ db, readSheetRows, parseCdekSheet, log = () =
     if (counts.deleted) warnings.push(`Удалено позиций, исчезнувших из заказов: ${counts.deleted}`);
     if (parsed.rejected_truncated) warnings.push('Список отвергнутых строк усечён — показаны первые');
 
-    const saved = await db.finishCdekImport(importId, {
+    const saved = await db.finishCdekImport(channelId, importId, {
       stats: parsed.stats,
       rejected: parsed.rejected.slice(0, MAX_REJECTED_STORED),
       warnings,
@@ -102,7 +102,7 @@ function createCdekImportService({ db, readSheetRows, parseCdekSheet, log = () =
       });
       return { duplicate: false, import: saved };
     } catch (e) {
-      await db.failCdekImport(importId, e.userMessage || e.message).catch(() => {});
+      await db.failCdekImport(channelId, importId, e.userMessage || e.message).catch(() => {});
       log('warn', 'cdek_import_failed', { channelId, importId, error: e && e.message });
       throw e;
     }
