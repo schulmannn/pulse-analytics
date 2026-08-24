@@ -24,6 +24,9 @@ const { createApp } = require('./app');
 const { createAuthService } = require('./services/authService');
 const { createAiProvider } = require('./infrastructure/aiProvider');
 const { createAiChatService } = require('./services/aiChatService');
+const { createCdekImportService } = require('./services/cdekImportService');
+const { readSheetRows } = require('./lib/sheetReader');
+const { parseCdekSheet } = require('./domain/cdekImport');
 const { createEmailService } = require('./services/emailService');
 const { createAuditService } = require('./services/auditService');
 const { createInstagramClient } = require('./infrastructure/instagramClient');
@@ -465,6 +468,17 @@ function createComposition(config, overrides = {}) {
     sklad: { msFetch, msCrypto },
   });
 
+  // Импорт выгрузок СДЭК (038): ридер листа и разбор домена инъектируются, чтобы сервис можно
+  // было проверить на настоящем файле без БД и HTTP. Крона у источника нет по построению —
+  // данные приезжают только тогда, когда пользователь загрузил файл.
+  const cdekImport = createCdekImportService({
+    db,
+    readSheetRows,
+    parseCdekSheet,
+    log,
+    maxRows: config.cdek.maxRows,
+  });
+
   // Флаг дренажа (graceful shutdown): main.js ставит true в stop() → /api/ready 503.
   const drainState = { draining: false };
 
@@ -552,6 +566,7 @@ function createComposition(config, overrides = {}) {
       mtprotoClient,
       notionCrash,
       aiChatService,
+      cdekImport,
     });
   }
 

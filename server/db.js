@@ -18,6 +18,7 @@ const { createTeamRepo } = require('./repos/teamRepo');
 const { createIntegrationsRepo } = require('./repos/integrationsRepo');
 const { createMentionSettingsRepo } = require('./repos/mentionSettingsRepo');
 const { createMentionNotifyRepo } = require('./repos/mentionNotifyRepo');
+const { createCdekRepo } = require('./repos/cdekRepo');
 const { createAiChatsRepo } = require('./repos/aiChatsRepo');
 const { createAuditRepo } = require('./repos/auditRepo');
 const { createGdprService } = require('./services/gdprService');
@@ -245,6 +246,14 @@ function createDatabase(config, overrides = {}) {
   // Доставка упоминаний (035): привязка бота (uid→chat) + личные подписки. Запись подписки
   // вшивает channelAccessSql в SQL (member-view достаточно — поиск идёт сессией подписчика).
   const mentionNotifyRepo = createMentionNotifyRepo({ pool, enabled });
+  // СДЭК Fulfillment (038): источник с ручной загрузкой Excel — импорты и архив заказов.
+  // ensureExternalSource — инъекция, как у integrationsRepo (repos не импортят друг друга).
+  const cdekRepo = createCdekRepo({
+    pool,
+    enabled,
+    transaction,
+    ensureExternalSource: sourcesRepo.ensureExternalSource,
+  });
   // Личные AI-диалоги (028): все методы uid-scoped; аналитика в чат попадает только через
   // ForActor-инструменты aiChatService, не через этот repo.
   const aiChatsRepo = createAiChatsRepo({ pool, enabled });
@@ -276,6 +285,7 @@ function createDatabase(config, overrides = {}) {
     collector: collectorRepo,
     reports: reportsRepo, // REPORT_SCHEDULES, listReports, getReport, createReport, updateReport, deleteReport, listDueReports, markReportSent, reserveReportDelivery, clearReportDelivery, listPostsWindow
     campaigns: campaignsRepo, // CAMPAIGN_*, listCampaigns, getCampaign, create/update/deleteCampaign, add/remove/listCampaignPosts, getCampaignSummary
+    cdek: cdekRepo, // get/saveCdekSource, setCdekWarehouse, find/start/finish/failCdekImport, list/getCdekImport(File), applyCdekImport, getCdekWarehouseFromOrders
     mentionSettings: mentionSettingsRepo, // getMentionSettingsInternal/ForActor, upsertMentionSettingsForActor
     mentionNotify: mentionNotifyRepo, // issueMentionNotifyLink, bindMentionNotifyByToken, get/deleteMentionNotifyBinding, unbindMentionNotifyChat, set/getMentionNotifySubscription*, listRunnableMentionNotifySubscriptions, markMentionNotifyRun, filterNewMentions
     aiChats: aiChatsRepo, // listAiChats, createAiChat, getAiChat, deleteAiChat, listAiChatMessages, appendAiChatMessage, getAiUsageToday, bumpAiUsage
