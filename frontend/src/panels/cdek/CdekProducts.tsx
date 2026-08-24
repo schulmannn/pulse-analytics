@@ -80,7 +80,7 @@ export function CdekProducts() {
 
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-6">
-      <ChartWidget id="cdek-abc" title={`Концентрация ассортимента ${periodInLabel ?? ''}`.trim()} fixedSize="full">
+      <ChartWidget id="cdek-abc" drillTo="/metrics/cdek-products" title={`Концентрация ассортимента ${periodInLabel ?? ''}`.trim()} fixedSize="full">
         {products.isPending ? (
           <TableSkeleton rows={6} columns={3} />
         ) : rows.length === 0 ? (
@@ -106,7 +106,7 @@ export function CdekProducts() {
         )}
       </ChartWidget>
 
-      <ChartWidget id="cdek-units" title="Штук продано" fixedSize="half">
+      <ChartWidget id="cdek-units" drillTo="/metrics/cdek-units" title="Штук продано" fixedSize="half">
         {series.isPending ? (
           <ChartSkeleton />
         ) : (
@@ -114,7 +114,7 @@ export function CdekProducts() {
         )}
       </ChartWidget>
 
-      <ChartWidget id="cdek-price" title="Средняя цена продажи" fixedSize="half">
+      <ChartWidget id="cdek-price" drillTo="/metrics/cdek-price" title="Средняя цена продажи" fixedSize="half">
         {series.isPending ? (
           <ChartSkeleton />
         ) : (

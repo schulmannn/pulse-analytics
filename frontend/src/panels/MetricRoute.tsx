@@ -7,6 +7,7 @@ import { isMentionsMetricKey } from '@/panels/mentions/mentionsMetricKeys';
 import { isMsMetricKey } from '@/panels/sklad/msMetricKeys';
 import { isTgExtraMetricKey } from '@/panels/tgMetricKeys';
 import { isYmMetricKey } from '@/panels/metrika/ymMetricKeys';
+import { isCdekMetricKey } from '@/panels/cdek/cdekMetricKeys';
 
 /**
  * The metric dispatcher is deliberately dependency-free apart from the tiny key registries.
@@ -36,6 +37,11 @@ const YmMetricPageLazy = lazy(
     })),
   ),
 );
+const CdekMetricPageLazy = lazy(
+  lazyWithReload(() =>
+    import('@/panels/cdek/CdekMetricPage').then((module) => ({ default: module.CdekMetricPage })),
+  ),
+);
 const TgMetricPageLazy = lazy(
   lazyWithReload(() =>
     import('@/panels/TgMetricPage').then((module) => ({ default: module.TgMetricPage })),
@@ -54,6 +60,9 @@ export function MetricRoute() {
 
   if (isYmMetricKey(key)) {
     return <MetricBranch><YmMetricPageLazy metricKey={key} /></MetricBranch>;
+  }
+  if (isCdekMetricKey(key)) {
+    return <MetricBranch><CdekMetricPageLazy metricKey={key} /></MetricBranch>;
   }
   if (isTgExtraMetricKey(key)) {
     return <MetricBranch><TgMetricPageLazy metricKey={key} /></MetricBranch>;

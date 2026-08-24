@@ -191,3 +191,18 @@ test('ни одна карточка не переполняется внутр�
   await bootOverview(page);
   expect(await overflowingCards(page)).toEqual([]);
 });
+
+test('«Развернуть» ведёт на страницу метрики, как у соседних источников', async ({ page }) => {
+  // Пока у карточек не было drillTo, разворот падал в инлайновый оверлей — источник вёл себя
+  // не как МойСклад и Метрика (жалоба владельца).
+  await bootOverview(page);
+  const btn = page.getByRole('button', { name: 'Развернуть виджет «Выручка»' });
+  await btn.focus();
+  await btn.press('Enter');
+  await expect(page).toHaveURL(/\/metrics\/cdek-revenue/);
+  await expect(page.getByRole('heading', { name: 'Выручка', level: 1 })).toBeVisible();
+  await expect(page.getByRole('link', { name: /СДЭК · Обзор/ })).toBeVisible();
+  await expect(page.getByRole('toolbar', { name: 'Тип графика' })).toBeVisible();
+  await expect(page.getByRole('toolbar', { name: 'База сравнения' })).toBeVisible();
+  await expect(page.getByText('без отмен, возвратов и складских движений')).toBeVisible();
+});

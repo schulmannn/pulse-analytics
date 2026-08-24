@@ -188,12 +188,13 @@ export function CdekOverview() {
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-6">
       {series.isPending || summary.isPending ? (
-        <ChartWidget id="cdek-revenue" title="Выручка" fixedSize="half" defaultColor={1} defaultTinted>
+        <ChartWidget id="cdek-revenue" drillTo="/metrics/cdek-revenue" title="Выручка" fixedSize="half" defaultColor={1} defaultTinted>
           <ChartSkeleton />
         </ChartWidget>
       ) : (
         <ChartWidget
           id="cdek-revenue"
+          drillTo="/metrics/cdek-revenue"
           title="Выручка"
           fixedSize="half"
           defaultColor={1}
@@ -205,7 +206,7 @@ export function CdekOverview() {
         />
       )}
 
-      <ChartWidget id="cdek-orders" title="Заказы" fixedSize="half">
+      <ChartWidget id="cdek-orders" drillTo="/metrics/cdek-orders" title="Заказы" fixedSize="half">
         {series.isPending || summary.isPending ? (
           <ChartSkeleton />
         ) : (
@@ -221,7 +222,7 @@ export function CdekOverview() {
         )}
       </ChartWidget>
 
-      <ChartWidget id="cdek-aov" title="Средний чек" fixedSize="half">
+      <ChartWidget id="cdek-aov" drillTo="/metrics/cdek-aov" title="Средний чек" fixedSize="half">
         {series.isPending || summary.isPending ? (
           <ChartSkeleton />
         ) : (
@@ -237,7 +238,7 @@ export function CdekOverview() {
         )}
       </ChartWidget>
 
-      <ChartWidget id="cdek-statuses" title="Статусы заказов" fixedSize="half">
+      <ChartWidget id="cdek-statuses" drillTo="/metrics/cdek-statuses" title="Статусы заказов" fixedSize="half">
         <div className="flex h-full min-h-0 flex-col">
           <div className="mb-1 flex shrink-0 justify-end">
             <SegmentedControl
@@ -274,7 +275,7 @@ export function CdekOverview() {
         </div>
       </ChartWidget>
 
-      <ChartWidget id="cdek-channels" title="Каналы продаж" fixedSize="half">
+      <ChartWidget id="cdek-channels" drillTo="/metrics/cdek-channels" title="Каналы продаж" fixedSize="half">
         {/* Флекс-колонка во всю высоту тела: переключатель занимает СВОЁ, а кольцо меряет остаток
             через ChartFill. Без этого PieChart берёт высоту ВСЕГО тела из контекста, рисует себя
             во всю её величину — и тайл переполняется ровно на высоту переключателя (кольцо на
@@ -306,7 +307,7 @@ export function CdekOverview() {
         </div>
       </ChartWidget>
 
-      <ChartWidget id="cdek-products" title={`Топ товаров ${periodInLabel ?? ''}`.trim()} fixedSize="half">
+      <ChartWidget id="cdek-products" drillTo="/metrics/cdek-products" title={`Топ товаров ${periodInLabel ?? ''}`.trim()} fixedSize="half">
         {products.isPending ? (
           <ChartSkeleton />
         ) : products.isError ? (
