@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
 import { ChartCardBody } from '@/components/chartWidget/ChartCardBody';
 import { ChartBand } from '@/components/ChartBand';
+import { ChartFill } from '@/components/ChartFill';
 import { BarChart } from '@/components/BarChart';
 import { Sparkline } from '@/components/Sparkline';
 import { PieChart } from '@/components/PieChart';
@@ -110,9 +111,14 @@ function CdekStory({
   return (
     <ChartCardBody hero value={value} delta={delta} caption={caption}>
       {viz === 'bar' ? (
-        <ChartBand>
-          <BarChart values={model.values} labels={labels} axisLabels={axisLabels} titles={titles} formatValue={formatValue} />
-        </ChartBand>
+        // ChartBand — `flex-1`, и без флекс-КОЛОНКИ-родителя он не ограничен ничем: полоса растёт
+        // под контент, столбцы берут высоту ВСЕГО тела карточки из контекста, и тайл переполняется
+        // (гейт ловил «Заказы» на +19px). Колонка во всю высоту слота даёт полосе честный остаток.
+        <div className="flex h-full min-h-0 flex-col">
+          <ChartBand>
+            <BarChart values={model.values} labels={labels} axisLabels={axisLabels} titles={titles} formatValue={formatValue} />
+          </ChartBand>
+        </div>
       ) : (
         <Sparkline
           values={model.values}
@@ -232,18 +238,20 @@ export function CdekOverview() {
       </ChartWidget>
 
       <ChartWidget id="cdek-statuses" title="Статусы заказов" fixedSize="half">
-        <div className="mb-1 flex justify-end">
-          <SegmentedControl
-            ariaLabel="Показатель распределения заказов по статусам"
-            size="sm"
-            value={statusMetric}
-            onChange={setStatusMetric}
-            options={[
-              { value: 'orders', content: 'Заказы' },
-              { value: 'revenue', content: 'Выручка' },
-            ]}
-          />
-        </div>
+        <div className="flex h-full min-h-0 flex-col">
+          <div className="mb-1 flex shrink-0 justify-end">
+            <SegmentedControl
+              ariaLabel="Показатель распределения заказов по статусам"
+              size="sm"
+              value={statusMetric}
+              onChange={setStatusMetric}
+              options={[
+                { value: 'orders', content: 'Заказы' },
+                { value: 'revenue', content: 'Выручка' },
+              ]}
+            />
+          </div>
+          <ChartFill>
         {statuses.isPending ? (
           <TableSkeleton rows={4} columns={3} className="py-2" />
         ) : statuses.isError ? (
@@ -262,30 +270,40 @@ export function CdekOverview() {
             tailWord={statusMetric === 'orders' ? 'заказов' : 'рублей'}
           />
         )}
+          </ChartFill>
+        </div>
       </ChartWidget>
 
       <ChartWidget id="cdek-channels" title="Каналы продаж" fixedSize="half">
-        <div className="mb-1 flex justify-end">
-          <SegmentedControl
-            ariaLabel="Показатель каналов продаж"
-            size="sm"
-            value={channelMetric}
-            onChange={setChannelMetric}
-            options={[
-              { value: 'revenue', content: 'Выручка' },
-              { value: 'orders', content: 'Заказы' },
-            ]}
-          />
+        {/* Флекс-колонка во всю высоту тела: переключатель занимает СВОЁ, а кольцо меряет остаток
+            через ChartFill. Без этого PieChart берёт высоту ВСЕГО тела из контекста, рисует себя
+            во всю её величину — и тайл переполняется ровно на высоту переключателя (кольцо на
+            проде обрезалось снизу). */}
+        <div className="flex h-full min-h-0 flex-col">
+          <div className="mb-1 flex shrink-0 justify-end">
+            <SegmentedControl
+              ariaLabel="Показатель каналов продаж"
+              size="sm"
+              value={channelMetric}
+              onChange={setChannelMetric}
+              options={[
+                { value: 'revenue', content: 'Выручка' },
+                { value: 'orders', content: 'Заказы' },
+              ]}
+            />
+          </div>
+          <ChartFill>
+            {channels.isPending ? (
+              <ChartSkeleton />
+            ) : channels.isError ? (
+              <ErrorState compact size="chart" title="Не удалось получить каналы" onRetry={() => channels.refetch()} />
+            ) : !channels.data || channels.data.rows.length === 0 ? (
+              <EmptyState compact size="chart" title="Нет продаж за период." />
+            ) : (
+              <ChannelDonut data={channels.data} metric={channelMetric} />
+            )}
+          </ChartFill>
         </div>
-        {channels.isPending ? (
-          <ChartSkeleton />
-        ) : channels.isError ? (
-          <ErrorState compact size="chart" title="Не удалось получить каналы" onRetry={() => channels.refetch()} />
-        ) : !channels.data || channels.data.rows.length === 0 ? (
-          <EmptyState compact size="chart" title="Нет продаж за период." />
-        ) : (
-          <ChannelDonut data={channels.data} metric={channelMetric} />
-        )}
       </ChartWidget>
 
       <ChartWidget id="cdek-products" title={`Топ товаров ${periodInLabel ?? ''}`.trim()} fixedSize="half">

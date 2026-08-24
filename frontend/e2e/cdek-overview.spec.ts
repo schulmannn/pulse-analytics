@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { overflowingCards } from './helpers';
 
 // «Обзор» СДЭКа на стабах: демо-режим read-only и не знает cdek-каналов, поэтому полный перехват
 // /api/ со своими ответами. Спека бьёт по тому, что легко сломать незаметно: подпись выручки
@@ -181,4 +182,12 @@ test('на окне со сравнением видно, кто добавил 
   const widget = card(page, 'Что изменило выручку');
   await expect(widget).toContainText('Wildberries');
   await expect(widget).toContainText('Яндекс.Маркет');
+});
+
+test('ни одна карточка не переполняется внутренним скроллом', async ({ page }) => {
+  // Кольцо каналов на проде обрезалось снизу: PieChart берёт высоту ВСЕГО тела тайла из контекста
+  // и рисовал себя во всю её величину, не зная про переключатель метрики над собой. Гейт меряет
+  // всю доску, а не первый экран, — тела карточек грузятся по появлению.
+  await bootOverview(page);
+  expect(await overflowingCards(page)).toEqual([]);
 });
