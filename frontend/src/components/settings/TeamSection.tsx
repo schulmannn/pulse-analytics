@@ -1,5 +1,6 @@
 import { useState, type FormEvent, type ReactNode } from 'react';
 import {
+  useInviteLink,
   useInviteMember,
   useRemoveMember,
   useRevokeInvite,
@@ -19,6 +20,7 @@ import {
 } from '@/lib/team';
 import { cn } from '@/lib/utils';
 import { PillSelect } from '@/components/PillSelect';
+import { Snippet } from '@/components/ui/snippet';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -98,6 +100,11 @@ function TeamRoster({ plan }: { plan: 'pro' | 'max' }) {
   const revoke = useRevokeInvite();
   const setRole = useSetMemberRole();
   const remove = useRemoveMember();
+  const inviteLink = useInviteLink();
+
+  // Какую ссылку сейчас показываем: свежевыпущенную формой или перевыпущенную по кнопке в строке.
+  // `reissued` разводит два текста: у второй прежняя ссылка из письма уже мертва.
+  const [shownLink, setShownLink] = useState<{ email: string; url: string; reissued: boolean } | null>(null);
 
   const [email, setEmail] = useState('');
   const [role, setRoleValue] = useState<TeamRole>('viewer');
@@ -108,7 +115,7 @@ function TeamRoster({ plan }: { plan: 'pro' | 'max' }) {
   const full = used >= planLimit;
   const members = team.data?.members ?? [];
   const invites = team.data?.invites ?? [];
-  const busy = invite.isPending || revoke.isPending || setRole.isPending || remove.isPending;
+  const busy = invite.isPending || revoke.isPending || setRole.isPending || remove.isPending || inviteLink.isPending;
 
   const onInvite = (event: FormEvent) => {
     event.preventDefault();
@@ -121,9 +128,10 @@ function TeamRoster({ plan }: { plan: 'pro' | 'max' }) {
     invite.mutate(
       { email: value, role },
       {
-        onSuccess: () => {
+        onSuccess: (data) => {
           setEmail('');
           setRoleValue('viewer');
+          if (data.invite_link) setShownLink({ email: value, url: data.invite_link, reissued: false });
         },
       },
     );
@@ -201,6 +209,19 @@ function TeamRoster({ plan }: { plan: 'pro' | 'max' }) {
                 <p className="mt-2 text-xs text-ink2">{deliveryText(invite.data)}</p>
               )}
             </div>
+            {shownLink && (
+              <div className="mt-3">
+                <Snippet
+                  value={shownLink.url}
+                  tone={shownLink.reissued ? 'warn' : 'default'}
+                  label={
+                    shownLink.reissued
+                      ? `Новая ссылка для ${shownLink.email} — прежняя из письма больше не работает`
+                      : `Ссылка для ${shownLink.email} — можно передать напрямую`
+                  }
+                />
+              </div>
+            )}
           </>
         }
       />
@@ -246,7 +267,23 @@ function TeamRoster({ plan }: { plan: 'pro' | 'max' }) {
           badgeMuted
           control={
             <>
-              <span className="text-xs text-muted-foreground">Ждёт ответа</span>
+              <Button
+                type="button"
+                variant="secondary"
+                size="xs"
+                disabled={busy}
+                onClick={() =>
+                  inviteLink.mutate(inv.id, {
+                    onSuccess: (data) => {
+                      if (data.invite_link) {
+                        setShownLink({ email: inv.email, url: data.invite_link, reissued: true });
+                      }
+                    },
+                  })
+                }
+              >
+                Ссылка
+              </Button>
               <Button
                 type="button"
                 variant="destructive"
@@ -262,10 +299,10 @@ function TeamRoster({ plan }: { plan: 'pro' | 'max' }) {
         />
       ))}
 
-      {(setRole.isError || remove.isError || revoke.isError) && (
+      {(setRole.isError || remove.isError || revoke.isError || inviteLink.isError) && (
         <div className="px-5 pb-3">
           <p role="alert" className="text-xs font-medium text-destructive">
-            {errorText(setRole.error ?? remove.error ?? revoke.error)}
+            {errorText(setRole.error ?? remove.error ?? revoke.error ?? inviteLink.error)}
           </p>
         </div>
       )}

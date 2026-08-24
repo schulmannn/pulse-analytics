@@ -218,6 +218,26 @@ function createTeamRepo({ pool, enabled, transaction, ensurePersonalWorkspace })
     });
   }
 
+  /* Перевыпуск токена ЖИВОГО приглашения без письма — под кнопку «Скопировать ссылку».
+     Нужен потому, что сырой токен существует ровно один раз: в БД лежит только его sha256, а сам
+     он уходит в письмо и больше нигде не хранится. Значит «дай мне ссылку ещё раз» физически
+     возможно только выпуском НОВОГО токена — прежняя ссылка из письма при этом умирает, и UI
+     обязан сказать это вслух. Срок жизни отсчитывается заново.
+     Кулдаун здесь НЕ применяется: он охраняет почтовый флуд по чужому ящику, а этот путь писем
+     не шлёт. Скоупится воркспейсом — чужое приглашение по id не перевыпускается. */
+  async function reissueWorkspaceInviteToken(workspaceId, inviteId, tokenHash, expiresAt) {
+    if (!enabled || !workspaceId || !inviteId) return null;
+    const { rows } = await pool.query(
+      `UPDATE workspace_invites
+          SET token_hash = $3, expires_at = $4
+        WHERE id = $1 AND workspace_id = $2 AND accepted_at IS NULL AND revoked_at IS NULL
+        RETURNING id, email, role,
+                  to_char(created_at,'YYYY-MM-DD"T"HH24:MI:SS') AS created_at,
+                  to_char(expires_at,'YYYY-MM-DD"T"HH24:MI:SS') AS expires_at`,
+      [inviteId, workspaceId, tokenHash, expiresAt]);
+    return rows[0] || null;
+  }
+
   // Отзыв приглашения (ссылка из письма умирает немедленно). Скоупится воркспейсом — чужое
   // приглашение по id не отзывается.
   async function revokeWorkspaceInvite(workspaceId, inviteId) {
@@ -250,7 +270,7 @@ function createTeamRepo({ pool, enabled, transaction, ensurePersonalWorkspace })
     MAX_WORKSPACE_SEATS, INVITE_ROLES, INVITE_COOLDOWN_SECONDS,
     ensureTeamWorkspace, listWorkspaceMembers, listWorkspaceInvites, listForeignMemberships,
     countWorkspaceSeats, createWorkspaceInvite, getWorkspaceInviteByToken, acceptWorkspaceInvite,
-    revokeWorkspaceInvite, setWorkspaceMemberRole, removeWorkspaceMember,
+    reissueWorkspaceInviteToken, revokeWorkspaceInvite, setWorkspaceMemberRole, removeWorkspaceMember,
   };
 }
 
