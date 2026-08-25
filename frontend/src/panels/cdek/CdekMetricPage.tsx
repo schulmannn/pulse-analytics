@@ -85,16 +85,27 @@ const STATUS_LABEL: Record<string, string> = {
 
 /** Тихая шапка + две колонки, как у `/metrics/ms-*`. `back` меняется: товарные метрики
     возвращают на «Товары», продажи — на «Обзор». */
+/**
+ * Каркас страницы метрики СДЭКа.
+ *
+ * Фильтры живут в ПРАВОЙ колонке, а не над графиком. Раньше они стояли в основной колонке и
+ * забирали её верх: провалившись в метрику, человек видел блок управления, а сам график уезжал
+ * под сгиб (жалоба владельца со скриншотом). Rail для них — естественное место: он и так несёт
+ * «чем это меряется» (сравнение), всегда на виду и не отнимает у графика ни пикселя высоты.
+ */
 function CdekMetricShell({
   term,
   descriptor,
   back,
   comparison,
+  filters,
   children,
 }: {
   term: string;
   descriptor?: string;
   back: { to: string; label: string };
+  /** Блок управления выборкой. Живёт в rail'е — см. комментарий выше. */
+  filters?: ReactNode;
   comparison?: ReactNode;
   children: ReactNode;
 }) {
@@ -118,6 +129,7 @@ function CdekMetricShell({
                 </p>
               )}
             </RailSection>
+            {filters && <RailSection title="Фильтры">{filters}</RailSection>}
             <Link
               to={back.to}
               className="inline-flex items-center gap-1 text-xs font-medium text-primary transition-colors hover:text-primary/80"
@@ -291,8 +303,45 @@ function CdekSeriesPage({ def }: { def: SeriesDef }) {
     </div>
   );
 
+  // Тот же блок, что раньше стоял над графиком, — теперь узел для rail'а. Подпись выбора едет
+  // ВМЕСТЕ с фильтрами: она объясняет именно их состояние, а не график сам по себе.
+  const filters = (
+    <div className="space-y-3">
+      <CdekStatusFilter
+        selected={statuses}
+        saved={saved}
+        onChange={setSelected}
+        onSave={(ids) => {
+          setSavedFilter(filterKey, normalizeCdekStatuses(ids));
+          toastStatusFilterSaved(ids);
+        }}
+      />
+      <CdekProductFilter
+        options={productOptions}
+        selected={products}
+        saved={savedProducts}
+        onChange={setPickedProducts}
+        onSave={(ids) => {
+          setSavedFilter(productKey, normalizeCdekProducts(ids));
+          toast(ids.length > 0 ? 'Фильтр товаров сохранён' : 'Фильтр товаров сброшен');
+        }}
+      />
+      {(caption || productCaption) && (
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          {[caption, productCaption].filter(Boolean).join(' · ')}
+        </p>
+      )}
+    </div>
+  );
+
   return (
-    <CdekMetricShell term={def.term} descriptor={def.descriptor} back={def.back} comparison={comparison}>
+    <CdekMetricShell
+      term={def.term}
+      descriptor={def.descriptor}
+      back={def.back}
+      comparison={comparison}
+      filters={filters}
+    >
       <div className="space-y-3">
         <div className="flex flex-wrap items-center justify-end gap-2">
           <SegmentedControl
@@ -317,30 +366,6 @@ function CdekSeriesPage({ def }: { def: SeriesDef }) {
             ]}
           />
         </div>
-        <CdekStatusFilter
-          selected={statuses}
-          saved={saved}
-          onChange={setSelected}
-          onSave={(ids) => {
-            setSavedFilter(filterKey, normalizeCdekStatuses(ids));
-            toastStatusFilterSaved(ids);
-          }}
-        />
-        <CdekProductFilter
-          options={productOptions}
-          selected={products}
-          saved={savedProducts}
-          onChange={setPickedProducts}
-          onSave={(ids) => {
-            setSavedFilter(productKey, normalizeCdekProducts(ids));
-            toast(ids.length > 0 ? 'Фильтр товаров сохранён' : 'Фильтр товаров сброшен');
-          }}
-        />
-        {(caption || productCaption) && (
-          <p className="text-xs text-muted-foreground">
-            {[caption, productCaption].filter(Boolean).join(' · ')}
-          </p>
-        )}
         {values.length < 2 ? (
           <EmptyState compact size="chart" title="Недостаточно дней для графика за окно." />
         ) : kind === 'bar' ? (
