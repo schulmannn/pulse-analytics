@@ -149,7 +149,7 @@ gate and every screenshot spec therefore keep measuring the real default.
 | Base colour | `--background` `--card` `--popover` `--muted` `--secondary` `--border` `--input` `--hover-row` `--avatar` `--surface-table` + the ink scale | 6 neutrals; hue + saturation only — **the lightness ladder is the canon's** |
 | Chart palette | `--chart-1…6` `--chart-N-cat` `--chart-seq-1…5` | canon (Okabe-Ito) or one hue family in six solved steps |
 | Radius | `--radius` + `--radius-xl/2xl/3xl` | 0 / 4 / 8 / 12 / 16px — the whole ladder scales together, so the 4px default still yields today's 12/16/24 |
-| Font | `--font-sans` (+ a `body` rule) | Geist or a system sans/serif/mono — **no new font file ships** |
+| Font | `--font-sans` (+ a `body` rule) | Geist, a system stack, or one of 15 self-hosted families — loaded on demand |
 
 **What is deliberately NOT customisable**, because it carries meaning rather than taste:
 `--brand-verdant` / `--brand-ember` / `--status-warn` (evaluated up / down / risk), the `--chip-*`
@@ -171,6 +171,34 @@ specificity, so nothing needs re-specifying. The flip side: a colour token print
 would also beat canon's `.dark`, so both blocks always print the same colour token set (asserted by
 the test). `.force-light` keeps the canon light palette — it declares those tokens on itself, and an
 element's own declaration outranks an inherited one.
+
+**Fonts.** Families ship as `@fontsource-variable/*` and are served from our own origin — CSP is
+`font-src 'self'`, and a third-party font host would mean both an extra origin and a leak of the
+visit. (This is also how shadcn's own registry ships fonts.) Every offered family carries a
+**Cyrillic** subset: the product UI is Russian, and a Latin-only face would leave nearly all text on
+the fallback, i.e. the choice would silently do nothing — that is why Outfit / Figtree / DM Sans /
+Space Grotesk are absent. `lib/appearanceFonts` holds a STATIC loader map (Vite cannot analyse a
+templated `import()` into node_modules), so each family is its own chunk: a user on Geist downloads
+nothing extra, and opening the font list pulls only the `@font-face` declarations — the browser
+fetches a woff2 only for the rows it actually paints. Family names are proper nouns and stay in
+Latin; only the group headers are translated.
+
+**Two hosts, one component.** `AppearanceStudio` renders both inside the settings dialog
+(`variant="settings"`, with a preview card and the full CSS snippet) and inside `AppearanceDock` —
+a left panel over the running app, opened from the account menu. The dock is deliberately **not** a
+modal: no scrim, no focus trap, because the point is to change a token and watch the charts behind
+it repaint (SVG reads `hsl(var(--chart-role-primary))`, so the repaint costs no re-render). While it
+is open the shell is **pushed right**, not covered — the sidebar lives exactly where the panel does,
+and navigating between sections is the reason the panel exists. Its open state is `localStorage`,
+not a URL param, so it survives those navigations; the trade-off is that the panel itself is not
+deep-linkable (the theme is, through the account).
+
+**Picker shape.** Every knob is a field-card — label, current value, sample glyph — that opens a
+menu (owner reference: `ui.shadcn.com/create`). A menu opened from inside a dialog must pass
+`layer="modal"` to `DropdownMenuContent`: the default `z-popover` (40) puts it **under** the dialog
+scrim (`z-modal`, 50) and it becomes unclickable. Do not try to pass `z-modal-popover` through
+`className` — tailwind-merge does not treat our scale's utility as a conflict for `z-popover`, and
+both survive into the markup.
 
 **Where the code lives.** `lib/appearanceStorage` (shell — keys + selection only) → `lib/appearance`
 (lazy — store, apply, persist) → `lib/appearanceTheme` (lazy — palettes, solvers, CSS). The computed

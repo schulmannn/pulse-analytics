@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react';
+import { loadAppearanceFont } from '@/lib/appearanceFonts';
 import {
   APPEARANCE_CSS_KEY,
   APPEARANCE_CSS_VERSION,
@@ -96,6 +97,9 @@ function commit(settings: AppearanceSettings, notifySync: boolean): void {
   persistSettings(settings);
   for (const listener of listeners) listener();
   if (notifySync) notifyAppearanceChanged();
+
+  // Семейство просим сразу: CSS-переменная уже уехала в документ, файл догоняет (обычный FOUT).
+  loadAppearanceFont(settings.font);
 
   const token = ++intent;
   void import('@/lib/appearanceTheme').then(({ appearanceCss }) => {

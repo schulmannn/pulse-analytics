@@ -13,6 +13,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { setThemeStudioOpen } from '@/lib/appearanceStorage';
 import { useTheme } from '@/lib/theme';
 import { accountExitLabel, runAccountExit } from '@/lib/accountExit';
 import { useDemo } from '@/lib/demo-context';
@@ -143,6 +144,18 @@ export function AccountMenuContent({
           <Icon name="card" className="text-muted-foreground" />
           Подписка
         </NavLink>
+      </DropdownMenuItem>
+      {/* Студия — desktop-поверхность: панель открывается слева ПОВЕРХ страницы, чтобы правки темы
+          было видно на самих графиках. На телефоне остаётся раздел настроек. */}
+      <DropdownMenuItem
+        className="hidden md:flex"
+        onSelect={() => {
+          setThemeStudioOpen(true);
+          onClose?.();
+        }}
+      >
+        <Icon name="palette" className="text-muted-foreground" />
+        Оформление
       </DropdownMenuItem>
       <ThemeRow />
 

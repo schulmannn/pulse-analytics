@@ -1,7 +1,10 @@
+import { Suspense, lazy, useEffect } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useChannels, useIgProfile } from '@/api/queries';
 import { useDemo } from '@/lib/demo-context';
 import { useMediaQuery } from '@/lib/useMediaQuery';
+import { readStoredAppearance, useThemeStudioOpen } from '@/lib/appearanceStorage';
+import { lazyWithReload } from '@/lib/lazyWithReload';
 import { useWidgetPrefsSync } from '@/lib/widgetPrefsStore';
 import { cn } from '@/lib/utils';
 import { NETWORKS, NetworkGlyph } from '@/lib/networks';
@@ -9,6 +12,13 @@ import { Sidebar } from '@/components/layout/Sidebar';
 import { MobileBottomNav, MobileHeader } from '@/components/layout/MobileNav';
 import { FEED_ROUTES, routeTitle, useActiveNetwork } from '@/components/layout/nav';
 import { Button } from '@/components/ui/button';
+
+/** Студия оформления — редкая поверхность и ЛЕНИВАЯ: закрытая панель не стоит оболочке ничего. */
+const AppearanceDock = lazy(
+  lazyWithReload(() =>
+    import('@/components/settings/AppearanceDock').then((m) => ({ default: m.AppearanceDock })),
+  ),
+);
 
 interface DashboardLayoutProps {
   email?: string;
@@ -28,6 +38,17 @@ export function DashboardLayout({ email, role, avatar }: DashboardLayoutProps) {
     isMd && (pathname.startsWith('/metrics/') || pathname.startsWith('/widgets/'));
   // Widget customisation follows the account (user_prefs), not the browser.
   useWidgetPrefsSync();
+  // Панель студии живёт в localStorage, а не в URL: её открывают, чтобы ХОДИТЬ по страницам и
+  // смотреть, как перекрашиваются графики, — параметр запроса терялся бы на первом переходе.
+  const studioOpen = useThemeStudioOpen();
+  // Сохранённое семейство: CSS-переменную ставит прерисовочный бутстрап из кэша, но файл шрифта
+  // просить некому — модуль палитр при свежем кэше не поднимается вовсе. Карта загрузчиков тоже
+  // ленивая: пользователь на каноне (или на системном шрифте) не тянет ни её, ни шрифты.
+  const savedFont = readStoredAppearance()?.font;
+  useEffect(() => {
+    if (!savedFont || savedFont === 'canon' || savedFont === 'system') return;
+    void import('@/lib/appearanceFonts').then((module) => module.loadAppearanceFont(savedFont));
+  }, [savedFont]);
   return (
     // Desktop shell — inset-панель («завершение области», владелец/Kimi-референс): контент живёт
     // в скруглённом окне с зазором от краёв вьюпорта и СОБСТВЕННЫМ скроллом, так что нижняя
@@ -36,7 +57,17 @@ export function DashboardLayout({ email, role, avatar }: DashboardLayoutProps) {
     // scrollbar-gutter:stable у единственного desktop-скроллера резервирует полосу под классический
     // скроллбар: его появление/исчезновение больше не меняет ширину контента и не будит
     // ResizeObserver-волну по всем карточкам (источник покадровых штормов после прокрутки).
-    <div className="flex min-h-screen bg-background text-foreground md:h-screen md:gap-2.5 md:overflow-hidden md:p-2.5">
+    <div
+      className={cn(
+        'flex min-h-screen bg-background text-foreground md:h-screen md:gap-2.5 md:overflow-hidden md:p-2.5',
+        // Открытая студия НЕ перекрывает оболочку, а раздвигает её: панель встаёт на место
+        // сайдбара, и навигация осталась бы под ней — а ходить по разделам и смотреть, как
+        // перекрасились их графики, ровно и есть смысл панели. 21.25rem = 10px отступа панели +
+        // её 320px + 10px зазора. Сдвиг разовый (открыл/закрыл), без перехода: анимировать
+        // раскладку значит пересчитывать её каждый кадр (см. канон в DESIGN_TOKENS).
+        studioOpen && 'md:pl-[21.25rem]',
+      )}
+    >
       <Sidebar email={email} role={role} avatar={avatar} />
       <div
         data-dashboard-scroll
@@ -61,6 +92,11 @@ export function DashboardLayout({ email, role, avatar }: DashboardLayoutProps) {
         </main>
       </div>
       <MobileBottomNav />
+      {studioOpen && (
+        <Suspense fallback={null}>
+          <AppearanceDock />
+        </Suspense>
+      )}
     </div>
   );
 }
