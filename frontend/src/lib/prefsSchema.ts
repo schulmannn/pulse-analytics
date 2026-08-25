@@ -76,6 +76,9 @@ export const PrefsSchema = z
     savedFilters: SavedFiltersMapSchema.optional().catch(undefined),
     home: HomeBlocksSchema.optional().catch(undefined),
     widgetConfigs: WidgetConfigsSchema.optional().catch(undefined),
+    // Тема студии «Оформление»: короткие enum-ключи. Здесь только форма — значения санирует
+    // parseAppearance (см. lib/appearance), потому что они попадают в генератор CSS.
+    appearance: z.record(z.string(), z.unknown()).optional().catch(undefined),
   })
   .passthrough();
 
@@ -85,6 +88,7 @@ export type Prefs = z.infer<typeof PrefsSchema> & {
   savedFilters?: Record<string, string[]>;
   home?: string[];
   widgetConfigs?: WidgetConfig[];
+  appearance?: Record<string, unknown>;
 };
 
 function defaultPrefs(): Prefs {

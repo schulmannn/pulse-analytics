@@ -3,11 +3,8 @@ import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-do
 import { useChannels, useMe } from '@/api/queries';
 import { pluralRu } from '@/lib/format';
 import { SettingsIcon } from '@/components/settings/primitives';
-import {
-  AppearanceSection,
-  ProfileSection,
-  SecuritySection,
-} from '@/components/settings/AccountSection';
+import { ProfileSection, SecuritySection } from '@/components/settings/AccountSection';
+import { AppearanceStudio } from '@/components/settings/AppearanceStudio';
 import { BillingSection } from '@/components/settings/BillingSection';
 import { ChannelsSection } from '@/components/settings/ChannelsSection';
 import { DataSection } from '@/components/settings/DataSection';
@@ -385,7 +382,7 @@ function renderSection(
 ) {
   switch (section) {
     case 'appearance':
-      return <AppearanceSection />;
+      return <AppearanceStudio />;
     case 'security':
       return <SecuritySection />;
     case 'billing':

@@ -9,8 +9,6 @@ import {
 } from '@/api/queries';
 import { ApiError } from '@/api/client';
 import { resizeImageToDataUrl } from '@/lib/image';
-import { useTheme, type ThemeMode } from '@/lib/theme';
-import { cn } from '@/lib/utils';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import {
   AlertDialog,
@@ -32,14 +30,9 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import {
-  SettingsGroup,
-  SettingsIcon,
-  SettingsRow,
-  type SettingsIconName,
-} from '@/components/settings/primitives';
+import { SettingsGroup, SettingsRow } from '@/components/settings/primitives';
 
-/** Account settings: profile, appearance and security. */
+/** Account settings: профиль и безопасность. Оформление живёт в AppearanceStudio. */
 
 export function ProfileSection() {
   const me = useMe();
@@ -145,120 +138,6 @@ export function ProfileSection() {
         </p>
       </div>
     </SettingsGroup>
-  );
-}
-
-const THEME_OPTIONS: Array<{
-  value: ThemeMode;
-  label: string;
-  icon: SettingsIconName;
-}> = [
-  { value: 'light', label: 'Светлая', icon: 'sun' },
-  { value: 'system', label: 'Системная', icon: 'monitor' },
-  { value: 'dark', label: 'Тёмная', icon: 'moon' },
-];
-
-export function AppearanceSection() {
-  return (
-    <SettingsGroup>
-      <SettingsRow
-        title="Цветовая схема"
-        description="Светлая, тёмная или синхронизированная с настройками системы."
-        footer={<ThemeControl />}
-      />
-    </SettingsGroup>
-  );
-}
-
-/** Visual theme tiles adapted to the existing three-mode theme store. */
-function ThemeControl() {
-  const { mode, setMode } = useTheme();
-  return (
-    <fieldset className="m-0 mt-4 grid min-w-0 grid-cols-3 gap-2">
-      <legend className="sr-only">Тема интерфейса</legend>
-      {THEME_OPTIONS.map((option) => {
-        const active = mode === option.value;
-        return (
-          <button
-            key={option.value}
-            type="button"
-            aria-pressed={active}
-            onClick={() => setMode(option.value)}
-            className={cn(
-              'min-w-0 rounded-xl border p-2.5 text-left transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/50',
-              active
-                ? 'border-primary bg-primary/10 text-foreground'
-                : 'border-border bg-background text-muted-foreground hover:bg-muted/60 hover:text-foreground',
-            )}
-          >
-            <ThemePreview mode={option.value} />
-            <span className="mt-2 flex min-w-0 items-center gap-1.5 px-0.5">
-              <SettingsIcon name={option.icon} className="h-3.5 w-3.5 shrink-0" />
-              <span className="truncate text-xs font-medium">{option.label}</span>
-            </span>
-          </button>
-        );
-      })}
-    </fieldset>
-  );
-}
-
-function ThemePreview({ mode }: { mode: ThemeMode }) {
-  if (mode === 'system') {
-    return (
-      <span
-        aria-hidden="true"
-        className="grid h-16 grid-cols-2 overflow-hidden rounded-lg border border-border"
-      >
-        <ThemePreviewPanel className="force-light border-r" />
-        <ThemePreviewPanel className="dark" />
-      </span>
-    );
-  }
-  return (
-    <span
-      aria-hidden="true"
-      className={cn(
-        'block h-16 overflow-hidden rounded-lg border border-border',
-        mode === 'light' ? 'force-light' : 'dark',
-      )}
-      style={{ borderColor: 'hsl(var(--border))' }}
-    >
-      <ThemePreviewPanel />
-    </span>
-  );
-}
-
-function ThemePreviewPanel({ className }: { className?: string }) {
-  return (
-    <span
-      className={cn('flex h-full min-w-0 gap-1.5 p-2', className)}
-      style={{
-        backgroundColor: 'hsl(var(--background))',
-        borderColor: 'hsl(var(--border))',
-      }}
-    >
-      <span
-        className="w-2 shrink-0 rounded"
-        style={{ backgroundColor: 'hsl(var(--muted))' }}
-      />
-      <span className="min-w-0 flex-1 space-y-1.5">
-        <span
-          className="block h-1.5 w-3/4 rounded-full"
-          style={{ backgroundColor: 'hsl(var(--foreground))' }}
-        />
-        {[0, 1].map((line) => (
-          <span
-            key={line}
-            className="block h-2.5 rounded border"
-            style={{
-              backgroundColor: 'hsl(var(--card))',
-              borderColor: 'hsl(var(--border))',
-            }}
-          />
-        ))}
-      </span>
-    </span>
   );
 }
 

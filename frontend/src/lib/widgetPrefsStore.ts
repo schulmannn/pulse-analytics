@@ -1,6 +1,13 @@
 import { createContext, useEffect, useSyncExternalStore } from 'react';
 import { z } from 'zod';
 import { apiGet, apiSend } from '@/api/client';
+import {
+  appearanceCacheStale,
+  parseAppearance,
+  readStoredAppearance,
+  sameAppearance,
+  setAppearanceSyncHook,
+} from '@/lib/appearanceStorage';
 import { isDemoMode } from '@/lib/demo';
 import { parsePrefs } from '@/lib/prefsSchema';
 import { preserveEntryIdentity, preserveValueIdentity } from '@/lib/storeIdentity';
@@ -339,6 +346,9 @@ function localBlob() {
     // composites are excluded (device-local, re-derived from the synced Home pins) so they never
     // resurrect on a device that cleared them.
     widgetConfigs: syncableWidgetConfigs(),
+    // Пользовательская тема («Оформление») едет тем же blob'ом: пять коротких ключей со своим
+    // localStorage-first стором. Канон в blob не пишем — отсутствие ключа И ЕСТЬ канон.
+    appearance: readStoredAppearance(),
   };
 }
 
@@ -367,6 +377,7 @@ export function useWidgetPrefsSync() {
     // A LOCAL widget-config mutation mirrors into the account blob (schedulePush is debounced and
     // no-ops until syncReady, so a mutation before hydrate can't blind-push).
     setWidgetConfigsSyncHook(schedulePush);
+    setAppearanceSyncHook(schedulePush);
     // Snapshot the syncable config ids at mount. Any syncable id NOT in this baseline when the GET
     // resolves was created in the fetch window (a genuine raced create) and must survive account-wins;
     // a pre-existing local id IS in the baseline, so account-wins correctly drops it if another device
@@ -375,7 +386,8 @@ export function useWidgetPrefsSync() {
     void apiGet('/api/prefs', PrefsBlobSchema)
       .then(({ prefs }) => {
         if (cancelled) return;
-        const { widgets, widgetOrder, savedFilters, home, widgetConfigs, ...rest } = parsePrefs(prefs);
+        const { widgets, widgetOrder, savedFilters, home, widgetConfigs, appearance, ...rest } =
+          parsePrefs(prefs);
         serverExtra = rest;
         syncReady = true;
         const local = localBlob();
@@ -400,6 +412,19 @@ export function useWidgetPrefsSync() {
           // device-local legacy composites are preserved. hydrateWidgetConfigs notifies its subscribers
           // WITHOUT firing the sync hook (no push-back of the just-hydrated copy); pushBack pushes the
           // genuinely-raced widget up.
+          // Тема: тот же account-wins, но применение ЛЕНИВОЕ. Модуль темы (и следом таблицы
+          // палитр) поднимается только при реальном расхождении устройств или протухшем
+          // прерисовочном кэше — пользователь на каноне не грузит ни байта.
+          const accountAppearance = appearance ? parseAppearance(appearance) : null;
+          const needsApply = accountAppearance
+            ? !local.appearance || !sameAppearance(accountAppearance, local.appearance)
+            : false;
+          if (!accountAppearance && local.appearance) pushLocal = true;
+          if (needsApply || appearanceCacheStale()) {
+            void import('@/lib/appearance').then((module) => {
+              module.applyAccountAppearance(needsApply ? appearance : null);
+            });
+          }
           if (Array.isArray(widgetConfigs)) {
             const { seed, pushBack } = reconcileHydratedConfigs(widgetConfigs, baseline);
             hydrateWidgetConfigs(seed);
@@ -419,6 +444,7 @@ export function useWidgetPrefsSync() {
     return () => {
       cancelled = true;
       setWidgetConfigsSyncHook(null);
+      setAppearanceSyncHook(null);
       // Reset the module-global sync state so a prior account's push (or preserved foreign keys)
       // can never land on the NEXT account after a logout→login within the same page session.
       syncReady = false;

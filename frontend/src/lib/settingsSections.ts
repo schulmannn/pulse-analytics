@@ -33,7 +33,7 @@ const APPEARANCE: SettingsSection = {
   key: 'appearance',
   label: 'Оформление',
   icon: 'sun',
-  description: 'Тема интерфейса на этом устройстве.',
+  description: 'Тема, акцент, палитра данных, форма и шрифт интерфейса.',
 };
 
 const SECURITY: SettingsSection = {
