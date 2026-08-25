@@ -260,7 +260,11 @@ function NavItem({ to, label, icon, end, rail }: NavLinkDef & { rail?: boolean }
         cn(
           // The first grid track is exactly the rail's available width (64px − 2 × 12px nav inset),
           // so every glyph remains centred on x=32 in both modes while only the copy track collapses.
-          'sidebar-nav-item relative grid h-9 grid-cols-[40px_minmax(0,1fr)] items-center overflow-hidden rounded-xl text-sm transition-colors',
+          // БЕЗ overflow-hidden: маркер активного пункта в рейле вынесен на кромку полосы
+          // (-left-3, ровно ширина отступа nav), и клип строки съедал бы его. Подпись обрезает
+          // себя сама (`.sidebar-copy { overflow: hidden }`), а сам <nav> держит overflow-x-hidden
+          // на время схлопывания — так что клип строки был подстраховкой, а не несущей стеной.
+          'sidebar-nav-item relative grid h-9 grid-cols-[40px_minmax(0,1fr)] items-center rounded-xl text-sm transition-colors',
           isActive
             ? 'sidebar-nav-item-active font-medium text-foreground'
             : 'text-ink2 hover:bg-hover-row/60 hover:text-foreground',
@@ -269,10 +273,15 @@ function NavItem({ to, label, icon, end, rail }: NavLinkDef & { rail?: boolean }
     >
       {({ isActive }) => (
         <>
+          {/* Маркер активного пункта в свёрнутом рейле. Стоит НА КРОМКЕ полосы (-left-3 = отступ
+              nav), а не в 12px от неё: у левого края он читается как индикатор кромки, а рядом с
+              иконкой выглядел пятном (жалоба владельца). Цвет — акцент, а не чистые чернила:
+              чернильная засечка на 3px кричала громче самой иконки, и она же следует акценту
+              студии оформления. Скругление только справа — слева он прижат к краю. */}
           {isActive && (
             <span
               aria-hidden="true"
-              className="sidebar-rail-active absolute left-0 top-1/2 h-4 w-[3px] rounded-full bg-foreground"
+              className="sidebar-rail-active absolute -left-3 top-1/2 h-5 w-[3px] rounded-r-full bg-primary"
             />
           )}
           <span className="flex justify-center">
