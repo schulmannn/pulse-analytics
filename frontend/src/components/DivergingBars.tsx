@@ -18,6 +18,19 @@ interface DivergingBarsProps {
   axisLabels?: string[];
   titles?: string[];
   height?: number;
+  /**
+   * Что стоит по оси X. `time` (умолчание) — дни/недели: последний столбец И ЕСТЬ «сейчас», его
+   * метку канон семьи графиков красит пилюлей. `category` — разрезы (каналы, товары): там
+   * «последнего» не существует, порядок задаёт сортировка по величине, и пилюля на крайнем
+   * столбце читалась бы как «этот выбран» — поэтому в категориальном режиме её нет.
+   */
+  axis?: 'time' | 'category';
+  /**
+   * Короткие подписи величин у концов столбцов (уже отформатированные вызывающим — компонент
+   * не знает ни валюты, ни знака). Без них вклад читается только курсором, а на разборе «кто
+   * сколько добавил» число — и есть содержание графика.
+   */
+  valueLabels?: string[];
 }
 
 // Approximate glyph width of the 11px tabular labels (канон BarChart/LineChart).
@@ -33,7 +46,15 @@ interface Hover {
     тинтованной карточке бары автоматически берут её пастель через accent-скоуп). Fills the
     height an ancestor dictates — the fixed widget tile or the expand overlay — via
     ExpandedChartHeightContext (like BarChart), else the caller's `height`, else 120px. */
-export function DivergingBars({ values, labels, axisLabels, titles, height }: DivergingBarsProps) {
+export function DivergingBars({
+  values,
+  labels,
+  axisLabels,
+  titles,
+  height,
+  axis = 'time',
+  valueLabels,
+}: DivergingBarsProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const [hover, setHover] = useState<Hover | null>(null);
@@ -70,6 +91,10 @@ export function DivergingBars({ values, labels, axisLabels, titles, height }: Di
   // The tooltip follows the cursor here (a per-mousemove setState) — the cached layers keep
   // that from re-creating a rect per bar per move, and the per-bar transparent hit-rects are
   // replaced by ONE mouse handler on the svg with O(1) column math (columnIndex).
+  // В зависимостях `plot` стоит именно ФЛАГ, а не сам массив: он приходит новым на каждый рендер
+  // (`.map(...)` у вызывающего) и обнулял бы мемоизацию, хотя геометрии важно лишь одно — есть
+  // числа или нет (от этого зависит ширина полей).
+  const hasValueLabels = !!valueLabels;
   const plot = useMemo(() => {
     if (!values || values.length === 0) return null;
 
@@ -81,9 +106,37 @@ export function DivergingBars({ values, labels, axisLabels, titles, height }: Di
     // area (mid line ± bars) never grows past the tile.
     const total = ctxHeight ?? height ?? 120;
     const h = Math.max(total - labelPad, 1);
-    const mid = h / 2;
     const normalized = values.map((value) => (Number.isFinite(value) ? value : 0));
-    const maxAbs = Math.max(1, ...normalized.map((value) => Math.abs(value)));
+
+    // Нулевая линия ИДЁТ ЗА ДАННЫМИ, а не стоит посередине.
+    //
+    // Раньше было `mid = h / 2` при масштабе от `maxAbs`: половина площади резервировалась под
+    // знак, которого в данных может не быть вовсе. На разборе «Что изменило выручку» все вклады
+    // ушли в минус — верхняя половина карточки пустовала всегда, а столбцы делили оставшуюся
+    // половину и вырождались в полоски по 1–2px (замечено владельцем: «как-то не наглядно»).
+    //
+    // Теперь это обычная линейная шкала по НАСТОЯЩЕМУ размаху [−maxDown, +maxUp]: пиксель на
+    // единицу ОДИН для обеих сторон, поэтому столбцы по-прежнему сравнимы между собой, а высоту
+    // получает только тот знак, который в данных есть. Симметричный размах даёт ровно прежнюю
+    // картинку (mid = h/2) — временные ряды со сменой знака ничего не теряют.
+    const maxUp = Math.max(0, ...normalized);
+    const maxDown = Math.max(0, ...normalized.map((value) => -value));
+    const span = maxUp + maxDown;
+    // Числа печатаются СНАРУЖИ столбца, поэтому поле на их стороне шире. Внутрь их класть нельзя:
+    // минус-бары идут на 0.6 прозрачности, и белые чернила по такой пастели проваливают контраст
+    // (проверено кадром светлой темы). Поле берётся только с той стороны, где столбцы ЕСТЬ, —
+    // иначе односторонний размах опять дарил бы пустоту тому знаку, которого в данных нет.
+    //
+    // 17 = высота бокса числа (14) + просвет до столбца (3). Меньше — и число касается кромки
+    // (первый заход давал ровно 0px и читался как подпись ВНУТРИ столбца), больше — столбцы зря
+    // теряют высоту. Столько же остаётся между числом и полосой подписей оси.
+    const PAD = 4;
+    const LABEL_PAD = 17;
+    const padUp = hasValueLabels && maxUp > 0 ? LABEL_PAD : PAD;
+    const padDown = hasValueLabels && maxDown > 0 ? LABEL_PAD : PAD;
+    const usable = Math.max(h - padUp - padDown, 1);
+    const mid = span > 0 ? padUp + (usable * maxUp) / span : h / 2;
+    const scale = span > 0 ? usable / span : 0;
 
     const W = Math.max(width, 1);
     const step = W / values.length;
@@ -98,15 +151,22 @@ export function DivergingBars({ values, labels, axisLabels, titles, height }: Di
     // Invalid values are honest zeros (op 0 keeps them invisible even mid-flight).
     const extents = normalized.map((value, i) => {
       const valid = Number.isFinite(values[i]);
-      const bh = valid ? Math.max(1, (Math.abs(value) / maxAbs) * (mid - 4)) : 0;
+      // Честный ноль остаётся отметкой в 1px: точка в ряду есть, и она нулевая — это не то же
+      // самое, что пропуск (у пропуска op = 0, его не видно вовсе).
+      const bh = valid ? Math.max(1, Math.abs(value) * scale) : 0;
       return value >= 0 ? bh : -bh;
     });
     const valid = values.map((value) => Number.isFinite(value));
 
     // «Текущий» индекс оси (пилюля): последний НЕПУСТОЙ тик канонной оси, иначе последний столбец.
-    const axisCurrentIdx = letterAxis
-      ? letterAxis.reduce((acc, text, i) => (text.length > 0 ? i : acc), -1)
-      : values.length - 1;
+    // На категориальной оси «текущего» нет — там крайний столбец это просто крайний по величине,
+    // и солидная пилюля на нём читалась бы как «выбран этот разрез». −1 гасит её целиком.
+    const axisCurrentIdx =
+      axis !== 'time'
+        ? -1
+        : letterAxis
+          ? letterAxis.reduce((acc, text, i) => (text.length > 0 ? i : acc), -1)
+          : values.length - 1;
     const labelsLayer = hasLabels
       ? values.map((_, i) => {
           const axisText = letterAxis ? letterAxis[i] : labels?.[i];
@@ -146,7 +206,7 @@ export function DivergingBars({ values, labels, axisLabels, titles, height }: Di
       : null;
 
     return { W, h, mid, step, barWidth, gap, extents, valid, labelsLayer, labelPad };
-  }, [values, labels, axisLabels, width, ctxHeight, height, expanded]);
+  }, [values, labels, axisLabels, width, ctxHeight, height, expanded, axis, hasValueLabels]);
 
   // ── UPDATE morph (canon BarChart): the signed silhouette flows into the new shape ─────────
   // A sign flip mid-flight honestly passes through the midline (the bar shrinks to 0 and re-grows
@@ -181,6 +241,43 @@ export function DivergingBars({ values, labels, axisLabels, titles, height }: Di
       }) ?? null,
     [bars],
   );
+
+  // ── Числа у концов столбцов ───────────────────────────────────────────────────────────────
+  // ВСЕГДА снаружи, в сторону от нуля — там для них зарезервировано поле (LABEL_PAD выше).
+  //
+  // Первый заход клал число высокого столбца внутрь, чернилами по фону: на плюс-барах это читалось,
+  // а минус-бары идут на 0.6 прозрачности, и белое по такой пастели провалило контраст в светлой
+  // теме. Одно правило для обоих знаков избавляет и от этого, и от перескока «внутрь/наружу»
+  // посреди морфа.
+  //
+  // Не влезло по ширине столбца — не печатаем вовсе: обрезок врёт сильнее, чем пропуск.
+  const valuesLayer = useMemo(() => {
+    if (!plot || !bars || !valueLabels) return null;
+    return bars.map((b, i) => {
+      const text = valueLabels[i];
+      if (!text || !plot.valid[i]) return null;
+      if (text.length * CHAR_W + 4 > plot.step) return null;
+      const x = b.x + b.w / 2;
+      // Бокс числа — 14px вокруг базовой линии (11 вверх, 3 вниз), поэтому смещения не
+      // симметричны: −6 над кромкой и +14 под ней дают одинаковые 3px просвета с обеих сторон.
+      const raw = b.up ? b.y - 6 : b.y + b.h + 14;
+      // Одинокий короткий столбец «не в ту сторону» стоит вплотную к краю (поле там узкое) —
+      // число прижимается к полю, а не уезжает за верх или в полосу подписей оси.
+      const y = Math.min(Math.max(raw, 11), plot.h - 1);
+      return (
+        <text
+          key={`v${i}`}
+          x={x}
+          y={y}
+          textAnchor="middle"
+          data-chart-value-label=""
+          className="pointer-events-none select-none fill-muted-foreground text-2xs font-medium tabular-nums"
+        >
+          {text}
+        </text>
+      );
+    });
+  }, [plot, bars, valueLabels]);
 
   // Pointer reading is supplementary to the graphic's full text summary. Listen on the passive
   // SVG node and keep it out of the keyboard order; there is no activation action to expose.
@@ -220,10 +317,25 @@ export function DivergingBars({ values, labels, axisLabels, titles, height }: Di
   const latestName = labels?.[latestIndex] ?? `точка ${values.length}`;
   const latestDetail = titles?.[latestIndex];
   const latestValue = Number.isFinite(values[latestIndex]) ? `${values[latestIndex]}` : 'нет данных';
+  // На категориальной оси «последней точки» не существует — читалке нужен крайний по ВЕЛИЧИНЕ,
+  // а не крайний по порядку сортировки, иначе слышно «последняя: −250000» про то, что на экране
+  // подписано именем разреза и стоит там лишь из-за сортировки.
+  const extremeIndex =
+    axis === 'time'
+      ? latestIndex
+      : values.reduce(
+          (acc, value, i) =>
+            Number.isFinite(value) && Math.abs(value) > Math.abs(values[acc] ?? 0) ? i : acc,
+          0,
+        );
+  const extremeName = labels?.[extremeIndex] ?? `разрез ${extremeIndex + 1}`;
+  const extremeDetail = titles?.[extremeIndex];
   const accessibleSummary = [
-    `Дельта по ${n} точкам.`,
+    axis === 'time' ? `Дельта по ${n} точкам.` : `Дельта по ${n} разрезам.`,
     minimum == null ? 'Числовых значений нет.' : `Минимум ${minimum}; максимум ${maximum}.`,
-    `Последняя — ${latestName}: ${latestValue}${latestDetail ? ` (${latestDetail})` : ''}.`,
+    axis === 'time'
+      ? `Последняя — ${latestName}: ${latestValue}${latestDetail ? ` (${latestDetail})` : ''}.`
+      : `Наибольший вклад — ${extremeName}${extremeDetail ? ` (${extremeDetail})` : ''}.`,
   ].join(' ');
 
   return (
@@ -247,6 +359,7 @@ export function DivergingBars({ values, labels, axisLabels, titles, height }: Di
             full-opacity highlight unmounts in the same commit) — no below-idle dip. */}
         <g className={hover ? 'transition-opacity' : undefined} opacity={hover ? 0.55 : 1}>
           {barsLayer}
+          {valuesLayer}
         </g>
 
         {plot.labelsLayer}
