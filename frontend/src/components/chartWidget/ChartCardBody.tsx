@@ -1,7 +1,7 @@
 import { useContext, type ReactNode } from 'react';
+import { KpiValue } from '@/components/chartWidget/KpiValue';
 import { DeltaPill } from '@/components/DeltaPill';
 import { ChartExpandedContext } from '@/components/ExpandableChart';
-import { KpiNumber } from '@/components/KpiNumber';
 import { fmt } from '@/lib/format';
 import type { MetricDelta } from '@/lib/delta';
 
@@ -69,10 +69,6 @@ export function ChartCardBody({
     );
   }
 
-  // The display font's numeral glyph box is ~4px taller than a `leading-none` 30px line box.
-  // Give it an honest line box so the headline does not expand the card's scroll area or clip
-  // glyphs inside the fixed overflow-hidden widget slot.
-  const numberClass = `kpi-accent ${hero ? 'text-hero' : 'text-3xl'} font-medium leading-[1.15] tabular-nums tracking-tight`;
   return (
     <div className="flex h-full min-h-0 items-end gap-4" data-chart-card-body>
       <div className="flex shrink-0 flex-col items-start gap-1.5 pb-0.5" data-chart-card-headline>
@@ -80,21 +76,12 @@ export function ChartCardBody({
         {/* KpiNumber: цифры морфятся при смене периода (канон 2026-08-18, паритет с морфом
             графиков); нечисловые строки остаются на снапе ValueSwap внутри него. */}
         <div className="flex items-center gap-1.5">
-          {onValueClick ? (
-            <button
-              type="button"
-              aria-label={drillLabel ? `Разбор: ${drillLabel}` : undefined}
-              title="Подробный разбор"
-              onClick={onValueClick}
-              className={`${numberClass} rounded text-left transition-colors hover:text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40`}
-            >
-              <KpiNumber text={value} />
-            </button>
-          ) : (
-            <div className={numberClass}>
-              <KpiNumber text={value} />
-            </div>
-          )}
+          <KpiValue
+            text={value}
+            size={hero ? 'hero' : 'compact'}
+            onDrill={onValueClick}
+            drillLabel={drillLabel}
+          />
           {valueAdornment}
         </div>
         <DeltaPill delta={delta} />

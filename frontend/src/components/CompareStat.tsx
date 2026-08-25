@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
+import { KpiValue } from '@/components/chartWidget/KpiValue';
 import { DeltaPill } from '@/components/DeltaPill';
-import { KpiNumber } from '@/components/KpiNumber';
 import type { MetricDelta } from '@/lib/delta';
 
 /**
@@ -30,22 +30,13 @@ export function CompactStatHeadline({
   drillLabel?: string;
   live: boolean;
 }) {
-  const numberClass = 'kpi-accent text-hero font-medium leading-none tabular-nums tracking-tight';
   return (
     <div className="flex items-baseline gap-2">
-      {onDrill && live ? (
-        <button
-          type="button"
-          aria-label={drillLabel ? `Разбор: ${drillLabel}` : undefined}
-          title="Подробный разбор"
-          onClick={onDrill}
-          className={`${numberClass} rounded text-left transition-colors hover:text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40`}
-        >
-          <KpiNumber text={text} />
-        </button>
-      ) : (
-        <div className={numberClass}><KpiNumber text={text} /></div>
-      )}
+      <KpiValue
+        text={text}
+        onDrill={onDrill && live ? onDrill : undefined}
+        drillLabel={drillLabel}
+      />
       {live ? <DeltaPill delta={delta} /> : null}
     </div>
   );
@@ -75,24 +66,15 @@ export function CenteredStat({
   live: boolean;
   note?: ReactNode;
 }) {
-  const numberClass = 'kpi-accent text-hero font-medium leading-none tabular-nums tracking-tight';
   const showDelta = live && (deltaText || (delta && delta.dir !== 'flat'));
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 text-center">
-        {onDrill && live ? (
-          <button
-            type="button"
-            aria-label={drillLabel ? `Разбор: ${drillLabel}` : undefined}
-            title="Подробный разбор"
-            onClick={onDrill}
-            className={`${numberClass} rounded transition-colors hover:text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40`}
-          >
-            <KpiNumber text={text} />
-          </button>
-        ) : (
-          <div className={numberClass}><KpiNumber text={text} /></div>
-        )}
+        <KpiValue
+          text={text}
+          onDrill={onDrill && live ? onDrill : undefined}
+          drillLabel={drillLabel}
+        />
         {showDelta ? (
           <div className="flex items-center justify-center gap-1.5 text-xs font-medium tabular-nums text-muted-foreground">
             {deltaText ? <span>{deltaText}</span> : <DeltaPill delta={delta} />}
