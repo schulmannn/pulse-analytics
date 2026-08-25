@@ -59,13 +59,10 @@ export function divergingFrame(
   padUp: number,
   padDown: number,
 ): { mid: number; scale: number } {
-  let maxUp = 0;
-  let maxDown = 0;
-  for (const value of values) {
-    if (!Number.isFinite(value)) continue;
-    if (value > maxUp) maxUp = value;
-    if (-value > maxDown) maxDown = -value;
-  }
+  // Значения сюда приходят уже нормализованными (не-числа заменены нулём), поэтому хватает
+  // размаха без отдельной фильтрации.
+  const maxUp = Math.max(0, ...values);
+  const maxDown = -Math.min(0, ...values);
   const span = maxUp + maxDown;
   const usable = Math.max(h - padUp - padDown, 1);
   if (span <= 0) return { mid: h / 2, scale: 0 };
