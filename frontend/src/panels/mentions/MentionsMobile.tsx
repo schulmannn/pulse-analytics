@@ -1,6 +1,7 @@
 import { useMentions, useMentionsArchive } from '@/api/queries';
 import { dayKeyToTs, fmt, timeAxisFromDayKeys } from '@/lib/format';
 import { BarChart } from '@/components/BarChart';
+import { KpiValue } from '@/components/chartWidget/KpiValue';
 import { Skeleton } from '@/components/ui/skeleton';
 import type { Mentions as MentionsData } from '@/api/schemas';
 
@@ -120,15 +121,15 @@ export function MentionsMobile() {
       <div className="grid grid-cols-1 gap-px border-t border-border bg-border sm:grid-cols-3">
         <div className="bg-background p-5">
           <div className="text-xs tracking-wide text-muted-foreground">Упоминаний</div>
-          <div className="mt-2 text-3xl font-medium tabular-nums tracking-tight">{fmt.num(total)}</div>
+          <KpiValue size="compact" text={fmt.num(total)} className="mt-2" />
         </div>
         <div className="bg-background p-5">
           <div className="text-xs tracking-wide text-muted-foreground">Каналов</div>
-          <div className="mt-2 text-3xl font-medium tabular-nums tracking-tight text-ink2">{fmt.num(uniqueChannels)}</div>
+          <KpiValue size="compact" text={fmt.num(uniqueChannels)} className="mt-2  text-ink2" />
         </div>
         <div className="bg-background p-5">
           <div className="text-xs tracking-wide text-muted-foreground">Суммарный охват</div>
-          <div className="mt-2 text-3xl font-medium tabular-nums tracking-tight text-ink3">{fmt.kpi(totalViews)}</div>
+          <KpiValue size="compact" text={fmt.kpi(totalViews)} className="mt-2  text-ink3" />
         </div>
       </div>
 

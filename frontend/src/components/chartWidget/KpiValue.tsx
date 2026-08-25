@@ -17,12 +17,15 @@ import { cn } from '@/lib/utils';
 export interface KpiValueProps {
   /** Уже отформатированное значение: морф цифр делает KpiNumber, нечисловые строки снапаются. */
   text: string;
-  /** `hero` — герой истории (44px); `compact` — вторая величина карточки (30px). */
-  size?: 'hero' | 'compact';
+  /** `hero` — герой истории (44px); `compact` — вторая величина (30px); `small` — плотные
+   *  места, где 30px не помещается: центр кольца и ячейки леджера (24px). */
+  size?: 'hero' | 'compact' | 'small';
   /** Клик по числу — тихий вход в разбор. Без него число остаётся текстом. */
   onDrill?: () => void;
   /** Имя метрики для читалки: «Разбор: …». */
   drillLabel?: string;
+  /** Готовое имя кнопки, когда «Разбор: …» не подходит (например «Открыть страницу метрики»). */
+  ariaLabel?: string;
   className?: string;
 }
 
@@ -33,13 +36,14 @@ export interface KpiValueProps {
  */
 const RECIPE = 'kpi-accent font-medium leading-[1.15] tabular-nums tracking-tight';
 
-export function KpiValue({ text, size = 'hero', onDrill, drillLabel, className }: KpiValueProps) {
-  const classes = cn(RECIPE, size === 'hero' ? 'text-hero' : 'text-3xl', className);
+export function KpiValue({ text, size = 'hero', onDrill, drillLabel, ariaLabel, className }: KpiValueProps) {
+  const SIZE = { hero: 'text-hero', compact: 'text-3xl', small: 'text-2xl' } as const;
+  const classes = cn(RECIPE, SIZE[size], className);
   if (!onDrill) return <div className={classes}><KpiNumber text={text} /></div>;
   return (
     <button
       type="button"
-      aria-label={drillLabel ? `Разбор: ${drillLabel}` : undefined}
+      aria-label={ariaLabel ?? (drillLabel ? `Разбор: ${drillLabel}` : undefined)}
       title="Подробный разбор"
       onClick={onDrill}
       className={cn(

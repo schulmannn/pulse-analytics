@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { DeltaPill } from '@/components/DeltaPill';
 import { ChartSection } from '@/components/instagram/shared';
+import { KpiValue } from '@/components/chartWidget/KpiValue';
 import { fmt } from '@/lib/format';
 import { isDrillKey } from '@/lib/kpiDerive';
 import type { DrillKey } from '@/lib/kpiDerive';
@@ -89,7 +90,7 @@ export function ReportComposition({ blocks, data, editable, onInsert, onMove, on
         >
           <div className="text-2xs tracking-wide text-muted-foreground">{label}</div>
           <div className="mt-1 flex items-baseline gap-1.5">
-            <span className="text-2xl font-medium tabular-nums tracking-tight">{drillMeta[k].total}</span>
+            <KpiValue size="small" text={drillMeta[k].total} />
             <DeltaPill delta={drillMeta[k].trend} />
           </div>
         </Link>
@@ -251,7 +252,7 @@ export function ReportComposition({ blocks, data, editable, onInsert, onMove, on
             )}
             <div className="text-xs font-medium tracking-wider text-muted-foreground">{label}</div>
             <div className="mt-2 flex items-baseline gap-2">
-              <span className="text-3xl font-medium tabular-nums tracking-tight">{drillMeta[metric].total}</span>
+              <KpiValue size="compact" text={drillMeta[metric].total} />
               <DeltaPill delta={drillMeta[metric].trend} />
             </div>
           </div>
@@ -277,7 +278,7 @@ export function ReportComposition({ blocks, data, editable, onInsert, onMove, on
               )}
             </div>
             <div className="flex items-baseline gap-2">
-              <span className="text-2xl font-medium tabular-nums tracking-tight">{drillMeta[spec.drill].total}</span>
+              <KpiValue size="small" text={drillMeta[spec.drill].total} />
               <DeltaPill delta={drillMeta[spec.drill].trend} />
             </div>
             <ReportChart series={spec.series} viz={viz} valueFmt={spec.valueFmt} zeroBase={spec.zeroBase}

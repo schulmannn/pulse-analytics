@@ -220,14 +220,20 @@ CSS is cached in `localStorage` and re-injected pre-paint by `public/theme-boot.
 **One** ladder, in the `@theme` block (`--text-*`). No magic `text-[Npx]` — the lint hard-fails on it.
 Keep ≲4 steps on a single screen.
 
-**The card headline is a component, not a class string.** `text-hero` may appear in exactly one
+**The card headline is a component, not a class string.** The whole KPI number family — `text-hero` (44), `text-3xl` (30), `text-2xl` (24) — is rendered by one
+component, and `text-hero` may appear in exactly one
 place — `components/chartWidget/KpiValue`. It was copy-pasted into four (`ChartCardBody`,
 `CompareStat` twice, `ExpandableChart`) and the copies drifted: the canon had long fixed the line box
 to `leading-[1.15]` (the display face's glyph box is ~4px taller than a `leading-none` box and
 clipped digits inside a fixed tile) while two copies still carried `leading-none`. Same 44px,
-different baseline — the cards stop reading as one system. Gated by `hero-number-recipe-retyped` in
-`design-motion-lint`. A different headline size becomes a variant of that component, never a class
+different baseline — the cards stop reading as one system. Gated by `kpi-number-recipe-retyped` in
+`design-motion-lint`, which now covers the second tier too (`text-3xl` + `tabular-nums`). A different headline size becomes a variant of that component, never a class
 string at the call site.
+
+Not yet folded in, on purpose: `KpiGrid`'s `DrillValue` (number + quiet unit is its own
+composition), `RadialShare`'s centre label (SVG `<text>`, which a `div`-based component cannot be)
+and the report title inputs (headings, not numbers). The `text-2xl` tier is therefore converted but
+not yet gated.
 
 Anatomy is a separate question from the recipe: `ChartCardBody` owns the canonical story face
 (label → value → delta → min/max → caption, plot to the right) and every widget card goes through

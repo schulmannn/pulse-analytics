@@ -1,4 +1,5 @@
 import { fmt } from '@/lib/format';
+import { KpiValue } from '@/components/chartWidget/KpiValue';
 
 /**
  * Кольцевой прогресс с числом в центре — форма shadcn «Radial Chart – Text», посчитанная руками
@@ -72,11 +73,13 @@ export function RadialGauge({
           )}
         </svg>
         <div className="absolute inset-0 flex flex-col items-center justify-center">
-          <span
-            className={`kpi-accent ${size < 132 ? 'text-2xl' : 'text-3xl'} font-medium leading-[1.15] tabular-nums tracking-tight text-foreground`}
-          >
-            {value}
-          </span>
+          {/* Размер зависит от диаметра кольца, но рецепт числа — общий (KpiValue), иначе центр
+              кольца жил бы по своим правилам набора. */}
+          <KpiValue
+            size={size < 132 ? 'small' : 'compact'}
+            text={value}
+            className="text-foreground"
+          />
           {label && <span className="mt-0.5 text-2xs text-muted-foreground">{label}</span>}
         </div>
       </div>

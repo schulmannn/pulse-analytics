@@ -9,6 +9,7 @@ import type { DailySeries, DrillKey } from '@/lib/kpiDerive';
 import type { PeriodDays } from '@/lib/period';
 import { REPORT_BLOCKS } from '@/lib/reportBlocks';
 import type { ReportBlockKey, ReportBlockType } from '@/lib/reportBlocks';
+import { KpiValue } from '@/components/chartWidget/KpiValue';
 
 // Inline «+» type menu. Desktop Telegram reports suppress «Карта» because the source exposes no
 // geography; the frozen mobile builder keeps its historical catalog until the mobile redesign.
@@ -275,7 +276,7 @@ export function ReportMetricCard({ title, total, trend, series, valueFmt, zeroBa
         <span aria-hidden="true" className="report-metric-card__rule h-px flex-1 bg-border" />
       </div>
       <div className="report-metric-card__value flex items-baseline gap-2">
-        <span className="report-metric-card__number text-2xl font-medium tabular-nums tracking-tight">{total}</span>
+        <KpiValue size="small" text={total} className="report-metric-card__number" />
         <DeltaPill delta={trend} />
       </div>
       <div className="report-metric-card__chart">

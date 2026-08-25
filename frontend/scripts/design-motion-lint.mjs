@@ -89,14 +89,16 @@ const rules = [
     exempt: (rel) => BESPOKE_TYPE.includes(rel),
   },
   {
-    id: 'hero-number-recipe-retyped',
-    hint: 'render the card headline through components/chartWidget/KpiValue',
+    id: 'kpi-number-recipe-retyped',
+    hint: 'render the number through components/chartWidget/KpiValue',
     // Рецепт крупного числа карточки был скопирован в четыре места, и копии разошлись: канон
     // давно чинил line-box на leading-[1.15] («глиф-бокс дисплейного начертания выше line-box,
     // leading-none клипал цифры в фикс-тайле»), а две копии остались на leading-none. Одинаковые
     // 44px с разной высотой строки читаются как две разные системы. Размер героя живёт в одном
     // компоненте; нужен другой — он появляется там вариантом, а не строкой классов на месте.
-    test: (line) => /\btext-hero\b/.test(line),
+    test: (line) =>
+      /\btext-hero\b/.test(line) ||
+      (/\btext-3xl\b/.test(line) && /tabular-nums/.test(line)),
     exempt: (rel) => rel.endsWith('.css') || rel.endsWith('components/chartWidget/KpiValue.tsx'),
   },
   {

@@ -32,6 +32,7 @@ import {
 import { useTheme, type ThemeMode } from '@/lib/theme';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { KpiValue } from '@/components/chartWidget/KpiValue';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -492,9 +493,7 @@ function Preview() {
         </span>
       </div>
       <div className="mt-1.5 flex items-baseline gap-2.5">
-        <span className="text-3xl font-medium tabular-nums tracking-tight text-foreground">
-          128 400
-        </span>
+        <KpiValue size="compact" text="128 400" className="text-foreground" />
         <span className="text-xs font-medium text-verdant">↑ 12,4%</span>
       </div>
       <svg

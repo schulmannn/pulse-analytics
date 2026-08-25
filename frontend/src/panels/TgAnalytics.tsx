@@ -1,5 +1,4 @@
 import { useCallback, useMemo, useState } from 'react';
-import { KpiNumber } from '@/components/KpiNumber';
 import { useTgFull, useTgGraphs } from '@/api/queries';
 import type { TgFull, TgGraphs } from '@/api/schemas';
 import { lttbDownsample } from '@/lib/downsample';
@@ -29,6 +28,7 @@ import type { CalendarWindow, WidgetPeriodValue } from '@/lib/period';
 import type { WidgetSeriesOpts } from '@/lib/widgetPrefsStore';
 import { cn } from '@/lib/utils';
 import { Skeleton } from '@/components/ui/skeleton';
+import { KpiValue } from '@/components/chartWidget/KpiValue';
 
 const SRC_NAMES: Record<string, string> = {
   Followers: 'Подписчики',
@@ -629,9 +629,7 @@ function TgAnalyticsSummary({ full }: { full: TgFull | undefined }) {
       {items.map((item) => (
         <div key={item.label} className="min-w-0">
           <div className="truncate text-2xs tracking-wide text-muted-foreground">{item.label}</div>
-          <div className="mt-1.5 text-2xl font-medium tabular-nums tracking-tight text-foreground">
-            <KpiNumber text={item.value} />
-          </div>
+          <KpiValue size="small" text={item.value} className="mt-1.5 text-foreground" />
           <div className="mt-1 truncate text-2xs text-muted-foreground" title={item.captionTitle}>{item.caption}</div>
         </div>
       ))}

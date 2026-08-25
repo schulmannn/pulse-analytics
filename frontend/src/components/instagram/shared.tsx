@@ -10,6 +10,7 @@ import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
 import { ChartBand } from '@/components/ChartBand';
 import { ChartCardBody, ChartSection as WidgetChartSection, seriesRange } from '@/components/ChartWidget';
+import { KpiValue } from '@/components/chartWidget/KpiValue';
 import { CenteredStat, CompactStatHeadline } from '@/components/CompareStat';
 import { Sparkline } from '@/components/Sparkline';
 import type { WidgetSize } from '@/lib/widgetPrefsStore';
@@ -82,19 +83,7 @@ export function KpiCard({ label, value, hint, trend, deltaText, deltaTone, onDri
       {/* Паритет с TG StatTile (аудит: «twin» расходился кеглем и базовой линией дельты). */}
       <div className="text-2xs tracking-wide text-muted-foreground">{label}</div>
       <div className="mt-1.5 flex items-baseline gap-2">
-        {onDrill ? (
-          <button
-            type="button"
-            aria-label={`Разбор: ${label}`}
-            title="Подробный разбор"
-            onClick={onDrill}
-            className="rounded text-left text-2xl font-medium tabular-nums tracking-tight transition-colors hover:text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40"
-          >
-            {value}
-          </button>
-        ) : (
-          <div className="text-2xl font-medium tabular-nums tracking-tight">{value}</div>
-        )}
+        <KpiValue size="small" text={value} onDrill={onDrill} drillLabel={label} />
         {deltaText ? (
           <span className={`shrink-0 text-xs font-medium tabular-nums ${deltaColor}`}>{deltaText}</span>
         ) : (
@@ -379,7 +368,11 @@ export function SubscriberMovement({
         {cells.map((c) => (
           <div key={c.label} className={compact ? '' : 'py-1'}>
             <div className={`${compact ? 'text-2xs' : 'text-xs'} tracking-wide text-muted-foreground`}>{c.label}</div>
-            <div className={`${compact ? 'mt-1 text-2xl' : 'mt-2 text-3xl'} font-medium tabular-nums tracking-tight ${c.color}`}>{c.text}</div>
+            <KpiValue
+              size={compact ? 'small' : 'compact'}
+              text={c.text}
+              className={`${compact ? 'mt-1' : 'mt-2'} ${c.color}`}
+            />
             {c.label === 'Чистый прирост' && net.hasPrev && (
               <div className={`${compact ? 'mt-1 text-2xs' : 'mt-2 text-xs'} text-muted-foreground`}>пред. период: {signedNum(net.prev)}</div>
             )}

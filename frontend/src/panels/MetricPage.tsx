@@ -15,6 +15,7 @@ import { getDrillMetric } from '@/lib/widgetMetrics';
 import { addWidgetForMetric } from '@/lib/widgetStore';
 import { pinToHome } from '@/lib/widgetPrefsStore';
 import { customKey } from '@/lib/widgetConfig';
+import { KpiValue } from '@/components/chartWidget/KpiValue';
 import { fmt, pluralRu, timeAxisFromDayKeys } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { markdownToPlainText } from '@/lib/markdown';
@@ -23,7 +24,6 @@ import type { NormalizedPost } from '@/lib/posts';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ErrorState } from '@/components/ErrorState';
 import { DeltaPill } from '@/components/DeltaPill';
-import { KpiNumber } from '@/components/KpiNumber';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { SegSelect } from '@/components/metric/SegSelect';
 import { LineChart } from '@/components/LineChart';
@@ -778,9 +778,7 @@ export function MetricPage() {
           <div className="mt-1 text-xs tracking-wide text-muted-foreground">Telegram {channelHandle}</div>
         ) : null}
         <div className="mt-2 flex flex-wrap items-baseline gap-x-2.5 gap-y-1 lg:hidden">
-          <span className="text-3xl font-medium leading-none tabular-nums tracking-tight">
-            <KpiNumber text={meta.total} />
-          </span>
+          <KpiValue size="compact" text={meta.total} />
           <DeltaPill delta={meta.trend} />
           <span className="text-xs tracking-wide text-muted-foreground">{periodLabel}</span>
         </div>
@@ -1219,7 +1217,7 @@ export function MetricPage() {
           <RailSection title="Сравнение" mark="comparison" variant="card">
             {/* Итог окна — доминанта карточки (hero переехал сюда после тихой шапки). */}
             <div className="text-2xs tracking-wide text-muted-foreground">Текущий период</div>
-            <div className="mt-1 text-3xl font-medium leading-none tabular-nums text-foreground">{meta.total}</div>
+            <KpiValue size="compact" text={meta.total} className="mt-1 text-foreground" />
             {winFrom == null ? (
               <p className="mt-3 text-xs text-muted-foreground">Для окна «Всё» прошлого периода не существует.</p>
             ) : (
