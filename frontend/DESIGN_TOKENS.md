@@ -131,6 +131,52 @@ widget's visualisation. Both live in **`src/lib/widgetSurface.ts`** (pure, unit-
   3 columns (50%), and `full` is 6 columns (100%). Editor labels and rendered widths must match.
   → `vizAllowsThirdWidth(viz)` / `coerceSizeForViz(viz, size)`.
 
+## User themes (the «Оформление» studio)
+
+The canon above is the **default**, not the only palette: `/settings?section=appearance` lets each
+account retune the theme. The whole subsystem is built so that the canon cannot be damaged by a
+choice — and so that the gates above stay authoritative.
+
+**The invariant.** Every knob has a `canon` value, and a fully-canon selection emits **nothing**. No
+`<style>` node, no overridden variable, `src/index.css` byte-for-byte. `contrast-tokens.mjs`, the axe
+gate and every screenshot spec therefore keep measuring the real default.
+
+**What a user can move, and how far.**
+
+| Knob | Tokens | Freedom |
+|---|---|---|
+| Accent | `--primary` `--ring` `--accent` `--accent-foreground` `--brand-iris(-soft)` `--blue-tint` `--card-tint` | 12 hues; **lightness is solved, not chosen** |
+| Base colour | `--background` `--card` `--popover` `--muted` `--secondary` `--border` `--input` `--hover-row` `--avatar` `--surface-table` + the ink scale | 6 neutrals; hue + saturation only — **the lightness ladder is the canon's** |
+| Chart palette | `--chart-1…6` `--chart-N-cat` `--chart-seq-1…5` | canon (Okabe-Ito) or one hue family in six solved steps |
+| Radius | `--radius` + `--radius-xl/2xl/3xl` | 0 / 4 / 8 / 12 / 16px — the whole ladder scales together, so the 4px default still yields today's 12/16/24 |
+| Font | `--font-sans` (+ a `body` rule) | Geist or a system sans/serif/mono — **no new font file ships** |
+
+**What is deliberately NOT customisable**, because it carries meaning rather than taste:
+`--brand-verdant` / `--brand-ember` / `--status-warn` (evaluated up / down / risk), the `--chip-*`
+identity tints (hashed from the channel name) and `--chart-N-accent(-deep)` (a widget author picks
+those, and six distinct hues beat one family there — a non-canon chart palette pins them explicitly,
+in both themes).
+
+**Why contrast cannot drift.** Surfaces and ink keep the canon's lightness, so their ratios are the
+audited ones by construction. Where lightness *must* follow the hue — an accent, a series step;
+amber at blue's lightness is twice as bright — it is solved against the same thresholds the gate
+uses (text 4.5, stroke/ring 3.0). `src/lib/appearanceTheme.test.ts` then re-reads `index.css`,
+overlays the generated variables exactly as the browser cascade would (`var()` aliases included) and
+re-runs those pairs across the whole accent × base × chart × theme matrix. A hue that cannot hold AA
+fails there, before anyone sees it.
+
+**Cascade note.** The generated rules are injected **unlayered**, and the canon lives in
+`@layer base` / `@layer theme` — an unlayered declaration wins over any layered one regardless of
+specificity, so nothing needs re-specifying. The flip side: a colour token printed only in `:root`
+would also beat canon's `.dark`, so both blocks always print the same colour token set (asserted by
+the test). `.force-light` keeps the canon light palette — it declares those tokens on itself, and an
+element's own declaration outranks an inherited one.
+
+**Where the code lives.** `lib/appearanceStorage` (shell — keys + selection only) → `lib/appearance`
+(lazy — store, apply, persist) → `lib/appearanceTheme` (lazy — palettes, solvers, CSS). The computed
+CSS is cached in `localStorage` and re-injected pre-paint by `public/theme-boot.js`, versioned by
+`APPEARANCE_CSS_VERSION`: **bump it whenever the palette tables change**, in both files.
+
 ## Type scale
 
 **One** ladder, in the `@theme` block (`--text-*`). No magic `text-[Npx]` — the lint hard-fails on it.
