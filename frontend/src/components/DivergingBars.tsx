@@ -36,6 +36,42 @@ interface DivergingBarsProps {
 // Approximate glyph width of the 11px tabular labels (канон BarChart/LineChart).
 const CHAR_W = 6.6;
 
+/**
+ * Нулевая линия и масштаб ОДНОГО кадра — из тех же значений, что в этом кадре и рисуются.
+ *
+ * Это не оформление, а инвариант. Пока морф твинил ПИКСЕЛЬНЫЕ высоты, посчитанные при прошлой
+ * нулевой линии, а рисовал их относительно новой, столбцы улетали за `viewBox` и обрезались: на
+ * «Что изменило выручку» переключение «Каналы»→«Товары» на ~175мс показывало пустую карточку с
+ * огрызками, а на «Чистом приросте» в TG смена периода пробивала столбцами полосу подписей оси.
+ * Раньше этого не могло случиться — `mid` был константой `h/2`, и устаревшие высоты всегда
+ * оставались в кадре.
+ *
+ * Отсюда доказуемость: для любого кадра `bh_i = |v_i|·scale ≤ maxUp·scale = mid − padUp`, значит
+ * верх плюс-бара `mid − bh_i ≥ padUp ≥ 0`; симметрично низ минус-бара `≤ h − padDown ≤ h`. Ни один
+ * столбец не может выйти за поле — если mid, scale и значения взяты из одного кадра.
+ *
+ * Поля приходят от ЦЕЛИ, а не от текущего кадра: считай их из твинящихся значений — и в момент,
+ * когда одна сторона пустеет, поле скакнуло бы с 17 на 4, дёрнув линию в самом конце перелёта.
+ */
+export function divergingFrame(
+  values: ReadonlyArray<number>,
+  h: number,
+  padUp: number,
+  padDown: number,
+): { mid: number; scale: number } {
+  let maxUp = 0;
+  let maxDown = 0;
+  for (const value of values) {
+    if (!Number.isFinite(value)) continue;
+    if (value > maxUp) maxUp = value;
+    if (-value > maxDown) maxDown = -value;
+  }
+  const span = maxUp + maxDown;
+  const usable = Math.max(h - padUp - padDown, 1);
+  if (span <= 0) return { mid: h / 2, scale: 0 };
+  return { mid: padUp + (usable * maxUp) / span, scale: usable / span };
+}
+
 interface Hover {
   i: number;
 }
@@ -115,13 +151,13 @@ export function DivergingBars({
     // ушли в минус — верхняя половина карточки пустовала всегда, а столбцы делили оставшуюся
     // половину и вырождались в полоски по 1–2px (замечено владельцем: «как-то не наглядно»).
     //
-    // Теперь это обычная линейная шкала по НАСТОЯЩЕМУ размаху [−maxDown, +maxUp]: пиксель на
-    // единицу ОДИН для обеих сторон, поэтому столбцы по-прежнему сравнимы между собой, а высоту
-    // получает только тот знак, который в данных есть. Симметричный размах даёт ровно прежнюю
-    // картинку (mid = h/2) — временные ряды со сменой знака ничего не теряют.
-    const maxUp = Math.max(0, ...normalized);
-    const maxDown = Math.max(0, ...normalized.map((value) => -value));
-    const span = maxUp + maxDown;
+    // Теперь это обычная линейная шкала по НАСТОЯЩЕМУ размаху [−maxDown, +maxUp] (см.
+    // divergingFrame): пиксель на единицу ОДИН для обеих сторон, поэтому столбцы по-прежнему
+    // сравнимы между собой, а высоту получает только тот знак, который в данных есть.
+    // Симметричный размах даёт ровно прежнюю картинку (mid = h/2) — временные ряды со сменой
+    // знака ничего не теряют. Сама линия считается НЕ здесь, а покадрово: она зависит от данных,
+    // а данные во время морфа промежуточные.
+    //
     // Числа печатаются СНАРУЖИ столбца, поэтому поле на их стороне шире. Внутрь их класть нельзя:
     // минус-бары идут на 0.6 прозрачности, и белые чернила по такой пастели проваливают контраст
     // (проверено кадром светлой темы). Поле берётся только с той стороны, где столбцы ЕСТЬ, —
@@ -132,11 +168,8 @@ export function DivergingBars({
     // теряют высоту. Столько же остаётся между числом и полосой подписей оси.
     const PAD = 4;
     const LABEL_PAD = 17;
-    const padUp = hasValueLabels && maxUp > 0 ? LABEL_PAD : PAD;
-    const padDown = hasValueLabels && maxDown > 0 ? LABEL_PAD : PAD;
-    const usable = Math.max(h - padUp - padDown, 1);
-    const mid = span > 0 ? padUp + (usable * maxUp) / span : h / 2;
-    const scale = span > 0 ? usable / span : 0;
+    const padUp = hasValueLabels && normalized.some((value) => value > 0) ? LABEL_PAD : PAD;
+    const padDown = hasValueLabels && normalized.some((value) => value < 0) ? LABEL_PAD : PAD;
 
     const W = Math.max(width, 1);
     const step = W / values.length;
@@ -146,16 +179,6 @@ export function DivergingBars({
       ? new Set(values.map((_, i) => i))
       : axisLabelIndexSet(values.length, W, { minLabelPx: expanded ? 68 : 78, maxLabels: expanded ? 12 : 7 });
 
-    // SIGNED extents (px up/down from the midline) — the one dimension the data owns; the morph
-    // below tweens these, and the boxes/opacity derive from the tweened sign+magnitude per frame.
-    // Invalid values are honest zeros (op 0 keeps them invisible even mid-flight).
-    const extents = normalized.map((value, i) => {
-      const valid = Number.isFinite(values[i]);
-      // Честный ноль остаётся отметкой в 1px: точка в ряду есть, и она нулевая — это не то же
-      // самое, что пропуск (у пропуска op = 0, его не видно вовсе).
-      const bh = valid ? Math.max(1, Math.abs(value) * scale) : 0;
-      return value >= 0 ? bh : -bh;
-    });
     const valid = values.map((value) => Number.isFinite(value));
 
     // «Текущий» индекс оси (пилюля): последний НЕПУСТОЙ тик канонной оси, иначе последний столбец.
@@ -205,33 +228,46 @@ export function DivergingBars({
         })
       : null;
 
-    return { W, h, mid, step, barWidth, gap, extents, valid, labelsLayer, labelPad };
+    return { W, h, step, barWidth, gap, normalized, padUp, padDown, valid, labelsLayer, labelPad };
   }, [values, labels, axisLabels, width, ctxHeight, height, expanded, axis, hasValueLabels]);
 
   // ── UPDATE morph (canon BarChart): the signed silhouette flows into the new shape ─────────
   // A sign flip mid-flight honestly passes through the midline (the bar shrinks to 0 and re-grows
   // on the other side), switching to the quieter down-opacity at the crossing.
+  //
+  // Твинятся ЗНАЧЕНИЯ, а не пиксели. Пиксельный морф работал, пока нулевая линия стояла на `h/2`
+  // при любых данных; как только она пошла за данными, промежуточные кадры стали рисовать высоты
+  // прошлого масштаба относительно новой линии — и столбцы улетали за viewBox (см. divergingFrame).
+  // Из значений каждый кадр пересчитывает и линию, и масштаб, поэтому линия ПЛЫВЁТ к новому месту
+  // вместо телепорта, а выйти за поле кадр не может по построению.
   const motionKey = seriesMotionKey(values);
-  const targetExtents = useMemo(() => plot?.extents ?? [], [plot]);
-  const extents = useMorphValues(targetExtents, motionKey, 'silhouette');
+  const targetValues = useMemo(() => plot?.normalized ?? [], [plot]);
+  const tweened = useMorphValues(targetValues, motionKey, 'silhouette');
+  const frame = useMemo(
+    () => (plot ? divergingFrame(tweened, plot.h, plot.padUp, plot.padDown) : null),
+    [plot, tweened],
+  );
   const bars = useMemo(() => {
-    if (!plot) return null;
-    return extents.map((extent, i) => {
-      const bh = Math.abs(extent);
+    if (!plot || !frame) return null;
+    return tweened.map((value, i) => {
+      // Честный ноль остаётся отметкой в 1px: точка в ряду есть, и она нулевая — это не то же
+      // самое, что пропуск (у пропуска op = 0, его не видно вовсе).
+      const bh = plot.valid[i] ? Math.max(1, Math.abs(value) * frame.scale) : 0;
+      const up = value >= 0;
       return {
         x: i * plot.step + plot.gap / 2,
-        y: extent >= 0 ? plot.mid - bh : plot.mid,
+        y: up ? frame.mid - bh : frame.mid,
         w: plot.barWidth,
         h: bh,
         // Скругляется ВНЕШНИЙ угол (от нулевой линии): у плюс-бара верх, у минус-бара низ —
         // основание на нулевой линии остаётся прямым (канон BarChart, «закруглённое всё»).
-        up: extent >= 0,
+        up,
         fill: 'hsl(var(--chart-role-primary))',
         // Down bars: same ink, one luminance step quieter — position already says the direction.
-        op: plot.valid[i] ? (extent >= 0 ? 1 : 0.6) : 0,
+        op: plot.valid[i] ? (up ? 1 : 0.6) : 0,
       };
     });
-  }, [plot, extents]);
+  }, [plot, frame, tweened]);
   const barsLayer = useMemo(
     () =>
       bars?.map((b, i) => {
@@ -302,11 +338,14 @@ export function DivergingBars({
   }, [plot, values.length]);
 
   const hasFiniteValue = values?.some((value) => Number.isFinite(value)) ?? false;
-  if (!values || values.length === 0 || !hasFiniteValue || !plot || !bars) {
+  if (!values || values.length === 0 || !hasFiniteValue || !plot || !bars || !frame) {
     return <EmptyState compact size="chart" title="Нет данных" />;
   }
 
-  const { W, h, mid, labelPad } = plot;
+  const { W, h, labelPad } = plot;
+  // Нулевая линия — из ТЕКУЩЕГО кадра морфа, не из цели: иначе она телепортируется на новое место,
+  // пока столбцы ещё летят, и они на полперелёта отрываются от собственного основания.
+  const { mid } = frame;
   const n = values.length;
   const tipText = (i: number) =>
     titles?.[i] ?? (Number.isFinite(values[i]) ? `${values[i]}` : 'Нет данных');
