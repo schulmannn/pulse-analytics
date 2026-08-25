@@ -1,5 +1,7 @@
+import { useState } from 'react';
 import { toast } from 'sonner';
 import type { CdekInclude } from '@/api/cdek';
+import { SearchField } from '@/components/SearchField';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
@@ -124,3 +126,130 @@ export function CdekStatusFilter({
 export const toastStatusFilterSaved = (ids: readonly string[]): void => {
   toast(sortedUnique(ids).length === 0 ? 'Фильтр сброшен: канон СДЭКа' : 'Фильтр статусов сохранён');
 };
+
+// ── Фильтр по товарам ─────────────────────────────────────────────────────────────────────────
+/**
+ * Тот же вопрос «что считать», только по другой оси. Живёт рядом со статусами намеренно: два
+ * фильтра одной метрики должны читаться как один блок, а не как две независимые панели.
+ *
+ * Фильтр режет СТРОКИ ПОЗИЦИЙ (см. saleRows в server/repos/cdekRepo): выручка становится суммой
+ * выбранных товаров, «Заказы» — заказами, в которых они есть, «Штук» — их штуками. Все три числа
+ * отвечают на один вопрос, а не на три разных.
+ */
+export const cdekProductFilterKey = (channelId: number | null | undefined): string =>
+  `cdek:products:${channelId ?? 0}`;
+
+export interface CdekProductOption {
+  id: string;
+  name: string;
+}
+
+export const normalizeCdekProducts = (ids: readonly string[] | undefined | null): string[] =>
+  [...new Set(ids ?? [])].map((id) => id.trim()).filter(Boolean).sort();
+
+export const sameCdekProducts = (a: readonly string[], b: readonly string[]): boolean => {
+  const [x, y] = [normalizeCdekProducts(a), normalizeCdekProducts(b)];
+  return x.length === y.length && x.every((id, i) => id === y[i]);
+};
+
+/** Подпись — только когда выбор сделан: без него метрика считает весь ассортимент, как и раньше. */
+export function productFilterCaption(
+  selected: readonly string[],
+  options: readonly CdekProductOption[],
+): string | null {
+  const picked = normalizeCdekProducts(selected);
+  if (picked.length === 0) return null;
+  if (picked.length === 1) {
+    const name = options.find((o) => o.id === picked[0])?.name ?? picked[0];
+    return `Только товар: ${name}`;
+  }
+  return `Только выбранные товары: ${picked.length}`;
+}
+
+export function CdekProductFilter({
+  options,
+  selected,
+  saved,
+  onChange,
+  onSave,
+}: {
+  options: CdekProductOption[];
+  selected: string[];
+  saved: string[];
+  onChange: (ids: string[]) => void;
+  onSave: (ids: string[]) => void;
+}) {
+  const [query, setQuery] = useState('');
+  // Свёрнут по умолчанию: список ассортимента длиннее экрана, и раскрытый он сталкивал бы график
+  // под сгиб при каждом заходе (тот же приём, что у фильтра каналов МойСклада).
+  const [open, setOpen] = useState(false);
+  const needle = query.trim().toLocaleLowerCase('ru-RU');
+  const visible = needle
+    ? options.filter((o) => o.name.toLocaleLowerCase('ru-RU').includes(needle))
+    : options;
+  const dirty = !sameCdekProducts(selected, saved);
+  const toggle = (id: string) =>
+    onChange(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]);
+
+  return (
+    <div className="space-y-2" data-cdek-product-filter="">
+      <div className="flex items-center justify-between gap-3">
+        <button
+          type="button"
+          aria-expanded={open}
+          onClick={() => setOpen((v) => !v)}
+          className="text-xs text-muted-foreground transition-colors hover:text-foreground"
+        >
+          Товары{selected.length > 0 ? ` · выбрано ${selected.length}` : ' · все'}
+        </button>
+        <div className="flex items-center gap-2">
+          {selected.length > 0 && (
+            <Button type="button" variant="ghost" size="xs" onClick={() => onChange([])}>
+              Сбросить
+            </Button>
+          )}
+          {dirty && (
+            <Button type="button" variant="secondary" size="xs" onClick={() => onSave(selected)}>
+              Сохранить
+            </Button>
+          )}
+        </div>
+      </div>
+      {open && (
+        <div className="space-y-2 rounded-lg border border-border p-2.5">
+          <SearchField value={query} onChange={setQuery} ariaLabel="Поиск товара" placeholder="Название товара" />
+          <div className="max-h-56 space-y-0.5 overflow-y-auto">
+            {visible.length === 0 ? (
+              <p className="px-1 py-2 text-xs text-muted-foreground">Ничего не нашлось.</p>
+            ) : (
+              visible.map((option) => {
+                const active = selected.includes(option.id);
+                return (
+                  <button
+                    key={option.id}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => toggle(option.id)}
+                    className={cn(
+                      'flex min-h-11 w-full items-center gap-2.5 rounded px-2 py-1.5 text-left text-xs transition-colors sm:min-h-0',
+                      active ? 'bg-primary/10 text-foreground' : 'text-ink2 hover:bg-muted hover:text-foreground',
+                    )}
+                  >
+                    <span
+                      aria-hidden="true"
+                      className={cn(
+                        'h-3.5 w-3.5 shrink-0 rounded-sm border',
+                        active ? 'border-primary bg-primary' : 'border-border',
+                      )}
+                    />
+                    <span className="min-w-0 flex-1 truncate">{option.name}</span>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

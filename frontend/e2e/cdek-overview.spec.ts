@@ -64,6 +64,8 @@ async function bootOverview(page: Page, { all = false }: { all?: boolean } = {})
   const from = Date.now() - 30 * DAY;
   /** Каждый `include`, с которым уходил запрос окна — по нему видно, что фильтр реально доехал. */
   const includes: string[] = [];
+  /** Каждое значение `products` — по нему видно, что выбор товаров доехал до запроса. */
+  const productParams: string[] = [];
   await page.route(/^https?:\/\/[^/]+\/api\//, async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -89,6 +91,7 @@ async function bootOverview(page: Page, { all = false }: { all?: boolean } = {})
 
     if (path === '/api/cdek/summary' || path === '/api/cdek/series') {
       includes.push(url.searchParams.get('include') ?? '');
+      productParams.push(url.searchParams.get('products') ?? '');
     }
     if (path === '/api/cdek/summary') {
       return json(200, {
@@ -118,7 +121,7 @@ async function bootOverview(page: Page, { all = false }: { all?: boolean } = {})
   await page.goto('/cdek');
   await page.locator('main').waitFor({ state: 'visible', timeout: 25_000 });
   await page.waitForTimeout(900);
-  return includes;
+  return { includes, productParams };
 }
 
 test.beforeEach(({ page: _page }, testInfo) => {
@@ -221,7 +224,7 @@ test('фильтр статусов живёт только в разворот�
   // Решение владельца: фильтр доступен ТОЛЬКО когда провалились внутрь графика. На карточке его
   // нет и быть не должно — иначе у неё появилось бы скрытое состояние и число меняло бы смысл
   // без единого видимого контрола.
-  const includes = await bootOverview(page);
+  const { includes } = await bootOverview(page);
   await expect(page.locator('[data-cdek-status-filter]')).toHaveCount(0);
 
   const expand = page.getByRole('button', { name: 'Развернуть виджет «Выручка»' });
@@ -239,4 +242,25 @@ test('фильтр статусов живёт только в разворот�
 
   // И карточка теперь ГОВОРИТ, что посчитала: молча изменить смысл числа нельзя.
   await expect(page.getByText(/Считаются только/)).toBeVisible();
+});
+
+test('фильтр товаров режет метрику и тоже живёт только в развороте', async ({ page }) => {
+  const { productParams } = await bootOverview(page);
+  await expect(page.locator('[data-cdek-product-filter]')).toHaveCount(0);
+
+  const expand = page.getByRole('button', { name: 'Развернуть виджет «Выручка»' });
+  await expand.focus();
+  await expand.press('Enter');
+  await expect(page).toHaveURL(/\/metrics\/cdek-revenue/);
+
+  await page.getByRole('button', { name: /^Товары/ }).click();
+  const first = page.getByRole('button', { name: PRODUCTS[0].title ?? '' });
+  await expect(first).toBeVisible();
+  const before = productParams.length;
+  await first.click();
+
+  await expect.poll(() => productParams.length).toBeGreaterThan(before);
+  await expect.poll(() => productParams[productParams.length - 1]).toBe(PRODUCTS[0].key);
+  // Метрика обязана СКАЗАТЬ, что считает не весь ассортимент.
+  await expect(page.getByText(/Только товар/)).toBeVisible();
 });

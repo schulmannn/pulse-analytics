@@ -2,7 +2,7 @@
 
 const { hasWorkspaceRole } = require('../middleware/tenant');
 const { parseCdekPeriod } = require('../domain/cdekPeriod');
-const { normalizeCdekInclude } = require('../repos/cdekRepo');
+const { normalizeCdekInclude, normalizeCdekProducts } = require('../repos/cdekRepo');
 
 /**
  * Роуты СДЭК Fulfillment (/api/cdek/{sources,status,import,imports,imports/:id,
@@ -208,6 +208,9 @@ function registerCdekRoutes({ app, express, requireAuth, db, audit, cdekImport }
   // Разбор и белый список живут в репозитории — он же строит по этому значению SQL-фильтр, и
   // разъехаться двум копиям правила негде.
   const includeOf = (req) => normalizeCdekInclude(req.query.include);
+  // Товары фильтра приходят списком через запятую. Разбор и потолок живут в репозитории — там же,
+  // где из этого значения строится SQL.
+  const productsOf = (req) => normalizeCdekProducts(req.query.products);
 
   /** Окно + канал + часовой пояс источника — общий пролог всех читающих роутов. */
   async function resolveRead(req, res) {
@@ -219,7 +222,13 @@ function registerCdekRoutes({ app, express, requireAuth, db, audit, cdekImport }
     const channel = await resolveCdekChannel(req, res);
     if (!channel) return null;
     const source = await db.getCdekSource(channel.id);
-    return { channel, period, tz: (source && source.tz) || 'Europe/Moscow', include: includeOf(req) };
+    return {
+      channel,
+      period,
+      tz: (source && source.tz) || 'Europe/Moscow',
+      include: includeOf(req),
+      products: productsOf(req),
+    };
   }
 
   const totalsOf = (row) => (row ? {
@@ -241,7 +250,7 @@ function registerCdekRoutes({ app, express, requireAuth, db, audit, cdekImport }
       const ctx = await resolveRead(req, res);
       if (!ctx) return;
       const [totals, bounds] = await Promise.all([
-        db.getCdekSummaryForActor(ctx.channel.id, req.user, { ...ctx.period, tz: ctx.tz, include: ctx.include }),
+        db.getCdekSummaryForActor(ctx.channel.id, req.user, { ...ctx.period, tz: ctx.tz, include: ctx.include, products: ctx.products }),
         db.getCdekBoundsForActor(ctx.channel.id, req.user),
       ]);
       res.json({
@@ -264,7 +273,7 @@ function registerCdekRoutes({ app, express, requireAuth, db, audit, cdekImport }
       const ctx = await resolveRead(req, res);
       if (!ctx) return;
       const data = await db.getCdekSeriesForActor(ctx.channel.id, req.user, {
-        ...ctx.period, tz: ctx.tz, include: ctx.include,
+        ...ctx.period, tz: ctx.tz, include: ctx.include, products: ctx.products,
       });
       const point = (r) => ({
         day: r.day, revenue: rub(r.revenue_kopecks), orders: int(r.orders), items: int(r.items),
@@ -294,9 +303,13 @@ function registerCdekRoutes({ app, express, requireAuth, db, audit, cdekImport }
       // Разбивка ПО статусам обязана видеть все статусы, включая отменённые: отфильтруй мы их
       // «как выручку», она показала бы ровно те статусы, которые сама и отобрала.
       const include = dim === 'status' ? 'all' : ctx.include;
+      // Разбивка ПО ТОВАРАМ по той же причине игнорирует фильтр товаров: она и есть источник
+      // списка, из которого этот фильтр набирают. Отфильтруй мы её собой — человек увидел бы
+      // только уже выбранное и не смог бы добавить ничего нового.
+      const products = dim === 'product' ? null : ctx.products;
       const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || BREAKDOWN_LIMIT_DEFAULT, 1), BREAKDOWN_LIMIT_MAX);
       const rows = await db.getCdekBreakdownForActor(ctx.channel.id, req.user, {
-        ...ctx.period, tz: ctx.tz, include, dim,
+        ...ctx.period, tz: ctx.tz, include, dim, products,
       });
       const truncated = rows.length > db.CDEK_BREAKDOWN_MAX_GROUPS;
       const groups = truncated ? rows.slice(0, db.CDEK_BREAKDOWN_MAX_GROUPS) : rows;
@@ -346,7 +359,7 @@ function registerCdekRoutes({ app, express, requireAuth, db, audit, cdekImport }
       const ctx = await resolveRead(req, res);
       if (!ctx) return;
       const cells = await db.getCdekHourlyForActor(ctx.channel.id, req.user, {
-        ...ctx.period, tz: ctx.tz, include: ctx.include,
+        ...ctx.period, tz: ctx.tz, include: ctx.include, products: ctx.products,
       });
       res.json({
         window: { days: ctx.period.days, from: ctx.period.from, to: ctx.period.to, all: ctx.period.all },
