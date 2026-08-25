@@ -149,6 +149,11 @@ const PAIRS = [
   ['chart role: neutral on card', 'chart-role-neutral', 'card', 3.0, 'stroke'],
   ['chart role: selection on card', 'chart-role-selection', 'card', 3.0, 'stroke'],
 
+  // Слот стори-карточки (--accent-card): акцент карточки, который объявил ХОСТ и которого
+  // пользователь не выбирал. В каноне это алиас --chart-1-accent, но токен отдельный — студия
+  // оформления его перекрашивает, поэтому пара проверяется своим именем.
+  ['story card accent on card', 'accent-card', 'card', 3.0, 'stroke'],
+
   ['hairline on card', 'border', 'card', 3.0, 'border'],
   ['hairline on canvas', 'border', 'background', 3.0, 'border'],
   ['hairline on blue tint', 'border', 'blue-tint', 3.0, 'border'],
@@ -224,6 +229,31 @@ for (let n = 1; n <= 6; n++) {
     const pass = r >= target;
     if (!pass) failures++;
     console.log(`  ${pass ? 'ok  ' : 'FAIL'}  ${r.toFixed(2).padStart(5)} (need ${target})  ${label}`);
+  }
+}
+
+// Тональная подложка стори-карточки — та же арифметика, что и у пронумерованных акцентов выше,
+// но по отдельному слоту: число и подпись на подложке, замешанной из --accent-card-deep.
+console.log('\n=== dark · story card accent ===');
+{
+  const acc = dark['accent-card'];
+  const deep = dark['accent-card-deep'];
+  if (!acc || !deep) {
+    console.log('  ?     accent-card — token missing');
+    failures++;
+  } else {
+    const cardRgb = hslToRgb(dark.card);
+    const tonal = over(hslToRgb(deep), cardRgb, 0.26);
+    for (const [label, ink, bg, target] of [
+      ['story number on tonal surface', hslToRgb(acc), tonal, 4.5],
+      ['story number on card', hslToRgb(acc), cardRgb, 4.5],
+      ['muted caption on story tonal', hslToRgb([240, 6, 84]), tonal, 4.5],
+    ]) {
+      const r = ratio(ink, bg);
+      const pass = r >= target;
+      if (!pass) failures++;
+      console.log(`  ${pass ? 'ok  ' : 'FAIL'}  ${r.toFixed(2).padStart(5)} (need ${target})  ${label}`);
+    }
   }
 }
 

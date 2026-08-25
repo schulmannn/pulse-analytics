@@ -1884,6 +1884,13 @@
     --chart-role-warning: var(--status-warn);       /* anomaly / caution markers */
     --chart-role-neutral: var(--muted-foreground);  /* neutral fills — target line · «Прочее» slice */
     --chart-role-selection: var(--brand-iris);      /* hover / selected point + crosshair (= the accent) */
+    /* Акцент СТОРИ-КАРТОЧКИ — тот, что хост объявляет `defaultColor` и которого пользователь не
+       выбирал. Отдельный слот, а не прямая ссылка на --chart-1-accent, потому что студия
+       оформления должна уметь его перекрасить: карточка, чей цвет никто не выбирал, следует
+       акценту темы, а выбранный руками слот 1..6 остаётся собой (useChartSectionModel). В каноне
+       это ровно прежний --chart-1-accent, поэтому по умолчанию не меняется ничего. */
+    --accent-card: var(--chart-1-accent);
+    --accent-card-deep: var(--chart-1-accent-deep);
   }
 }
 

@@ -120,6 +120,48 @@ test.describe('студия оформления', () => {
     await expect(dock).toBeHidden();
   });
 
+  test('акцент ведёт серии, но выбранный вручную цвет карточки не трогает', async ({ page }) => {
+    // Стори-карточке `overview-hero` руками выставлен слот 4 — ровно тот случай, который правка
+    // обязана НЕ трогать. Ключ хранилища тот же, что у виджет-префов приложения.
+    await page.addInitScript(() =>
+      localStorage.setItem('pulse_widget_prefs', JSON.stringify({ 'overview-hero': { color: 4 } })),
+    );
+    const dock = await openDock(page, '/');
+    await choose(page, dock, 'Акцент', 'Изумрудный');
+
+    // Слот стори-карточек следует акценту — на нём живут карточки, цвет которых никто не выбирал.
+    await expect.poll(() => token(page, '--accent-card')).toMatch(/^15[0-9](\.\d)? /);
+    await expect.poll(() => token(page, '--chart-role-primary')).toMatch(/^15[0-9](\.\d)? /);
+
+    // А карточка с ручным выбором осталась на своём номерном слоте и своём цвете.
+    const hero = await page.evaluate(() => {
+      const el = [...document.querySelectorAll('[style*="--brand-iris"]')].find((node) =>
+        (node as HTMLElement).style.getPropertyValue('--brand-iris').includes('chart-4'),
+      ) as HTMLElement | undefined;
+      if (!el) return null;
+      return {
+        scoped: el.style.getPropertyValue('--chart-role-primary'),
+        resolved: getComputedStyle(el).getPropertyValue('--chart-role-primary').trim(),
+        canon: getComputedStyle(document.documentElement).getPropertyValue('--chart-4-accent').trim(),
+      };
+    });
+    expect(hero).not.toBeNull();
+    expect(hero?.scoped).toBe('var(--chart-4-accent)');
+    expect(hero?.resolved).toBe(hero?.canon);
+  });
+
+  test('карточка без ручного цвета в каноне красится ровно как раньше', async ({ page }) => {
+    await bootDemo(page, '/', { theme: 'dark' });
+    const story = page.locator('[style*="--accent-card"]').first();
+    await expect(story).toBeVisible();
+    const colors = await story.evaluate((el) => ({
+      slot: getComputedStyle(el).getPropertyValue('--chart-role-primary').trim(),
+      canon: getComputedStyle(document.documentElement).getPropertyValue('--chart-1-accent').trim(),
+    }));
+    // Канон = прежний --chart-1-accent буква в букву: правка не меняет вид дефолтной темы.
+    expect(colors.slot).toBe(colors.canon);
+  });
+
   test('тема переживает перезагрузку и встаёт до первого кадра', async ({ page }) => {
     const panel = await openSettings(page);
     await choose(page, panel, 'Пресет', 'Цветение');
