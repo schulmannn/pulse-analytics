@@ -62,6 +62,8 @@ const fold = (rows: typeof CHANNELS) => ({
 
 async function bootOverview(page: Page, { all = false }: { all?: boolean } = {}) {
   const from = Date.now() - 30 * DAY;
+  /** Каждый `include`, с которым уходил запрос окна — по нему видно, что фильтр реально доехал. */
+  const includes: string[] = [];
   await page.route(/^https?:\/\/[^/]+\/api\//, async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -85,6 +87,9 @@ async function bootOverview(page: Page, { all = false }: { all?: boolean } = {})
     const window = { days: all ? 0 : 30, from: all ? null : '2026-07-01', to: all ? null : '2026-07-30', all };
     const previousWindow = all ? null : { from: '2026-06-01', to: '2026-06-30' };
 
+    if (path === '/api/cdek/summary' || path === '/api/cdek/series') {
+      includes.push(url.searchParams.get('include') ?? '');
+    }
     if (path === '/api/cdek/summary') {
       return json(200, {
         window,
@@ -113,6 +118,7 @@ async function bootOverview(page: Page, { all = false }: { all?: boolean } = {})
   await page.goto('/cdek');
   await page.locator('main').waitFor({ state: 'visible', timeout: 25_000 });
   await page.waitForTimeout(900);
+  return includes;
 }
 
 test.beforeEach(({ page: _page }, testInfo) => {
@@ -123,12 +129,14 @@ test.beforeEach(({ page: _page }, testInfo) => {
 const card = (page: Page, title: string | RegExp) =>
   page.locator('section[data-widget-size]').filter({ has: page.getByRole('heading', { name: title }) });
 
-test('выручка подписана честно: это продажи, а не вся сумма файла', async ({ page }) => {
-  // Без подписи 3 076 319 ₽ читается как «всё, что в выгрузке» — а это на 428 тыс меньше наивной
-  // суммы, потому что отмены и складские движения из неё вычтены.
+test('на карточке выручки нет постоянной приписки про отмены', async ({ page }) => {
+  // Приписка «без отмен и складских движений» висела в каждом кадре и была шумом (владелец).
+  // Смысл никуда не делся: статусы выбираются в развороте, и там же карточка говорит, что именно
+  // посчитала, если выбор ушёл от канона. Здесь проверяется, что лицо карточки чистое.
   await bootOverview(page);
   const widget = card(page, 'Выручка');
-  await expect(widget).toContainText('без отмен и складских движений');
+  await expect(widget).not.toContainText('без отмен');
+  await expect(widget.locator('[data-cdek-status-filter]')).toHaveCount(0);
   // Hero идёт через цифровой морф (NumberFlow): в DOM рядом с числом лежит барабан цифр, поэтому
   // совпадение проверяется по самому числу, а не по строке целиком.
   await expect(widget).toContainText('3 076 319');
@@ -204,5 +212,31 @@ test('«Развернуть» ведёт на страницу метрики, 
   await expect(page.getByRole('link', { name: /СДЭК · Обзор/ })).toBeVisible();
   await expect(page.getByRole('toolbar', { name: 'Тип графика' })).toBeVisible();
   await expect(page.getByRole('toolbar', { name: 'База сравнения' })).toBeVisible();
-  await expect(page.getByText('без отмен, возвратов и складских движений')).toBeVisible();
+  // Описание метрики больше не утверждает, какие статусы посчитаны: с появлением фильтра это
+  // противоречило бы выбору на том же экране. Неизменная часть — складские движения не продажи.
+  await expect(page.getByText('Складские движения в неё не входят')).toBeVisible();
+});
+
+test('фильтр статусов живёт только в развороте и доезжает до запроса', async ({ page }) => {
+  // Решение владельца: фильтр доступен ТОЛЬКО когда провалились внутрь графика. На карточке его
+  // нет и быть не должно — иначе у неё появилось бы скрытое состояние и число меняло бы смысл
+  // без единого видимого контрола.
+  const includes = await bootOverview(page);
+  await expect(page.locator('[data-cdek-status-filter]')).toHaveCount(0);
+
+  const expand = page.getByRole('button', { name: 'Развернуть виджет «Выручка»' });
+  await expand.focus();
+  await expand.press('Enter');
+  await expect(page).toHaveURL(/\/metrics\/cdek-revenue/);
+
+  await expect(page.locator('[data-cdek-status-filter]')).toBeVisible();
+  const before = includes.length;
+
+  await page.getByRole('button', { name: 'Отменён' }).click();
+  await expect.poll(() => includes.length).toBeGreaterThan(before);
+  // Канон — «complete + delivery»; добавив отменённые, получаем явный набор из трёх статусов.
+  await expect.poll(() => includes[includes.length - 1]).toBe('status:cancel,complete,delivery');
+
+  // И карточка теперь ГОВОРИТ, что посчитала: молча изменить смысл числа нельзя.
+  await expect(page.getByText(/Считаются только/)).toBeVisible();
 });

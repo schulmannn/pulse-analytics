@@ -10,7 +10,7 @@ const assert = require('node:assert/strict');
 
 const { createCdekRepo } = require('../server/repos/cdekRepo');
 
-function repoWith({ rowsFor = () => ({ rows: [], rowCount: 0 }) } = {}) {
+function repoWith({ rowsFor = () => ({ rows: [], rowCount: 0 }), accessible = false } = {}) {
   const queries = [];
   const pool = {
     query: async (sql, params) => {
@@ -27,6 +27,7 @@ function repoWith({ rowsFor = () => ({ rows: [], rowCount: 0 }) } = {}) {
       sources.push({ network, externalId, meta });
       return 900;
     },
+    getAccessibleChannel: accessible ? async (id) => ({ id }) : undefined,
   });
   return { repo, queries, pool, sources };
 }
@@ -183,4 +184,46 @@ test('без базы репозиторий молчит, а не падает'
   assert.equal(await repo.saveCdekSource(5, {}), false);
   assert.deepEqual(await repo.listCdekImports(5), []);
   assert.deepEqual(await repo.applyCdekImport({ channelId: 5, orders: [ORDER] }), { inserted: 0, updated: 0, deleted: 0 });
+});
+
+// ── Что считать выручкой: режимы + явный набор статусов ───────────────────────────────────────
+// Набор едет ТЕМ ЖЕ параметром $7, что и прежние режимы (восьмой параметр в общем префиксе сдвинул
+// бы нумерацию плейсхолдеров во всех читающих запросах сразу). Значит вся защита — здесь: белый
+// список, порядок и дедуп. Порядок важен не для SQL, а для КЭША клиента: один и тот же выбор
+// обязан давать одну строку, иначе `complete,delivery` и `delivery,complete` станут двумя ключами.
+test('normalizeCdekInclude: режимы, набор статусов, мусор', () => {
+  const { normalizeCdekInclude } = require('../server/repos/cdekRepo');
+
+  for (const mode of ['revenue', 'completed', 'all']) {
+    assert.equal(normalizeCdekInclude(mode), mode);
+  }
+
+  assert.equal(normalizeCdekInclude('status:complete'), 'status:complete');
+  assert.equal(normalizeCdekInclude('status:delivery,complete'), 'status:complete,delivery', 'набор сортируется');
+  assert.equal(normalizeCdekInclude('status:complete,complete'), 'status:complete', 'дубли схлопываются');
+  assert.equal(
+    normalizeCdekInclude('status:complete,delivery,cancel,return'),
+    'all',
+    'полный набор — это режим «все», а не длинный список',
+  );
+
+  // Мусор НЕ означает «ничего не считать»: ноль на месте выручки человек прочитал бы как
+  // отсутствие продаж. Падаем на канон.
+  for (const bad of ['status:bogus', 'status:', 'status:;DROP TABLE', '', undefined, null, 42, {}]) {
+    assert.equal(normalizeCdekInclude(bad), 'revenue', `мусор ${JSON.stringify(bad)} → канон`);
+  }
+});
+
+test('фильтр статусов доезжает до SQL седьмым параметром', async () => {
+  const { repo, queries } = repoWith({ accessible: true });
+  await repo.getCdekSummaryForActor(7, { uid: 1 }, {
+    from: '2026-08-01',
+    to: '2026-08-31',
+    include: 'status:cancel,complete',
+  });
+  const withFilter = queries.filter((q) => q.params && q.params[6] != null);
+  assert.ok(withFilter.length > 0, 'хотя бы один запрос окна должен уйти с include');
+  for (const q of withFilter) {
+    assert.equal(q.params[6], 'status:cancel,complete');
+  }
 });

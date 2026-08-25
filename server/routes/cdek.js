@@ -2,6 +2,7 @@
 
 const { hasWorkspaceRole } = require('../middleware/tenant');
 const { parseCdekPeriod } = require('../domain/cdekPeriod');
+const { normalizeCdekInclude } = require('../repos/cdekRepo');
 
 /**
  * Роуты СДЭК Fulfillment (/api/cdek/{sources,status,import,imports,imports/:id,
@@ -203,8 +204,10 @@ function registerCdekRoutes({ app, express, requireAuth, db, audit, cdekImport }
   const rub = (v) => (v == null ? null : Number(v) / 100);
   const int = (v) => (v == null ? 0 : Number(v));
 
-  const INCLUDE = new Set(['revenue', 'completed', 'all']);
-  const includeOf = (req) => (INCLUDE.has(req.query.include) ? req.query.include : 'revenue');
+  // Что считать выручкой: три прежних режима ИЛИ явный набор статусов `status:complete,delivery`.
+  // Разбор и белый список живут в репозитории — он же строит по этому значению SQL-фильтр, и
+  // разъехаться двум копиям правила негде.
+  const includeOf = (req) => normalizeCdekInclude(req.query.include);
 
   /** Окно + канал + часовой пояс источника — общий пролог всех читающих роутов. */
   async function resolveRead(req, res) {

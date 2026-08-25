@@ -64,9 +64,11 @@ const WINDOW_CASE = `
  * иначе она показала бы лишь те статусы, которые сама же и отобрала).
  */
 const REVENUE_FILTER = `
-  (CASE $7::text
-     WHEN 'all' THEN true
-     WHEN 'completed' THEN o.status = 'complete'
+  (CASE
+     WHEN $7::text LIKE 'status:%'
+       THEN o.status = ANY(string_to_array(substr($7::text, 8), ','))
+     WHEN $7::text = 'all' THEN true
+     WHEN $7::text = 'completed' THEN o.status = 'complete'
      ELSE o.status NOT IN ('cancel', 'return')
    END)`;
 
@@ -77,6 +79,33 @@ const SALE_ROWS = `
  WHERE o.channel_id = $1 AND o.kind = 'sale'`;
 
 const INCLUDE_MODES = new Set(['revenue', 'completed', 'all']);
+/** Статусы заказа, известные разбору выгрузки. Произвольный набор строится ТОЛЬКО из них. */
+const ORDER_STATUSES = ['complete', 'delivery', 'cancel', 'return'];
+
+/**
+ * Нормализация «что считать выручкой». Кроме трёх прежних режимов принимает явный набор статусов
+ * `status:complete,delivery` (запрос владельца — считать выручку по выбранным статусам).
+ *
+ * Набор едет ТЕМ ЖЕ параметром $7, а не новым: `windowParams` отдаёт ровно $1..$7, и каждый
+ * читающий запрос дописывает свои плейсхолдеры следом — восьмой параметр в префиксе сдвинул бы
+ * нумерацию во всех запросах сразу. Здесь же меняется одно место.
+ *
+ * Значения из набора всегда из белого списка, отсортированы и без дублей: иначе один и тот же
+ * выбор давал бы разные строки и, следовательно, разные ключи кэша на клиенте.
+ */
+function normalizeCdekInclude(raw) {
+  if (typeof raw !== 'string') return 'revenue';
+  if (INCLUDE_MODES.has(raw)) return raw;
+  if (!raw.startsWith('status:')) return 'revenue';
+  const picked = [...new Set(raw.slice(7).split(',').map((s) => s.trim()))]
+    .filter((s) => ORDER_STATUSES.includes(s))
+    .sort();
+  // Пустой или целиком мусорный набор — это не «ничего не считать», а «выбора нет»: падаем на
+  // канонический режим, а не показываем ноль, который человек прочитал бы как отсутствие продаж.
+  if (picked.length === 0) return 'revenue';
+  // Набор, совпавший со всеми статусами, — это режим «все»: короче строка, устойчивее кэш.
+  return picked.length === ORDER_STATUSES.length ? 'all' : `status:${picked.join(',')}`;
+}
 const BREAKDOWN_DIMS = new Set(['channel', 'status', 'product', 'carrier']);
 // Потолок групп в разбивке: страховка от неожиданно широкого измерения (ассортимент склада
 // владельца — 54 позиции). Обрезанное честно помечается флагом, а не исчезает молча.
@@ -93,7 +122,7 @@ function createCdekRepo({ pool, enabled, transaction, ensureExternalSource, getA
 
   /** Параметры окна в порядке $1..$7 — общий префикс всех читающих запросов. */
   const windowParams = (channelId, { from = null, to = null, prevFrom = null, prevTo = null, tz = 'Europe/Moscow', include = 'revenue' }) =>
-    [channelId, from, to, prevFrom, prevTo, tz, INCLUDE_MODES.has(include) ? include : 'revenue'];
+    [channelId, from, to, prevFrom, prevTo, tz, normalizeCdekInclude(include)];
 
   // ── Источник ────────────────────────────────────────────────────────────────────────────────
 
@@ -603,4 +632,4 @@ function createCdekRepo({ pool, enabled, transaction, ensureExternalSource, getA
   };
 }
 
-module.exports = { createCdekRepo };
+module.exports = { createCdekRepo, normalizeCdekInclude, ORDER_STATUSES };
