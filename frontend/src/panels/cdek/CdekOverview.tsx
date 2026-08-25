@@ -406,11 +406,19 @@ function Contribution({
 
   if (!deltas.length) return <EmptyState compact size="chart" title="Против прошлого окна ничего не изменилось." />;
 
+  // Регистр числа выбирается ОДИН на весь график — по наибольшему вкладу, а не по каждому столбцу
+  // отдельно. Пер-значный `fmt.kpi` переключается на своём пороге, и в одном кадре оказывались
+  // «−8 200» рядом с «+307.9k»: две записи одной величины читаются как две разные величины.
+  const scaleShort = Math.max(...deltas.map((d) => Math.abs(d.delta))) >= 1e4;
+  const contribValue = (n: number) => `${scaleShort ? fmt.short(n) : fmt.num(Math.round(n))} ₽`;
+
   return (
     <ChartBand>
       <DivergingBars
+        axis="category"
         values={deltas.map((d) => d.delta)}
         labels={deltas.map((d) => d.label)}
+        valueLabels={deltas.map((d) => `${d.delta > 0 ? '+' : '−'}${contribValue(Math.abs(d.delta))}`)}
         titles={deltas.map((d) => `${d.label}: ${d.delta > 0 ? '+' : '−'}${rub(Math.abs(d.delta))}`)}
       />
     </ChartBand>
