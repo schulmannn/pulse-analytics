@@ -25,7 +25,24 @@ const CELLS = [
   { weekday: 6, hour: 19, orders: 3 },
 ];
 
-async function bootOrders(page: Page) {
+/** Длинная лента: ниже VIRTUALIZE_FROM (120) виртуализация спит, и её ветку никто не проверяет. */
+function manyOrders(count: number) {
+  return Array.from({ length: count }, (_, i) => ({
+    order_id: String(40000000 + i),
+    created_at: '2026-08-20T10:15:00',
+    status: 'complete',
+    channel: 'own',
+    carrier: 'Cdek',
+    external_order_id: null,
+    track_number: String(10000000000 + i),
+    comment: null,
+    amount: 1000 + i,
+    items: 1,
+    positions: 1,
+  }));
+}
+
+async function bootOrders(page: Page, orders: typeof ORDERS = ORDERS) {
   const seen: string[] = [];
   await page.route(/^https?:\/\/[^/]+\/api\//, async (route) => {
     const request = route.request();
@@ -55,7 +72,7 @@ async function bootOrders(page: Page) {
       const status = url.searchParams.get('status');
       const channel = url.searchParams.get('channel');
       // Стаб фильтрует так же, как сервер: по трём номерам сразу, статусу и каналу.
-      const rows = ORDERS.filter((o) => {
+      const rows = orders.filter((o) => {
         if (status && o.status !== status) return false;
         if (channel && o.channel !== channel) return false;
         if (!q) return true;
@@ -86,6 +103,37 @@ test('лента показывает заказы окна с суммой и �
   await expect(row).toContainText('Завершён');
   await expect(row).toContainText('Своя доставка');
   await expect(row).toContainText('2 850 ₽');
+});
+
+test('длинная лента: строки держат колонки шапки, а не схлопываются', async ({ page }) => {
+  // Регресс с живых данных владельца: виртуализация ставила строке `display: table` и абсолютное
+  // позиционирование, каждая строка становилась СВОЕЙ таблицей — шапка держала настоящие ширины,
+  // а ячейки строк схлопывались в ~20px и наезжали друг на друга. Прежние тесты этого не видели:
+  // они проверяли наличие текста, а фикстура была короче порога виртуализации.
+  await bootOrders(page, manyOrders(200));
+  const table = page.locator('table').last();
+  await expect(table.locator('tbody tr[data-index]').first()).toBeVisible();
+
+  const geom = await table.evaluate((node) => {
+    const head = [...node.querySelectorAll('thead th')].map((c) => Math.round(c.getBoundingClientRect().width));
+    const row = node.querySelector('tbody tr[data-index]');
+    return {
+      head,
+      body: row ? [...row.children].map((c) => Math.round(c.getBoundingClientRect().width)) : [],
+      rowDisplay: row ? getComputedStyle(row).display : null,
+      virtualized: node.querySelector('tbody')?.getAttribute('data-virtualized') ?? null,
+    };
+  });
+
+  // Сначала суть: ячейки строки обязаны совпасть с колонками шапки. Проверка «включилась ли
+  // виртуализация» идёт последней — иначе регресс валил бы тест по служебному признаку, а не по
+  // тому, что видит человек.
+  expect(geom.rowDisplay, 'строка обязана остаться table-row').toBe('table-row');
+  expect(geom.body).toHaveLength(geom.head.length);
+  for (const [i, width] of geom.head.entries()) {
+    expect(Math.abs(geom.body[i] - width), `колонка ${i} разъехалась с шапкой`).toBeLessThanOrEqual(2);
+  }
+  expect(geom.virtualized, 'виртуализация должна включиться на 200 строках').toBe('true');
 });
 
 test('поиск ищет по трек-номеру и по внешнему номеру маркетплейса', async ({ page }) => {

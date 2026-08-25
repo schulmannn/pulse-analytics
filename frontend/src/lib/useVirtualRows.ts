@@ -47,6 +47,16 @@ export interface VirtualRows<T extends HTMLElement> {
   totalSize: number;
   /** Смещение контейнера от начала scroll-контента — вычитается из item.start при позиционировании. */
   scrollMargin: number;
+  /**
+   * Высоты строк-РАСПОРОК до и после окна. Для таблицы это единственный корректный способ
+   * виртуализации: `<tr>` обязан остаться `table-row`, иначе он выпадает из колоночной модели
+   * таблицы. Абсолютное позиционирование строки требует `display: table` на `<tr>` — и тогда
+   * КАЖДАЯ строка становится собственной таблицей со своими ширинами: шапка держит реальные
+   * колонки, а ячейки строк схлопываются (владелец на живых данных СДЭКа — заказы наезжали друг
+   * на друга). Распорки этого не делают: строки остаются строками одной таблицы.
+   */
+  padTop: number;
+  padBottom: number;
   measureElement: Virtualizer<HTMLElement, Element>['measureElement'];
 }
 
@@ -86,12 +96,18 @@ export function useVirtualRows<T extends HTMLElement>({
     enabled: active,
     scrollMargin,
   });
+  const items = active ? virtualizer.getVirtualItems() : [];
+  const totalSize = active ? virtualizer.getTotalSize() : 0;
+  const first = items[0];
+  const last = items[items.length - 1];
   return {
     active,
     containerRef,
-    items: active ? virtualizer.getVirtualItems() : [],
-    totalSize: active ? virtualizer.getTotalSize() : 0,
+    items,
+    totalSize,
     scrollMargin,
+    padTop: first ? Math.max(0, first.start - scrollMargin) : 0,
+    padBottom: last ? Math.max(0, totalSize - (last.end - scrollMargin)) : 0,
     measureElement: virtualizer.measureElement,
   };
 }

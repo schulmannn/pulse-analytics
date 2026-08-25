@@ -148,9 +148,7 @@ export function MsStockTable({ period, sort }: { period: MsPeriod; sort: MsStock
             </tr>
           </thead>
           <tbody ref={virtual.containerRef} data-virtualized={virtual.active ? 'true' : undefined}>
-            {virtual.active && virtual.items.length > 0 && virtual.items[0].start - virtual.scrollMargin > 0 && (
-              <tr style={{ height: virtual.items[0].start - virtual.scrollMargin }} />
-            )}
+            {virtual.padTop > 0 && <tr style={{ height: virtual.padTop }} />}
             {(virtual.active ? virtual.items.map((vi) => [sorted[vi.index], vi.index] as const) : sorted.map((row, i) => [row, i] as const)).map(([row, i]) => {
               if (!row) return null;
               const warn = isWarnRow(row);
@@ -172,10 +170,7 @@ export function MsStockTable({ period, sort }: { period: MsPeriod; sort: MsStock
                 </tr>
               );
             })}
-            {virtual.active && virtual.items.length > 0 && (() => {
-              const bottom = virtual.totalSize - (virtual.items[virtual.items.length - 1].end - virtual.scrollMargin);
-              return bottom > 0 ? <tr style={{ height: bottom }} /> : null;
-            })()}
+            {virtual.padBottom > 0 && <tr style={{ height: virtual.padBottom }} />}
           </tbody>
         </table>
       </div>
