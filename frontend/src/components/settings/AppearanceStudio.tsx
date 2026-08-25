@@ -1,8 +1,19 @@
-import { useMemo, type ReactNode } from 'react';
+import {
+  Fragment,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from 'react';
+import { Check } from 'lucide-react';
 import { patchAppearance, setAppearance, useAppearance } from '@/lib/appearance';
+import { prefetchAppearanceFonts } from '@/lib/appearanceFonts';
 import {
   APPEARANCE_DEFAULT,
   isCanonAppearance,
+  setThemeStudioOpen,
   type AppearanceSettings,
 } from '@/lib/appearanceStorage';
 import {
@@ -15,197 +26,231 @@ import {
   appearanceCssPretty,
   baseSwatch,
   chartSwatches,
+  fontDef,
   shuffleAppearance,
 } from '@/lib/appearanceTheme';
 import { useTheme, type ThemeMode } from '@/lib/theme';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Snippet } from '@/components/ui/snippet';
-import { SegmentedControl } from '@/components/SegmentedControl';
-import { SettingsGroup, SettingsIcon, SettingsRow, type SettingsIconName } from '@/components/settings/primitives';
+import { SettingsGroup, SettingsIcon } from '@/components/settings/primitives';
 
 /**
- * «Оформление» — студия темы. Пользователь двигает ТОН и ФОРМУ, канон остаётся дефолтом: пока
- * все ручки стоят на «Atlavue», ни одна переменная не переопределяется (см. lib/appearance).
+ * «Оформление» — студия темы. Пользователь двигает ТОН и ФОРМУ, канон остаётся дефолтом: пока все
+ * поля стоят на «Atlavue», ни одна переменная не переопределяется (см. lib/appearance).
  *
- * Предпросмотр здесь намеренно маленький: настройки открыты ОВЕРЛЕЕМ поверх рабочей страницы, и
- * настоящий предпросмотр — само приложение за диалогом, которое перекрашивается на том же кадре.
- * Карточка ниже нужна, чтобы увидеть акцент, палитру данных, радиус и шрифт РЯДОМ, не закрывая
- * настройки.
+ * Подача выбора — поле-карточка с выпадающим списком (референс владельца — ui.shadcn.com/create):
+ * подпись сверху, текущее значение крупно, справа образец. Сетки свотчей не годились в узкой
+ * панели-студии, а два разных вида выбора на одну настройку — это два места, где расходится
+ * поведение.
+ *
+ * ДВА ХОЗЯИНА, ОДИН КОМПОНЕНТ:
+ *  • `variant="settings"` — раздел модальных настроек: поля в две колонки + живой предпросмотр и
+ *    полная копия CSS;
+ *  • `variant="dock"` — левая панель поверх работающего приложения (AppearanceDock). Предпросмотра
+ *    там нет намеренно: предпросмотр — это сами графики справа, ради них панель и открывают.
  *
  * Чего в студии нет и почему: зелёный/красный дельт и янтарный риска — семантика, а не вкус;
  * отдельного шрифта заголовков нет, потому что в вёрстке нет отдельного `font-display`, а вводить
  * его ради одной ручки — правка каждой страницы.
  */
-export function AppearanceStudio() {
+export function AppearanceStudio({
+  variant = 'settings',
+  onLeaveSettings,
+}: {
+  variant?: 'settings' | 'dock';
+  onLeaveSettings?: () => void;
+}) {
   const settings = useAppearance();
-  const { theme } = useTheme();
+  const { theme, mode, setMode } = useTheme();
   const canon = isCanonAppearance(settings);
+  const dock = variant === 'dock';
   const css = useMemo(() => appearanceCssPretty(settings), [settings]);
-  const activePreset = PRESETS.find((preset) =>
+  const preset = PRESETS.find((item) =>
     (Object.keys(APPEARANCE_DEFAULT) as Array<keyof AppearanceSettings>).every(
-      (key) => preset.settings[key] === settings[key],
+      (key) => item.settings[key] === settings[key],
     ),
   );
 
+  const fields = (
+    <>
+      <FieldGroup dock={dock}>
+        <Field
+          label="Тема"
+          value={THEME_OPTIONS.find((item) => item.key === mode)?.label ?? ''}
+          glyph={<ThemeGlyph mode={mode} />}
+          options={THEME_OPTIONS.map((item) => ({
+            key: item.key,
+            label: item.label,
+            sample: <ThemeGlyph mode={item.key} />,
+          }))}
+          active={mode}
+          onChange={(next) => setMode(next as ThemeMode)}
+        />
+        <Field
+          label="Базовый цвет"
+          value={BASES.find((item) => item.key === settings.base)?.label ?? ''}
+          glyph={<Dot color={baseSwatch(settings.base, theme)} />}
+          options={BASES.map((item) => ({
+            key: item.key,
+            label: item.label,
+            sample: <Dot color={baseSwatch(item.key, theme)} />,
+          }))}
+          active={settings.base}
+          onChange={(base) => patchAppearance({ base })}
+        />
+        <Field
+          label="Акцент"
+          value={ACCENTS.find((item) => item.key === settings.accent)?.label ?? ''}
+          glyph={<Dot color={accentSwatch(settings.accent, theme)} />}
+          options={ACCENTS.map((item) => ({
+            key: item.key,
+            label: item.label,
+            sample: <Dot color={accentSwatch(item.key, theme)} />,
+          }))}
+          active={settings.accent}
+          onChange={(accent) => patchAppearance({ accent })}
+        />
+        <Field
+          label="Цвет графиков"
+          value={chartLabel(settings.chart)}
+          glyph={<Ramp colors={chartSwatches(settings.chart, settings.accent, theme)} />}
+          options={CHART_OPTIONS.map((item) => ({
+            key: item.key,
+            label: item.label,
+            sample: <Ramp colors={chartSwatches(item.key, settings.accent, theme)} />,
+          }))}
+          active={settings.chart}
+          onChange={(chart) => patchAppearance({ chart })}
+        />
+      </FieldGroup>
+
+      <FieldGroup dock={dock}>
+        <Field
+          label="Шрифт"
+          value={fontDef(settings.font)?.label ?? ''}
+          glyph={<FontGlyph stack={fontDef(settings.font)?.stack} />}
+          // Список открыли — значит шрифты нужно ПОКАЗАТЬ: имена набраны своими начертаниями,
+          // и семейства подтягиваются в простое браузера (см. lib/appearanceFonts).
+          onOpen={prefetchAppearanceFonts}
+          options={FONTS.map((item) => ({
+            key: item.key,
+            label: item.label,
+            group: item.group,
+            style: item.stack ? { fontFamily: item.stack } : undefined,
+            sample: <FontGlyph stack={item.stack} />,
+          }))}
+          active={settings.font}
+          onChange={(font) => patchAppearance({ font })}
+        />
+        <Field
+          label="Скругление"
+          value={`${RADII.find((item) => item.key === settings.radius)?.label ?? ''} px`}
+          glyph={<RadiusGlyph radius={settings.radius} />}
+          options={RADII.map((item) => ({
+            key: item.key,
+            label: `${item.label} px`,
+            sample: <RadiusGlyph radius={item.key} />,
+          }))}
+          active={settings.radius}
+          onChange={(radius) => patchAppearance({ radius })}
+        />
+      </FieldGroup>
+
+      <FieldGroup dock={dock}>
+        <Field
+          label="Пресет"
+          value={preset?.label ?? 'Свой'}
+          glyph={<Dot color={accentSwatch(settings.accent, theme)} />}
+          options={PRESETS.map((item) => ({
+            key: item.key,
+            label: item.label,
+            sample: <Dot color={accentSwatch(item.settings.accent, theme)} />,
+          }))}
+          active={preset?.key ?? ''}
+          onChange={(key) => {
+            const next = PRESETS.find((item) => item.key === key);
+            if (next) setAppearance(next.settings);
+          }}
+        />
+      </FieldGroup>
+    </>
+  );
+
+  const actions = (
+    <div className={cn('flex flex-wrap gap-2', dock && 'flex-col')}>
+      <Button
+        type="button"
+        variant="secondary"
+        size="sm"
+        className={dock ? 'w-full' : undefined}
+        onClick={() => setAppearance(shuffleAppearance(settings))}
+      >
+        Случайно
+      </Button>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        disabled={canon}
+        className={dock ? 'w-full' : undefined}
+        onClick={() => setAppearance(APPEARANCE_DEFAULT)}
+      >
+        Сбросить
+      </Button>
+      {!dock && onLeaveSettings ? (
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          className="hidden md:inline-flex"
+          onClick={() => {
+            setThemeStudioOpen(true);
+            onLeaveSettings();
+          }}
+        >
+          Настроить поверх приложения
+        </Button>
+      ) : null}
+    </div>
+  );
+
+  if (dock) {
+    return (
+      <div className="flex flex-col">
+        {fields}
+        <div className="px-3 py-3">{actions}</div>
+        <div className="border-t border-border px-3 py-3">
+          <CopyCss css={css} className="w-full" />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-8">
-      <SettingsGroup title="Тема">
-        <SettingsRow
-          title="Цветовая схема"
-          description="Светлая, тёмная или синхронизированная с настройками системы. Хранится на этом устройстве."
-          footer={<ThemeControl />}
-        />
-        <SettingsRow
-          title="Пресет"
-          description="Готовое сочетание акцента, нейтрали, палитры данных и формы."
-          control={
-            <>
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                onClick={() => setAppearance(shuffleAppearance(settings))}
-              >
-                Случайно
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                disabled={canon}
-                onClick={() => setAppearance(APPEARANCE_DEFAULT)}
-              >
-                Сбросить
-              </Button>
-            </>
-          }
-          footer={
-            <div className="mt-4 flex flex-wrap gap-2">
-              {PRESETS.map((preset) => (
-                <button
-                  key={preset.key}
-                  type="button"
-                  aria-pressed={activePreset?.key === preset.key}
-                  onClick={() => setAppearance(preset.settings)}
-                  className={cn(
-                    'rounded-full border px-3 py-1.5 text-xs transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/50',
-                    activePreset?.key === preset.key
-                      ? 'border-primary bg-primary/10 font-medium text-accent-foreground'
-                      : 'border-border bg-background text-ink2 hover:bg-muted hover:text-foreground',
-                  )}
-                >
-                  {preset.label}
-                </button>
-              ))}
-            </div>
-          }
-        />
+      <SettingsGroup
+        title="Тема"
+        description="Светлота поверхностей и чернил остаётся канонической — выбор двигает только тон, поэтому контраст текста к фону не может уехать."
+      >
+        <div className="px-5 py-5">
+          {fields}
+          <div className="mt-4">{actions}</div>
+        </div>
       </SettingsGroup>
 
       <SettingsGroup title="Предпросмотр">
         <div className="px-5 py-5">
           <Preview />
         </div>
-      </SettingsGroup>
-
-      <SettingsGroup
-        title="Цвет"
-        description="Светлота поверхностей и чернил остаётся канонической — выбор двигает только тон, поэтому контраст текста к фону не может уехать."
-      >
-        <SettingsRow
-          title="Акцент"
-          description="Ссылки, активные состояния, кнопка действия и линия одиночной серии."
-          footer={
-            <ChoiceGrid
-              legend="Акцент интерфейса"
-              options={ACCENTS.map((accent) => ({
-                key: accent.key,
-                label: accent.label,
-                sample: <Dot color={accentSwatch(accent.key, theme)} />,
-              }))}
-              value={settings.accent}
-              onChange={(accent) => patchAppearance({ accent })}
-            />
-          }
-        />
-        <SettingsRow
-          title="Базовый цвет"
-          description="Температура холста, панелей и hairline-линий."
-          footer={
-            <ChoiceGrid
-              legend="Базовый цвет"
-              options={BASES.map((base) => ({
-                key: base.key,
-                label: base.label,
-                sample: <Dot color={baseSwatch(base.key, theme)} />,
-              }))}
-              value={settings.base}
-              onChange={(base) => patchAppearance({ base })}
-            />
-          }
-        />
-        <SettingsRow
-          title="Палитра данных"
-          description="«Канон» — категориальный набор Okabe-Ito, различимый при дальтонизме. Любой другой выбор превращает серии в шесть ступеней одного тона: красиво, но соседние категории различаются слабее — их по-прежнему держат подписи и легенда."
-          footer={
-            <ChoiceGrid
-              legend="Палитра данных"
-              options={[
-                { key: 'canon', label: 'Канон' },
-                { key: 'accent', label: 'Как акцент' },
-                ...ACCENTS.filter((accent) => accent.key !== 'canon').map((accent) => ({
-                  key: accent.key,
-                  label: accent.label,
-                })),
-              ].map((option) => ({
-                key: option.key,
-                label: option.label,
-                sample: <Ramp colors={chartSwatches(option.key, settings.accent, theme)} />,
-              }))}
-              value={settings.chart}
-              onChange={(chart) => patchAppearance({ chart })}
-            />
-          }
-        />
-      </SettingsGroup>
-
-      <SettingsGroup title="Форма и текст">
-        <SettingsRow
-          title="Скругление"
-          description="Радиус панелей, полей ввода и карточек, в пикселях."
-          control={
-            <SegmentedControl
-              ariaLabel="Скругление"
-              value={settings.radius}
-              onChange={(radius) => patchAppearance({ radius })}
-              options={RADII.map((option) => ({
-                value: option.key,
-                content: option.label,
-                ariaLabel: `${option.label} пикселей`,
-              }))}
-            />
-          }
-        />
-        <SettingsRow
-          title="Шрифт интерфейса"
-          description="Только системные семейства — ничего не скачивается дополнительно."
-          control={
-            <SegmentedControl
-              ariaLabel="Шрифт интерфейса"
-              value={settings.font}
-              onChange={(font) => patchAppearance({ font })}
-              options={FONTS.map((option) => ({
-                value: option.key,
-                content: (
-                  <span style={option.stack ? { fontFamily: option.stack } : undefined}>
-                    {option.label}
-                  </span>
-                ),
-              }))}
-            />
-          }
-        />
       </SettingsGroup>
 
       <SettingsGroup
@@ -220,60 +265,127 @@ export function AppearanceStudio() {
   );
 }
 
-// ── Выбор из набора ───────────────────────────────────────────────────────────────────────────
-interface Choice {
+// ── Поле выбора ───────────────────────────────────────────────────────────────────────────────
+const THEME_OPTIONS: Array<{ key: ThemeMode; label: string }> = [
+  { key: 'light', label: 'Светлая' },
+  { key: 'system', label: 'Системная' },
+  { key: 'dark', label: 'Тёмная' },
+];
+
+const CHART_OPTIONS = [
+  { key: 'canon', label: 'Канон' },
+  { key: 'accent', label: 'Как акцент' },
+  ...ACCENTS.filter((item) => item.key !== 'canon').map((item) => ({
+    key: item.key,
+    label: item.label,
+  })),
+];
+
+const chartLabel = (key: string) =>
+  CHART_OPTIONS.find((item) => item.key === key)?.label ?? 'Канон';
+
+interface Option {
   key: string;
   label: string;
   sample: ReactNode;
+  /** Заголовок раздела списка; повторяющиеся подряд значения печатаются один раз. */
+  group?: string;
+  /** Стиль подписи — семейством, которое эта строка и предлагает. */
+  style?: CSSProperties;
 }
 
-/**
- * Сетка образцов. Кнопки с `aria-pressed`, а не radiogroup: так же устроен выбор темы выше, и
- * читалка объявляет состояние без подмены семантики нативных радиокнопок.
- */
-function ChoiceGrid({
-  legend,
-  options,
-  value,
-  onChange,
-}: {
-  legend: string;
-  options: Choice[];
-  value: string;
-  onChange: (key: string) => void;
-}) {
+/** Ряд полей: в панели — колонкой, в широких настройках — по две в строку. */
+function FieldGroup({ dock, children }: { dock: boolean; children: ReactNode }) {
   return (
-    <fieldset className="m-0 mt-4 grid min-w-0 grid-cols-2 gap-2 @min-[30rem]:grid-cols-3">
-      <legend className="sr-only">{legend}</legend>
-      {options.map((option) => {
-        const active = option.key === value;
-        return (
-          <button
-            key={option.key}
-            type="button"
-            aria-pressed={active}
-            onClick={() => onChange(option.key)}
-            className={cn(
-              'flex min-h-11 min-w-0 items-center gap-2.5 rounded-lg border px-2.5 py-2 text-left transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/50 sm:min-h-0',
-              active
-                ? 'border-primary bg-primary/10 text-foreground'
-                : 'border-border bg-background text-ink2 hover:bg-muted hover:text-foreground',
-            )}
-          >
-            {option.sample}
-            <span className="truncate text-xs">{option.label}</span>
-          </button>
-        );
-      })}
-    </fieldset>
+    <div
+      className={cn(
+        'grid gap-2 border-border px-3 py-3 [&+&]:border-t',
+        dock ? 'grid-cols-1' : 'grid-cols-1 px-0 py-3 @min-[30rem]:grid-cols-2',
+      )}
+    >
+      {children}
+    </div>
   );
 }
 
+/**
+ * Поле-карточка с выпадающим списком: подпись, текущее значение и образец справа. Список —
+ * Radix-меню, то есть клавиатурная модель (стрелки, Home/End, набор буквами) достаётся даром, а
+ * выбранный пункт помечен галочкой справа — как в референсе, а не точкой слева (дефолт примитива
+ * гасится: `[&>span:first-child]:hidden`).
+ */
+function Field({
+  label,
+  value,
+  glyph,
+  options,
+  active,
+  onChange,
+  onOpen,
+}: {
+  label: string;
+  value: string;
+  glyph: ReactNode;
+  options: Option[];
+  active: string;
+  onChange: (key: string) => void;
+  onOpen?: () => void;
+}) {
+  return (
+    <DropdownMenu onOpenChange={(open) => { if (open) onOpen?.(); }}>
+      <DropdownMenuTrigger
+        className={cn(
+          'flex min-h-11 w-full items-center gap-3 rounded-lg border border-border bg-background px-3 py-2 text-left transition-colors',
+          'hover:bg-muted/60 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/50 data-[state=open]:bg-muted/60',
+        )}
+      >
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-2xs text-muted-foreground">{label}</span>
+          <span className="block truncate text-sm font-medium text-foreground">{value}</span>
+        </span>
+        {glyph}
+      </DropdownMenuTrigger>
+      {/* layer="modal": один из двух хозяев студии — САМ модальный диалог настроек, и на дефолтном
+          слое меню открывалось бы ПОД его затемнением (поймано e2e). */}
+      <DropdownMenuContent
+        align="start"
+        layer="modal"
+        className="max-h-80 w-(--radix-dropdown-menu-trigger-width) min-w-48 overflow-y-auto"
+      >
+        <DropdownMenuRadioGroup value={active} onValueChange={onChange}>
+          {options.map((option, index) => (
+            <Fragment key={option.key}>
+              {option.group && option.group !== options[index - 1]?.group ? (
+                <DropdownMenuLabel className="px-2 pb-1 pt-2 text-2xs font-medium uppercase tracking-wider text-ink3">
+                  {option.group}
+                </DropdownMenuLabel>
+              ) : null}
+              <DropdownMenuRadioItem
+                value={option.key}
+                className="gap-2.5 pl-2 pr-2 [&>span:first-child]:hidden"
+              >
+                {option.sample}
+                <span className="min-w-0 flex-1 truncate" style={option.style}>
+                  {option.label}
+                </span>
+                {option.key === active ? (
+                  <Check aria-hidden="true" className="ml-2 h-3.5 w-3.5 shrink-0" />
+                ) : null}
+              </DropdownMenuRadioItem>
+            </Fragment>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+// ── Образцы ───────────────────────────────────────────────────────────────────────────────────
 function Dot({ color }: { color: string }) {
   return (
     <span
       aria-hidden="true"
-      className="h-4 w-4 shrink-0 rounded-full ring-1 ring-inset ring-foreground/10"
+      className="h-4.5 w-4.5 shrink-0 rounded-full ring-1 ring-inset ring-foreground/10"
       style={{ backgroundColor: color }}
     />
   );
@@ -283,7 +395,7 @@ function Ramp({ colors }: { colors: string[] }) {
   return (
     <span
       aria-hidden="true"
-      className="flex h-4 w-4 shrink-0 flex-col overflow-hidden rounded-full ring-1 ring-inset ring-foreground/10"
+      className="flex h-4.5 w-4.5 shrink-0 flex-col overflow-hidden rounded-full ring-1 ring-inset ring-foreground/10"
     >
       {colors.slice(0, 3).map((color) => (
         <span key={color} className="flex-1" style={{ backgroundColor: color }} />
@@ -292,7 +404,75 @@ function Ramp({ colors }: { colors: string[] }) {
   );
 }
 
-// ── Живой предпросмотр ────────────────────────────────────────────────────────────────────────
+/** Квадрат с НАСТОЯЩИМ радиусом варианта — форму видно до выбора. */
+function RadiusGlyph({ radius }: { radius: string }) {
+  const value = RADII.find((item) => item.key === radius)?.value ?? '0.25rem';
+  return (
+    <span
+      aria-hidden="true"
+      className="h-4.5 w-4.5 shrink-0 border-2 border-foreground/40"
+      style={{ borderRadius: `calc(${value} + 1px)` }}
+    />
+  );
+}
+
+/** «Aa» тем самым семейством, которое выбирают. */
+function FontGlyph({ stack }: { stack?: string | null }) {
+  return (
+    <span
+      aria-hidden="true"
+      className="w-4.5 shrink-0 text-center text-sm font-medium leading-none text-ink2"
+      style={stack ? { fontFamily: stack } : undefined}
+    >
+      Aa
+    </span>
+  );
+}
+
+const THEME_ICON: Record<ThemeMode, 'sun' | 'monitor' | 'moon'> = {
+  light: 'sun',
+  system: 'monitor',
+  dark: 'moon',
+};
+
+function ThemeGlyph({ mode }: { mode: ThemeMode }) {
+  return <SettingsIcon name={THEME_ICON[mode]} className="h-4.5 w-4.5 shrink-0 text-ink2" />;
+}
+
+// ── Копия CSS одной кнопкой (в панели полный сниппет не помещается) ───────────────────────────
+function CopyCss({ css, className }: { css: string; className?: string }) {
+  const [copied, setCopied] = useState(false);
+  const timer = useRef<number | null>(null);
+  useEffect(
+    () => () => {
+      if (timer.current != null) window.clearTimeout(timer.current);
+    },
+    [],
+  );
+  return (
+    <>
+      <Button
+        type="button"
+        size="sm"
+        className={className}
+        onClick={() => {
+          void navigator.clipboard.writeText(css).then(() => {
+            setCopied(true);
+            if (timer.current != null) window.clearTimeout(timer.current);
+            timer.current = window.setTimeout(() => setCopied(false), 2_000);
+          });
+        }}
+      >
+        {copied ? 'Скопировано' : 'Скопировать CSS'}
+      </Button>
+      <span role="status" className="sr-only">
+        {copied ? 'Скопировано' : ''}
+      </span>
+    </>
+  );
+}
+
+// ── Живой предпросмотр (только в настройках) ──────────────────────────────────────────────────
 const SERIES = [34, 41, 38, 52, 47, 63, 58, 71, 66, 82, 78, 94];
 
 /** Одна карточка со всем сразу: акцент, палитра данных, радиус, шрифт и шкала чернил. */
@@ -360,100 +540,5 @@ function Preview() {
         <span className="text-xs text-ink2">Вторичный текст</span>
       </div>
     </div>
-  );
-}
-
-// ── Светлая / тёмная / системная ──────────────────────────────────────────────────────────────
-const THEME_OPTIONS: Array<{ value: ThemeMode; label: string; icon: SettingsIconName }> = [
-  { value: 'light', label: 'Светлая', icon: 'sun' },
-  { value: 'system', label: 'Системная', icon: 'monitor' },
-  { value: 'dark', label: 'Тёмная', icon: 'moon' },
-];
-
-function ThemeControl() {
-  const { mode, setMode } = useTheme();
-  return (
-    <fieldset className="m-0 mt-4 grid min-w-0 grid-cols-3 gap-2">
-      <legend className="sr-only">Тема интерфейса</legend>
-      {THEME_OPTIONS.map((option) => {
-        const active = mode === option.value;
-        return (
-          <button
-            key={option.value}
-            type="button"
-            aria-pressed={active}
-            onClick={() => setMode(option.value)}
-            className={cn(
-              'min-w-0 rounded-xl border p-2.5 text-left transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/50',
-              active
-                ? 'border-primary bg-primary/10 text-foreground'
-                : 'border-border bg-background text-muted-foreground hover:bg-muted/60 hover:text-foreground',
-            )}
-          >
-            <ThemePreview mode={option.value} />
-            <span className="mt-2 flex min-w-0 items-center gap-1.5 px-0.5">
-              <SettingsIcon name={option.icon} className="h-3.5 w-3.5 shrink-0" />
-              <span className="truncate text-xs font-medium">{option.label}</span>
-            </span>
-          </button>
-        );
-      })}
-    </fieldset>
-  );
-}
-
-function ThemePreview({ mode }: { mode: ThemeMode }) {
-  if (mode === 'system') {
-    return (
-      <span
-        aria-hidden="true"
-        className="grid h-16 grid-cols-2 overflow-hidden rounded-lg border border-border"
-      >
-        <ThemePreviewPanel className="force-light border-r" />
-        <ThemePreviewPanel className="dark" />
-      </span>
-    );
-  }
-  return (
-    <span
-      aria-hidden="true"
-      className={cn(
-        'block h-16 overflow-hidden rounded-lg border border-border',
-        mode === 'light' ? 'force-light' : 'dark',
-      )}
-      style={{ borderColor: 'hsl(var(--border))' }}
-    >
-      <ThemePreviewPanel />
-    </span>
-  );
-}
-
-function ThemePreviewPanel({ className }: { className?: string }) {
-  return (
-    <span
-      className={cn('flex h-full min-w-0 gap-1.5 p-2', className)}
-      style={{
-        backgroundColor: 'hsl(var(--background))',
-        borderColor: 'hsl(var(--border))',
-      }}
-    >
-      <span className="w-2 shrink-0 rounded" style={{ backgroundColor: 'hsl(var(--muted))' }} />
-      <span className="min-w-0 flex-1 space-y-1.5">
-        <span
-          className="block h-1.5 w-3/4 rounded-full"
-          style={{ backgroundColor: 'hsl(var(--foreground))' }}
-        />
-        {[0, 1].map((line) => (
-          <span
-            key={line}
-            className="block h-2.5 rounded border"
-            style={{
-              backgroundColor: 'hsl(var(--card))',
-              borderColor: 'hsl(var(--border))',
-            }}
-          />
-        ))}
-      </span>
-    </span>
   );
 }

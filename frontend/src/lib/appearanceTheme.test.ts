@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { APPEARANCE_FONT_KEYS } from '@/lib/appearanceFonts';
 import {
   APPEARANCE_DEFAULT,
   parseAppearance,
@@ -253,17 +254,29 @@ describe('форма и текст', () => {
   });
 
   it('шрифт печатает и переменную, и правило body — иначе канон в @layer base перебьёт выбор', () => {
-    const resolved = resolveAppearance({ ...APPEARANCE_DEFAULT, font: 'mono' });
+    const resolved = resolveAppearance({ ...APPEARANCE_DEFAULT, font: 'jetbrains-mono' });
     const tokens = Object.fromEntries(resolved.light.tokens);
-    expect(tokens['font-sans']).toContain('ui-monospace');
+    expect(tokens['font-sans']).toContain('JetBrains Mono Variable');
     expect(resolved.rules).toContain('body{font-family:var(--font-sans)}');
   });
 
-  it('каждое семейство шрифтов заканчивается родовым именем (нечего скачивать)', () => {
+  it('у каждого семейства есть системный запасной вариант своего класса', () => {
     for (const font of FONTS) {
       if (!font.stack) continue;
-      expect(font.stack).toMatch(/(sans-serif|serif|monospace)$/);
+      expect(font.stack, font.label).toMatch(/(sans-serif|serif|monospace)$/);
+      // Ни одной внешней загрузки в самом токене: файлы приезжают модулем, а не из CSS-переменной.
       expect(font.stack).not.toContain('url(');
+    }
+  });
+
+  it('каждое webfont-семейство имеет загрузчик — иначе выбор тихо ничего бы не сделал', () => {
+    for (const font of FONTS) {
+      if (!font.webfont) continue;
+      expect(APPEARANCE_FONT_KEYS, font.label).toContain(font.key);
+    }
+    // И наоборот: лишний загрузчик = мёртвая зависимость в package.json.
+    for (const key of APPEARANCE_FONT_KEYS) {
+      expect(FONTS.some((font) => font.key === key), key).toBe(true);
     }
   });
 });
