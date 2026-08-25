@@ -369,7 +369,6 @@ function FeaturedKpi({ label, labelHidden = false, value, trend, caption, spark,
   }, [spark]);
   return (
     <ChartCardBody
-      hero
       label={
         <span className="flex items-center gap-1">
           {/* sr-only абсолютно спозиционирован — из flex-потока выпадает, gap перед ⓘ не растёт. */}

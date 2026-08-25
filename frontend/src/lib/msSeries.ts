@@ -1,4 +1,5 @@
 import { fmt } from '@/lib/format';
+import { formatMoney } from '@/lib/metricNumber';
 import { msDensifyWindow, type MsPeriod } from '@/lib/msPeriod';
 
 /**
@@ -35,7 +36,7 @@ export function metricValue(metric: Metric, p: { orders: number; sum: number }):
 /** Формат значения метрики для тултипа/числа. */
 export function fmtMetric(metric: Metric, v: number | null): string {
   if (v == null) return '—';
-  return metric === 'orders' ? fmt.num(v) : `${fmt.short(v)} ₽`;
+  return metric === 'orders' ? fmt.num(v) : `${formatMoney(v, 'axis')}`;
 }
 
 export const localDayKey = (d: Date): string =>

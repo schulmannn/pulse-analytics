@@ -8,6 +8,7 @@ import { useCdekHourly, useCdekOrders, type CdekOrder } from '@/api/cdek';
 import { useVirtualRows } from '@/lib/useVirtualRows';
 import { useScrollEdgeFade } from '@/lib/useScrollEdgeFade';
 import { fmt } from '@/lib/format';
+import { formatMoney } from '@/lib/metricNumber';
 import { useCardShowsPeriod, usePagePeriod } from '@/lib/period';
 import { useMsPagePeriod } from '@/lib/msPeriod';
 import { cn } from '@/lib/utils';
@@ -37,7 +38,8 @@ const STATUS_LABEL: Record<string, string> = {
   return: 'Возврат',
 };
 
-const rub = (n: number | null) => (n == null ? '—' : `${fmt.num(Math.round(n))} ₽`);
+/** Лента заказов — таблица: за суммой заказа идут именно сюда, роль `exact`. */
+const rub = (n: number | null) => formatMoney(n, 'exact');
 
 export function CdekOrders() {
   const pp = usePagePeriod();

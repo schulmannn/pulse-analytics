@@ -10,6 +10,7 @@ import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { TableSkeleton } from '@/components/ui/dataSkeleton';
 import { fmt } from '@/lib/format';
+import { formatMoney } from '@/lib/metricNumber';
 import { cumulativeContribution, cumulativePointLabel } from '@/lib/msConcentration';
 import type { MsPeriod } from '@/lib/msPeriod';
 
@@ -307,7 +308,7 @@ function MsConcentrationKpis({
       label: 'Убыточных товаров',
       value:
         summary.loss_making_count > 0
-          ? `${fmt.num(summary.loss_making_count)} · −${fmt.short(summary.loss_making_amount)} ₽`
+          ? `${fmt.num(summary.loss_making_count)} · −${formatMoney(summary.loss_making_amount, 'axis')}`
           : '0',
     },
   ];
@@ -385,7 +386,7 @@ function MsTopProductsList({ rows, metric, limit }: { rows: TopRow[]; metric: Ms
 }
 
 function formatProfit(value: number): string {
-  return `${value < 0 ? '−' : ''}${fmt.short(Math.abs(value))} ₽`;
+  return `${value < 0 ? '−' : ''}${formatMoney(Math.abs(value), 'axis')}₽`;
 }
 
 function formatMargin(value: number | null): string {
@@ -395,12 +396,12 @@ function formatMargin(value: number | null): string {
 function formatProductPrimary(row: { revenue: number; profit: number; margin: number | null }, metric: MsProductSort): string {
   if (metric === 'profit') return formatProfit(row.profit);
   if (metric === 'margin') return formatMargin(row.margin);
-  return `${fmt.short(row.revenue)} ₽`;
+  return `${formatMoney(row.revenue, 'axis')}`;
 }
 
 function formatProductSecondary(row: { revenue: number; profit: number; margin: number | null }, metric: MsProductSort): string {
-  if (metric === 'profit') return `выруч. ${fmt.short(row.revenue)} ₽ · ${formatMargin(row.margin)}`;
-  if (metric === 'margin') return `приб. ${formatProfit(row.profit)} · выруч. ${fmt.short(row.revenue)} ₽`;
+  if (metric === 'profit') return `выруч. ${formatMoney(row.revenue, 'axis')} · ${formatMargin(row.margin)}`;
+  if (metric === 'margin') return `приб. ${formatProfit(row.profit)} · выруч. ${formatMoney(row.revenue, 'axis')}`;
   return `приб. ${formatProfit(row.profit)} · ${formatMargin(row.margin)}`;
 }
 
@@ -411,7 +412,7 @@ type MoverKind = 'gain' | 'loss' | 'appeared' | 'disappeared';
 
 /** Значение метрики в её натуральной единице (сервер уже дал рубли/штуки). */
 export function fmtChangeValue(value: number, unit: 'rub' | 'count'): string {
-  return unit === 'rub' ? `${fmt.short(value)} ₽` : `${fmt.num(value)} шт.`;
+  return unit === 'rub' ? `${formatMoney(value, 'axis')}` : `${fmt.num(value)} шт.`;
 }
 
 /**

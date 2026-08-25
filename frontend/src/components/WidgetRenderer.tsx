@@ -155,7 +155,6 @@ export function WidgetRenderer({
     return (
       <div className="h-full min-h-0" data-widget-story-card>
         <ChartCardBody
-          hero
           value={result.value ?? '—'}
           delta={result.delta}
           caption={

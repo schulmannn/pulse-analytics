@@ -102,6 +102,19 @@ const rules = [
     exempt: (rel) => rel.endsWith('.css') || rel.endsWith('components/chartWidget/KpiValue.tsx'),
   },
   {
+    id: 'money-formatted-inline',
+    hint: 'format money through lib/metricNumber (formatMoney / formatMetricNumber)',
+    // Один смысл — «сколько рублей» — жил в ШЕСТИ объявлениях по трём разным правилам: СДЭК звал
+    // fmt.num («1 000 000 ₽», съедало полкарточки — жалоба владельца), МойСклад fmt.short («2k ₽»
+    // для двух тысяч, хотя канон сжимает от десяти), резолвер виджетов — своё третье. Правило
+    // задаётся ролью числа на экране (headline / axis / exact), и знать её должен один модуль.
+    test: (line) => /₽/.test(line) && /fmt\.(num|short|kpi)\s*\(/.test(line),
+    exempt: (rel) =>
+      rel.endsWith('lib/metricNumber.ts') ||
+      rel.endsWith('.test.ts') ||
+      rel.endsWith('.test.tsx'),
+  },
+  {
     id: 'arbitrary-motion-util',
     hint: 'use the duration scale / --motion-* tokens',
     test: (line) => /\b(?:duration|ease|delay)-\[/.test(line),

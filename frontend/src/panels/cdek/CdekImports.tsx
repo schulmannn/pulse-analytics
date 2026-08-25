@@ -11,6 +11,7 @@ import { useCdekCoverage, useCdekImports, useCdekReplay, useCdekStatus, useCdekU
 import { useSelectedChannel } from '@/lib/channel-context';
 import { buildActivityCalendar, type ActivityCalendarDay } from '@/lib/activityCalendar';
 import { fmt } from '@/lib/format';
+import { formatMoney } from '@/lib/metricNumber';
 import { cn } from '@/lib/utils';
 
 /**
@@ -377,7 +378,7 @@ function CoverageCalendar({ days }: { days: Array<{ day: string; revenue: number
 function CoverageCell({ day }: { day: ActivityCalendarDay | null }) {
   if (!day) return <div className="size-3" />;
   const title = day.covered
-    ? `${fmt.day(day.day)}: ${day.value > 0 ? `${fmt.num(Math.round(day.value))} ₽` : 'заказов нет'}`
+    ? `${fmt.day(day.day)}: ${day.value > 0 ? `${formatMoney(day.value, 'exact')}` : 'заказов нет'}`
     : `${fmt.day(day.day)}: выгрузка не загружена`;
   return (
     <div

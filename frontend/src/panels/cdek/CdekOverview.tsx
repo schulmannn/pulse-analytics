@@ -25,6 +25,7 @@ import { pctDelta, type MetricDelta } from '@/lib/delta';
 import { lttbDownsample } from '@/lib/downsample';
 import { CHART_MAX_POINTS } from '@/lib/msSeries';
 import { fmt, timeAxisFromDayKeys } from '@/lib/format';
+import { formatByRole, formatMoney, moneyFormatterFor } from '@/lib/metricNumber';
 import { useCardShowsPeriod, usePagePeriod } from '@/lib/period';
 import { useMsPagePeriod } from '@/lib/msPeriod';
 
@@ -61,7 +62,9 @@ const STATUS_LABEL: Record<string, string> = {
   return: 'Возврат',
 };
 
-const rub = (n: number) => `${fmt.num(Math.round(n))} ₽`;
+/** Тултипы/таблицы/подписи графиков — за цифрой идут именно сюда, поэтому роль `exact`.
+ *  Крупное число карточки печатает formatMoney без аргумента (роль headline). */
+const rub = (n: number) => formatMoney(n, 'exact');
 const rubShort = (n: number) => fmt.kpi(Math.round(n));
 
 /** Ключ разреза → подпись. Пустой ключ — отсутствие значения, а не категория с именем. */
@@ -99,7 +102,7 @@ function CdekStory({
 
   if (model.values.length <= 1) {
     return (
-      <ChartCardBody hero value={value} delta={delta} caption={caption}>
+      <ChartCardBody value={value} delta={delta} caption={caption}>
         <EmptyState compact size="chart" title="Недостаточно дней для графика." />
       </ChartCardBody>
     );
@@ -109,7 +112,7 @@ function CdekStory({
   const titles = model.values.map((v, i) => `${labels[i] ?? ''}: ${formatValue(v)}`);
 
   return (
-    <ChartCardBody hero value={value} delta={delta} caption={caption}>
+    <ChartCardBody value={value} delta={delta} caption={caption}>
       {viz === 'bar' ? (
         // ChartBand — `flex-1`, и без флекс-КОЛОНКИ-родителя он не ограничен ничем: полоса растёт
         // под контент, столбцы берут высоту ВСЕГО тела карточки из контекста, и тайл переполняется
@@ -175,7 +178,7 @@ export function CdekOverview() {
     [periodInLabel, extra].filter(Boolean).join(' · ') || undefined;
 
   const revStory = {
-    value: cur?.revenue != null ? rub(cur.revenue) : '—',
+    value: formatMoney(cur?.revenue),
     delta: pctDelta(cur?.revenue, prev?.revenue),
     // Что именно считается выручкой, объясняет «О метрике» и разворот, где этим можно управлять;
     // на лице карточки постоянная приписка про отмены была шумом в каждом кадре (владелец).
@@ -211,7 +214,7 @@ export function CdekOverview() {
           <ChartSkeleton />
         ) : (
           <CdekStory
-            value={fmt.num(cur?.orders ?? 0)}
+            value={formatByRole(cur?.orders ?? 0, 'headline')}
             delta={pctDelta(cur?.orders, prev?.orders)}
             caption={storyCaption(grainWord)}
             points={points}
@@ -227,7 +230,7 @@ export function CdekOverview() {
           <ChartSkeleton />
         ) : (
           <CdekStory
-            value={cur?.avg_check != null ? rub(cur.avg_check) : '—'}
+            value={formatMoney(cur?.avg_check)}
             delta={pctDelta(cur?.avg_check, prev?.avg_check)}
             caption={storyCaption(grainWord)}
             points={points}
@@ -407,10 +410,8 @@ function Contribution({
   if (!deltas.length) return <EmptyState compact size="chart" title="Против прошлого окна ничего не изменилось." />;
 
   // Регистр числа выбирается ОДИН на весь график — по наибольшему вкладу, а не по каждому столбцу
-  // отдельно. Пер-значный `fmt.kpi` переключается на своём пороге, и в одном кадре оказывались
-  // «−8 200» рядом с «+307.9k»: две записи одной величины читаются как две разные величины.
-  const scaleShort = Math.max(...deltas.map((d) => Math.abs(d.delta))) >= 1e4;
-  const contribValue = (n: number) => `${scaleShort ? fmt.short(n) : fmt.num(Math.round(n))} ₽`;
+  // отдельно (см. moneyFormatterFor).
+  const contribValue = moneyFormatterFor(deltas.map((d) => d.delta));
 
   return (
     <ChartBand>

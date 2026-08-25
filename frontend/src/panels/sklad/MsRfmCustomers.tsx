@@ -10,6 +10,7 @@ import { toYmd } from '@/lib/analyticsExport';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { downloadCsv, type CsvRow } from '@/lib/csv';
 import { fmt, pluralRu } from '@/lib/format';
+import { formatMoney } from '@/lib/metricNumber';
 import { msPeriodKey, type MsPeriod } from '@/lib/msPeriod';
 import { useVirtualRows } from '@/lib/useVirtualRows';
 
@@ -96,7 +97,7 @@ function CustomerRow({ row, index }: { row: Row; index: number }) {
         <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
           {fmt.num(row.orders)} {pluralRu(row.orders, ['заказ', 'заказа', 'заказов'])}
         </span>
-        <span className="w-28 shrink-0 text-right text-sm font-medium tabular-nums">{fmt.short(row.sum)} ₽</span>
+        <span className="w-28 shrink-0 text-right text-sm font-medium tabular-nums">{formatMoney(row.sum, 'axis')}</span>
       </div>
       <p className="mt-0.5 flex min-w-0 items-baseline gap-1.5 pl-8 text-2xs text-muted-foreground">
         {row.city && <span className="shrink-0">{row.city}</span>}

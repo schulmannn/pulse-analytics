@@ -11,6 +11,7 @@ import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { ChartSkeleton, TableSkeleton } from '@/components/ui/dataSkeleton';
 import { fmt, pluralRu, smoothSvgPath, timeAxisFromDayKeys } from '@/lib/format';
+import { formatMoney } from '@/lib/metricNumber';
 import { usePagePeriod } from '@/lib/period';
 import { msPreviousPeriod, useMsPagePeriod, type MsPeriod } from '@/lib/msPeriod';
 import { useSelectedChannel } from '@/lib/channel-context';
@@ -642,8 +643,8 @@ export function MsChannelRows({
                 )}
               </span>
               <span className="shrink-0 tabular-nums text-muted-foreground">
-                <span className="font-medium text-foreground">{fmt.short(r.sum)} ₽</span> · {share}% · {fmt.num(r.orders)}{' '}
-                {pluralRu(r.orders, ['заказ', 'заказа', 'заказов'])} · ср. {fmt.short(aov(r))} ₽
+                <span className="font-medium text-foreground">{formatMoney(r.sum, 'axis')}</span> · {share}% · {fmt.num(r.orders)}{' '}
+                {pluralRu(r.orders, ['заказ', 'заказа', 'заказов'])} · ср. {formatMoney(aov(r), 'axis')}
               </span>
             </div>
             {/* Доля от ЦЕЛОГО, а не от лидера: канал с 40% выручки и должен занимать 40% дорожки. */}
@@ -656,7 +657,7 @@ export function MsChannelRows({
       {restOrders > 0 && (
         <p className="text-2xs text-muted-foreground">
           {expanded ? 'Из них' : 'Ещё'} {fmt.num(restOrders)}{' '}
-          {noChannel > 0 ? `заказов (без канала ${fmt.num(noChannel)} · ${fmt.short(noChannelSum)} ₽)` : 'заказов'} из {fmt.num(totalOrders)}.
+          {noChannel > 0 ? `заказов (без канала ${fmt.num(noChannel)} · ${formatMoney(noChannelSum, 'axis')})` : 'заказов'} из {fmt.num(totalOrders)}.
         </p>
       )}
     </div>
@@ -668,7 +669,7 @@ export function MsChannelRows({
 function signedValue(delta: number, metric: MsChannelContributionMetric): string {
   const sign = delta > 0 ? '+' : delta < 0 ? '−' : '';
   return metric === 'revenue'
-    ? `${sign}${fmt.short(Math.abs(delta))} ₽`
+    ? `${sign}${formatMoney(Math.abs(delta), 'axis')}₽`
     : `${sign}${fmt.num(Math.abs(delta))}`;
 }
 
@@ -753,7 +754,7 @@ export function MsChannelContribution({
               <span className="flex shrink-0 items-baseline gap-2 tabular-nums text-muted-foreground">
                 <span>
                   <span className="font-medium text-foreground">
-                    {metric === 'revenue' ? `${fmt.short(currentValue)} ₽` : fmt.num(currentValue)}
+                    {metric === 'revenue' ? `${formatMoney(currentValue, 'axis')}` : fmt.num(currentValue)}
                   </span>{' '}
                   · {share.toLocaleString('ru-RU', { maximumFractionDigits: 1 })}%
                 </span>
@@ -778,7 +779,7 @@ export function MsChannelContribution({
       })}
       {hiddenValue > 0 && (
         <p className="text-2xs text-muted-foreground">
-          Ещё {metric === 'revenue' ? `${fmt.short(hiddenValue)} ₽` : `${fmt.num(hiddenValue)} ${pluralRu(hiddenValue, ['заказ', 'заказа', 'заказов'])}`} в свёрнутых каналах.
+          Ещё {metric === 'revenue' ? `${formatMoney(hiddenValue, 'axis')}` : `${fmt.num(hiddenValue)} ${pluralRu(hiddenValue, ['заказ', 'заказа', 'заказов'])}`} в свёрнутых каналах.
         </p>
       )}
       {comparable && (
@@ -808,7 +809,7 @@ export function MsGeographyRows({
       <div className="flex items-baseline justify-between gap-3 text-xs">
         <span className="min-w-0 truncate text-foreground">{r.city}</span>
         <span className="shrink-0 tabular-nums text-muted-foreground">
-          <span className="font-medium text-foreground">{fmt.num(r.orders)}</span> · {fmt.short(r.sum)} ₽
+          <span className="font-medium text-foreground">{fmt.num(r.orders)}</span> · {formatMoney(r.sum, 'axis')}
         </span>
       </div>
       <div className="mt-1 flex">

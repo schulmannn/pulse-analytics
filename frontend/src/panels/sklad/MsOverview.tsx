@@ -22,6 +22,7 @@ import { Sparkline } from '@/components/Sparkline';
 import { pctDelta, type MetricDelta } from '@/lib/delta';
 import { lttbDownsample } from '@/lib/downsample';
 import { fmt, timeAxisFromDayKeys } from '@/lib/format';
+import { formatByRole, formatMoney } from '@/lib/metricNumber';
 import { usePagePeriod, useCardShowsPeriod } from '@/lib/period';
 import { msPreviousPeriod, useMsPagePeriod, type MsPeriod } from '@/lib/msPeriod';
 import {
@@ -81,7 +82,6 @@ function MsStoryBody({
   const navigate = useNavigate();
   return (
     <ChartCardBody
-      hero
       label={label}
       value={value}
       delta={delta}
@@ -219,9 +219,9 @@ export function MsOverview() {
   const periodInLabel = showPeriod ? windowLabel : undefined;
   // Пропсы story-тел вынесены: «Линия» и «Столбцы» это ОДНА карточка в двух подачах,
   // дублировать её данные в двух вариантах — прямой путь к их расхождению.
-  const revStory = { label: periodInLabel, value: `${fmt.short(revenue.total)} ₽`, delta: revenueDelta, values: revValues, labels: revLabels, axisLabels: timeAxisFromDayKeys(revSeries.map((p) => p.day)), formatValue: (v: number) => `${fmt.num(Math.round(v))} ₽`, emptyTitle: 'Недостаточно дней для графика.', drillTo: '/metrics/ms-revenue', drillLabel: 'Выручка' };
-  const ordStory = { label: periodInLabel, value: fmt.num(orders.totalCount), delta: ordersDelta, caption: `на ${fmt.short(orders.totalSum)} ₽`, values: ordValues, labels: ordLabels, axisLabels: timeAxisFromDayKeys(ordSeries.map((p) => p.day)), formatValue: fmt.num, emptyTitle: 'Недостаточно дней для графика.', drillTo: '/metrics/ms-orders', drillLabel: 'Заказы' };
-  const avgStory = { label: periodInLabel, value: avgTotal != null ? `${fmt.short(avgTotal)} ₽` : '—', delta: avgDelta, caption: 'по дням с заказами', values: avgValues, labels: avgLabels, axisLabels: timeAxisFromDayKeys(avgSampled.map((p) => p.day)), formatValue: (v: number) => `${fmt.num(Math.round(v))} ₽`, emptyTitle: 'Недостаточно дней с заказами для графика.', drillTo: '/metrics/ms-aov', drillLabel: 'Средний чек' };
+  const revStory = { label: periodInLabel, value: formatMoney(revenue.total), delta: revenueDelta, values: revValues, labels: revLabels, axisLabels: timeAxisFromDayKeys(revSeries.map((p) => p.day)), formatValue: (v: number) => `${formatMoney(v, 'exact')}`, emptyTitle: 'Недостаточно дней для графика.', drillTo: '/metrics/ms-revenue', drillLabel: 'Выручка' };
+  const ordStory = { label: periodInLabel, value: formatByRole(orders.totalCount, 'headline'), delta: ordersDelta, caption: `на ${formatMoney(orders.totalSum, 'axis')}`, values: ordValues, labels: ordLabels, axisLabels: timeAxisFromDayKeys(ordSeries.map((p) => p.day)), formatValue: fmt.num, emptyTitle: 'Недостаточно дней для графика.', drillTo: '/metrics/ms-orders', drillLabel: 'Заказы' };
+  const avgStory = { label: periodInLabel, value: formatMoney(avgTotal), delta: avgDelta, caption: 'по дням с заказами', values: avgValues, labels: avgLabels, axisLabels: timeAxisFromDayKeys(avgSampled.map((p) => p.day)), formatValue: (v: number) => `${formatMoney(v, 'exact')}`, emptyTitle: 'Недостаточно дней с заказами для графика.', drillTo: '/metrics/ms-aov', drillLabel: 'Средний чек' };
 
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-6">
@@ -399,14 +399,13 @@ function MsReturnsCardBody({
               значение шло мимо KpiNumber, то есть не морфилось при смене периода, как у соседних
               карточек. */}
           <KpiValue
-            text={fmt.num(data.count)}
-            size="compact"
+            text={formatByRole(data.count, 'headline')}
             onDrill={onDrill}
             drillLabel="Возвраты"
           />
           <DeltaPill delta={delta} />
         </div>
-        <div className="mt-1.5 text-2xs text-muted-foreground">{`на ${fmt.short(data.sum)} ₽ ${windowLabel}`}</div>
+        <div className="mt-1.5 text-2xs text-muted-foreground">{`на ${formatMoney(data.sum, 'axis')} ${windowLabel}`}</div>
       </div>
       {/* overflow-hidden — страховка на кадр между измерением слота и ре-рендером графика. */}
       <div ref={slotRef} className="mt-2 min-h-0 flex-1 overflow-hidden">
@@ -419,7 +418,7 @@ function MsReturnsCardBody({
                 values={sampled.map((p) => p.orders)}
                 labels={sampled.map((p) => fmt.day(p.day))}
                 axisLabels={timeAxisFromDayKeys(sampled.map((p) => p.day))}
-                titles={sampled.map((p) => `${fmt.day(p.day)}: ${fmt.num(p.orders)} · ${fmt.short(p.sum)} ₽`)}
+                titles={sampled.map((p) => `${fmt.day(p.day)}: ${fmt.num(p.orders)} · ${formatMoney(p.sum, 'axis')}`)}
                 yMin={0}
               />
             </ExpandedChartHeightContext.Provider>
@@ -668,9 +667,9 @@ export function MsFunnelRows({
             </span>
             <span className="shrink-0 tabular-nums text-muted-foreground">
               {metric === 'orders' ? (
-                <><span className="font-medium text-foreground">{fmt.num(r.orders)}</span> · {fmt.short(r.sum)} ₽</>
+                <><span className="font-medium text-foreground">{fmt.num(r.orders)}</span> · {formatMoney(r.sum, 'axis')}</>
               ) : (
-                <><span className="font-medium text-foreground">{fmt.short(r.sum)} ₽</span> · {fmt.num(r.orders)}</>
+                <><span className="font-medium text-foreground">{formatMoney(r.sum, 'axis')}</span> · {fmt.num(r.orders)}</>
               )}
             </span>
           </div>
@@ -685,7 +684,7 @@ export function MsFunnelRows({
           {metric === 'orders' ? (
             <>Ещё {fmt.num(restOrders)} {noState > 0 ? `заказов (из них без статуса ${fmt.num(noState)})` : 'заказов'} из {fmt.num(totalOrders)}.</>
           ) : (
-            <>Ещё {fmt.short(restSum)} ₽ {noStateSum !== 0 ? `(без статуса ${fmt.short(noStateSum)} ₽)` : 'выручки'} из {fmt.short(totalSum)} ₽.</>
+            <>Ещё {formatMoney(restSum, 'axis')} {noStateSum !== 0 ? `(без статуса ${formatMoney(noStateSum, 'axis')})` : 'выручки'} из {formatMoney(totalSum, 'axis')}.</>
           )}
         </p>
       )}
@@ -704,7 +703,7 @@ export const RETURNS_METRIC_OPTIONS: Array<{ value: MsReturnsMetric; content: st
 /** Формат значения выбранной метрики возвратов (число — штуки, сумма — рубли). */
 export function fmtReturnsMetric(metric: MsReturnsMetric, value: number | null): string {
   if (value == null) return '—';
-  return metric === 'count' ? fmt.num(value) : `${fmt.short(value)} ₽`;
+  return metric === 'count' ? fmt.num(value) : `${formatMoney(value, 'axis')}`;
 }
 
 /** Итог метрики возвратов за окно (сумма по дням серии). */

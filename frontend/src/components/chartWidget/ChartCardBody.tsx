@@ -39,11 +39,17 @@ export interface ChartCardBodyProps {
       одна в пустой строке над числом. Сиблинг кнопки, а не её содержимое — клик по ⓘ не должен
       уводить в разбор. */
   valueAdornment?: ReactNode;
-  hero?: boolean;
   children: ReactNode;
 }
 
-/** Headline, comparison, and chart layout shared by metric cards. */
+/**
+ * Headline, comparison, and chart layout shared by metric cards.
+ *
+ * Размер крупного числа ОДИН на весь продукт и здесь не выбирается. Раньше его выбирал проп
+ * `hero`: с ним 44px, без — 30px. Ставили его не все, и одна и та же метрика жила в двух
+ * размерах — «Просмотры» на главной 44px, «Просмотры» на /analytics 30px (замечено владельцем).
+ * Проп удалён целиком, а не обесценен: пока он существовал, его можно было забыть.
+ */
 export function ChartCardBody({
   label,
   value,
@@ -53,7 +59,6 @@ export function ChartCardBody({
   onValueClick,
   drillLabel,
   valueAdornment,
-  hero = false,
   children,
 }: ChartCardBodyProps) {
   const expanded = useContext(ChartExpandedContext);
@@ -78,7 +83,7 @@ export function ChartCardBody({
         <div className="flex items-center gap-1.5">
           <KpiValue
             text={value}
-            size={hero ? 'hero' : 'compact'}
+            size="hero"
             onDrill={onValueClick}
             drillLabel={drillLabel}
           />
