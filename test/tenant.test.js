@@ -104,3 +104,35 @@ t.test('hasWorkspaceRole ranks roles and falls back to creator', () => {
   a.ok(hasWorkspaceRole({ id: null }, user, 'owner'), 'DB-off dev mode allows');
   a.throws(() => hasWorkspaceRole({ id: 1 }, user, 'root'), /unknown workspace role/);
 });
+
+const { tenantChannelId } = require('../server/middleware/tenant');
+
+/**
+ * Канал арендатора: заголовок — канон, `?channel=` — только для ссылок, где заголовок не поставить.
+ *
+ * Прежняя строка `parseInt(req.query.channel || req.headers['x-channel-id'], 10) || 0` превращала
+ * ЛЮБОЙ мусор в «канал по умолчанию» и заодно съедала заголовок. На этом лента заказов СДЭКа,
+ * слав свой фильтр `?channel=yandex_market`, уезжала на чужой канал и отвечала 404.
+ */
+const req = (query, headers = {}) => ({ query, headers });
+
+test('tenantChannelId: числовой ?channel выигрывает у заголовка', () => {
+  assert.equal(tenantChannelId(req({ channel: '5' }, { 'x-channel-id': '9' })), 5);
+});
+
+test('tenantChannelId: нечисловой ?channel игнорируется, берётся заголовок', () => {
+  assert.equal(tenantChannelId(req({ channel: 'yandex_market' }, { 'x-channel-id': '5' })), 5);
+  // Ключ канала продаж, случайно похожий на число с хвостом, — тоже не идентификатор.
+  assert.equal(tenantChannelId(req({ channel: '5abc' }, { 'x-channel-id': '7' })), 7);
+  assert.equal(tenantChannelId(req({ channel: ' 5' }, { 'x-channel-id': '7' })), 7);
+});
+
+test('tenantChannelId: повторённый ?channel — массив, а не идентификатор', () => {
+  // `?channel=1&channel=2` Express отдаёт массивом; «первый попавшийся» тут выбирать нельзя.
+  assert.equal(tenantChannelId(req({ channel: ['1', '2'] }, { 'x-channel-id': '5' })), 5);
+});
+
+test('tenantChannelId: нет ни того, ни другого — 0 (канал по умолчанию)', () => {
+  assert.equal(tenantChannelId(req({}, {})), 0);
+  assert.equal(tenantChannelId(req({ channel: 'own' }, {})), 0);
+});
