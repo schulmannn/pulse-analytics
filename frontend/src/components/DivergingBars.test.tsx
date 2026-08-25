@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { DivergingBars } from './DivergingBars';
+import { DivergingBars, divergingFrame } from './DivergingBars';
 
 describe('DivergingBars accessibility contract', () => {
   it('names the passive SVG with exact extrema and latest value', () => {
@@ -161,5 +161,76 @@ describe('DivergingBars degenerate input', () => {
     expect(html).toContain('Нет данных');
     expect(html).not.toContain('role="img"');
     expect(html).not.toContain('cursor-crosshair');
+  });
+});
+
+/**
+ * Регресс: столбцы улетали за viewBox на первых ~175мс морфа.
+ *
+ * Морф твинил ПИКСЕЛЬНЫЕ высоты, посчитанные при прошлой нулевой линии, а рисовал их относительно
+ * новой. Пока линия стояла на `h/2` при любых данных, устаревшие высоты всегда оставались в кадре;
+ * как только она пошла за данными, промежуточный кадр стал рисовать чужой масштаб вокруг чужой
+ * линии. На «Что изменило выручку» переключение «Каналы»→«Товары» показывало пустую карточку с
+ * огрызками, на «Чистом приросте» в TG смена периода пробивала столбцами полосу подписей оси.
+ *
+ * Лечение — считать линию и масштаб из ТЕХ ЖЕ значений, что рисуются. Тогда инвариант держится
+ * арифметически, а не по договорённости, — что эти тесты и проверяют.
+ */
+describe('divergingFrame — ни один кадр не выходит за поле', () => {
+  const box = (value: number, f: { mid: number; scale: number }) => {
+    const bh = Math.max(1, Math.abs(value) * f.scale);
+    return value >= 0 ? { top: f.mid - bh, bottom: f.mid } : { top: f.mid, bottom: f.mid + bh };
+  };
+
+  it('весь перелёт между двумя наборами держится в границах', () => {
+    const H = 200;
+    const from = [40_000, -120_000, 5_000];
+    const to = [-60_000, -25_000, -9_000];
+    for (let t = 0; t <= 1.0001; t += 0.02) {
+      const blend = from.map((v, i) => v + (to[i] - v) * t);
+      const f = divergingFrame(blend, H, 17, 17);
+      for (const value of blend) {
+        const { top, bottom } = box(value, f);
+        expect(top).toBeGreaterThanOrEqual(0);
+        expect(bottom).toBeLessThanOrEqual(H);
+      }
+    }
+  });
+
+  it('вырожденные наборы тоже в границах', () => {
+    const H = 100;
+    for (const values of [[0, 0], [5], [-5], [1e12, -1], [0.0000001, -0.0000002]]) {
+      const f = divergingFrame(values, H, 4, 4);
+      for (const value of values) {
+        const { top, bottom } = box(value, f);
+        expect(top).toBeGreaterThanOrEqual(0);
+        expect(bottom).toBeLessThanOrEqual(H);
+      }
+    }
+  });
+
+  it('СТАРАЯ схема — линия от цели, высоты от кадра — выпускала столбец за верх', () => {
+    // Это не проверка живого кода, а фиксация того, почему схему поменяли: возьми линию из одного
+    // набора, а высоту из другого — и столбец уезжает на 90+px выше карточки.
+    const H = 200;
+    const target = [-60_000, -25_000];
+    const stillOnScreen = 40_000; // значение прошлого кадра
+    const wrong = divergingFrame(target, H, 17, 17);
+    expect(box(stillOnScreen, wrong).top).toBeLessThan(-50);
+  });
+
+  it('нулевая линия непрерывна по всему перелёту', () => {
+    // Прыжок линии посреди морфа читается как «график моргнул»: столбцы летят, а основание под
+    // ними телепортируется.
+    const H = 200;
+    const from = [40_000, -120_000];
+    const to = [-60_000, -25_000];
+    let prev: number | null = null;
+    for (let t = 0; t <= 1.0001; t += 0.01) {
+      const blend = from.map((v, i) => v + (to[i] - v) * t);
+      const { mid } = divergingFrame(blend, H, 17, 17);
+      if (prev != null) expect(Math.abs(mid - prev)).toBeLessThan(8);
+      prev = mid;
+    }
   });
 });
