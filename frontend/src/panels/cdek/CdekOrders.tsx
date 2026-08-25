@@ -222,37 +222,26 @@ function OrdersTable({ rows, total, truncated }: { rows: CdekOrder[]; total: num
             <th scope="col" className="text-right">Сумма</th>
           </tr>
         </thead>
-        {virtual.active ? (
-          <tbody ref={virtual.containerRef} style={{ height: virtual.totalSize, position: 'relative', display: 'block' }}>
-            {virtual.items.map((vi) => {
-              const row = rows[vi.index];
-              return row ? (
+        {/* Виртуализация РАСПОРКАМИ, а не абсолютным позиционированием: `<tr>` остаётся
+            `table-row` и держит колонки шапки. Прежний вариант ставил строке `display: table`,
+            и каждая строка становилась своей таблицей — на живых данных ячейки схлопывались в
+            20px и наезжали друг на друга, пока шапка держала настоящие ширины. */}
+        <tbody ref={virtual.containerRef} data-virtualized={virtual.active ? 'true' : undefined}>
+          {virtual.padTop > 0 && <tr style={{ height: virtual.padTop }} />}
+          {(virtual.active ? virtual.items.map((vi) => [rows[vi.index], vi.index] as const) : rows.map((row, i) => [row, i] as const)).map(
+            ([row, index]) =>
+              row ? (
                 <tr
                   key={row.order_id}
-                  data-index={vi.index}
-                  ref={virtual.measureElement}
-                  style={{
-                    position: 'absolute',
-                    top: 0,
-                    left: 0,
-                    width: '100%',
-                    display: 'table',
-                    tableLayout: 'fixed',
-                    transform: `translateY(${vi.start - virtual.scrollMargin}px)`,
-                  }}
+                  data-index={index}
+                  ref={virtual.active ? virtual.measureElement : undefined}
                 >
                   {cells(row)}
                 </tr>
-              ) : null;
-            })}
-          </tbody>
-        ) : (
-          <tbody ref={virtual.containerRef}>
-            {rows.map((row) => (
-              <tr key={row.order_id}>{cells(row)}</tr>
-            ))}
-          </tbody>
-        )}
+              ) : null,
+          )}
+          {virtual.padBottom > 0 && <tr style={{ height: virtual.padBottom }} />}
+        </tbody>
       </table>
       <p className="mt-2 text-2xs text-muted-foreground">
         {truncated
