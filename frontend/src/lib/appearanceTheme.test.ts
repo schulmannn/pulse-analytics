@@ -136,6 +136,28 @@ function check(theme: Theme, settings: AppearanceSettings, label: string) {
       `${label} · ${theme} · ${pair} — штрих обязан держать 3.0 (WCAG 1.4.11)`,
     ).toBeGreaterThanOrEqual(3.0);
   }
+  // Стори-карточка (`defaultColor` хоста, цвет которой никто не выбирал) красится слотом
+  // --accent-card. В тёмной теме это одновременно линия, крупное число И тональная подложка под
+  // ними (deep под 26% поверх карточки) — те же пары, что гейт считает для акцентов карточек.
+  const card = tokens['accent-card'];
+  const deep = tokens['accent-card-deep'];
+  expect(card, `${label}: нет токена accent-card`).toBeDefined();
+  expect(
+    contrast(card, tokens.card),
+    `${label} · ${theme} — акцент стори-карточки на карточке`,
+  ).toBeGreaterThanOrEqual(4.5);
+  if (theme === 'dark') {
+    expect(
+      contrastOnTint(card, deep, tokens.card, 0.26),
+      `${label} · dark — число стори-карточки на её тональной подложке`,
+    ).toBeGreaterThanOrEqual(4.5);
+    // Подпись на той же подложке использует ЛОКАЛЬНО поднятый muted (index.css, .dark tinted).
+    expect(
+      contrastOnTint([240, 6, 84], deep, tokens.card, 0.26),
+      `${label} · dark — подпись на тональной подложке стори-карточки`,
+    ).toBeGreaterThanOrEqual(4.5);
+  }
+
   // Выбранная пилюля периода: подпись `accent-foreground` на 10%-м размыве акцента по холсту —
   // ровно та пара, которую отдельно считает scripts/contrast-tokens.mjs.
   const onWash = contrastOnTint(tokens['accent-foreground'], tokens.primary, tokens.background, 0.1);

@@ -82,6 +82,16 @@ positive/negative never lean on hue alone (diverging bars use position around ze
 | Warning | `--chart-role-warning` | `--status-warn` | anomaly / caution markers |
 | Neutral | `--chart-role-neutral` | `--muted-foreground` | target line · «Прочее» pie slice |
 | Selection | `--chart-role-selection` | `--brand-iris` | hover point + crosshair (= the accent) |
+| Story card | `--accent-card` / `-deep` | `--chart-1-accent` / `-deep` | the accent of a card whose colour the USER never picked (the host's `defaultColor`) |
+
+**Story card vs picked card.** A widget's accent has two sources and they must not be confused.
+`prefs.color` is a deliberate choice — it stays on its numbered `--chart-N-accent` slot forever.
+`defaultColor` is the host saying "this is a story card", and that one rides `--accent-card`, which
+**follows the theme accent**. In the canon `--accent-card` is a plain alias of `--chart-1-accent`, so
+the default product looks exactly as before; pick an accent in the studio and every un-picked story
+card follows, while hand-coloured cards keep their hue. Split in `useChartSectionModel`
+(`chosenColor` vs `activeColor`); the dark tonal surface mixes the `-deep` companion, so both are
+solved together and gated (`contrast-tokens.mjs` → «dark · story card accent»).
 
 The categorical **`--chart-1 … --chart-6`** (Okabe-Ito) stay for MULTI-series charts (pie slices,
 multi-line); the roles above are the single-series semantic set. `ComparisonDelta` / `WidgetRenderer`
@@ -145,7 +155,7 @@ gate and every screenshot spec therefore keep measuring the real default.
 
 | Knob | Tokens | Freedom |
 |---|---|---|
-| Accent | `--primary` `--ring` `--accent` `--accent-foreground` `--brand-iris(-soft)` `--blue-tint` `--card-tint` | 12 hues; **lightness is solved, not chosen** |
+| Accent | `--primary` `--ring` `--accent` `--accent-foreground` `--brand-iris(-soft)` `--blue-tint` `--card-tint` `--accent-card(-deep)` | 12 hues; **lightness is solved, not chosen** |
 | Base colour | `--background` `--card` `--popover` `--muted` `--secondary` `--border` `--input` `--hover-row` `--avatar` `--surface-table` + the ink scale | 6 neutrals; hue + saturation only — **the lightness ladder is the canon's** |
 | Chart palette | `--chart-1…6` `--chart-N-cat` `--chart-seq-1…5` | canon (Okabe-Ito) or one hue family in six solved steps |
 | Radius | `--radius` + `--radius-xl/2xl/3xl` | 0 / 4 / 8 / 12 / 16px — the whole ladder scales together, so the 4px default still yields today's 12/16/24 |

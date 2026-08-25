@@ -189,6 +189,10 @@ export interface AccentDef {
   tint?: Hsl;
   tintDark?: Hsl;
   blueTintDark?: Hsl;
+  /** Слот стори-карточки (--accent-card). У канона это ровно нынешний --chart-1-accent. */
+  card?: Hsl;
+  cardDark?: Hsl;
+  cardDeepDark?: Hsl;
 }
 
 export const ACCENTS: readonly AccentDef[] = [
@@ -205,6 +209,9 @@ export const ACCENTS: readonly AccentDef[] = [
     tint: [220, 79, 96],
     tintDark: [219, 40, 22],
     blueTintDark: [219, 40, 20],
+    card: [218, 48, 48],
+    cardDark: [216, 86, 86],
+    cardDeepDark: [216, 72, 38],
   },
   { key: 'indigo', label: 'Индиго', h: 245, s: 62, sDark: 70 },
   { key: 'violet', label: 'Фиолетовый', h: 268, s: 58, sDark: 66 },
@@ -249,9 +256,26 @@ function accentTokens(key: string, theme: Theme, base: Record<string, Hsl>): Rec
   const fgStart = (light ? def.fgL : def.fgLDark) ?? primaryL;
   const accentForegroundL = solveL(def.h, s, fgStart, light ? 18 : 92, 4.5, fields);
 
+  // Стори-карточка (`defaultColor` хоста). В тёмной теме это ОДНОВРЕМЕННО линия серии, крупное
+  // число и — через свою «глубокую» пару — тональная подложка под ними, поэтому светлота обеих
+  // решается вместе: подложка = deep под 26% поверх карточки, число обязано держать на ней AA.
+  const cardDeep: Hsl = light
+    ? (def.card ?? primary)
+    : (def.cardDeepDark ?? [def.h, clamp(s * 0.9, 40, 78), 36]);
+  const tonal = light ? hslToRgb(card) : blend(cardDeep, card, 0.26);
+  const accentCard: Hsl = light
+    ? (def.card ?? primary)
+    : (def.cardDark ?? [
+        def.h,
+        clamp(s * 0.95, 45, 90),
+        solveL(def.h, clamp(s * 0.95, 45, 90), 74, 94, TEXT_MIN, [tonal, hslToRgb(card)]),
+      ]);
+
   return {
     primary,
     'primary-foreground': light ? [0, 0, 100] : [0, 0, 4],
+    'accent-card': accentCard,
+    'accent-card-deep': cardDeep,
     ring: primary,
     accent: tint,
     'blue-tint': light ? tint : (def.blueTintDark ?? tint),

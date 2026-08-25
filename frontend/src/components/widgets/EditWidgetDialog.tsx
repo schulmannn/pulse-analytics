@@ -460,7 +460,9 @@ export function EditWidgetDialog({ defaultTitle, prefs, variants, showPeriod, sh
               aria-label="Стандартный акцент"
               aria-pressed={!prefs.color}
               onClick={() => onChange({ ...prefs, color: undefined })}
-              color={defaultColor ? `hsl(var(--chart-${defaultColor}-accent))` : 'hsl(var(--primary))'}
+              // Дефолт хоста красится общим слотом --accent-card (он следует акценту темы), а не
+              // номерным --chart-N-accent: свотч обязан показывать тот же цвет, что и карточка.
+              color={defaultColor ? 'hsl(var(--accent-card))' : 'hsl(var(--primary))'}
               selected={!prefs.color}
             />
             {SWATCHES.map((n) => (

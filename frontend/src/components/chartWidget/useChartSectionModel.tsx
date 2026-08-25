@@ -183,7 +183,12 @@ export function useChartSectionModel(props: ChartSectionProps) {
       : children
     : <ThrowInRender error={variantResult.error} />;
 
-  const activeColor = (configEditor ? configEditor.color : prefs.color) ?? defaultColor;
+  // ВЫБОР ПОЛЬЗОВАТЕЛЯ и ДЕФОЛТ ХОСТА — разные вещи, и с появлением студии оформления разница
+  // стала видимой: акцент карточки, который никто не выбирал, обязан следовать акценту темы, а
+  // выбранный руками — остаться собой. `activeColor` по-прежнему «эффективный слот» (нужен
+  // логике заливки и редактору), а красит карточку теперь `chosenColor`.
+  const chosenColor = (configEditor ? configEditor.color : prefs.color) ?? null;
+  const activeColor = chosenColor ?? defaultColor;
   // Дефолт «цветного фона» приходит от хоста (см. defaultWidgetTint) — сохранённый выбор
   // пользователя главнее. Считаем его от ОБЪЯВЛЕННОГО ХОСТОМ `defaultColor`, а НЕ от
   // эффективного `activeColor`: иначе карточка, которой пользователь сам выбрал акцент (а
@@ -241,12 +246,24 @@ export function useChartSectionModel(props: ChartSectionProps) {
   if (sequenceIndex >= 0) outerStyle.order = sequenceIndex;
   if (prefs.hidden) outerStyle.display = 'none';
 
-  const accentVars: Record<string, string> | null = activeColor
+  // Слот акцента карточки: явный выбор пользователя — свой номер, дефолт хоста — общий
+  // `--accent-card`, который в каноне АЛИАС `--chart-1-accent` (то есть для канонической темы это
+  // правка-ничто), а при выбранном акценте студии следует ему. Карточка без дефолта не скоупит
+  // ничего и наследует роль primary темы — так было и раньше.
+  const accentSlot = chosenColor
+    ? `var(--chart-${chosenColor}-accent)`
+    : defaultColor
+      ? 'var(--accent-card)'
+      : null;
+  const accentDeep = chosenColor
+    ? `var(--chart-${chosenColor}-accent-deep)`
+    : 'var(--accent-card-deep)';
+  const accentVars: Record<string, string> | null = accentSlot
     ? {
-        '--brand-iris': `var(--chart-${activeColor}-accent)`,
-        '--brand-iris-deep': `var(--chart-${activeColor}-accent-deep)`,
-        '--chart-role-primary': `var(--chart-${activeColor}-accent)`,
-        '--chart-role-selection': `var(--chart-${activeColor}-accent)`,
+        '--brand-iris': accentSlot,
+        '--brand-iris-deep': accentDeep,
+        '--chart-role-primary': accentSlot,
+        '--chart-role-selection': accentSlot,
       }
     : null;
   if (accentVars) Object.assign(outerStyle as Record<string, string>, accentVars);
