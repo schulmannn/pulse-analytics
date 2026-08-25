@@ -38,6 +38,7 @@ import { useCdekBreakdown, useCdekSeries, useCdekSummary, type CdekPoint } from 
 import { lttbDownsample } from '@/lib/downsample';
 import { useExplorerChartHeight } from '@/lib/useExplorerChartHeight';
 import { fmt, timeAxisFromDayKeys } from '@/lib/format';
+import { formatMoney } from '@/lib/metricNumber';
 import { usePeriod } from '@/lib/period';
 import { useMsResolvedPeriod } from '@/lib/msPeriod';
 import { isCdekMetricKey } from '@/panels/cdek/cdekMetricKeys';
@@ -64,7 +65,8 @@ export function CdekMetricPage({ metricKey }: { metricKey: string }) {
 
 export { isCdekMetricKey };
 
-const rub = (n: number) => `${fmt.num(Math.round(n))} ₽`;
+/** Страница метрики: rub идёт в тултипы и леджеры — роль `exact`. */
+const rub = (n: number) => formatMoney(n, 'exact');
 
 const CHANNEL_LABEL: Record<string, string> = {
   own: 'Своя доставка',

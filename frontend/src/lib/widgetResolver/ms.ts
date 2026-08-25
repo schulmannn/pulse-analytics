@@ -6,9 +6,11 @@
 // generic-слою resolveWidgetMetric (moving_average/same_weekday работают от out.series).
 
 import { fmt } from '@/lib/format';
+import { formatMoney } from '@/lib/metricNumber';
 import type { WidgetMetricResolver, WidgetSeriesPoint } from '@/lib/widgetResolver/types';
 
-const rub = (n: number) => `${fmt.short(n)} ₽`;
+/** Значения резолвера идут в подписи рядом с графиком — роль `axis` (см. lib/metricNumber). */
+const rub = (n: number) => formatMoney(n, 'axis');
 
 export const resolveMsMetric: WidgetMetricResolver = (metric, _config, ctx, out) => {
   const summary = ctx.ms?.summary;

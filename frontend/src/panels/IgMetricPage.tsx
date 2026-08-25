@@ -18,6 +18,7 @@ import type { WindowPair, IgBreakdownItem } from '@/lib/igMetrics';
 import { pctDelta } from '@/lib/delta';
 import { KpiValue } from '@/components/chartWidget/KpiValue';
 import { fmt } from '@/lib/format';
+import { formatByRole } from '@/lib/metricNumber';
 import { windowIgSeries, KpiCard } from '@/components/instagram/shared';
 import { BestTimeHeatmap } from '@/components/instagram/audience';
 import { ChartSection } from '@/components/ChartWidget';
@@ -1178,7 +1179,7 @@ function IgReelsWatchTimePage({
         ) : (
           <div className="space-y-4">
             <div className="grid grid-cols-1 gap-x-6 gap-y-4 border-t border-border pt-4 sm:grid-cols-3">
-              <KpiCard label="Reels" value={fmt.num(r.count)} />
+              <KpiCard label="Reels" value={formatByRole(r.count, 'headline')} />
               <KpiCard label="Ср. время просмотра" value={`${r.avgWatchAll} сек`} />
               <KpiCard label="Суммарно просмотрено" value={`${fmt.short(Math.round(r.totalWatchHours))} ч`} />
             </div>

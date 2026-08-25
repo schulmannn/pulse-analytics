@@ -17,6 +17,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { TableSkeleton } from '@/components/ui/dataSkeleton';
 import { Skeleton } from '@/components/ui/skeleton';
 import { fmt } from '@/lib/format';
+import { formatMoney } from '@/lib/metricNumber';
 import { useExplorerChartHeight } from '@/lib/useExplorerChartHeight';
 import { usePeriod, type DateRange, type PeriodDays } from '@/lib/period';
 import { useSelectedChannel } from '@/lib/channel-context';
@@ -533,7 +534,7 @@ function MsSummaryPage({
     if (metric === 'orders') return data.orders.totalCount;
     return data.orders.totalCount > 0 ? data.orders.totalSum / data.orders.totalCount : null;
   };
-  const format = (value: number) => metric === 'orders' ? fmt.num(value) : `${fmt.short(value)} ₽`;
+  const format = (value: number) => metric === 'orders' ? fmt.num(value) : `${formatMoney(value, 'axis')}`;
   return (
     <MsMetricShell
       back={BACK_OVERVIEW}
@@ -603,7 +604,7 @@ function MsCustomerPage({
   const previous = useMsCustomers(comparisonPeriod ?? window.period);
   const valueOf = (data: typeof current.data) => data ? customerMetricTotal(data.series, metric).value : null;
   const format = (value: number) =>
-    metric === 'orders' ? fmt.num(value) : metric === 'revenue' ? `${fmt.short(value)} ₽` : `${value.toFixed(1)}%`;
+    metric === 'orders' ? fmt.num(value) : metric === 'revenue' ? `${formatMoney(value, 'axis')}` : `${value.toFixed(1)}%`;
   return (
     <MsMetricShell
       back={BACK_CLIENTS}
@@ -694,7 +695,7 @@ function MsChannelsPage() {
   const currentSeries = useMsChannelSeries(window.period, { channels: selected, breakdown: false });
   const previousSeries = useMsChannelSeries(comparisonPeriod ?? window.period, { channels: selected, breakdown: false });
   const valueOf = (data: typeof currentSeries.data) => data ? metricTotal(data.series, metric) : null;
-  const format = (value: number) => metric === 'orders' ? fmt.num(value) : `${fmt.short(value)} ₽`;
+  const format = (value: number) => metric === 'orders' ? fmt.num(value) : `${formatMoney(value, 'axis')}`;
 
   // A normal drill from the compact card has no channels query: seed it once from the account-saved
   // filter. An explicit deep link always wins and stays a preview until the user presses «Сохранить».
@@ -969,7 +970,7 @@ function MsFunnelPage() {
     return data.rows.reduce((sum, row) => sum + (metric === 'orders' ? row.orders : row.sum), 0)
       + (metric === 'orders' ? data.no_state_orders : data.no_state_sum);
   };
-  const format = (value: number) => metric === 'orders' ? fmt.num(value) : `${fmt.short(value)} ₽`;
+  const format = (value: number) => metric === 'orders' ? fmt.num(value) : `${formatMoney(value, 'axis')}`;
   return (
     <MsMetricShell
       back={BACK_OVERVIEW}
@@ -1216,7 +1217,7 @@ function MsSalesChannelsPage() {
     ? data.rows.reduce((sum, row) => sum + (metric === 'revenue' ? row.sum : row.orders),
         metric === 'revenue' ? data.no_channel_sum : data.no_channel_orders)
     : null;
-  const format = (value: number) => metric === 'revenue' ? `${fmt.short(value)} ₽` : fmt.num(value);
+  const format = (value: number) => metric === 'revenue' ? `${formatMoney(value, 'axis')}` : fmt.num(value);
   return (
     <MsMetricShell
       back={BACK_CHANNELS}
@@ -1376,7 +1377,7 @@ function MsTopCustomersPage() {
         <ComparisonReadout
           current={sumOf(topCustomers.data)}
           previous={comparisonPeriod ? sumOf(previous.data) : null}
-          format={(value) => `${fmt.short(value)} ₽`}
+          format={(value) => `${formatMoney(value, 'axis')}`}
           previousPeriod={window.previousPeriod}
           pending={topCustomers.isPending || (comparisonPeriod != null && previous.isPending)}
           error={topCustomers.isError || (comparisonPeriod != null && previous.isError)}

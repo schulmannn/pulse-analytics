@@ -260,7 +260,6 @@ export function SubscriberGrowth() {
   // two prod bugs' worth) retired by construction.
   return (
     <ChartCardBody
-      hero
       label={showPeriod ? `за ${periodLabel}` : undefined}
       value={fmt.kpi(currentSubs)}
       delta={change != null ? pctDelta(currentSubs, currentSubs - change) : null}

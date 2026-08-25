@@ -12,6 +12,7 @@ import { useCdekBreakdown, useCdekSeries, type CdekBreakdownRow } from '@/api/cd
 import { lttbDownsample } from '@/lib/downsample';
 import { CHART_MAX_POINTS } from '@/lib/msSeries';
 import { fmt, timeAxisFromDayKeys } from '@/lib/format';
+import { formatByRole, formatMoney } from '@/lib/metricNumber';
 import { useCardShowsPeriod, usePagePeriod } from '@/lib/period';
 import { useMsPagePeriod } from '@/lib/msPeriod';
 import { cn } from '@/lib/utils';
@@ -31,7 +32,9 @@ const PRODUCT_LIMIT = 100;
 // Порог концентрации АБВ-разбора: классические 80% выручки.
 const ABC_SHARE = 0.8;
 
-const rub = (n: number) => `${fmt.num(Math.round(n))} ₽`;
+/** Роль `exact` — этот rub идёт в таблицы и подписи графиков. Крупное число карточки ниже
+ *  печатает formatMoney без аргумента (роль headline, сжатие от 10 000). */
+const rub = (n: number) => formatMoney(n, 'exact');
 
 const titleOf = (row: CdekBreakdownRow) => row.title || row.sku || row.article || row.key || 'Без названия';
 
@@ -152,14 +155,14 @@ function UnitsBody({
   const grainWord = grain === 'month' ? 'по месяцам' : grain === 'week' ? 'по неделям' : 'по дням';
   if (model.length <= 1) {
     return (
-      <ChartCardBody hero value={fmt.num(total)} caption={periodInLabel}>
+      <ChartCardBody value={formatByRole(total, 'headline')} caption={periodInLabel}>
         <EmptyState compact size="chart" title="Недостаточно дней для графика." />
       </ChartCardBody>
     );
   }
   const labels = model.map((r) => fmt.day(r.day));
   return (
-    <ChartCardBody hero value={fmt.num(total)} caption={[periodInLabel, grainWord].filter(Boolean).join(' · ')}>
+    <ChartCardBody value={formatByRole(total, 'headline')} caption={[periodInLabel, grainWord].filter(Boolean).join(' · ')}>
       {/* Флекс-колонка обязательна: ChartBand объявлен `flex-1`, и без неё ограничивать его нечем —
           полоса растёт под контент, столбцы берут высоту всего тела, тайл переполняется (та же
           болезнь, что чинил #487 у «Заказов»). */}
@@ -212,14 +215,14 @@ function PriceBody({
 
   if (model.length <= 1) {
     return (
-      <ChartCardBody hero value={avg != null ? rub(avg) : '—'} caption={caption}>
+      <ChartCardBody value={formatMoney(avg)} caption={caption}>
         <EmptyState compact size="chart" title="Недостаточно дней для графика." />
       </ChartCardBody>
     );
   }
   const labels = model.map((r) => fmt.day(r.day));
   return (
-    <ChartCardBody hero value={avg != null ? rub(avg) : '—'} caption={caption}>
+    <ChartCardBody value={formatMoney(avg)} caption={caption}>
       <Sparkline
         values={model.map((r) => r.value)}
         labels={labels}

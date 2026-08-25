@@ -18,6 +18,7 @@ import { Sparkline } from '@/components/Sparkline';
 import { pctDelta, type MetricDelta } from '@/lib/delta';
 import { lttbDownsample } from '@/lib/downsample';
 import { fmt, pluralRu, timeAxisFromDayKeys } from '@/lib/format';
+import { formatMoney } from '@/lib/metricNumber';
 import { usePagePeriod, usePeriod } from '@/lib/period';
 import { msPreviousPeriod, useMsPagePeriod, type MsPeriod } from '@/lib/msPeriod';
 import {
@@ -124,7 +125,6 @@ export function MsClients() {
         drillTo="/metrics/ms-customers"
       >
         <ChartCardBody
-          hero
           label={windowLabel}
           value={fmt.num(summary.customers)}
           delta={customersDelta}
@@ -279,11 +279,11 @@ export function MsCustomerExplorer({
     : metric === 'orders'
       ? fmt.num(totals.value)
       : metric === 'revenue'
-        ? `${fmt.short(totals.value)} ₽`
+        ? `${formatMoney(totals.value, 'axis')}`
         : `${totals.value.toFixed(1)}%`;
   const caption = metric === 'repeatShare' ? 'доля повторной выручки' : 'новые и повторные покупки';
   const formatValue = (value: number) =>
-    metric === 'orders' ? fmt.num(value) : metric === 'revenue' ? `${fmt.short(value)} ₽` : `${value.toFixed(1)}%`;
+    metric === 'orders' ? fmt.num(value) : metric === 'revenue' ? `${formatMoney(value, 'axis')}` : `${value.toFixed(1)}%`;
 
   return (
     <ChartCardBody value={headline} caption={caption}>
@@ -367,7 +367,7 @@ export function MsTopCustomersBody({ state }: { state: ReturnType<typeof useMsTo
           <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
             {fmt.num(row.orders)} {pluralRu(row.orders, ['заказ', 'заказа', 'заказов'])}
           </span>
-          <span className="w-28 shrink-0 text-right text-sm font-medium tabular-nums">{fmt.short(row.sum)} ₽</span>
+          <span className="w-28 shrink-0 text-right text-sm font-medium tabular-nums">{formatMoney(row.sum, 'axis')}</span>
         </li>
       ))}
     </ul>
@@ -452,7 +452,7 @@ export function MsRfmBody({
                 <span className="min-w-0 truncate text-foreground">{meta.label}</span>
                 <span className="shrink-0 tabular-nums text-muted-foreground">
                   <span className="font-medium text-foreground">
-                    {mode === 'customers' ? fmt.num(value) : `${fmt.short(value)} ₽`}
+                    {mode === 'customers' ? fmt.num(value) : `${formatMoney(value, 'axis')}`}
                   </span>{' '}
                   · {share.toLocaleString('ru-RU', { maximumFractionDigits: 1 })}%
                 </span>
@@ -462,7 +462,7 @@ export function MsRfmBody({
               </div>
               {(detailed || expanded) && segment.customers > 0 && (
                 <p className="mt-1 text-2xs text-muted-foreground">
-                  {meta.action}; в среднем R {segment.average_recency_days == null ? '—' : segment.average_recency_days.toLocaleString('ru-RU', { maximumFractionDigits: 1 })} дн. · F {segment.average_frequency == null ? '—' : segment.average_frequency.toLocaleString('ru-RU', { maximumFractionDigits: 1 })} заказа · M {segment.average_monetary == null ? '—' : `${fmt.short(segment.average_monetary)} ₽`}.
+                  {meta.action}; в среднем R {segment.average_recency_days == null ? '—' : segment.average_recency_days.toLocaleString('ru-RU', { maximumFractionDigits: 1 })} дн. · F {segment.average_frequency == null ? '—' : segment.average_frequency.toLocaleString('ru-RU', { maximumFractionDigits: 1 })} заказа · M {segment.average_monetary == null ? '—' : `${formatMoney(segment.average_monetary, 'axis')}`}.
                 </p>
               )}
             </>
@@ -552,7 +552,7 @@ export function MsRepeatBreakdown({
       )}
       <p>
         Повторные заказы: <span className="font-medium tabular-nums text-foreground">{fmt.num(summary.orders_repeat)}</span>{' '}
-        на <span className="font-medium tabular-nums text-foreground">{fmt.short(summary.sum_repeat)} ₽</span>
+        на <span className="font-medium tabular-nums text-foreground">{formatMoney(summary.sum_repeat, 'axis')}</span>
       </p>
       <div className="pt-1">
         <div className="mb-1 flex items-center justify-between gap-3 text-2xs">
@@ -636,14 +636,14 @@ const COHORT_MODE_CAPTION: Record<MsCohortMode, string> = {
 /** Формат значения клетки: ретеншен — проценты, деньги — компактные рубли (клетка узкая). */
 function cohortCellLabel(value: number | null, mode: MsCohortMode): string {
   if (value == null) return '—';
-  return isMoneyCohortMode(mode) ? `${fmt.short(value)} ₽` : `${Math.round(value * 100)}%`;
+  return isMoneyCohortMode(mode) ? `${formatMoney(value, 'axis')}` : `${Math.round(value * 100)}%`;
 }
 
 /** Полная подсказка клетки (title/aria) — всегда точные числа, режим явно назван. */
 function cohortCellTitle(cell: MsCohortCell, size: number, value: number | null, mode: MsCohortMode): string {
   if (mode === 'retention') return `${fmt.num(cell.active)} из ${fmt.num(size)} клиентов`;
   if (value == null) return 'Сумма недоступна в точном числовом диапазоне';
-  const per = `${fmt.num(value)} ₽ на клиента (÷ ${fmt.num(size)} исходных)`;
+  const per = `${formatMoney(value, 'exact')} на клиента (÷ ${fmt.num(size)} исходных)`;
   return mode === 'revenue' ? `Выручка месяца: ${per}` : `Накопленная выручка (LTV): ${per}`;
 }
 

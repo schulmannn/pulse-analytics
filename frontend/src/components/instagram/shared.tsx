@@ -154,7 +154,7 @@ export function KpiHero({
     ));
   // Steep anatomy (owner rule): label + number + delta bottom-left, the chart inset to the RIGHT.
   return (
-    <ChartCardBody hero label={label} value={value} delta={delta} onValueClick={drillTo ? () => navigate(drillTo) : undefined} drillLabel={label}>
+    <ChartCardBody label={label} value={value} delta={delta} onValueClick={drillTo ? () => navigate(drillTo) : undefined} drillLabel={label}>
       {chart && <div className="h-full">{chart}</div>}
     </ChartCardBody>
   );
@@ -440,7 +440,6 @@ export function IgAudienceBody({ ig }: { ig: IgData }) {
           процент, и DeltaPill соврал бы про природу числа. */}
       <div className="min-h-0 flex-1">
         <ChartCardBody
-          hero
           label={`База · ${ig.window.days} дн.`}
           value={fmt.kpi(ig.followers)}
           valueAdornment={

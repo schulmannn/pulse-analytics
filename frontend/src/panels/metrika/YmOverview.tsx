@@ -15,6 +15,7 @@ import { InlineSpark } from '@/components/InlineSpark';
 import { pctDelta, type MetricDelta } from '@/lib/delta';
 import { lttbDownsample } from '@/lib/downsample';
 import { fmt, timeAxisFromDayKeys } from '@/lib/format';
+import { formatByRole } from '@/lib/metricNumber';
 import { usePagePeriod, useCardShowsPeriod } from '@/lib/period';
 import { msPreviousPeriod, useMsPagePeriod } from '@/lib/msPeriod';
 import { YM_BREAKDOWNS } from '@/panels/metrika/ymBreakdowns';
@@ -59,7 +60,6 @@ function YmStoryBody({
 }) {
   return (
     <ChartCardBody
-      hero
       label={windowLabel}
       value={fmt.short(total)}
       delta={delta}
@@ -333,7 +333,7 @@ function YmHourlyCard({
       ) : (
         <ChartCardBody
           label="Визиты"
-          value={fmt.short(hourly.data.visits_total)}
+          value={formatByRole(hourly.data.visits_total, 'headline')}
           caption={
             <span className="space-y-0.5">
               <span className="block">
