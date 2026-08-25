@@ -177,9 +177,9 @@ export function CdekOverview() {
   const revStory = {
     value: cur?.revenue != null ? rub(cur.revenue) : '—',
     delta: pctDelta(cur?.revenue, prev?.revenue),
-    // Подпись обязательна: число здесь — не «всё, что в файле», а продажи без отмен и складских
-    // движений. Без этой строки цифра выглядит полной суммой выгрузки.
-    caption: storyCaption('без отмен и складских движений'),
+    // Что именно считается выручкой, объясняет «О метрике» и разворот, где этим можно управлять;
+    // на лице карточки постоянная приписка про отмены была шумом в каждом кадре (владелец).
+    caption: storyCaption(),
     points,
     pick: (p: CdekPoint) => p.revenue ?? 0,
     formatValue: rub,

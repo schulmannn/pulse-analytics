@@ -250,7 +250,12 @@ export type CdekBreakdownRow = z.infer<typeof CdekBreakdownRowSchema>;
 export type CdekBreakdown = z.infer<typeof CdekBreakdownSchema>;
 
 /** Что считать выручкой. По решению владельца отгруженное — уже проданное, отсюда дефолт. */
-export type CdekInclude = 'revenue' | 'completed' | 'all';
+/**
+ * Что считать выручкой/заказами. Три прежних режима ИЛИ явный набор статусов
+ * `status:complete,delivery` — сервер нормализует и чистит его (normalizeCdekInclude), поэтому
+ * один и тот же выбор всегда даёт одну строку и один ключ кэша.
+ */
+export type CdekInclude = 'revenue' | 'completed' | 'all' | `status:${string}`;
 
 export function useCdekSummary(period: MsPeriod, include: CdekInclude = 'revenue') {
   const { channelId } = useSelectedChannel();

@@ -1,9 +1,20 @@
-import { useState, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
 import { ShareRows } from '@/components/ShareRows';
 import { SegmentedControl } from '@/components/SegmentedControl';
+import { useSelectedChannel } from '@/lib/channel-context';
+import { setSavedFilter, useSavedFilter } from '@/lib/widgetPrefsStore';
+import {
+  CDEK_CANON_STATUSES,
+  CdekStatusFilter,
+  cdekStatusFilterKey,
+  cdekStatusInclude,
+  normalizeCdekStatuses,
+  statusFilterCaption,
+  toastStatusFilterSaved,
+} from '@/panels/cdek/cdekStatusFilter';
 import { PeriodChips } from '@/components/PeriodChips';
 import { SourceIdentity } from '@/components/SourceIdentity';
 import { EmptyState } from '@/components/EmptyState';
@@ -136,8 +147,10 @@ interface SeriesDef {
 const SERIES_DEFS: Record<SeriesKey, SeriesDef> = {
   'cdek-revenue': {
     term: 'Выручка',
-    // Подпись повторяет карточку: число — это продажи, а не полная сумма выгрузки.
-    descriptor: 'Сумма проданного за окно — без отмен, возвратов и складских движений.',
+    // Складские движения не входят НИКОГДА (это не продажи), а вот статусы заказов теперь
+    // выбираются фильтром ниже — поэтому описание про них молчит: иначе оно противоречило бы
+    // выбору прямо на том же экране.
+    descriptor: 'Сумма проданного за окно. Складские движения в неё не входят.',
     back: OVERVIEW_BACK,
     pick: (p) => p.revenue ?? 0,
     total: (t) => t.revenue,
@@ -185,8 +198,21 @@ function CdekSeriesPage({ def }: { def: SeriesDef }) {
   const [kind, setKind] = useState<'line' | 'bar'>('line');
   const [cmp, setCmp] = useState<'off' | 'prev'>('prev');
 
-  const series = useCdekSeries(period);
-  const summary = useCdekSummary(period);
+  // Фильтр статусов живёт ТОЛЬКО здесь, внутри разворота (решение владельца). Карточка «Обзора»
+  // остаётся на каноне и потому не имеет скрытого состояния: число на ней всегда значит одно и то
+  // же. Сохранённый набор по той же причине не протекает на карточку — иначе она меняла бы
+  // значение без единого видимого контрола.
+  const { channelId } = useSelectedChannel();
+  const filterKey = cdekStatusFilterKey(channelId);
+  const savedRaw = useSavedFilter(filterKey);
+  const saved = useMemo(() => normalizeCdekStatuses(savedRaw), [savedRaw]);
+  const [selected, setSelected] = useState<string[] | null>(null);
+  const statuses = selected ?? (saved.length > 0 ? saved : CDEK_CANON_STATUSES);
+  const include = cdekStatusInclude(statuses);
+  const caption = statusFilterCaption(statuses);
+
+  const series = useCdekSeries(period, include);
+  const summary = useCdekSummary(period, include);
 
   if (series.isPending || summary.isPending) {
     return (
@@ -267,6 +293,16 @@ function CdekSeriesPage({ def }: { def: SeriesDef }) {
             ]}
           />
         </div>
+        <CdekStatusFilter
+          selected={statuses}
+          saved={saved}
+          onChange={setSelected}
+          onSave={(ids) => {
+            setSavedFilter(filterKey, normalizeCdekStatuses(ids));
+            toastStatusFilterSaved(ids);
+          }}
+        />
+        {caption && <p className="text-xs text-muted-foreground">{caption}</p>}
         {values.length < 2 ? (
           <EmptyState compact size="chart" title="Недостаточно дней для графика за окно." />
         ) : kind === 'bar' ? (
