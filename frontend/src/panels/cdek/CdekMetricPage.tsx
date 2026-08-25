@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { toast } from 'sonner';
+import { Button } from '@/components/ui/button';
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
 import { ShareRows } from '@/components/ShareRows';
@@ -18,6 +18,8 @@ import {
   normalizeCdekProducts,
   productFilterCaption,
   statusFilterCaption,
+  sameCdekProducts,
+  sameCdekStatuses,
   toastStatusFilterSaved,
   type CdekProductOption,
 } from '@/panels/cdek/cdekStatusFilter';
@@ -99,6 +101,7 @@ function CdekMetricShell({
   back,
   comparison,
   filters,
+  onSaveFilters,
   children,
 }: {
   term: string;
@@ -106,6 +109,8 @@ function CdekMetricShell({
   back: { to: string; label: string };
   /** Блок управления выборкой. Живёт в rail'е — см. комментарий выше. */
   filters?: ReactNode;
+  /** Задан — выбор отличается от сохранённого, и в шапке появляется «Сохранить». */
+  onSaveFilters?: () => void;
   comparison?: ReactNode;
   children: ReactNode;
 }) {
@@ -113,10 +118,19 @@ function CdekMetricShell({
     <div className="space-y-5">
       <MetricBackLink to={back.to}>{back.label}</MetricBackLink>
 
-      <div>
-        <h1 className="text-2xl font-medium tracking-tight text-foreground">{term}</h1>
-        <SourceIdentity network="cdek" className="mt-1 max-w-full" />
-        {descriptor && <MetricDescriptor>{descriptor}</MetricDescriptor>}
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <h1 className="text-2xl font-medium tracking-tight text-foreground">{term}</h1>
+          <SourceIdentity network="cdek" className="mt-1 max-w-full" />
+          {descriptor && <MetricDescriptor>{descriptor}</MetricDescriptor>}
+        </div>
+        {/* Появляется, только когда есть что сохранять: кнопка, ничего не делающая при нажатии,
+            учит не доверять кнопкам. */}
+        {onSaveFilters && (
+          <Button type="button" size="sm" className="shrink-0" onClick={onSaveFilters}>
+            Сохранить
+          </Button>
+        )}
       </div>
 
       <MetricColumns
@@ -305,27 +319,19 @@ function CdekSeriesPage({ def }: { def: SeriesDef }) {
 
   // Тот же блок, что раньше стоял над графиком, — теперь узел для rail'а. Подпись выбора едет
   // ВМЕСТЕ с фильтрами: она объясняет именно их состояние, а не график сам по себе.
+  // Одна кнопка на весь выбор. Обе оси отвечают на ОДИН вопрос «что считать», и раздельное
+  // сохранение заставляло нажимать дважды, а пропустив второе — увезти на «Обзор» половину выбора.
+  const dirty = !sameCdekStatuses(statuses, saved) || !sameCdekProducts(products, savedProducts);
+  const saveFilters = () => {
+    setSavedFilter(filterKey, normalizeCdekStatuses(statuses));
+    setSavedFilter(productKey, normalizeCdekProducts(products));
+    toastStatusFilterSaved(statuses);
+  };
+
   const filters = (
     <div className="space-y-3">
-      <CdekStatusFilter
-        selected={statuses}
-        saved={saved}
-        onChange={setSelected}
-        onSave={(ids) => {
-          setSavedFilter(filterKey, normalizeCdekStatuses(ids));
-          toastStatusFilterSaved(ids);
-        }}
-      />
-      <CdekProductFilter
-        options={productOptions}
-        selected={products}
-        saved={savedProducts}
-        onChange={setPickedProducts}
-        onSave={(ids) => {
-          setSavedFilter(productKey, normalizeCdekProducts(ids));
-          toast(ids.length > 0 ? 'Фильтр товаров сохранён' : 'Фильтр товаров сброшен');
-        }}
-      />
+      <CdekStatusFilter selected={statuses} onChange={setSelected} />
+      <CdekProductFilter options={productOptions} selected={products} onChange={setPickedProducts} />
       {(caption || productCaption) && (
         <p className="text-xs leading-relaxed text-muted-foreground">
           {[caption, productCaption].filter(Boolean).join(' · ')}
@@ -341,6 +347,7 @@ function CdekSeriesPage({ def }: { def: SeriesDef }) {
       back={def.back}
       comparison={comparison}
       filters={filters}
+      onSaveFilters={dirty ? saveFilters : undefined}
     >
       <div className="space-y-3">
         <div className="flex flex-wrap items-center justify-end gap-2">
