@@ -70,7 +70,9 @@ async function bootOrders(page: Page, orders: typeof ORDERS = ORDERS) {
       seen.push(url.search);
       const q = url.searchParams.get('q');
       const status = url.searchParams.get('status');
-      const channel = url.searchParams.get('channel');
+      // ИМЕННО `sales_channel`: `channel` на сервере означает канал АРЕНДАТОРА (склад), и пока
+      // фильтр ходил под тем же именем, выбор канала уводил запрос на чужой канал (прод-баг).
+      const channel = url.searchParams.get('sales_channel');
       // Стаб фильтрует так же, как сервер: по трём номерам сразу, статусу и каналу.
       const rows = orders.filter((o) => {
         if (status && o.status !== status) return false;
@@ -162,7 +164,12 @@ test('фильтр канала и статуса уходит на сервер
   await page.getByRole('button', { name: 'ЯМ' }).click();
   await expect(page.getByRole('row', { name: /33905573/ })).toBeVisible();
   await expect(page.getByRole('row', { name: /33905564/ })).toHaveCount(0);
-  expect(seen.some((s) => s.includes('channel=yandex_market'))).toBe(true);
+  // Проверяем ИМЯ параметра точно, а не подстрокой: `s.includes('channel=yandex_market')` зеленел
+  // бы и на `sales_channel=...`, и на старом `channel=...` — то есть не различал бы ровно те два
+  // варианта, из-за путаницы между которыми лента и падала.
+  const params = seen.map((s) => new URLSearchParams(s));
+  expect(params.some((p) => p.get('sales_channel') === 'yandex_market')).toBe(true);
+  expect(params.every((p) => p.get('channel') === null)).toBe(true);
 });
 
 test('ритм называет пик словами, а не оставляет читать цвета', async ({ page }) => {

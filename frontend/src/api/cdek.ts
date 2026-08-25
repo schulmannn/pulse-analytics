@@ -371,7 +371,10 @@ export function useCdekOrders(period: MsPeriod, filters: CdekOrderFilters = {}, 
   const query = new URLSearchParams(msPeriodQuery(period));
   query.set('include', include);
   if (filters.status) query.set('status', filters.status);
-  if (filters.channel) query.set('channel', filters.channel);
+  // ИМЕННО `sales_channel`: `channel` — это канал арендатора (склад), и сервер разбирает его
+  // раньше фильтра. Пока имена совпадали, выбор «ЯМ» уводил запрос на чужой канал и лента
+  // отвечала «Не удалось получить заказы».
+  if (filters.channel) query.set('sales_channel', filters.channel);
   if (filters.q) query.set('q', filters.q);
   const serialized = query.toString();
   return useQuery({

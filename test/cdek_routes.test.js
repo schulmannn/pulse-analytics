@@ -328,3 +328,67 @@ test('чтение доступно роли viewer — под admin тольк�
   assert.equal(res.status, 200);
   assert.equal(res.body.current.orders, 1035);
 });
+
+/**
+ * Регресс прод-бага: выбор канала продаж в ленте заказов отвечал «Не удалось получить заказы».
+ *
+ * Фильтр ходил параметром `?channel=yandex_market`, а тем же именем сервер разбирает канал
+ * АРЕНДАТОРА: `parseInt('yandex_market')` → NaN → `|| 0` → «канал по умолчанию». У владельца
+ * дефолтным был не СДЭК, поэтому запрос отбивался 404 «Это не источник СДЭК».
+ *
+ * Ни один прежний тест этого не ловил: интеграционный звал репозиторий НАПРЯМУЮ (там фильтр
+ * работал), а роут-стаб отдавал СДЭК-канал на любой id и подмену арендатора прятал. Поэтому
+ * заглушка здесь ЧЕСТНАЯ — id решает, какой канал вернётся.
+ */
+function ordersBuild(seen) {
+  return build({
+    db: {
+      getChannelOrDefault: async (id) => (
+        id === 5
+          ? { id: 5, owner_uid: 7, source: 'cdek', title: 'Склад', member_role: 'owner' }
+          // id 0 — «канал по умолчанию»: у владельца это Telegram, а не СДЭК.
+          : id === 0 ? { id: 1, owner_uid: 7, source: 'tg', title: 'Канал', member_role: 'owner' } : null
+      ),
+      getCdekOrdersForActor: async (channelId, _actor, opts) => {
+        seen.push({ channelId, channel: opts.channel, status: opts.status });
+        return { rows: [], total: 0 };
+      },
+    },
+  });
+}
+
+test('фильтр по каналу продаж не подменяет канал арендатора', async () => {
+  const seen = [];
+  const { routes } = ordersBuild(seen);
+  const res = await call(routes, 'GET /api/cdek/orders', {
+    query: { sales_channel: 'yandex_market', status: 'complete' },
+    headers: { 'x-channel-id': '5' },
+  });
+  assert.equal(res.status, 200);
+  assert.deepEqual(seen, [{ channelId: 5, channel: 'yandex_market', status: 'complete' }]);
+});
+
+test('вкладка, открытая до выката, шлёт старое имя — фильтр всё равно доезжает', async () => {
+  const seen = [];
+  const { routes } = ordersBuild(seen);
+  const res = await call(routes, 'GET /api/cdek/orders', {
+    query: { channel: 'yandex_market' },
+    headers: { 'x-channel-id': '5' },
+  });
+  assert.equal(res.status, 200);
+  assert.equal(seen[0].channelId, 5, 'арендатор берётся из заголовка, а не из мусорного ?channel');
+  assert.equal(seen[0].channel, 'yandex_market', 'а само значение работает фильтром');
+});
+
+test('числовой ?channel по-прежнему выбирает канал арендатора', async () => {
+  // Этим путём ходят прямые ссылки на скачивание CSV — заголовок в <a href> не поставить.
+  const seen = [];
+  const { routes } = ordersBuild(seen);
+  const res = await call(routes, 'GET /api/cdek/orders', {
+    query: { channel: '5' },
+    headers: { 'x-channel-id': '9' },
+  });
+  assert.equal(res.status, 200);
+  assert.equal(seen[0].channelId, 5);
+  assert.equal(seen[0].channel, undefined, 'числовое значение фильтром НЕ становится');
+});

@@ -1,6 +1,6 @@
 'use strict';
 
-const { hasWorkspaceRole } = require('../middleware/tenant');
+const { hasWorkspaceRole, tenantChannelId } = require('../middleware/tenant');
 const { parseCdekPeriod } = require('../domain/cdekPeriod');
 const { normalizeCdekInclude, normalizeCdekProducts } = require('../repos/cdekRepo');
 
@@ -28,12 +28,16 @@ function registerCdekRoutes({ app, express, requireAuth, db, audit, cdekImport }
   const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
   const rawBody = express.raw({ type: () => true, limit: MAX_UPLOAD_BYTES });
 
+  /** Старое имя фильтра по каналу продаж — принимается только нечисловым (см. tenantChannelId). */
+  const legacySalesChannel = (raw) =>
+    (typeof raw === 'string' && raw && !/^\d+$/.test(raw) ? raw : undefined);
+
   async function resolveCdekChannel(req, res, { role = null } = {}) {
     if (!db.enabled) {
       res.status(503).json({ error: 'База данных недоступна' });
       return null;
     }
-    const channelId = parseInt(req.query.channel || req.headers['x-channel-id'], 10) || 0;
+    const channelId = tenantChannelId(req);
     const channel = await db.getChannelOrDefault(channelId, req.user).catch(() => null);
     if (!channel) {
       res.status(channelId ? 403 : 404).json({
@@ -370,7 +374,13 @@ function registerCdekRoutes({ app, express, requireAuth, db, audit, cdekImport }
     }
   });
 
-  // GET /api/cdek/orders?status=&channel=&q=&limit= — лента заказов окна.
+  /**
+   * GET /api/cdek/orders?status=&sales_channel=&q=&limit= — лента заказов окна.
+   *
+   * Фильтр по каналу ПРОДАЖ зовётся `sales_channel`, а не `channel`: `?channel=` уже занят каналом
+   * АРЕНДАТОРА (см. tenantChannelId). Пока имена совпадали, выбор «ЯМ» в ленте уводил запрос на
+   * чужой канал и отвечал 404 «Это не источник СДЭК» — прод-баг, найденный владельцем.
+   */
   app.get('/api/cdek/orders', requireAuth, async (req, res, next) => {
     try {
       const ctx = await resolveRead(req, res);
@@ -380,7 +390,9 @@ function registerCdekRoutes({ app, express, requireAuth, db, audit, cdekImport }
         tz: ctx.tz,
         include: ctx.include,
         status: req.query.status,
-        channel: req.query.channel,
+        // Совместимость на окно деплоя: вкладка, открытая до выката, шлёт старое имя. Принимаем
+        // его только НЕЧИСЛОВЫМ — числовое там всегда было каналом арендатора, а не фильтром.
+        channel: req.query.sales_channel ?? legacySalesChannel(req.query.channel),
         q: req.query.q,
         limit: req.query.limit,
       });
