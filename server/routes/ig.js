@@ -1,6 +1,7 @@
 'use strict';
 
 const { createAdmissionController } = require('../lib/admissionController');
+const { tenantChannelId } = require('../middleware/tenant');
 const {
   IG_THUMB_CACHE_TTL_MS,
   verifyIgThumbnailToken,
@@ -48,7 +49,7 @@ function registerIgRoutes({
   async function resolveIg(req, res, next) {
     req.ig = null;
     try {
-      const channelId = parseInt(req.query.channel || req.headers['x-channel-id'], 10) || 0;
+      const channelId = tenantChannelId(req);
       if (db.enabled && channelId && igCrypto.configured()) {
         const ch  = await db.getChannel(channelId, req.user).catch(() => null);
         const acc = ch ? await db.getIgAccount(channelId).catch(() => null) : null;

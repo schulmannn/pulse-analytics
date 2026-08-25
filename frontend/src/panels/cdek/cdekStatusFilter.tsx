@@ -139,6 +139,13 @@ export const toastStatusFilterSaved = (ids: readonly string[]): void => {
 export const cdekProductFilterKey = (channelId: number | null | undefined): string =>
   `cdek:products:${channelId ?? 0}`;
 
+/**
+ * Потолок выбора — ТОТ ЖЕ, что у сервера (PRODUCT_FILTER_MAX в server/repos/cdekRepo). Сервер на
+ * переборе отвечает отказом, а не срезает хвост молча; чтобы в этот отказ нельзя было упереться
+ * случайно, дальше потолка кнопки просто не нажимаются и рядом стоит причина.
+ */
+export const CDEK_PRODUCT_MAX = 50;
+
 export interface CdekProductOption {
   id: string;
   name: string;
@@ -188,8 +195,12 @@ export function CdekProductFilter({
     ? options.filter((o) => o.name.toLocaleLowerCase('ru-RU').includes(needle))
     : options;
   const dirty = !sameCdekProducts(selected, saved);
-  const toggle = (id: string) =>
-    onChange(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]);
+  const full = selected.length >= CDEK_PRODUCT_MAX;
+  const toggle = (id: string) => {
+    if (selected.includes(id)) return onChange(selected.filter((x) => x !== id));
+    if (full) return;
+    onChange([...selected, id]);
+  };
 
   return (
     <div className="space-y-2" data-cdek-product-filter="">
@@ -218,6 +229,11 @@ export function CdekProductFilter({
       {open && (
         <div className="space-y-2 rounded-lg border border-border p-2.5">
           <SearchField value={query} onChange={setQuery} ariaLabel="Поиск товара" placeholder="Название товара" />
+          {full && (
+            <p className="px-1 text-2xs text-muted-foreground">
+              Выбрано максимум — {CDEK_PRODUCT_MAX}. Снимите лишний, чтобы добавить другой.
+            </p>
+          )}
           <div className="max-h-56 space-y-0.5 overflow-y-auto">
             {visible.length === 0 ? (
               <p className="px-1 py-2 text-xs text-muted-foreground">Ничего не нашлось.</p>
@@ -229,9 +245,10 @@ export function CdekProductFilter({
                     key={option.id}
                     type="button"
                     aria-pressed={active}
+                    disabled={!active && full}
                     onClick={() => toggle(option.id)}
                     className={cn(
-                      'flex min-h-11 w-full items-center gap-2.5 rounded px-2 py-1.5 text-left text-xs transition-colors sm:min-h-0',
+                      'flex min-h-11 w-full items-center gap-2.5 rounded px-2 py-1.5 text-left text-xs transition-colors disabled:pointer-events-none disabled:opacity-45 sm:min-h-0',
                       active ? 'bg-primary/10 text-foreground' : 'text-ink2 hover:bg-muted hover:text-foreground',
                     )}
                   >

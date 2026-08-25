@@ -136,3 +136,30 @@ test('tenantChannelId: нет ни того, ни другого — 0 (кана
   assert.equal(tenantChannelId(req({}, {})), 0);
   assert.equal(tenantChannelId(req({ channel: 'own' }, {})), 0);
 });
+
+/**
+ * Разбор канала арендатора живёт в ОДНОМ месте — и это проверяется по исходникам.
+ *
+ * Строка `parseInt(req.query.channel || req.headers['x-channel-id'], 10) || 0` была скопирована в
+ * шесть роутов. В СДЭКе рядом с копией завёлся фильтр с тем же именем — и лента заказов начала
+ * отвечать «Не удалось получить заказы» (#502); в МойСкладе такой же фильтр стоит рядом до сих пор
+ * («legacy single», moysklad.js). Чинить это по одному экземпляру бессмысленно: седьмая копия
+ * заведётся раньше, чем найдут шестую.
+ */
+test('ни один роут не разбирает канал арендатора сам', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const dir = path.join(__dirname, '..', 'server', 'routes');
+  const offenders = [];
+  for (const name of fs.readdirSync(dir)) {
+    if (!name.endsWith('.js')) continue;
+    const text = fs.readFileSync(path.join(dir, name), 'utf8');
+    text.split('\n').forEach((line, i) => {
+      // Признак самодельного разбора: чтение query.channel/x-channel-id вне tenantChannelId.
+      if (/req\.query\.channel\b\s*\|\|/.test(line) || /req\.headers\['x-channel-id'\]/.test(line)) {
+        offenders.push(`${name}:${i + 1} → ${line.trim()}`);
+      }
+    });
+  }
+  assert.deepEqual(offenders, [], `разбор канала арендатора продублирован:\n${offenders.join('\n')}`);
+});

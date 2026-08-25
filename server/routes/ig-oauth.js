@@ -1,7 +1,7 @@
 'use strict';
 
 const crypto = require('crypto');
-const { hasWorkspaceRole } = require('../middleware/tenant');
+const { hasWorkspaceRole, tenantChannelId } = require('../middleware/tenant');
 const { createAdmissionController } = require('../lib/admissionController');
 
 // "Business Login for Instagram" (Instagram API with Instagram Login, no Facebook Page). These app
@@ -172,7 +172,7 @@ function registerIgOauthRoutes({
     // ?new_source=1 — connect the account as its OWN standalone source (a fresh channels row is
     // created in the callback once the identity is known) instead of attaching it to a channel.
     const newSource = String(req.query.new_source || '') === '1';
-    const channelId = newSource ? 0 : parseInt(req.query.channel || req.headers['x-channel-id'], 10) || 0;
+    const channelId = newSource ? 0 : tenantChannelId(req);
     if (!newSource) {
       if (!channelId) return res.status(400).json({ error: 'Выбери канал, к которому подключить Instagram' });
       const ch = await db.getChannel(channelId, req.user).catch(() => null);
@@ -323,7 +323,7 @@ function registerIgOauthRoutes({
 
   // DELETE /api/ig/oauth — disconnect the Instagram account from the selected channel.
   app.delete('/api/ig/oauth', requireAuth, asyncHandler(async (req, res) => {
-    const channelId = parseInt(req.query.channel || req.headers['x-channel-id'], 10) || 0;
+    const channelId = tenantChannelId(req);
     if (!channelId) return res.status(400).json({ error: 'Канал не выбран' });
     const ch = await db.getChannel(channelId, req.user).catch(() => null);
     if (!ch) return res.status(403).json({ error: 'Нет доступа к этому каналу' });
@@ -337,7 +337,7 @@ function registerIgOauthRoutes({
 
   // GET /api/ig/oauth/status — connection state for Settings + the connect panel (no token leaked).
   app.get('/api/ig/oauth/status', requireAuth, asyncHandler(async (req, res) => {
-    const channelId = parseInt(req.query.channel || req.headers['x-channel-id'], 10) || 0;
+    const channelId = tenantChannelId(req);
     let acc = null;
     if (db.enabled && channelId) {
       const ch = await db.getChannel(channelId, req.user).catch(() => null);
