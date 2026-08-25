@@ -8,7 +8,7 @@ const {
   buildAssortmentComparison,
 } = require('../lib/msTopProducts');
 const { SEGMENT_ORDER } = require('../domain/msRfm');
-const { hasWorkspaceRole } = require('../middleware/tenant');
+const { hasWorkspaceRole, tenantChannelId } = require('../middleware/tenant');
 
 /**
  * Роуты МойСклада (/api/ms/{connect,summary,top-products,top-customers,status,account,backfill,
@@ -211,7 +211,7 @@ function registerMsRoutes({ app, requireAuth, db, audit, msCrypto, msFetch, msBa
       res.status(503).json({ error: 'База данных недоступна' });
       return null;
     }
-    const channelId = parseInt(req.query.channel || req.headers['x-channel-id'], 10) || 0;
+    const channelId = tenantChannelId(req);
     const channel = await db.getChannelOrDefault(channelId, req.user).catch(() => null);
     if (!channel) {
       if (channelId) {
@@ -1022,6 +1022,12 @@ function registerMsRoutes({ app, requireAuth, db, audit, msCrypto, msFetch, msBa
       const ms = await resolveMs(req, res);
       if (!ms) return;
 
+      // `channel` в единственном числе — legacy-имя фильтра по каналу ПРОДАЖ (UUID МойСклада).
+      // Оно совпадает с именем канала АРЕНДАТОРА, и пока резолвер разбирал его лениво
+      // (`parseInt(...) || 0`), такой запрос уезжал на дефолтный канал: UUID даёт NaN, NaN даёт 0,
+      // 0 значит «по умолчанию». Ровно этим сломалась лента заказов СДЭКа (#502). Теперь
+      // tenantChannelId берёт `?channel` только чистым числом, поэтому legacy-путь работает как
+      // задумано, а не подменяет арендатора.
       const raw = typeof req.query.channels === 'string' ? req.query.channels
         : typeof req.query.channel === 'string' ? req.query.channel   // legacy single
           : '';

@@ -2,7 +2,7 @@
 
 const { hasWorkspaceRole, tenantChannelId } = require('../middleware/tenant');
 const { parseCdekPeriod } = require('../domain/cdekPeriod');
-const { normalizeCdekInclude, normalizeCdekProducts } = require('../repos/cdekRepo');
+const { normalizeCdekInclude, normalizeCdekProducts, PRODUCT_FILTER_MAX } = require('../repos/cdekRepo');
 
 /**
  * Роуты СДЭК Fulfillment (/api/cdek/{sources,status,import,imports,imports/:id,
@@ -213,7 +213,8 @@ function registerCdekRoutes({ app, express, requireAuth, db, audit, cdekImport }
   // разъехаться двум копиям правила негде.
   const includeOf = (req) => normalizeCdekInclude(req.query.include);
   // Товары фильтра приходят списком через запятую. Разбор и потолок живут в репозитории — там же,
-  // где из этого значения строится SQL.
+  // где из этого значения строится SQL. Перебор потолка возвращается признаком, а не срезанным
+  // списком: роут обязан ответить отказом, иначе человек увидит число не по своему выбору.
   const productsOf = (req) => normalizeCdekProducts(req.query.products);
 
   /** Окно + канал + часовой пояс источника — общий пролог всех читающих роутов. */
@@ -221,6 +222,11 @@ function registerCdekRoutes({ app, express, requireAuth, db, audit, cdekImport }
     const period = parseCdekPeriod(req.query);
     if (period.invalid) {
       res.status(400).json({ error: 'Некорректный диапазон дат (ожидается from<=to в формате YYYY-MM-DD)' });
+      return null;
+    }
+    const products = productsOf(req);
+    if (products && products.tooMany) {
+      res.status(400).json({ error: `Можно выбрать не более ${PRODUCT_FILTER_MAX} товаров` });
       return null;
     }
     const channel = await resolveCdekChannel(req, res);
@@ -231,7 +237,7 @@ function registerCdekRoutes({ app, express, requireAuth, db, audit, cdekImport }
       period,
       tz: (source && source.tz) || 'Europe/Moscow',
       include: includeOf(req),
-      products: productsOf(req),
+      products,
     };
   }
 

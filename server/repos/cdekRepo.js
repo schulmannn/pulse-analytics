@@ -92,12 +92,19 @@ const saleRows = (productsIdx) => `
 /** Ограничение набора товаров: столько влезает в осмысленный выбор, дальше это уже «все». */
 const PRODUCT_FILTER_MAX = 50;
 
-/** Массив товаров для параметра запроса; null — фильтра нет (а не «ноль товаров»). */
+/**
+ * Массив товаров для параметра запроса; null — фильтра нет (а не «ноль товаров»).
+ *
+ * Перебор потолка — ОШИБКА, а не повод молча срезать хвост. Раньше 51-й товар просто исчезал:
+ * выручка считалась по пятидесяти, а карточка над ней писала «Только выбранные товары: 51», и
+ * узнать о подмене было неоткуда — ответ применённый список не возвращает. Тот же вопрос в
+ * МойСкладе решён отказом («Можно выбрать не более 20 каналов»), и здесь теперь так же: неверное
+ * число честнее подменённого.
+ */
 function normalizeCdekProducts(raw) {
   const list = Array.isArray(raw) ? raw : typeof raw === 'string' && raw ? raw.split(',') : [];
-  const picked = [...new Set(list.map((v) => String(v).trim()).filter(Boolean))]
-    .slice(0, PRODUCT_FILTER_MAX)
-    .sort();
+  const picked = [...new Set(list.map((v) => String(v).trim()).filter(Boolean))].sort();
+  if (picked.length > PRODUCT_FILTER_MAX) return { tooMany: true };
   return picked.length > 0 ? picked : null;
 }
 
@@ -655,4 +662,4 @@ function createCdekRepo({ pool, enabled, transaction, ensureExternalSource, getA
   };
 }
 
-module.exports = { createCdekRepo, normalizeCdekInclude, normalizeCdekProducts, ORDER_STATUSES };
+module.exports = { createCdekRepo, normalizeCdekInclude, normalizeCdekProducts, ORDER_STATUSES, PRODUCT_FILTER_MAX };

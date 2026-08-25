@@ -392,3 +392,27 @@ test('числовой ?channel по-прежнему выбирает кана�
   assert.equal(seen[0].channelId, 5);
   assert.equal(seen[0].channel, undefined, 'числовое значение фильтром НЕ становится');
 });
+
+test('перебор потолка товаров — честный отказ, а не срезанный хвост', async () => {
+  // Раньше 51-й товар просто исчезал: выручка считалась по пятидесяти, а карточка над ней писала
+  // «Только выбранные товары: 51». Ответ применённый список не возвращает, узнать о подмене
+  // неоткуда. Тот же вопрос в МойСкладе решён отказом — здесь теперь так же.
+  let reached = false;
+  const { routes } = build({ db: { getCdekSummaryForActor: async () => { reached = true; return { current: null, previous: null }; } } });
+  const products = Array.from({ length: 51 }, (_, i) => `p${String(i + 1).padStart(3, '0')}`).join(',');
+  const res = await call(routes, 'GET /api/cdek/summary', { query: { days: '30', products } });
+  assert.equal(res.status, 400);
+  assert.match(res.body.error, /не более 50 товаров/i);
+  assert.equal(reached, false, 'до репозитория запрос доходить не должен');
+});
+
+test('набор ровно по потолку проходит целиком', async () => {
+  const seen = [];
+  const { routes } = build({
+    db: { getCdekSummaryForActor: async (_id, _actor, opts) => { seen.push(opts.products); return { current: null, previous: null }; } },
+  });
+  const list = Array.from({ length: 50 }, (_, i) => `p${String(i + 1).padStart(3, '0')}`);
+  const res = await call(routes, 'GET /api/cdek/summary', { query: { days: '30', products: list.join(',') } });
+  assert.equal(res.status, 200);
+  assert.equal(seen[0].length, 50);
+});

@@ -1,6 +1,6 @@
 'use strict';
 
-const { hasWorkspaceRole } = require('../middleware/tenant');
+const { hasWorkspaceRole, tenantChannelId } = require('../middleware/tenant');
 
 /**
  * Роуты Яндекс.Метрики
@@ -373,7 +373,7 @@ function registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cach
       res.status(503).json({ error: 'База данных недоступна' });
       return null;
     }
-    const channelId = parseInt(req.query.channel || req.headers['x-channel-id'], 10) || 0;
+    const channelId = tenantChannelId(req);
     const channel = await db.getChannelOrDefault(channelId, req.user).catch(() => null);
     if (!channel) {
       if (channelId) {
