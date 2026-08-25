@@ -188,7 +188,7 @@ export function TopPosts({ variant = 'table' }: { variant?: 'table' | 'cards' } 
                   )}
                 >
                   {c.label}
-                  <span aria-hidden="true" className={cn('text-2xs', !active && 'text-ink3/60')}>
+                  <span aria-hidden="true" className={cn('text-2xs', !active && 'text-ink3')}>
                     {active ? (sortDir === 'desc' ? '↓' : '↑') : '↕'}
                   </span>
                 </button>

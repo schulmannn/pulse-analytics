@@ -556,6 +556,10 @@ Google OAuth origins, Railway-service для recovery worker.
   deploy.
 - Active/selected chips на `bg-primary/10` используют `text-accent-foreground`: светлая тема даёт
   4.53:1, а composite-пара и запрет старого `text-primary` recipe гейтятся design-token scripts.
+  Светлая тема ПРОВЕРЕНА сплошным прогоном по 14 маршрутам в обеих темах (`e2e/contrast-rendered`):
+  нарушений контраста нет, отложенность светлой темы больше не означает непроверенность. У axe при
+  этом две структурные слепые зоны — он не смотрит `aria-hidden` вовсе и пишет `incomplete` вместо
+  нарушения на полупрозрачном фоне, — поэтому вычисленный гейт стоит рядом, а не вместо.
   Основные phone-контролы (tabs, period segments и меню виджета) имеют минимум 44×44 CSS px ниже `sm`;
   `e2e/mobile-nav.spec.ts` гейтит их и отсутствие горизонтального скролла на 360/390/430, а отдельный
   обязательный `e2e-phone` CI job добавляет representative phone axe/focus scan. Это не означает,

@@ -19,6 +19,7 @@ import { networkDisplayName } from '@/lib/networks';
 import type { WidgetMeta, WidgetResult } from '@/lib/resolveWidgetMetric';
 import type { WidgetViz } from '@/lib/widgetMetrics';
 import { breakdownTitles, effectiveViz, seriesStats, seriesToChart } from '@/lib/widgetRender';
+import { KpiValue } from '@/components/chartWidget/KpiValue';
 
 /**
  * Loading placeholder shaped like the story card (hero bar + chart area), shown while the widget's
@@ -187,18 +188,15 @@ export function WidgetRenderer({
         <div className="shrink-0">
           <div className="flex items-baseline gap-2.5">
             {onDrill ? (
-              <button
-                type="button"
-                onClick={onDrill}
-                aria-label={drillLabel ? `Разбор: ${drillLabel}` : 'Открыть страницу метрики'}
-                className="rounded text-2xl font-medium leading-none tabular-nums tracking-tight text-foreground transition-colors hover:text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40"
-              >
-                {result.value}
-              </button>
+              <KpiValue
+                size="small"
+                text={result.value ?? ''}
+                onDrill={onDrill}
+                ariaLabel={drillLabel ? `Разбор: ${drillLabel}` : 'Открыть страницу метрики'}
+                className="text-foreground"
+              />
             ) : (
-              <span className="text-2xl font-medium leading-none tabular-nums tracking-tight text-foreground">
-                {result.value}
-              </span>
+              <KpiValue size="small" text={result.value ?? ''} className="text-foreground" />
             )}
             <DeltaPill delta={result.delta} />
           </div>

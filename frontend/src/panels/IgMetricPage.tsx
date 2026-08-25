@@ -16,6 +16,7 @@ import {
 } from '@/lib/igMetrics';
 import type { WindowPair, IgBreakdownItem } from '@/lib/igMetrics';
 import { pctDelta } from '@/lib/delta';
+import { KpiValue } from '@/components/chartWidget/KpiValue';
 import { fmt } from '@/lib/format';
 import { windowIgSeries, KpiCard } from '@/components/instagram/shared';
 import { BestTimeHeatmap } from '@/components/instagram/audience';
@@ -342,7 +343,7 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
           <h1 className="text-2xl font-medium tracking-tight text-foreground">Подписчики</h1>
           <div className="mt-1 text-xs tracking-wide text-muted-foreground">{handle ? `Instagram ${handle}` : 'Instagram'}</div>
           <div className="mt-2 flex flex-wrap items-baseline gap-x-2.5 gap-y-1 lg:hidden">
-            <span className="text-3xl font-medium leading-none tabular-nums tracking-tight">{fmt.kpi(lvlNow ?? ig.followers)}</span>
+            <KpiValue size="compact" text={fmt.kpi(lvlNow ?? ig.followers)} />
             <DeltaPill delta={lvlTrend} />
             <span className="text-xs tracking-wide text-muted-foreground">{periodLabel}</span>
           </div>
@@ -367,7 +368,7 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
           <h1 className="text-2xl font-medium tracking-tight text-foreground">{daily.term}</h1>
           <div className="mt-1 text-xs tracking-wide text-muted-foreground">{handle ? `Instagram ${handle}` : 'Instagram'}</div>
           <div className="mt-2 flex flex-wrap items-baseline gap-x-2.5 gap-y-1 lg:hidden">
-            <span className="text-3xl font-medium leading-none tabular-nums tracking-tight">{fmt.kpi(sumCur)}</span>
+            <KpiValue size="compact" text={fmt.kpi(sumCur)} />
             <DeltaPill delta={trend} />
             <span className="text-xs tracking-wide text-muted-foreground">{periodLabel}</span>
           </div>
@@ -630,7 +631,7 @@ function IgAggregatePage({ def, pair, windowDays, handle }: { def: IgAggDef; pai
         <h1 className="text-2xl font-medium tracking-tight text-foreground">{def.term}</h1>
         <div className="mt-1 text-xs tracking-wide text-muted-foreground">{handle ? `Instagram ${handle}` : 'Instagram'}</div>
         <div className="mt-2 flex flex-wrap items-baseline gap-x-2.5 gap-y-1 lg:hidden">
-          <span className="text-3xl font-medium leading-none tabular-nums tracking-tight">{pair.hasCur ? fmt.kpi(pair.cur) : '—'}</span>
+          <KpiValue size="compact" text={pair.hasCur ? fmt.kpi(pair.cur) : '—'} />
           <DeltaPill delta={trend} />
           <span className="text-xs tracking-wide text-muted-foreground">{windowDays} дн.</span>
         </div>
@@ -646,11 +647,11 @@ function IgAggregatePage({ def, pair, windowDays, handle }: { def: IgAggDef; pai
               <div className="grid grid-cols-1 gap-px border-t border-border bg-border sm:grid-cols-3">
                 <div className="bg-card p-4">
                   <div className="text-xs tracking-wide text-muted-foreground">Текущий период</div>
-                  <div className="mt-2 text-3xl font-medium tabular-nums tracking-tight">{fmt.kpi(pair.cur)}</div>
+                  <KpiValue size="compact" text={fmt.kpi(pair.cur)} className="mt-2" />
                 </div>
                 <div className="bg-card p-4">
                   <div className="text-xs tracking-wide text-muted-foreground">Пред. период</div>
-                  <div className="mt-2 text-3xl font-medium tabular-nums tracking-tight text-ink2">{pair.hasPrev ? fmt.kpi(pair.prev) : '—'}</div>
+                  <KpiValue size="compact" text={pair.hasPrev ? fmt.kpi(pair.prev) : '—'} className="mt-2  text-ink2" />
                 </div>
                 <div className="bg-card p-4">
                   <div className="text-xs tracking-wide text-muted-foreground">Изменение</div>
@@ -742,7 +743,7 @@ function IgErPage({
         <h1 className="text-2xl font-medium tracking-tight text-foreground">{ER_DEF.term}</h1>
         <div className="mt-1 text-xs tracking-wide text-muted-foreground">{handle ? `Instagram ${handle}` : 'Instagram'}</div>
         <div className="mt-2 flex flex-wrap items-baseline gap-x-2.5 gap-y-1 lg:hidden">
-          <span className="text-3xl font-medium leading-none tabular-nums tracking-tight">{hasCur ? fmt.pctAbs(erReach) : '—'}</span>
+          <KpiValue size="compact" text={hasCur ? fmt.pctAbs(erReach) : '—'} />
           <DeltaPill delta={trend} />
           <span className="text-xs tracking-wide text-muted-foreground">{windowDays} дн.</span>
         </div>
@@ -759,11 +760,11 @@ function IgErPage({
                 <div className="grid grid-cols-1 gap-px border-t border-border bg-border sm:grid-cols-3">
                   <div className="bg-card p-4">
                     <div className="text-xs tracking-wide text-muted-foreground">Текущий период</div>
-                    <div className="mt-2 text-3xl font-medium tabular-nums tracking-tight">{fmt.pctAbs(erReach)}</div>
+                    <KpiValue size="compact" text={fmt.pctAbs(erReach)} className="mt-2" />
                   </div>
                   <div className="bg-card p-4">
                     <div className="text-xs tracking-wide text-muted-foreground">Пред. период</div>
-                    <div className="mt-2 text-3xl font-medium tabular-nums tracking-tight text-ink2">{hasPrev ? fmt.pctAbs(erReachPrev) : '—'}</div>
+                    <KpiValue size="compact" text={hasPrev ? fmt.pctAbs(erReachPrev) : '—'} className="mt-2  text-ink2" />
                   </div>
                   <div className="bg-card p-4">
                     <div className="text-xs tracking-wide text-muted-foreground">Изменение</div>

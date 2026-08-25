@@ -15,6 +15,7 @@ import type { DailySeries, DrillKey, PostMetricField } from '@/lib/kpiDerive';
 import { DAY_MS, buildWeeklyTable, cellTint } from '@/lib/reportTables';
 import { defaultBlock, isReportBlockKey, normalizeBlocks } from '@/lib/reportBlocks';
 import type { ReportBlock, ReportBlockKey, ReportBlockType } from '@/lib/reportBlocks';
+import { KpiValue } from '@/components/chartWidget/KpiValue';
 import { fmt } from '@/lib/format';
 import { useMediaQuery } from '@/lib/useMediaQuery';
 import { ReportDocumentDesktop } from '@/panels/report/ReportDocumentDesktop';
@@ -309,7 +310,7 @@ function ReportDocumentBody({
         <Link key={k} to={`/metrics/${k}`} className="bg-background p-3 transition-colors hover:bg-muted/60">
           <div className="text-2xs tracking-wide text-muted-foreground">{label}</div>
           <div className="mt-1 flex items-baseline gap-1.5">
-            <span className="text-2xl font-medium tabular-nums tracking-tight">{drillMeta[k].total}</span>
+            <KpiValue size="small" text={drillMeta[k].total} />
             <DeltaPill delta={drillMeta[k].trend} />
           </div>
         </Link>
@@ -452,7 +453,7 @@ function ReportDocumentBody({
             </BlockControls>
             <div className="text-xs font-medium tracking-wider text-muted-foreground">{label}</div>
             <div className="mt-2 flex items-baseline gap-2">
-              <span className="text-3xl font-medium tabular-nums tracking-tight">{drillMeta[metric].total}</span>
+              <KpiValue size="compact" text={drillMeta[metric].total} />
               <DeltaPill delta={drillMeta[metric].trend} />
             </div>
           </div>
@@ -475,7 +476,7 @@ function ReportDocumentBody({
               </BlockControls>
             </div>
             <div className="flex items-baseline gap-2">
-              <span className="text-2xl font-medium tabular-nums tracking-tight">{drillMeta[spec.drill].total}</span>
+              <KpiValue size="small" text={drillMeta[spec.drill].total} />
               <DeltaPill delta={drillMeta[spec.drill].trend} />
             </div>
             <ReportChart series={spec.series} viz={viz} valueFmt={spec.valueFmt} zeroBase={spec.zeroBase} />

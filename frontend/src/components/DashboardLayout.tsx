@@ -10,7 +10,7 @@ import { cn } from '@/lib/utils';
 import { NETWORKS, NetworkGlyph } from '@/lib/networks';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { MobileBottomNav, MobileHeader } from '@/components/layout/MobileNav';
-import { FEED_ROUTES, routeTitle, useActiveNetwork } from '@/components/layout/nav';
+import { isFeedRoute, routeTitle, useActiveNetwork } from '@/components/layout/nav';
 import { Button } from '@/components/ui/button';
 
 /** Студия оформления — редкая поверхность и ЛЕНИВАЯ: закрытая панель не стоит оболочке ничего. */
@@ -127,7 +127,7 @@ function DemoBanner() {
     It remains for utility pages such as admin, bugs and reports. */
 function Topbar() {
   const { pathname } = useLocation();
-  const title = FEED_ROUTES.includes(pathname) ? null : routeTitle(pathname);
+  const title = isFeedRoute(pathname) ? null : routeTitle(pathname);
   if (!title) return null;
   return (
     <header data-dashboard-topbar className="sticky top-0 z-sticky flex h-14 items-center gap-3 border-b bg-background/80 px-4 backdrop-blur-sm sm:gap-4 sm:px-6 print:hidden">

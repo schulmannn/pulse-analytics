@@ -220,6 +220,26 @@ CSS is cached in `localStorage` and re-injected pre-paint by `public/theme-boot.
 **One** ladder, in the `@theme` block (`--text-*`). No magic `text-[Npx]` — the lint hard-fails on it.
 Keep ≲4 steps on a single screen.
 
+**The card headline is a component, not a class string.** The whole KPI number family — `text-hero` (44), `text-3xl` (30), `text-2xl` (24) — is rendered by one
+component, and `text-hero` may appear in exactly one
+place — `components/chartWidget/KpiValue`. It was copy-pasted into four (`ChartCardBody`,
+`CompareStat` twice, `ExpandableChart`) and the copies drifted: the canon had long fixed the line box
+to `leading-[1.15]` (the display face's glyph box is ~4px taller than a `leading-none` box and
+clipped digits inside a fixed tile) while two copies still carried `leading-none`. Same 44px,
+different baseline — the cards stop reading as one system. Gated by `kpi-number-recipe-retyped` in
+`design-motion-lint`, which now covers the second tier too (`text-3xl` + `tabular-nums`). A different headline size becomes a variant of that component, never a class
+string at the call site.
+
+Not yet folded in, on purpose: `KpiGrid`'s `DrillValue` (number + quiet unit is its own
+composition), `RadialShare`'s centre label (SVG `<text>`, which a `div`-based component cannot be)
+and the report title inputs (headings, not numbers). The `text-2xl` tier is therefore converted but
+not yet gated.
+
+Anatomy is a separate question from the recipe: `ChartCardBody` owns the canonical story face
+(label → value → delta → min/max → caption, plot to the right) and every widget card goes through
+it; `CompareStat` keeps its own centred/stacked arrangements on purpose. Both draw their number
+from `KpiValue`.
+
 `text-2xs` 11 (meta · axis ticks) · `text-xs` 12 (caption) · `text-sm` 14 (body/default) ·
 `text-base` 16 (card titles) · `text-lg` 18 (sub-heading, sparingly) · `text-2xl` 24 (page/modal
 titles) · `text-3xl` 30 (secondary metric) · `text-hero` 44 (primary KPI hero).
@@ -264,6 +284,12 @@ radius ladder: cards/overlays 16 → floating chrome 12 → inputs/controls 4 �
 Hairlines are `--border`. Soft over-surface tints use a small, deliberate opacity set rather than
 arbitrary values: `foreground / 0.06` (hover wash), `ink3 / 0.25` (edit-mode card edge),
 `white / 0.06` (dark card edge). Keep to these; don't invent new alphas per component.
+
+**Never on ink.** The set above is for SURFACES. An invented alpha on TEXT quietly drops contrast
+below the gate that checks the token: `text-ink3/60` on the inactive sort arrow measured 2.43:1 in
+light and 2.70:1 in dark while `--ink3` itself passes 4.5 — the token was fine, the alpha was not.
+If ink must be quieter, pick a quieter ink token; there is no legal ink alpha.
+`e2e/contrast-rendered.spec.ts` now measures this on the rendered page.
 
 ## Icon buttons
 
@@ -566,6 +592,12 @@ Run from `frontend/`:
 
 - `node scripts/contrast-tokens.mjs` — WCAG contrast for the colour tokens (text 4.5 / non-text 3.0;
   hairlines warn-only). Pairs with the axe `e2e/a11y-contrast.spec.ts` gate (rendered text).
+- `e2e/contrast-rendered.spec.ts` — the same question asked of the RENDERED page, both themes,
+  14 routes. It exists because axe has two structural blind spots: it skips `aria-hidden` elements
+  entirely (visible affordance glyphs are never checked) and it reports `incomplete` — not a
+  violation — when the background is translucent, which the axe spec silently drops. Here the
+  background is composited through a canvas (Tailwind emits `oklab(...)` for alpha utilities, which
+  no naive parser reads), so a translucent surface gets a real verdict instead of a shrug.
 - `npm run lint:motion` (`node scripts/design-motion-lint.mjs`) — **gated in CI** (the `frontend` job,
   ahead of the suite). Hard-fails on an inlined house easing, magic `text-[Npx]`, arbitrary
   `duration-[…]/ease-[…]/delay-[…]`, off-ladder `duration-300`/`ease-out`, `transition-all`,

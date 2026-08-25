@@ -10,6 +10,7 @@ import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
 import { ChartBand } from '@/components/ChartBand';
 import { ChartCardBody, ChartSection as WidgetChartSection, seriesRange } from '@/components/ChartWidget';
+import { KpiValue } from '@/components/chartWidget/KpiValue';
 import { CenteredStat, CompactStatHeadline } from '@/components/CompareStat';
 import { Sparkline } from '@/components/Sparkline';
 import type { WidgetSize } from '@/lib/widgetPrefsStore';
@@ -82,19 +83,7 @@ export function KpiCard({ label, value, hint, trend, deltaText, deltaTone, onDri
       {/* Паритет с TG StatTile (аудит: «twin» расходился кеглем и базовой линией дельты). */}
       <div className="text-2xs tracking-wide text-muted-foreground">{label}</div>
       <div className="mt-1.5 flex items-baseline gap-2">
-        {onDrill ? (
-          <button
-            type="button"
-            aria-label={`Разбор: ${label}`}
-            title="Подробный разбор"
-            onClick={onDrill}
-            className="rounded text-left text-2xl font-medium tabular-nums tracking-tight transition-colors hover:text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40"
-          >
-            {value}
-          </button>
-        ) : (
-          <div className="text-2xl font-medium tabular-nums tracking-tight">{value}</div>
-        )}
+        <KpiValue size="small" text={value} onDrill={onDrill} drillLabel={label} />
         {deltaText ? (
           <span className={`shrink-0 text-xs font-medium tabular-nums ${deltaColor}`}>{deltaText}</span>
         ) : (
@@ -379,7 +368,11 @@ export function SubscriberMovement({
         {cells.map((c) => (
           <div key={c.label} className={compact ? '' : 'py-1'}>
             <div className={`${compact ? 'text-2xs' : 'text-xs'} tracking-wide text-muted-foreground`}>{c.label}</div>
-            <div className={`${compact ? 'mt-1 text-2xl' : 'mt-2 text-3xl'} font-medium tabular-nums tracking-tight ${c.color}`}>{c.text}</div>
+            <KpiValue
+              size={compact ? 'small' : 'compact'}
+              text={c.text}
+              className={`${compact ? 'mt-1' : 'mt-2'} ${c.color}`}
+            />
             {c.label === 'Чистый прирост' && net.hasPrev && (
               <div className={`${compact ? 'mt-1 text-2xs' : 'mt-2 text-xs'} text-muted-foreground`}>пред. период: {signedNum(net.prev)}</div>
             )}
@@ -440,22 +433,25 @@ export function IgAudienceBody({ ig }: { ig: IgData }) {
   const hasChart = level.length >= 2;
   return (
     <div className="flex h-full min-h-0 flex-col gap-4">
-      <div className="flex min-h-0 items-end gap-4">
-        <div className="flex shrink-0 flex-col items-start gap-1.5 pb-0.5">
-          <div className="text-xs tracking-wide text-muted-foreground">База · {ig.window.days} дн.</div>
-          <div className="flex items-baseline gap-2">
-            {/* leading-[1.15] — канон ChartCardBody hero: leading-none клипал глифы дисплейного
-                начертания в фикс-тайле (глиф-бокс ~4px выше line-box). */}
-            <div className="kpi-accent text-hero font-medium leading-[1.15] tabular-nums tracking-tight">{fmt.kpi(ig.followers)}</div>
-            {net.hasCur && net.cur !== 0 && (
+      {/* Анатомия истории берётся ЦЕЛИКОМ из ChartCardBody, а не собирается тут руками: раньше это
+          была копия его разметки, и копия отстала — число не морфилось при смене периода (не шло
+          через KpiNumber), а «сколько прибавилось» рисовалось голым span вместо канонной подачи.
+          Прибавка идёт в `valueAdornment`, а НЕ в `delta`: это подписчики штуками, а не оценённый
+          процент, и DeltaPill соврал бы про природу числа. */}
+      <div className="min-h-0 flex-1">
+        <ChartCardBody
+          hero
+          label={`База · ${ig.window.days} дн.`}
+          value={fmt.kpi(ig.followers)}
+          valueAdornment={
+            net.hasCur && net.cur !== 0 ? (
               <span className="text-sm font-medium tabular-nums text-muted-foreground">
                 {signedNum(net.cur)}
               </span>
-            )}
-          </div>
-        </div>
-        {hasChart && (
-          <div className="min-h-0 min-w-0 flex-1 self-stretch">
+            ) : undefined
+          }
+        >
+          {hasChart ? (
             <Sparkline
               values={level.map((p) => p.value)}
               labels={level.map((p) => fmtDay(p.day))}
@@ -467,8 +463,8 @@ export function IgAudienceBody({ ig }: { ig: IgData }) {
               formatValue={(n) => fmt.num(Math.round(n))}
               className="h-full min-h-14 w-full"
             />
-          </div>
-        )}
+          ) : null}
+        </ChartCardBody>
       </div>
       <SubscriberMovement follows={ig.pairs.follows} unfollows={ig.pairs.unfollows} net={net} compact />
     </div>

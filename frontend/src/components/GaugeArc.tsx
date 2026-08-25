@@ -1,4 +1,5 @@
 import { cn } from '@/lib/utils';
+import { KpiValue } from '@/components/chartWidget/KpiValue';
 
 /**
  * Спидометр-дуга 240° (волна «слабых виджетов», 2026-08-18; референс Amicro Speedometer Arc,
@@ -68,7 +69,7 @@ export function GaugeArc({
         <circle cx={tip.x} cy={tip.y} r={3.5} fill="hsl(var(--chart-role-primary))" className="transition-[cx,cy] dur-base ease-house" />
       </svg>
       <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-[38%] flex flex-col items-center gap-0.5 text-center">
-        <div className="text-2xl font-medium leading-none tabular-nums tracking-tight text-foreground">{centerValue}</div>
+        <KpiValue size="small" text={centerValue} className="text-foreground" />
         {centerLabel ? <div className="text-2xs text-muted-foreground">{centerLabel}</div> : null}
       </div>
     </div>

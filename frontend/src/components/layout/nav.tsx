@@ -1,7 +1,7 @@
 import { useLocation } from 'react-router-dom';
 import type { IconName } from '@/components/nav-icons';
 import { getMetric } from '@/lib/widgetMetrics';
-import { networkByKey, type Network } from '@/lib/networks';
+import { NETWORKS, networkByKey, type Network } from '@/lib/networks';
 import { useNetworkSelection } from '@/lib/networkStore';
 
 export interface NavLinkDef {
@@ -53,32 +53,33 @@ export const TITLES: Record<string, string> = {
 /** Feed routes open with their own header (the block header on TG; the «Instagram · @handle»
     account header + block headers on IG) — a topbar h1 there reads twice (the name in the corner
     AND on the page), so these routes render no topbar title. Covers both feeds' section paths. */
-export const FEED_ROUTES = [
-  // Home renders its own «Главная» header, so suppress the topbar h1 (a duplicate otherwise).
-  '/home',
-  '/',
-  '/analytics',
-  '/posts',
-  '/mentions',
-  '/instagram',
-  '/instagram/analytics',
-  '/instagram/content',
-  '/instagram/audience',
-  // «МойСклад» analysis pages render their own FeedBlock header exactly like TG/IG, so the layout
-  // must NOT also mount its Atlavue topbar + divider over them (it did, because these routes were
-  // absent here — the shared shell fell through to the default Topbar and rendered twice).
-  '/sklad',
-  '/sklad/clients',
-  '/sklad/channels',
-  // «Метрика» — тот же FeedBlock-заголовок, что у остальных сетей.
-  '/metrika',
-  // /connect рендерит собственную шапку («Подключение источников» + назад-ссылка) — topbar-полоса
-  // «Подключение данных» над ней читалась дублем (владелец).
-  '/connect',
-  // /settings — модальный оверлей поверх фоновой страницы: топбар с «Настройки» рисовал бы
-  // заголовок НАД чужим фоном за диалогом. Заголовок носит сам диалог.
-  '/settings',
-];
+/**
+ * Поверхности, которые НЕСУТ СОБСТВЕННЫЙ заголовок, поэтому общий topbar над ними не монтируется.
+ *
+ * Здесь только то, что не принадлежит ни одной сети: префиксная часть выводится из реестра (см.
+ * isFeedRoute). Ручной список и был багом — TG/IG в нём были, «МойСклад» дописали после того, как
+ * дубль уехал в прод, «Метрику» после этого, а СДЭК повторил всё заново: над «Обзором» висела
+ * надпись «Atlavue» с полосой (владелец, скриншот). Новый источник теперь закрыт самим фактом
+ * регистрации префикса.
+ */
+export const OWN_HEADER_ROUTES = ['/home', '/connect', '/settings'];
+
+/** Ленты сети БЕЗ префикса (Telegram — сеть по умолчанию, её страницы живут в корне). */
+export const DEFAULT_FEED_ROUTES = ['/', '/analytics', '/posts', '/mentions'];
+
+/** Совокупный список — остаётся экспортом ради читаемости тестов и отладки. */
+export const FEED_ROUTES = [...OWN_HEADER_ROUTES, ...DEFAULT_FEED_ROUTES];
+
+/**
+ * Страница сама рисует свой заголовок? Тогда общий topbar (h1 + hairline) не нужен.
+ * Любой путь под префиксом зарегистрированной сети считается её лентой.
+ */
+export function isFeedRoute(pathname: string): boolean {
+  if (FEED_ROUTES.includes(pathname)) return true;
+  return NETWORKS.some(
+    (net) => 'prefix' in net && (pathname === net.prefix || pathname.startsWith(`${net.prefix}/`)),
+  );
+}
 
 /** Topbar h1 for the current route; metric pages resolve to the metric's display name. */
 export function routeTitle(pathname: string): string {

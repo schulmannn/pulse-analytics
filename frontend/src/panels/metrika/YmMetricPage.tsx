@@ -17,6 +17,7 @@ import { PinnedDayPanel } from '@/components/PinnedDayPanel';
 import { ChartSkeleton } from '@/components/ui/dataSkeleton';
 import { ChartTooltip, useHeatmapTip } from '@/components/ChartTooltip';
 import { Skeleton } from '@/components/ui/skeleton';
+import { KpiValue } from '@/components/chartWidget/KpiValue';
 import { fmt, timeAxisFromDayKeys } from '@/lib/format';
 import { lttbDownsample } from '@/lib/downsample';
 import { useExplorerChartHeight } from '@/lib/useExplorerChartHeight';
@@ -582,7 +583,7 @@ function YmHourlyPage() {
         ) : (
           <div className="space-y-4">
             <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-              <span className="text-3xl font-medium leading-none tabular-nums tracking-tight">{fmt.short(q.data.visits_total)}</span>
+              <KpiValue size="compact" text={fmt.short(q.data.visits_total)} />
               <span className="text-xs tracking-wide text-muted-foreground">визитов{peakLabel ? ` · ${peakLabel}` : ''}</span>
             </div>
             {/* hover — канонный ChartTooltip через useHeatmapTip (нативный HTML title убран:

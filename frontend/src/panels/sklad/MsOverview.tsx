@@ -14,6 +14,7 @@ import { BarChart } from '@/components/BarChart';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { ChartSkeleton, TableSkeleton } from '@/components/ui/dataSkeleton';
+import { KpiValue } from '@/components/chartWidget/KpiValue';
 import { DeltaPill } from '@/components/DeltaPill';
 import { RadialShare } from '@/components/RadialShare';
 import { SegmentedControl } from '@/components/SegmentedControl';
@@ -394,21 +395,15 @@ function MsReturnsCardBody({
     <div className="flex h-full min-h-0 flex-col pt-1">
       <div className="shrink-0">
         <div className="flex items-baseline gap-2.5">
-          {onDrill ? (
-            <button
-              type="button"
-              aria-label="Разбор: Возвраты"
-              title="Подробный разбор"
-              onClick={onDrill}
-              className="kpi-accent rounded text-left text-3xl font-medium leading-[1.15] tabular-nums tracking-tight transition-colors hover:text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40"
-            >
-              {fmt.num(data.count)}
-            </button>
-          ) : (
-            <span className="kpi-accent text-3xl font-medium leading-[1.15] tabular-nums tracking-tight">
-              {fmt.num(data.count)}
-            </span>
-          )}
+          {/* Рецепт числа берётся из KpiValue, а не набирается тут: копия отставала от канона —
+              значение шло мимо KpiNumber, то есть не морфилось при смене периода, как у соседних
+              карточек. */}
+          <KpiValue
+            text={fmt.num(data.count)}
+            size="compact"
+            onDrill={onDrill}
+            drillLabel="Возвраты"
+          />
           <DeltaPill delta={delta} />
         </div>
         <div className="mt-1.5 text-2xs text-muted-foreground">{`на ${fmt.short(data.sum)} ₽ ${windowLabel}`}</div>
