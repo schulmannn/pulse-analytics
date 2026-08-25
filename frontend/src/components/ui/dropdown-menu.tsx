@@ -57,16 +57,26 @@ const DropdownMenuSubContent = React.forwardRef<
 DropdownMenuSubContent.displayName =
   DropdownMenuPrimitive.SubContent.displayName;
 
+/**
+ * Слой меню. `page` (по умолчанию) — обычное меню над содержимым страницы; `modal` поднимает его на
+ * ступень `z-modal-popover` (55) для меню, открытого ИЗ ДИАЛОГА: на дефолтных 40 список уезжает под
+ * затемнение диалога и становится некликабельным. Ровно на этой ступени по той же причине живут
+ * ui/select и ui/popover. Прокидывать `z-…` через className нельзя: tailwind-merge не считает
+ * `z-modal-popover` (утилита из нашей шкалы) конфликтом для `z-popover`, и в разметке остаются оба.
+ */
+type MenuLayer = 'page' | 'modal';
+
 const DropdownMenuContent = React.forwardRef<
   React.ElementRef<typeof DropdownMenuPrimitive.Content>,
-  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Content>
->(({ className, sideOffset = 4, ...props }, ref) => (
+  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Content> & { layer?: MenuLayer }
+>(({ className, sideOffset = 4, layer = 'page', ...props }, ref) => (
   <DropdownMenuPrimitive.Portal>
     <DropdownMenuPrimitive.Content
       ref={ref}
       sideOffset={sideOffset}
       className={cn(
-        'z-popover max-h-(--radix-dropdown-menu-content-available-height) min-w-32 overflow-y-auto overflow-x-hidden rounded-xl border border-border bg-popover p-1 text-popover-foreground',
+        layer === 'modal' ? 'z-modal-popover' : 'z-popover',
+        'max-h-(--radix-dropdown-menu-content-available-height) min-w-32 overflow-y-auto overflow-x-hidden rounded-xl border border-border bg-popover p-1 text-popover-foreground',
         'data-[state=open]:animate-in data-[state=open]:ease-house data-[state=closed]:animate-out data-[state=closed]:ease-exit data-[state=closed]:anim-dur-exit data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 motion-reduce:duration-0 origin-(--radix-dropdown-menu-content-transform-origin)',
         className,
       )}

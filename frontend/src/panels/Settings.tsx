@@ -253,7 +253,7 @@ export function Settings() {
                         {active.description}
                       </p>
                     </header>
-                    {renderSection(section, setSection)}
+                    {renderSection(section, setSection, close)}
                   </div>
                 </div>
               </div>
@@ -379,10 +379,11 @@ function ChannelsMeta() {
 function renderSection(
   section: SettingsSectionKey,
   setSection: (section: SettingsSectionKey, moveFocus?: boolean) => void,
+  close: () => void,
 ) {
   switch (section) {
     case 'appearance':
-      return <AppearanceStudio />;
+      return <AppearanceStudio onLeaveSettings={close} />;
     case 'security':
       return <SecuritySection />;
     case 'billing':

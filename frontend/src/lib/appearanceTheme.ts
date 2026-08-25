@@ -350,31 +350,81 @@ export const RADII: readonly RadiusDef[] = [
   { key: 'xl', label: '16', value: '1rem' },
 ];
 
+/**
+ * Стек с системным запасным вариантом того же класса: пока variable-файл едет (или если не доехал),
+ * текст стоит на системном шрифте той же природы, а не на дефолтной засечке браузера.
+ */
+const FALLBACK = {
+  sans: "ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif",
+  serif: "ui-serif, Georgia, 'Times New Roman', Times, serif",
+  mono: "ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace",
+} as const;
+
+const font = (family: string, kind: keyof typeof FALLBACK = 'sans') =>
+  `'${family}', ${FALLBACK[kind]}`;
+
 export interface FontDef {
   key: string;
+  /** Настоящее имя семейства — имя собственное, поэтому НЕ переводится. */
   label: string;
+  /** Полный стек. `null` = канон (Geist), ничего не печатаем. */
   stack: string | null;
+  /** Раздаём сами (`@fontsource-variable`) и грузим по требованию — см. lib/appearanceFonts. */
+  webfont?: true;
+  group: 'Без загрузки' | 'Гротеск' | 'Антиква' | 'Моноширинные';
 }
 
-/** Только системные семейства: ни одного нового файла — бюджет ресурсов остаётся нетронутым. */
+/**
+ * Семейства студии. Все — с КИРИЛЛИЦЕЙ: интерфейс русский, а шрифт без кириллического подмножества
+ * оставил бы почти весь текст на запасном варианте, то есть выбор не работал бы (по этой причине
+ * из списка shadcn выпали Outfit, Figtree, DM Sans, Space Grotesk и прочая латиница).
+ * Каждое семейство — variable-начертание: один файл на всю ось веса вместо четырёх статических.
+ */
 export const FONTS: readonly FontDef[] = [
-  { key: 'canon', label: 'Geist', stack: null },
+  { key: 'canon', label: 'Geist', stack: null, group: 'Без загрузки' },
   {
     key: 'system',
-    label: 'Системный',
+    label: 'System',
     stack: "ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif",
+    group: 'Без загрузки',
+  },
+  { key: 'inter', label: 'Inter', stack: font('Inter Variable'), webfont: true, group: 'Гротеск' },
+  { key: 'manrope', label: 'Manrope', stack: font('Manrope Variable'), webfont: true, group: 'Гротеск' },
+  { key: 'montserrat', label: 'Montserrat', stack: font('Montserrat Variable'), webfont: true, group: 'Гротеск' },
+  { key: 'open-sans', label: 'Open Sans', stack: font('Open Sans Variable'), webfont: true, group: 'Гротеск' },
+  { key: 'roboto', label: 'Roboto', stack: font('Roboto Variable'), webfont: true, group: 'Гротеск' },
+  { key: 'nunito', label: 'Nunito', stack: font('Nunito Variable'), webfont: true, group: 'Гротеск' },
+  { key: 'rubik', label: 'Rubik', stack: font('Rubik Variable'), webfont: true, group: 'Гротеск' },
+  { key: 'raleway', label: 'Raleway', stack: font('Raleway Variable'), webfont: true, group: 'Гротеск' },
+  { key: 'source-sans-3', label: 'Source Sans 3', stack: font('Source Sans 3 Variable'), webfont: true, group: 'Гротеск' },
+  { key: 'ibm-plex-sans', label: 'IBM Plex Sans', stack: font('IBM Plex Sans Variable'), webfont: true, group: 'Гротеск' },
+  { key: 'golos-text', label: 'Golos Text', stack: font('Golos Text Variable'), webfont: true, group: 'Гротеск' },
+  { key: 'lora', label: 'Lora', stack: font('Lora Variable', 'serif'), webfont: true, group: 'Антиква' },
+  {
+    key: 'playfair-display',
+    label: 'Playfair Display',
+    stack: font('Playfair Display Variable', 'serif'),
+    webfont: true,
+    group: 'Антиква',
   },
   {
-    key: 'serif',
-    label: 'Серифный',
-    stack: "ui-serif, Georgia, 'Times New Roman', Times, serif",
+    key: 'jetbrains-mono',
+    label: 'JetBrains Mono',
+    stack: font('JetBrains Mono Variable', 'mono'),
+    webfont: true,
+    group: 'Моноширинные',
   },
   {
-    key: 'mono',
-    label: 'Моноширинный',
-    stack: "ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace",
+    key: 'roboto-mono',
+    label: 'Roboto Mono',
+    stack: font('Roboto Mono Variable', 'mono'),
+    webfont: true,
+    group: 'Моноширинные',
   },
 ];
+
+export const fontDef = (key: string): FontDef | undefined =>
+  FONTS.find((item) => item.key === key);
 
 // ── Сборка ────────────────────────────────────────────────────────────────────────────────────
 export type Theme = 'light' | 'dark';

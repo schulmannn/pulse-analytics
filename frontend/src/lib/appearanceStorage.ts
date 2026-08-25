@@ -1,3 +1,5 @@
+import { useSyncExternalStore } from 'react';
+
 /**
  * Хранилище пользовательской темы — та её часть, которая ОБЯЗАНА лежать в оболочке.
  *
@@ -106,4 +108,47 @@ export function setAppearanceSyncHook(hook: (() => void) | null): void {
 
 export function notifyAppearanceChanged(): void {
   syncHook?.();
+}
+
+// ── Студия поверх приложения ──────────────────────────────────────────────────────────────────
+/**
+ * Открыта ли левая панель студии. Состояние живёт в localStorage, а НЕ в URL: студию открывают
+ * ради того, чтобы ходить по страницам и смотреть, как перекрашиваются графики, — параметр запроса
+ * терялся бы на первом же переходе по ссылке сайдбара. Плата за это — панель не разделяется
+ * ссылкой; сам выбор темы при этом синхронизируется аккаунтом, так что делиться нечем.
+ */
+const STUDIO_KEY = 'pulse_theme_studio';
+let studioOpen: boolean | null = null;
+const studioListeners = new Set<() => void>();
+
+export function isThemeStudioOpen(): boolean {
+  if (studioOpen == null) {
+    try {
+      studioOpen = localStorage.getItem(STUDIO_KEY) === '1';
+    } catch {
+      studioOpen = false;
+    }
+  }
+  return studioOpen;
+}
+
+export function setThemeStudioOpen(open: boolean): void {
+  if (isThemeStudioOpen() === open) return;
+  studioOpen = open;
+  try {
+    if (open) localStorage.setItem(STUDIO_KEY, '1');
+    else localStorage.removeItem(STUDIO_KEY);
+  } catch {
+    /* localStorage может быть недоступен — панель тогда живёт до перезагрузки */
+  }
+  for (const listener of studioListeners) listener();
+}
+
+export function subscribeThemeStudio(listener: () => void): () => void {
+  studioListeners.add(listener);
+  return () => studioListeners.delete(listener);
+}
+
+export function useThemeStudioOpen(): boolean {
+  return useSyncExternalStore(subscribeThemeStudio, isThemeStudioOpen, () => false);
 }
