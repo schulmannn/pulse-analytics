@@ -1,5 +1,6 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
+import { toast } from 'sonner';
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
 import { ShareRows } from '@/components/ShareRows';
@@ -8,12 +9,17 @@ import { useSelectedChannel } from '@/lib/channel-context';
 import { setSavedFilter, useSavedFilter } from '@/lib/widgetPrefsStore';
 import {
   CDEK_CANON_STATUSES,
+  CdekProductFilter,
   CdekStatusFilter,
+  cdekProductFilterKey,
   cdekStatusFilterKey,
   cdekStatusInclude,
   normalizeCdekStatuses,
+  normalizeCdekProducts,
+  productFilterCaption,
   statusFilterCaption,
   toastStatusFilterSaved,
+  type CdekProductOption,
 } from '@/panels/cdek/cdekStatusFilter';
 import { PeriodChips } from '@/components/PeriodChips';
 import { SourceIdentity } from '@/components/SourceIdentity';
@@ -211,8 +217,24 @@ function CdekSeriesPage({ def }: { def: SeriesDef }) {
   const include = cdekStatusInclude(statuses);
   const caption = statusFilterCaption(statuses);
 
-  const series = useCdekSeries(period, include);
-  const summary = useCdekSummary(period, include);
+  // Товары — вторая ось того же вопроса «что считать». Список берётся из разбивки по товарам,
+  // которая ФИЛЬТР ИГНОРИРУЕТ (иначе выбранное было бы единственным, что можно выбрать).
+  const productKey = cdekProductFilterKey(channelId);
+  const savedProductsRaw = useSavedFilter(productKey);
+  const savedProducts = useMemo(() => normalizeCdekProducts(savedProductsRaw), [savedProductsRaw]);
+  const [pickedProducts, setPickedProducts] = useState<string[] | null>(null);
+  const products = pickedProducts ?? savedProducts;
+  const catalogue = useCdekBreakdown(period, 'product', 'all', 200);
+  const productOptions: CdekProductOption[] = useMemo(
+    () => (catalogue.data?.rows ?? [])
+      .filter((row): row is typeof row & { key: string } => typeof row.key === 'string' && row.key !== '')
+      .map((row) => ({ id: row.key, name: row.title ?? row.article ?? row.key })),
+    [catalogue.data?.rows],
+  );
+  const productCaption = productFilterCaption(products, productOptions);
+
+  const series = useCdekSeries(period, include, undefined, products);
+  const summary = useCdekSummary(period, include, products);
 
   if (series.isPending || summary.isPending) {
     return (
@@ -302,7 +324,21 @@ function CdekSeriesPage({ def }: { def: SeriesDef }) {
             toastStatusFilterSaved(ids);
           }}
         />
-        {caption && <p className="text-xs text-muted-foreground">{caption}</p>}
+        <CdekProductFilter
+          options={productOptions}
+          selected={products}
+          saved={savedProducts}
+          onChange={setPickedProducts}
+          onSave={(ids) => {
+            setSavedFilter(productKey, normalizeCdekProducts(ids));
+            toast(ids.length > 0 ? 'Фильтр товаров сохранён' : 'Фильтр товаров сброшен');
+          }}
+        />
+        {(caption || productCaption) && (
+          <p className="text-xs text-muted-foreground">
+            {[caption, productCaption].filter(Boolean).join(' · ')}
+          </p>
+        )}
         {values.length < 2 ? (
           <EmptyState compact size="chart" title="Недостаточно дней для графика за окно." />
         ) : kind === 'bar' ? (

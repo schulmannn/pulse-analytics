@@ -257,26 +257,52 @@ export type CdekBreakdown = z.infer<typeof CdekBreakdownSchema>;
  */
 export type CdekInclude = 'revenue' | 'completed' | 'all' | `status:${string}`;
 
-export function useCdekSummary(period: MsPeriod, include: CdekInclude = 'revenue') {
-  const { channelId } = useSelectedChannel();
-  return useQuery({
-    enabled: channelId != null,
-    queryKey: qk.cdekSummary.window(channelId, period, include),
-    retry: false,
-    queryFn: ({ signal }) =>
-      apiGet(`/api/cdek/summary?${msPeriodQuery(period)}&include=${include}`, CdekSummarySchema, { signal, channelId }),
-  });
-}
+/**
+ * Набор товаров фильтра в параметр запроса. Сортируется здесь, а не только на сервере: ключ кэша
+ * строится на клиенте, и `a,b` с `b,a` иначе стали бы двумя разными записями одного и того же.
+ * Пустой набор — отсутствие параметра, а не «ноль товаров».
+ */
+const productsParam = (products?: readonly string[]): string => {
+  const picked = [...new Set(products ?? [])].filter(Boolean).sort();
+  return picked.length > 0 ? `&products=${picked.map(encodeURIComponent).join(',')}` : '';
+};
 
-export function useCdekSeries(period: MsPeriod, include: CdekInclude = 'revenue', grain?: string) {
+const productsKey = (products?: readonly string[]): string =>
+  [...new Set(products ?? [])].filter(Boolean).sort().join(',');
+
+export function useCdekSummary(
+  period: MsPeriod,
+  include: CdekInclude = 'revenue',
+  products?: readonly string[],
+) {
   const { channelId } = useSelectedChannel();
   return useQuery({
     enabled: channelId != null,
-    queryKey: qk.cdekSeries.window(channelId, period, include, grain ?? 'auto'),
+    queryKey: qk.cdekSummary.window(channelId, period, include, productsKey(products)),
     retry: false,
     queryFn: ({ signal }) =>
       apiGet(
-        `/api/cdek/series?${msPeriodQuery(period)}&include=${include}${grain ? `&grain=${grain}` : ''}`,
+        `/api/cdek/summary?${msPeriodQuery(period)}&include=${include}${productsParam(products)}`,
+        CdekSummarySchema,
+        { signal, channelId },
+      ),
+  });
+}
+
+export function useCdekSeries(
+  period: MsPeriod,
+  include: CdekInclude = 'revenue',
+  grain?: string,
+  products?: readonly string[],
+) {
+  const { channelId } = useSelectedChannel();
+  return useQuery({
+    enabled: channelId != null,
+    queryKey: qk.cdekSeries.window(channelId, period, include, grain ?? 'auto', productsKey(products)),
+    retry: false,
+    queryFn: ({ signal }) =>
+      apiGet(
+        `/api/cdek/series?${msPeriodQuery(period)}&include=${include}${grain ? `&grain=${grain}` : ''}${productsParam(products)}`,
         CdekSeriesSchema,
         { signal, channelId },
       ),

@@ -72,11 +72,34 @@ const REVENUE_FILTER = `
      ELSE o.status NOT IN ('cancel', 'return')
    END)`;
 
-const SALE_ROWS = `
+/**
+ * Строки продаж окна. Функция ОТ ИНДЕКСА плейсхолдера, а не константа: фильтр по товарам должен
+ * стоять в общем фрагменте, но у каждого запроса свой хвост параметров (grain у ряда, dim у
+ * разбивки). Двигать общий префикс `windowParams` ради восьмого параметра значило бы перенумеровать
+ * плейсхолдеры сразу в четырёх запросах — а ошибка там тихая: параметр молча уедет не в тот слот.
+ * Поэтому индекс приходит снаружи, а каждый вызывающий дописывает массив товаров последним.
+ *
+ * Фильтр режет СТРОКИ ПОЗИЦИЙ, а не заказы: тогда выручка — это сумма выбранных товаров, «Заказы»
+ * — заказы, в которых они есть, а «Штук» — их штуки. Все три числа отвечают на один вопрос.
+ */
+const saleRows = (productsIdx) => `
   FROM cdek_orders o
   JOIN cdek_order_items i ON i.channel_id = o.channel_id AND i.order_id = o.order_id
   CROSS JOIN b
- WHERE o.channel_id = $1 AND o.kind = 'sale'`;
+ WHERE o.channel_id = $1 AND o.kind = 'sale'
+   AND ($${productsIdx}::text[] IS NULL OR i.product_id = ANY($${productsIdx}))`;
+
+/** Ограничение набора товаров: столько влезает в осмысленный выбор, дальше это уже «все». */
+const PRODUCT_FILTER_MAX = 50;
+
+/** Массив товаров для параметра запроса; null — фильтра нет (а не «ноль товаров»). */
+function normalizeCdekProducts(raw) {
+  const list = Array.isArray(raw) ? raw : typeof raw === 'string' && raw ? raw.split(',') : [];
+  const picked = [...new Set(list.map((v) => String(v).trim()).filter(Boolean))]
+    .slice(0, PRODUCT_FILTER_MAX)
+    .sort();
+  return picked.length > 0 ? picked : null;
+}
 
 const INCLUDE_MODES = new Set(['revenue', 'completed', 'all']);
 /** Статусы заказа, известные разбору выгрузки. Произвольный набор строится ТОЛЬКО из них. */
@@ -388,7 +411,7 @@ function createCdekRepo({ pool, enabled, transaction, ensureExternalSource, getA
        r AS (
          SELECT o.order_id, o.status, i.amount_kopecks, i.qty, ${WINDOW_CASE} AS win,
                 ${REVENUE_FILTER} AS counts
-         ${SALE_ROWS}
+         ${saleRows(8)}
        )
        SELECT win,
               COALESCE(sum(amount_kopecks) FILTER (WHERE counts), 0) AS revenue_kopecks,
@@ -398,7 +421,7 @@ function createCdekRepo({ pool, enabled, transaction, ensureExternalSource, getA
               count(DISTINCT order_id) FILTER (WHERE status = 'cancel') AS orders_cancelled,
               count(DISTINCT order_id) FILTER (WHERE status = 'return') AS orders_returned
          FROM r WHERE win IS NOT NULL GROUP BY win`,
-      windowParams(channelId, opts));
+      [...windowParams(channelId, opts), normalizeCdekProducts(opts.products)]);
     const pick = (win) => rows.find((x) => Number(x.win) === win) || null;
     return { current: pick(1), previous: pick(0) };
   }
@@ -416,14 +439,14 @@ function createCdekRepo({ pool, enabled, transaction, ensureExternalSource, getA
        r AS (
          SELECT o.order_id, i.amount_kopecks, i.qty, ${WINDOW_CASE} AS win,
                 to_char(date_trunc($8, o.created_ts AT TIME ZONE $6), 'YYYY-MM-DD') AS day
-         ${SALE_ROWS} AND ${REVENUE_FILTER}
+         ${saleRows(9)} AND ${REVENUE_FILTER}
        )
        SELECT win, day,
               COALESCE(sum(amount_kopecks), 0) AS revenue_kopecks,
               count(DISTINCT order_id) AS orders,
               COALESCE(sum(qty), 0) AS items
          FROM r WHERE win IS NOT NULL GROUP BY win, day ORDER BY day`,
-      [...windowParams(channelId, opts), grain]);
+      [...windowParams(channelId, opts), grain, normalizeCdekProducts(opts.products)]);
     return {
       grain,
       current: rows.filter((r) => Number(r.win) === 1),
@@ -450,7 +473,7 @@ function createCdekRepo({ pool, enabled, transaction, ensureExternalSource, getA
                   WHEN 'carrier' THEN COALESCE(o.carrier, '')
                   ELSE COALESCE(o.channel, '')
                 END AS key
-         ${SALE_ROWS} AND ${REVENUE_FILTER}
+         ${saleRows(9)} AND ${REVENUE_FILTER}
        )
        SELECT r.key,
               p.title, p.article, p.sku,
@@ -473,7 +496,7 @@ function createCdekRepo({ pool, enabled, transaction, ensureExternalSource, getA
         GROUP BY r.key, p.title, p.article, p.sku
         ORDER BY revenue_kopecks DESC, r.key
         LIMIT ${BREAKDOWN_MAX_GROUPS + 1}`,
-      [...windowParams(channelId, opts), dim]);
+      [...windowParams(channelId, opts), dim, normalizeCdekProducts(opts.products)]);
     return rows;
   }
 
@@ -632,4 +655,4 @@ function createCdekRepo({ pool, enabled, transaction, ensureExternalSource, getA
   };
 }
 
-module.exports = { createCdekRepo, normalizeCdekInclude, ORDER_STATUSES };
+module.exports = { createCdekRepo, normalizeCdekInclude, normalizeCdekProducts, ORDER_STATUSES };
