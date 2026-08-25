@@ -1067,7 +1067,7 @@ function SortButton({ label, active, order, onClick }: { label: string; active: 
           'text-2xs transition-opacity',
           active
             ? 'text-foreground'
-            : 'text-ink3/60 opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100',
+            : 'text-ink3 opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100',
         )}
       >
         {active ? (order === 'desc' ? '↓' : '↑') : '↕'}

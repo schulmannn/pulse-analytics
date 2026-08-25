@@ -265,6 +265,12 @@ Hairlines are `--border`. Soft over-surface tints use a small, deliberate opacit
 arbitrary values: `foreground / 0.06` (hover wash), `ink3 / 0.25` (edit-mode card edge),
 `white / 0.06` (dark card edge). Keep to these; don't invent new alphas per component.
 
+**Never on ink.** The set above is for SURFACES. An invented alpha on TEXT quietly drops contrast
+below the gate that checks the token: `text-ink3/60` on the inactive sort arrow measured 2.43:1 in
+light and 2.70:1 in dark while `--ink3` itself passes 4.5 — the token was fine, the alpha was not.
+If ink must be quieter, pick a quieter ink token; there is no legal ink alpha.
+`e2e/contrast-rendered.spec.ts` now measures this on the rendered page.
+
 ## Icon buttons
 
 Header affordances (expand / menu / remove) share **one** quiet circular shape: `rounded-full` + hover
@@ -566,6 +572,12 @@ Run from `frontend/`:
 
 - `node scripts/contrast-tokens.mjs` — WCAG contrast for the colour tokens (text 4.5 / non-text 3.0;
   hairlines warn-only). Pairs with the axe `e2e/a11y-contrast.spec.ts` gate (rendered text).
+- `e2e/contrast-rendered.spec.ts` — the same question asked of the RENDERED page, both themes,
+  14 routes. It exists because axe has two structural blind spots: it skips `aria-hidden` elements
+  entirely (visible affordance glyphs are never checked) and it reports `incomplete` — not a
+  violation — when the background is translucent, which the axe spec silently drops. Here the
+  background is composited through a canvas (Tailwind emits `oklab(...)` for alpha utilities, which
+  no naive parser reads), so a translucent surface gets a real verdict instead of a shrug.
 - `npm run lint:motion` (`node scripts/design-motion-lint.mjs`) — **gated in CI** (the `frontend` job,
   ahead of the suite). Hard-fails on an inlined house easing, magic `text-[Npx]`, arbitrary
   `duration-[…]/ease-[…]/delay-[…]`, off-ladder `duration-300`/`ease-out`, `transition-all`,

@@ -672,7 +672,7 @@ function SortButton({
       className={cn('ml-auto inline-flex items-center gap-1 tabular-nums transition-colors', active ? 'text-primary' : 'hover:text-foreground')}
     >
       {label}
-      <span aria-hidden="true" className={cn('text-2xs', !active && 'text-ink3/60')}>
+      <span aria-hidden="true" className={cn('text-2xs', !active && 'text-ink3')}>
         {active ? (order === 'desc' ? '↓' : '↑') : '↕'}
       </span>
     </button>
