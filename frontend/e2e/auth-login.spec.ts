@@ -95,7 +95,9 @@ test('logged-out root stays on the public Landing instead of redirecting to /log
   });
   await page.goto('/');
 
-  await expect(page.getByRole('heading', { name: 'Atlavue' })).toBeVisible();
+  // Маркер лендинга — его собственный h1. Раньше им был заголовок «Atlavue», но на минимальной
+  // чёрной версии имя бренда живёт в топбаре-пилюле ссылкой, а не заголовком.
+  await expect(page.getByRole('heading', { name: 'Вся аналитика в одном месте' })).toBeVisible();
   await expect(page).toHaveURL(/\/$/);
 });
 
