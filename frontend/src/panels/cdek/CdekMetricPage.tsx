@@ -164,6 +164,19 @@ function CdekMetricShell({
       <MetricColumns
         rail={
           <>
+            {/* Порядок — как у Steep: сначала «из чего сложилось» и «что считаем», и только потом
+                «с чем сравниваем» и «чем рисуем». У нас он был буквально перевёрнут: сравнение
+                стояло первым, фильтры последними (замечено владельцем по кадру). */}
+            {split && (
+              <RailSection title="Разбивка" variant="row" icon={SplitGlyph} action={splitAction}>
+                {split}
+              </RailSection>
+            )}
+            {filters && (
+              <RailSection title="Фильтры" variant="row" icon={filterIcon} action={filterAction}>
+                {filters}
+              </RailSection>
+            )}
             <RailSection title="Сравнение" variant="row" icon={CompareGlyph}>
               {comparison ?? (
                 <p className="text-xs leading-relaxed text-muted-foreground">
@@ -174,21 +187,6 @@ function CdekMetricShell({
             {view && (
               <RailSection title="Вид" variant="row" icon={ViewGlyph}>
                 {view}
-              </RailSection>
-            )}
-            {split && (
-              <RailSection
-                title="Разбивка"
-                variant="row"
-                icon={SplitGlyph}
-                action={splitAction}
-              >
-                {split}
-              </RailSection>
-            )}
-            {filters && (
-              <RailSection title="Фильтры" variant="row" icon={filterIcon} action={filterAction}>
-                {filters}
               </RailSection>
             )}
             <Link
