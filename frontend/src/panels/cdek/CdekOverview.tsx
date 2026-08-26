@@ -29,9 +29,12 @@ import { useSelectedChannel } from '@/lib/channel-context';
 import { useSavedFilter } from '@/lib/widgetPrefsStore';
 import {
   CDEK_CANON_STATUSES,
+  cdekChannelFilterKey,
   cdekProductFilterKey,
   cdekStatusFilterKey,
   cdekStatusInclude,
+  channelFilterCaption,
+  normalizeCdekChannels,
   normalizeCdekProducts,
   normalizeCdekStatuses,
   productFilterCaption,
@@ -170,14 +173,19 @@ export function CdekOverview() {
   const include = cdekStatusInclude(savedStatuses.length > 0 ? savedStatuses : CDEK_CANON_STATUSES);
   const savedProductsRaw = useSavedFilter(cdekProductFilterKey(channelId));
   const pickedProducts = useMemo(() => normalizeCdekProducts(savedProductsRaw), [savedProductsRaw]);
+  const savedChannelsRaw = useSavedFilter(cdekChannelFilterKey(channelId));
+  const salesChannels = useMemo(() => normalizeCdekChannels(savedChannelsRaw), [savedChannelsRaw]);
 
-  const summary = useCdekSummary(period, include, pickedProducts);
-  const series = useCdekSeries(period, include, undefined, pickedProducts);
+  const summary = useCdekSummary(period, include, pickedProducts, salesChannels);
+  const series = useCdekSeries(period, include, undefined, pickedProducts, salesChannels);
+  // Кольцо каналов фильтр по каналам ИГНОРИРУЕТ: отфильтруй его выбранными — и оно покажет ровно
+  // их, а вопрос «на кого мы завязаны» останется без ответа (сервер снимает фильтр сам, но ключ
+  // кэша обязан это отражать, иначе один и тот же ответ лёг бы под разные ключи).
   const channels = useCdekBreakdown(period, 'channel', include, 12, pickedProducts);
   // Разбивка ПО СТАТУСАМ остаётся на 'all': отфильтруй её выбранными статусами — и она покажет
   // ровно то, что сама же отобрала. Фильтр товаров ей при этом осмыслен и применяется.
-  const statuses = useCdekBreakdown(period, 'status', 'all', 12, pickedProducts);
-  const products = useCdekBreakdown(period, 'product', include, 10, pickedProducts);
+  const statuses = useCdekBreakdown(period, 'status', 'all', 12, pickedProducts, salesChannels);
+  const products = useCdekBreakdown(period, 'product', include, 10, pickedProducts, salesChannels);
 
   const [channelMetric, setChannelMetric] = useState<'revenue' | 'orders'>('revenue');
   const [statusMetric, setStatusMetric] = useState<'orders' | 'revenue'>('orders');
@@ -213,6 +221,7 @@ export function CdekOverview() {
   const filterCaption = [
     statusFilterCaption(savedStatuses),
     productFilterCaption(pickedProducts, productNames),
+    channelFilterCaption(salesChannels),
   ]
     .filter(Boolean)
     .join(' · ') || undefined;

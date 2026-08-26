@@ -227,3 +227,44 @@ test('фильтр статусов доезжает до SQL седьмым п�
     assert.equal(q.params[6], 'status:cancel,complete');
   }
 });
+
+/**
+ * Плейсхолдеры и параметры обязаны сходиться ЧИСЛОМ — иначе Postgres падает на bind, а до него
+ * ошибка ничем себя не выдаёт. Общий фрагмент `saleRows` берёт индексы АРГУМЕНТАМИ, и у трёх
+ * читающих запросов хвосты параметров разные: сдвинешь один — молча уедет не тот слот, о чём
+ * предупреждает комментарий в самом фрагменте. Тест закрывает ровно это, и без базы.
+ */
+test('читающие запросы: число плейсхолдеров совпадает с числом параметров', async () => {
+  const { repo, queries } = repoWith({ accessible: true });
+  const opts = {
+    from: '2026-03-01', to: '2026-03-31', tz: 'Europe/Moscow', include: 'revenue',
+    products: 'p1,p2', channels: ['own', 'ozon'], grain: 'day', dim: 'channel',
+  };
+  await repo.getCdekSummaryForActor(5, { uid: 1 }, opts);
+  await repo.getCdekSeriesForActor(5, { uid: 1 }, opts);
+  await repo.getCdekBreakdownForActor(5, { uid: 1 }, opts);
+
+  assert.equal(queries.length, 3, 'три чтения — три запроса');
+  for (const { sql, params } of queries) {
+    const highest = Math.max(...[...sql.matchAll(/\$(\d+)/g)].map((m) => Number(m[1])));
+    assert.equal(highest, params.length,
+      `запрос использует $${highest}, а параметров передано ${params.length}`);
+  }
+});
+
+test('фильтр по каналу продаж доезжает до SQL последним параметром', async () => {
+  const { repo, queries } = repoWith({ accessible: true });
+  await repo.getCdekSummaryForActor(5, { uid: 1 }, {
+    from: '2026-03-01', to: '2026-03-31', tz: 'Europe/Moscow', channels: ['ozon', 'own'],
+  });
+  const { sql, params } = queries[0];
+  assert.match(sql, /COALESCE\(o\.channel, ''\) = ANY/, 'условие по каналу есть в запросе');
+  assert.deepEqual(params[params.length - 1], ['ozon', 'own']);
+});
+
+test('без фильтра канал не сужается — параметр null, а не пустой массив', async () => {
+  // Пустой массив дал бы `= ANY('{}')` — ноль строк, то есть «продаж нет» вместо «фильтра нет».
+  const { repo, queries } = repoWith({ accessible: true });
+  await repo.getCdekSummaryForActor(5, { uid: 1 }, { from: '2026-03-01', to: '2026-03-31' });
+  assert.equal(queries[0].params[queries[0].params.length - 1], null);
+});

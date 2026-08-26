@@ -9,8 +9,10 @@ import { useSelectedChannel } from '@/lib/channel-context';
 import { setSavedFilter, useSavedFilter } from '@/lib/widgetPrefsStore';
 import {
   CDEK_CANON_STATUSES,
+  CdekChannelFilter,
   CdekProductFilter,
   CdekStatusFilter,
+  cdekChannelFilterKey,
   cdekProductFilterKey,
   cdekStatusFilterKey,
   cdekStatusInclude,
@@ -18,6 +20,9 @@ import {
   normalizeCdekProducts,
   productFilterCaption,
   statusFilterCaption,
+  channelFilterCaption,
+  normalizeCdekChannels as normChannels,
+  sameCdekChannels,
   sameCdekProducts,
   sameCdekStatuses,
   toastStatusFilterSaved,
@@ -261,8 +266,16 @@ function CdekSeriesPage({ def }: { def: SeriesDef }) {
   );
   const productCaption = productFilterCaption(products, productOptions);
 
-  const series = useCdekSeries(period, include, undefined, products);
-  const summary = useCdekSummary(period, include, products);
+  // Третья ось того же вопроса: статус — КАК закончился заказ, товар — ЧТО продано, канал — ГДЕ.
+  const channelKey = cdekChannelFilterKey(channelId);
+  const savedChannelsRaw = useSavedFilter(channelKey);
+  const savedChannels = useMemo(() => normChannels(savedChannelsRaw), [savedChannelsRaw]);
+  const [pickedChannels, setPickedChannels] = useState<string[] | null>(null);
+  const salesChannels = pickedChannels ?? savedChannels;
+  const channelCaption = channelFilterCaption(salesChannels);
+
+  const series = useCdekSeries(period, include, undefined, products, salesChannels);
+  const summary = useCdekSummary(period, include, products, salesChannels);
 
   if (series.isPending || summary.isPending) {
     return (
@@ -321,10 +334,14 @@ function CdekSeriesPage({ def }: { def: SeriesDef }) {
   // ВМЕСТЕ с фильтрами: она объясняет именно их состояние, а не график сам по себе.
   // Одна кнопка на весь выбор. Обе оси отвечают на ОДИН вопрос «что считать», и раздельное
   // сохранение заставляло нажимать дважды, а пропустив второе — увезти на «Обзор» половину выбора.
-  const dirty = !sameCdekStatuses(statuses, saved) || !sameCdekProducts(products, savedProducts);
+  const dirty =
+    !sameCdekStatuses(statuses, saved) ||
+    !sameCdekProducts(products, savedProducts) ||
+    !sameCdekChannels(salesChannels, savedChannels);
   const saveFilters = () => {
     setSavedFilter(filterKey, normalizeCdekStatuses(statuses));
     setSavedFilter(productKey, normalizeCdekProducts(products));
+    setSavedFilter(channelKey, normChannels(salesChannels));
     toastStatusFilterSaved(statuses);
   };
 
@@ -332,9 +349,10 @@ function CdekSeriesPage({ def }: { def: SeriesDef }) {
     <div className="space-y-3">
       <CdekStatusFilter selected={statuses} onChange={setSelected} />
       <CdekProductFilter options={productOptions} selected={products} onChange={setPickedProducts} />
-      {(caption || productCaption) && (
+      <CdekChannelFilter selected={salesChannels} onChange={setPickedChannels} />
+      {(caption || productCaption || channelCaption) && (
         <p className="text-xs leading-relaxed text-muted-foreground">
-          {[caption, productCaption].filter(Boolean).join(' · ')}
+          {[caption, productCaption, channelCaption].filter(Boolean).join(' · ')}
         </p>
       )}
     </div>

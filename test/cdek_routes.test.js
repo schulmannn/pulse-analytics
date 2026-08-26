@@ -416,3 +416,34 @@ test('набор ровно по потолку проходит целиком'
   assert.equal(res.status, 200);
   assert.equal(seen[0].length, 50);
 });
+
+test('незнакомый канал продаж — отказ, а не пустой график', async () => {
+  // «Wildberrys» с опечаткой молча дал бы ноль строк, неотличимый от «продаж не было».
+  let reached = false;
+  const { routes } = build({ db: { getCdekSummaryForActor: async () => { reached = true; return { current: null, previous: null }; } } });
+  const res = await call(routes, 'GET /api/cdek/summary', { query: { days: '30', sales_channels: 'wildberrys' } });
+  assert.equal(res.status, 400);
+  assert.match(res.body.error, /канал продаж/i);
+  assert.equal(reached, false);
+});
+
+test('известные каналы доезжают до репозитория набором', async () => {
+  const seen = [];
+  const { routes } = build({
+    db: { getCdekSeriesForActor: async (_id, _actor, opts) => { seen.push(opts.channels); return { grain: 'day', current: [], previous: [] }; } },
+  });
+  const res = await call(routes, 'GET /api/cdek/series', { query: { days: '30', sales_channels: 'ozon,own' } });
+  assert.equal(res.status, 200);
+  assert.deepEqual(seen[0], ['own', 'ozon'], 'набор нормализован и отсортирован');
+});
+
+test('выбраны все каналы — это «фильтра нет», а не длинный список', async () => {
+  const seen = [];
+  const { routes } = build({
+    db: { getCdekSeriesForActor: async (_id, _actor, opts) => { seen.push(opts.channels); return { grain: 'day', current: [], previous: [] }; } },
+  });
+  await call(routes, 'GET /api/cdek/series', {
+    query: { days: '30', sales_channels: 'other,own,ozon,wildberries,yandex_market' },
+  });
+  assert.equal(seen[0], null, 'полный набор сворачивается в null — короче строка, устойчивее кэш');
+});

@@ -1,5 +1,7 @@
 'use strict';
 
+const { SALES_CHANNELS } = require('../domain/cdekImport');
+
 /* ── СДЭК Fulfillment: источник, импорты и архив заказов (миграция 038) ─────────────────────────
    Первый источник без API: наполняется ручной загрузкой Excel, поэтому здесь нет ни токена, ни
    крона — только приём файла и идемпотентная запись его содержимого.
@@ -82,12 +84,36 @@ const REVENUE_FILTER = `
  * Фильтр режет СТРОКИ ПОЗИЦИЙ, а не заказы: тогда выручка — это сумма выбранных товаров, «Заказы»
  * — заказы, в которых они есть, а «Штук» — их штуки. Все три числа отвечают на один вопрос.
  */
-const saleRows = (productsIdx) => `
+const saleRows = (productsIdx, channelsIdx) => `
   FROM cdek_orders o
   JOIN cdek_order_items i ON i.channel_id = o.channel_id AND i.order_id = o.order_id
   CROSS JOIN b
  WHERE o.channel_id = $1 AND o.kind = 'sale'
-   AND ($${productsIdx}::text[] IS NULL OR i.product_id = ANY($${productsIdx}))`;
+   AND ($${productsIdx}::text[] IS NULL OR i.product_id = ANY($${productsIdx}))
+   AND ($${channelsIdx}::text[] IS NULL OR COALESCE(o.channel, '') = ANY($${channelsIdx}))`;
+
+/**
+ * Каналы продаж, известные разбору выгрузки. Список ВЫВОДИТСЯ из карты импорта, а не переписан
+ * рядом: появится новый маркетплейс — фильтр узнает о нём вместе с импортом, а не через полгода.
+ * `other` в карте нет по построению (это ветка «всё остальное»), поэтому дописывается явно.
+ */
+const SALES_CHANNEL_KEYS = [...new Set([...Object.values(SALES_CHANNELS), 'other'])].sort();
+
+/**
+ * Набор каналов продаж для запроса; null — фильтра нет.
+ *
+ * Незнакомый ключ — ОШИБКА, а не повод молча вернуть ноль строк: «Wildberrys» с опечаткой дал бы
+ * пустой график, неотличимый от «продаж не было». Возвращаем признак, роут отвечает отказом —
+ * тот же приём, что у потолка товаров и у каналов МойСклада.
+ */
+function normalizeCdekChannels(raw) {
+  const list = Array.isArray(raw) ? raw : typeof raw === 'string' && raw ? raw.split(',') : [];
+  const picked = [...new Set(list.map((v) => String(v).trim()).filter(Boolean))].sort();
+  if (picked.length === 0) return null;
+  if (picked.some((key) => !SALES_CHANNEL_KEYS.includes(key))) return { unknown: true };
+  // Выбраны все — это «фильтра нет»: короче строка, устойчивее кэш (тот же приём у статусов).
+  return picked.length === SALES_CHANNEL_KEYS.length ? null : picked;
+}
 
 /** Ограничение набора товаров: столько влезает в осмысленный выбор, дальше это уже «все». */
 const PRODUCT_FILTER_MAX = 50;
@@ -418,7 +444,7 @@ function createCdekRepo({ pool, enabled, transaction, ensureExternalSource, getA
        r AS (
          SELECT o.order_id, o.status, i.amount_kopecks, i.qty, ${WINDOW_CASE} AS win,
                 ${REVENUE_FILTER} AS counts
-         ${saleRows(8)}
+         ${saleRows(8, 9)}
        )
        SELECT win,
               COALESCE(sum(amount_kopecks) FILTER (WHERE counts), 0) AS revenue_kopecks,
@@ -428,7 +454,7 @@ function createCdekRepo({ pool, enabled, transaction, ensureExternalSource, getA
               count(DISTINCT order_id) FILTER (WHERE status = 'cancel') AS orders_cancelled,
               count(DISTINCT order_id) FILTER (WHERE status = 'return') AS orders_returned
          FROM r WHERE win IS NOT NULL GROUP BY win`,
-      [...windowParams(channelId, opts), normalizeCdekProducts(opts.products)]);
+      [...windowParams(channelId, opts), normalizeCdekProducts(opts.products), opts.channels ?? null]);
     const pick = (win) => rows.find((x) => Number(x.win) === win) || null;
     return { current: pick(1), previous: pick(0) };
   }
@@ -446,14 +472,14 @@ function createCdekRepo({ pool, enabled, transaction, ensureExternalSource, getA
        r AS (
          SELECT o.order_id, i.amount_kopecks, i.qty, ${WINDOW_CASE} AS win,
                 to_char(date_trunc($8, o.created_ts AT TIME ZONE $6), 'YYYY-MM-DD') AS day
-         ${saleRows(9)} AND ${REVENUE_FILTER}
+         ${saleRows(9, 10)} AND ${REVENUE_FILTER}
        )
        SELECT win, day,
               COALESCE(sum(amount_kopecks), 0) AS revenue_kopecks,
               count(DISTINCT order_id) AS orders,
               COALESCE(sum(qty), 0) AS items
          FROM r WHERE win IS NOT NULL GROUP BY win, day ORDER BY day`,
-      [...windowParams(channelId, opts), grain, normalizeCdekProducts(opts.products)]);
+      [...windowParams(channelId, opts), grain, normalizeCdekProducts(opts.products), opts.channels ?? null]);
     return {
       grain,
       current: rows.filter((r) => Number(r.win) === 1),
@@ -480,7 +506,7 @@ function createCdekRepo({ pool, enabled, transaction, ensureExternalSource, getA
                   WHEN 'carrier' THEN COALESCE(o.carrier, '')
                   ELSE COALESCE(o.channel, '')
                 END AS key
-         ${saleRows(9)} AND ${REVENUE_FILTER}
+         ${saleRows(9, 10)} AND ${REVENUE_FILTER}
        )
        SELECT r.key,
               p.title, p.article, p.sku,
@@ -503,7 +529,7 @@ function createCdekRepo({ pool, enabled, transaction, ensureExternalSource, getA
         GROUP BY r.key, p.title, p.article, p.sku
         ORDER BY revenue_kopecks DESC, r.key
         LIMIT ${BREAKDOWN_MAX_GROUPS + 1}`,
-      [...windowParams(channelId, opts), dim, normalizeCdekProducts(opts.products)]);
+      [...windowParams(channelId, opts), dim, normalizeCdekProducts(opts.products), opts.channels ?? null]);
     return rows;
   }
 
@@ -662,4 +688,12 @@ function createCdekRepo({ pool, enabled, transaction, ensureExternalSource, getA
   };
 }
 
-module.exports = { createCdekRepo, normalizeCdekInclude, normalizeCdekProducts, ORDER_STATUSES, PRODUCT_FILTER_MAX };
+module.exports = {
+  createCdekRepo,
+  normalizeCdekInclude,
+  normalizeCdekProducts,
+  normalizeCdekChannels,
+  ORDER_STATUSES,
+  SALES_CHANNEL_KEYS,
+  PRODUCT_FILTER_MAX,
+};

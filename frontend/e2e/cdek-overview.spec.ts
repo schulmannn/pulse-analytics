@@ -67,6 +67,8 @@ async function bootOverview(page: Page, opts: { all?: boolean; savedFilters?: st
   const includes: string[] = [];
   /** Каждое значение `products` — по нему видно, что выбор товаров доехал до запроса. */
   const productParams: string[] = [];
+  /** То же для каналов продаж. */
+  const channelParams: string[] = [];
   await page.route(/^https?:\/\/[^/]+\/api\//, async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -93,6 +95,7 @@ async function bootOverview(page: Page, opts: { all?: boolean; savedFilters?: st
     if (path === '/api/cdek/summary' || path === '/api/cdek/series') {
       includes.push(url.searchParams.get('include') ?? '');
       productParams.push(url.searchParams.get('products') ?? '');
+      channelParams.push(url.searchParams.get('sales_channels') ?? '');
     }
     if (path === '/api/cdek/summary') {
       return json(200, {
@@ -123,7 +126,7 @@ async function bootOverview(page: Page, opts: { all?: boolean; savedFilters?: st
   await page.goto('/cdek');
   await page.locator('main').waitFor({ state: 'visible', timeout: 25_000 });
   await page.waitForTimeout(900);
-  return { includes, productParams };
+  return { includes, productParams, channelParams };
 }
 
 test.beforeEach(({ page: _page }, testInfo) => {
@@ -294,4 +297,22 @@ test('канонический набор ничего не печатает и 
   const { includes } = await bootOverview(page);
   expect(includes.every((v) => v !== 'status:complete')).toBe(true);
   await expect(card(page, 'Выручка')).not.toContainText(/только:/i);
+});
+
+
+test('сохранённый канал продаж режет метрику и назван подписью', async ({ page }) => {
+  const { channelParams } = await bootOverview(page, {
+    savedFilters: JSON.stringify({ 'cdek:sales-channels:5': ['ozon', 'wildberries'] }),
+  });
+  expect(channelParams.some((v) => v === 'ozon,wildberries')).toBe(true);
+  await expect(card(page, 'Выручка')).toContainText(/только каналы: .*wildberries/i);
+});
+
+test('кольцо каналов фильтр по каналам не сужает — иначе оно покажет ровно себя', async ({ page }) => {
+  // Вопрос кольца «на кого мы завязаны» теряет смысл, если оставить в нём только выбранное.
+  await bootOverview(page, {
+    savedFilters: JSON.stringify({ 'cdek:sales-channels:5': ['ozon'] }),
+  });
+  const donut = card(page, 'Каналы продаж');
+  await expect(donut).toContainText('Wildberries');
 });
