@@ -23,6 +23,25 @@ async function expectNoContrastViolations(
   testInfo: import('@playwright/test').TestInfo,
   label: string,
 ): Promise<void> {
+  // axe меряет ОДИН кадр. Пока идёт переход, полупрозрачный текст композитится с тем, что под ним,
+  // и даёт промежуточный цвет: «Готово» на переключателе режима правки ловилась так на 3.74 —
+  // обе подписи смонтированы в одной ячейке и кроссфейдятся, то есть замер попадал в середину
+  // кроссфейда. В состоянии покоя контраст нормальный, а WCAG говорит именно о покое.
+  //
+  // Поэтому ждём КОНЦА анимаций, а не спим фиксированно: сон подобрали бы под быструю машину, и в
+  // CI он снова не хватал бы (там это и падало — локально ни разу). Бесконечные анимации
+  // (скелетоны, спиннеры) пропускаем — их ждать нечего.
+  await page
+    .waitForFunction(
+      () =>
+        document.getAnimations().every((a) => {
+          const timing = a.effect?.getComputedTiming();
+          return timing?.iterations === Number.POSITIVE_INFINITY || a.playState !== 'running';
+        }),
+      undefined,
+      { timeout: 4000 },
+    )
+    .catch(() => {});
   const results = await new AxeBuilder({ page }).withRules(['color-contrast']).analyze();
   await testInfo.attach(`contrast-${label}-${testInfo.project.name}`, {
     body: JSON.stringify(results.violations, null, 2),
