@@ -642,6 +642,58 @@ function createCdekRepo({ pool, enabled, transaction, ensureExternalSource, getA
     return { rows, total: rows[0] ? Number(rows[0].total) : 0 };
   }
 
+  /**
+   * Ряд ТЕКУЩЕГО окна, разложенный по измерению: одна серия на значение разреза.
+   *
+   * Предыдущее окно здесь не считается намеренно. Разбивка отвечает на вопрос «из чего сложилось»,
+   * и вторая полупрозрачная копия каждой из шести серий превратила бы полотно в частокол — тот же
+   * довод, по которому число серий ограничено сверху (см. MAX_BREAKDOWN_SERIES во фронте).
+   *
+   * Порядок — по убыванию выручки окна: серии режутся по лимиту читаемости, и отрезать надо хвост,
+   * а не случайные разрезы. Пустые корзины не достраиваются, это работа фронта (как и у ряда).
+   */
+  async function getCdekSeriesBreakdownForActor(channelId, actor, opts = {}) {
+    if (!enabled || !(await allowed(channelId, actor))) return { grain: 'day', groups: [] };
+    const grain = ['day', 'week', 'month'].includes(opts.grain) ? opts.grain : 'day';
+    const dim = BREAKDOWN_DIMS.has(opts.dim) ? opts.dim : 'channel';
+    const { rows } = await pool.query(
+      `WITH b AS (${WINDOW_BOUNDS}),
+       r AS (
+         SELECT o.order_id, i.product_id, i.amount_kopecks, i.qty, ${WINDOW_CASE} AS win,
+                to_char(date_trunc($8, o.created_ts AT TIME ZONE $6), 'YYYY-MM-DD') AS day,
+                CASE $9::text
+                  WHEN 'status' THEN o.status
+                  WHEN 'product' THEN i.product_id
+                  WHEN 'carrier' THEN COALESCE(o.carrier, '')
+                  ELSE COALESCE(o.channel, '')
+                END AS key
+         ${saleRows(10, 11)} AND ${REVENUE_FILTER}
+       ),
+       w AS (SELECT * FROM r WHERE win = 1),
+       totals AS (
+         SELECT key, sum(amount_kopecks) AS total FROM w GROUP BY key
+       )
+       SELECT w.key, w.day,
+              COALESCE(sum(w.amount_kopecks), 0) AS revenue_kopecks,
+              count(DISTINCT w.order_id) AS orders,
+              COALESCE(sum(w.qty), 0) AS items,
+              max(t.total) AS key_total
+         FROM w JOIN totals t ON t.key = w.key
+        GROUP BY w.key, w.day
+        ORDER BY max(t.total) DESC, w.key, w.day`,
+      [...windowParams(channelId, opts), grain, dim,
+       normalizeCdekProducts(opts.products), opts.channels ?? null]);
+
+    const byKey = new Map();
+    for (const row of rows) {
+      const key = row.key == null || row.key === '' ? null : row.key;
+      const bucket = byKey.get(key) ?? { key, points: [] };
+      bucket.points.push(row);
+      byKey.set(key, bucket);
+    }
+    return { grain, dim, groups: [...byKey.values()] };
+  }
+
   /** Границы архива: чем подписать «Всё» и от чего отсчитывать календарь покрытия. */
   async function getCdekBoundsForActor(channelId, actor) {
     if (!enabled || !(await allowed(channelId, actor))) return null;
@@ -681,6 +733,7 @@ function createCdekRepo({ pool, enabled, transaction, ensureExternalSource, getA
     getCdekWarehouseFromOrders,
     getCdekSummaryForActor,
     getCdekSeriesForActor,
+    getCdekSeriesBreakdownForActor,
     getCdekBreakdownForActor,
     getCdekCoverageForActor,
     getCdekBoundsForActor,

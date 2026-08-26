@@ -301,6 +301,31 @@ function registerCdekRoutes({ app, express, requireAuth, db, audit, cdekImport }
     try {
       const ctx = await resolveRead(req, res);
       if (!ctx) return;
+      // ?breakdown=<dim> — тот же ряд, разложенный по измерению: одна серия на значение разреза.
+      // Ответ несёт groups ВМЕСТО current/previous: разбивка отвечает на «из чего сложилось», и
+      // вторая полупрозрачная копия каждой серии превратила бы полотно в частокол.
+      const breakdownDim = typeof req.query.breakdown === 'string' ? req.query.breakdown : '';
+      if (breakdownDim) {
+        const split = await db.getCdekSeriesBreakdownForActor(ctx.channel.id, req.user, {
+          ...ctx.period, tz: ctx.tz, include: ctx.include, products: ctx.products,
+          channels: ctx.channels, dim: breakdownDim,
+        });
+        return res.json({
+          window: { days: ctx.period.days, from: ctx.period.from, to: ctx.period.to, all: ctx.period.all },
+          grain: split.grain,
+          include: ctx.include,
+          dim: split.dim,
+          current: [],
+          previous: [],
+          groups: split.groups.map((g) => ({
+            key: g.key,
+            points: g.points.map((r) => ({
+              day: r.day, revenue: rub(r.revenue_kopecks), orders: int(r.orders), items: int(r.items),
+            })),
+          })),
+        });
+      }
+
       const data = await db.getCdekSeriesForActor(ctx.channel.id, req.user, {
         ...ctx.period, tz: ctx.tz, include: ctx.include, products: ctx.products, channels: ctx.channels,
       });

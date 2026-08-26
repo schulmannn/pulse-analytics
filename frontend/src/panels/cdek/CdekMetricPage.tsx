@@ -1,11 +1,16 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
+import { MultiLineChart } from '@/components/MultiLineChart';
 import {
   CdekFilterAdd,
   CdekFilterList,
+  CDEK_MAX_SERIES,
   CompareGlyph,
   FilterGlyph,
+  CdekSplitAdd,
+  CdekSplitRow,
+  SplitGlyph,
   ViewGlyph,
   useCdekFilterDims,
 } from '@/panels/cdek/CdekFilterRail';
@@ -49,7 +54,7 @@ import {
 import { useCdekBreakdown, useCdekSeries, useCdekSummary, type CdekPoint } from '@/api/cdek';
 import { lttbDownsample } from '@/lib/downsample';
 import { useExplorerChartHeight } from '@/lib/useExplorerChartHeight';
-import { fmt, timeAxisFromDayKeys } from '@/lib/format';
+import { fmt, pluralRu, timeAxisFromDayKeys } from '@/lib/format';
 import { formatMoney } from '@/lib/metricNumber';
 import { usePeriod } from '@/lib/period';
 import { useMsResolvedPeriod } from '@/lib/msPeriod';
@@ -112,6 +117,8 @@ function CdekMetricShell({
   comparison,
   filters,
   view,
+  split,
+  splitAction,
   filterIcon,
   filterAction,
   onSaveFilters,
@@ -124,6 +131,9 @@ function CdekMetricShell({
   filters?: ReactNode;
   /** Раздел «Вид» — чем рисуем полотно. */
   view?: ReactNode;
+  /** Раздел «Разбивка» — по какому разрезу раскладываем ряд, и «+» выбора у правого края строки. */
+  split?: ReactNode;
+  splitAction?: ReactNode;
   /** Значок раздела фильтров и действие «+» у правого края его строки. */
   filterIcon?: ReactNode;
   filterAction?: ReactNode;
@@ -164,6 +174,16 @@ function CdekMetricShell({
             {view && (
               <RailSection title="Вид" variant="row" icon={ViewGlyph}>
                 {view}
+              </RailSection>
+            )}
+            {split && (
+              <RailSection
+                title="Разбивка"
+                variant="row"
+                icon={SplitGlyph}
+                action={splitAction}
+              >
+                {split}
               </RailSection>
             )}
             {filters && (
@@ -296,7 +316,10 @@ function CdekSeriesPage({ def }: { def: SeriesDef }) {
   const salesChannels = pickedChannels ?? savedChannels;
   const channelCaption = channelFilterCaption(salesChannels);
 
-  const series = useCdekSeries(period, include, undefined, products, salesChannels);
+  // Разбивка: ряд приходит группами вместо одной серии. Пока разрез не выбран, запрос прежний —
+  // лишнего похода за данными «на всякий случай» нет.
+  const [splitDim, setSplitDim] = useState<string>('');
+  const series = useCdekSeries(period, include, undefined, products, salesChannels, splitDim || undefined);
   const summary = useCdekSummary(period, include, products, salesChannels);
 
   // Хук ДО ранних возвратов: ниже страница уходит в скелетон и в ошибку, и вызов после них дал бы
@@ -329,6 +352,40 @@ function CdekSeriesPage({ def }: { def: SeriesDef }) {
   const prevRaw = (series.data?.previous ?? []).map((p) => def.pick(p) ?? 0);
   const compare = cmp === 'prev' && prevRaw.length > 1 ? prevRaw : undefined;
 
+  // ── Разбивка: ряд группами ────────────────────────────────────────────────────────────────
+  // Дни берутся ОБЪЕДИНЕНИЕМ по всем группам, а не из первой: у каналов дни продаж разные, и взяв
+  // сетку одной серии, остальные пришлось бы натягивать на чужие даты.
+  const groups = splitDim ? (series.data?.groups ?? []) : [];
+  const splitModel = (() => {
+    if (groups.length === 0) return null;
+    const days = [...new Set(groups.flatMap((g) => g.points.map((p) => p.day)))].sort();
+    const head = groups.slice(0, CDEK_MAX_SERIES);
+    const hidden = groups.length - head.length;
+    const label = (key: string | null) =>
+      key == null || key === ''
+        ? 'Без значения'
+        : splitDim === 'channel'
+          ? (CHANNEL_LABEL[key] ?? key)
+          : splitDim === 'status'
+            ? (STATUS_LABEL[key] ?? key)
+            : (productOptions.find((o) => o.id === key)?.name ?? key);
+    return {
+      days,
+      hidden,
+      labels: days.map((d) => fmt.day(d)),
+      series: head.map((g, i) => {
+        const byDay = new Map(g.points.map((p) => [p.day, def.pick(p)]));
+        return {
+          name: label(g.key),
+          color: `hsl(var(--chart-${i + 1}))`,
+          // День, которого у группы нет, — это НОЛЬ продаж, а не пропуск измерения: выгрузка
+          // сплошная, и разрыв линии читался бы как «данных не собрали».
+          values: days.map((d) => byDay.get(d) ?? 0),
+        };
+      }),
+    };
+  })();
+
   const cur = summary.data?.current ? def.total(summary.data.current) : null;
   const prev = summary.data?.previous ? def.total(summary.data.previous) : null;
   const hasPrevWindow = summary.data?.previous_window != null;
@@ -336,18 +393,30 @@ function CdekSeriesPage({ def }: { def: SeriesDef }) {
   // Контролы графика переехали из-над графика в rail (владелец: «возьми всю правую область из
   // Steep»). Там они и живут у Steep: над полотном остаётся только само полотно, а «чем смотрим» и
   // «с чем сравниваем» — вопросы того же рода, что «что считаем», и стоят рядом с фильтрами.
+  // Под разбивкой оба соседних контрола БЕЗДЕЙСТВОВАЛИ бы молча, и это хуже, чем их отсутствие:
+  //   • столбцы — шесть рядов за тридцать дней столбцами нечитаемы, разбивка рисуется линиями;
+  //   • пред. период — сервер при разбивке его не считает намеренно (вторая полупрозрачная копия
+  //     каждой из шести серий превратила бы полотно в частокол).
+  // Поэтому вариант гаснет и рядом печатается причина, а не остаётся кнопкой, на которую нажали и
+  // ничего не произошло.
+  const split = Boolean(splitDim);
   const viewSection = (
-    <div className="pl-[2.125rem]">
+    <div className="space-y-1.5 pl-[2.125rem]">
       <SegmentedControl
         ariaLabel="Тип графика"
         size="sm"
-        value={kind}
+        value={split ? 'line' : kind}
         onChange={setKind}
         options={[
           { value: 'line', content: 'Линия' },
-          { value: 'bar', content: 'Столбцы' },
+          { value: 'bar', content: 'Столбцы', disabled: split },
         ]}
       />
+      {split && (
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          Разбивка рисуется линиями: несколько рядов столбцами за окно нечитаемы.
+        </p>
+      )}
     </div>
   );
 
@@ -356,14 +425,20 @@ function CdekSeriesPage({ def }: { def: SeriesDef }) {
       <SegmentedControl
         ariaLabel="База сравнения"
         size="sm"
-        value={cmp}
+        value={split ? 'off' : cmp}
         onChange={setCmp}
         options={[
           { value: 'off', content: 'Выкл' },
           // На окне «Всё» сравнивать не с чем — вариант гаснет, а не молча ничего не делает.
-          { value: 'prev', content: 'Пред. период', disabled: !hasPrevWindow },
+          // Под разбивкой — по той же причине: сервер предыдущее окно для неё не считает.
+          { value: 'prev', content: 'Пред. период', disabled: !hasPrevWindow || split },
         ]}
       />
+      {split && (
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          При разбивке прошлое окно не показывается — оно удвоило бы число линий.
+        </p>
+      )}
       <div className="flex items-baseline justify-between gap-3">
         <span className="text-xs text-muted-foreground">Текущее окно</span>
         <span className="text-sm font-medium tabular-nums text-foreground">
@@ -413,6 +488,10 @@ function CdekSeriesPage({ def }: { def: SeriesDef }) {
     if (dim === 'product') return setPickedProducts([]);
     return setPickedChannels([]);
   };
+  // Разрез выбирается тем же приёмом, что и фильтры, и по той же причине: пять вариантов
+  // сегментированным контролом в 300px колонку не влезают — подписи налезали друг на друга.
+  const splitSection = <CdekSplitRow dim={splitDim} onClear={() => setSplitDim('')} />;
+
   const filters = (
     <div className="space-y-2">
       <CdekFilterList
@@ -438,12 +517,29 @@ function CdekSeriesPage({ def }: { def: SeriesDef }) {
       comparison={comparison}
       filters={filters}
       view={viewSection}
+      split={splitSection}
+      splitAction={splitDim ? undefined : <CdekSplitAdd onPick={setSplitDim} />}
       filterIcon={FilterGlyph}
       filterAction={<CdekFilterAdd dims={dims.addable} onAdd={dims.open} />}
       onSaveFilters={dirty ? saveFilters : undefined}
     >
       <div className="space-y-3">
-        {values.length < 2 ? (
+        {splitDim && splitModel ? (
+          <MultiLineChart
+            series={splitModel.series}
+            labels={splitModel.labels}
+            height={420}
+            format={(v) => (v == null ? '—' : def.format(v))}
+            ariaLabel={`${def.term} по разрезу`}
+            legend={
+              splitModel.hidden > 0
+                ? `${def.term} · и ещё ${splitModel.hidden} ${pluralRu(splitModel.hidden, ['разрез', 'разреза', 'разрезов'])} не показаны`
+                : def.term
+            }
+          />
+        ) : splitDim ? (
+          <EmptyState compact size="chart" title="За окно нечего разложить по этому разрезу." />
+        ) : values.length < 2 ? (
           <EmptyState compact size="chart" title="Недостаточно дней для графика за окно." />
         ) : kind === 'bar' ? (
           <BarChart
