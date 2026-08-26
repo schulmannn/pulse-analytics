@@ -249,7 +249,8 @@ test('фильтр статусов живёт только в разворот�
 
   await page.getByRole('button', { name: 'Добавить фильтр' }).click();
   await page.getByRole('menuitem', { name: 'Статусы заказов' }).click();
-  await page.getByRole('button', { name: /^Статусы:/ }).click();
+  // Выбор раскрывается ВНУТРИ карточки (как у Steep), а не в поповере: клик по названию.
+  await page.getByRole('button', { name: 'Статусы заказов', expanded: false }).click();
   await expect(page.locator('[data-cdek-status-filter]')).toBeVisible();
 
   await page.getByRole('button', { name: 'Отменён' }).click();
@@ -273,7 +274,7 @@ test('фильтр товаров режет метрику и тоже живё
   await expect(page.locator('[data-cdek-product-filter]')).toHaveCount(0);
   await page.getByRole('button', { name: 'Добавить фильтр' }).click();
   await page.getByRole('menuitem', { name: 'Товары' }).click();
-  await page.getByRole('button', { name: /^Товары:/ }).click();
+  await page.getByRole('button', { name: 'Товары', expanded: false }).click();
   await page.getByRole('button', { name: /^Товары ·/ }).click();
   const first = page.getByRole('button', { name: PRODUCTS[0].title ?? '' });
   await expect(first).toBeVisible();
@@ -327,4 +328,29 @@ test('кольцо каналов фильтр по каналам не сужа
   });
   const donut = card(page, 'Каналы продаж');
   await expect(donut).toContainText('Wildberries');
+});
+
+
+/**
+ * Значение снимается СВОЕЙ пилюлей, не через выбор. Прошлая редакция давала один крестик на всю
+ * ось: чтобы убрать один статус из двух, приходилось открывать список — это другая механика, а не
+ * другой вид, и без проверки возврат к ней прошёл бы незаметно.
+ */
+test('пилюля значения снимается на месте и доезжает до запроса', async ({ page }) => {
+  const { includes } = await bootOverview(page);
+  const expand = page.getByRole('button', { name: 'Развернуть виджет «Выручка»' });
+  await expand.focus();
+  await expand.press('Enter');
+  await expect(page).toHaveURL(/\/metrics\/cdek-revenue/);
+
+  await page.getByRole('button', { name: 'Добавить фильтр' }).click();
+  await page.getByRole('menuitem', { name: 'Статусы заказов' }).click();
+  // Канон — «завершён + в доставке»: обе пилюли на месте.
+  await expect(page.getByRole('button', { name: 'Убрать: Завершён' })).toBeVisible();
+
+  const before = includes.length;
+  await page.getByRole('button', { name: 'Убрать: В доставке' }).click();
+  await expect(page.getByRole('button', { name: 'Убрать: В доставке' })).toHaveCount(0);
+  await expect.poll(() => includes.length).toBeGreaterThan(before);
+  await expect.poll(() => includes[includes.length - 1]).toBe('status:complete');
 });

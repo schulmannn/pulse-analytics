@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode } from 'react';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { cn } from '@/lib/utils';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -53,13 +53,6 @@ const DIM_TITLE: Record<CdekFilterDim, string> = {
   channel: 'Каналы продаж',
 };
 
-/** Начало предложения в строке элемента: «Каналы: Ozon, Wildberries». */
-const DIM_LEAD: Record<CdekFilterDim, string> = {
-  status: 'Статусы',
-  product: 'Товары',
-  channel: 'Каналы',
-};
-
 export interface CdekFilterState {
   statuses: string[];
   products: string[];
@@ -77,30 +70,6 @@ export function cdekDimActive(dim: CdekFilterDim, state: CdekFilterState): boole
   if (dim === 'status') return !sameCdekStatuses(state.statuses, CDEK_CANON_STATUSES);
   if (dim === 'product') return normalizeCdekProducts(state.products).length > 0;
   return normalizeCdekChannels(state.channels).length > 0;
-}
-
-function dimSummary(
-  dim: CdekFilterDim,
-  state: CdekFilterState,
-  productOptions: readonly CdekProductOption[],
-): string {
-  if (dim === 'status') {
-    const picked = normalizeCdekStatuses(state.statuses);
-    if (picked.length === 0) return 'ничего не выбрано';
-    return picked
-      .map((id) => CDEK_STATUSES.find((s) => s.id === id)?.label ?? id)
-      .join(', ')
-      .toLocaleLowerCase('ru-RU');
-  }
-  if (dim === 'channel') {
-    const picked = normalizeCdekChannels(state.channels);
-    if (picked.length === 0) return 'все';
-    return picked.map((id) => CDEK_SALES_CHANNELS.find((c) => c.id === id)?.label ?? id).join(', ');
-  }
-  const picked = normalizeCdekProducts(state.products);
-  if (picked.length === 0) return 'все';
-  if (picked.length === 1) return productOptions.find((o) => o.id === picked[0])?.name ?? picked[0];
-  return `выбрано ${picked.length}`;
 }
 
 const DIMS: CdekFilterDim[] = ['status', 'product', 'channel'];
@@ -243,6 +212,134 @@ export function useCdekFilterDims(state: CdekFilterState) {
     close: (dim: CdekFilterDim) => setOpened((prev) => prev.filter((d) => d !== dim)),
   };
 }
+/** Значения выбранной оси — по одной пилюле, каждая снимается сама. */
+function dimValues(
+  dim: CdekFilterDim,
+  state: CdekFilterState,
+  productOptions: readonly CdekProductOption[],
+): { id: string; label: string }[] {
+  if (dim === 'status') {
+    return normalizeCdekStatuses(state.statuses).map((id) => ({
+      id,
+      label: CDEK_STATUSES.find((x) => x.id === id)?.label ?? id,
+    }));
+  }
+  if (dim === 'channel') {
+    return normalizeCdekChannels(state.channels).map((id) => ({
+      id,
+      label: CDEK_SALES_CHANNELS.find((x) => x.id === id)?.label ?? id,
+    }));
+  }
+  return normalizeCdekProducts(state.products).map((id) => ({
+    id,
+    label: productOptions.find((o) => o.id === id)?.name ?? id,
+  }));
+}
+
+/**
+ * Карточка добавленного фильтра. Анатомия снята ЗАМЕРОМ со Steep (владелец вошёл и дал посмотреть):
+ * своя поверхность на ступень выше панели, волосяная рамка 0.8px, скругление, 8px до следующей;
+ * название обычного размера ОСНОВНЫМ цветом с треугольником раскрытия; выбранные значения —
+ * ПИЛЮЛЯМИ, у каждой свой крестик.
+ *
+ * Прошлая редакция печатала значения строкой через запятую и давала один крестик на всю ось: чтобы
+ * убрать один канал из трёх, приходилось лезть в выбор. Пилюля снимается на месте — это не только
+ * вид, это другая механика.
+ *
+ * Выбор раскрывается ВНУТРИ карточки, а не в поповере: у Steep так (в развёрнутой карточке живут
+ * поиск и список значений), и в 300px колонке это честнее — поповер поверх узкой панели закрывает
+ * соседние фильтры, ради которых его и открывают.
+ */
+function FilterCard({
+  dim,
+  state,
+  productOptions,
+  onChange,
+  onRemove,
+  picker,
+}: {
+  dim: CdekFilterDim;
+  state: CdekFilterState;
+  productOptions: CdekProductOption[];
+  onChange: (next: CdekFilterState) => void;
+  onRemove: () => void;
+  picker: ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const values = dimValues(dim, state, productOptions);
+
+  const dropValue = (id: string) => {
+    if (dim === 'status') {
+      return onChange({ ...state, statuses: state.statuses.filter((x) => x !== id) });
+    }
+    if (dim === 'channel') {
+      return onChange({ ...state, channels: state.channels.filter((x) => x !== id) });
+    }
+    onChange({ ...state, products: state.products.filter((x) => x !== id) });
+  };
+
+  return (
+    <div className="mb-2 rounded-lg border border-border bg-card p-2.5">
+      <div className="flex items-center gap-1.5">
+        <button
+          type="button"
+          aria-expanded={open}
+          onClick={() => setOpen((v) => !v)}
+          className="flex min-w-0 flex-1 items-center gap-1.5 rounded text-left text-sm font-medium text-foreground transition-colors hover:text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40"
+        >
+          <svg
+            viewBox="0 0 16 16"
+            className={cn('h-3 w-3 shrink-0 text-muted-foreground transition-transform', open && 'rotate-90')}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.75"
+            aria-hidden="true"
+          >
+            <path d="M6 3.5l5 4.5-5 4.5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          <span className="truncate">{DIM_TITLE[dim]}</span>
+        </button>
+        <button
+          type="button"
+          aria-label={`Убрать фильтр: ${DIM_TITLE[dim]}`}
+          onClick={onRemove}
+          className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40"
+        >
+          <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+            <path d="M4 4l8 8M12 4l-8 8" strokeLinecap="round" />
+          </svg>
+        </button>
+      </div>
+
+      {open ? (
+        <div className="mt-2.5">{picker}</div>
+      ) : values.length > 0 ? (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {values.map((v) => (
+            <span
+              key={v.id}
+              className="inline-flex max-w-full items-center gap-1 rounded-full bg-primary/10 py-0.5 pl-2 pr-1 text-xs text-accent-foreground"
+            >
+              <span className="truncate">{v.label}</span>
+              <button
+                type="button"
+                aria-label={`Убрать: ${v.label}`}
+                onClick={() => dropValue(v.id)}
+                className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-primary/15 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40"
+              >
+                <svg viewBox="0 0 16 16" className="h-2.5 w-2.5" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                  <path d="M4 4l8 8M12 4l-8 8" strokeLinecap="round" />
+                </svg>
+              </button>
+            </span>
+          ))}
+        </div>
+      ) : (
+        <p className="mt-1.5 text-xs text-muted-foreground">Все — нажмите название, чтобы выбрать</p>
+      )}
+    </div>
+  );
+}
 
 export function CdekFilterList({
   state,
@@ -285,33 +382,15 @@ export function CdekFilterList({
   return (
     <div data-cdek-filter-rail="">
       {shown.map((dim) => (
-        // Элемент стоит на ОДНОЙ вертикали с названием раздела (pl-2 + ширина значка + зазор),
-        // как у Steep: список читается колонкой, а не лесенкой.
-        <div key={dim} className="group flex h-8 items-center gap-2 pl-[2.125rem] pr-1">
-          <Popover>
-            <PopoverTrigger asChild>
-              <button
-                type="button"
-                className="min-w-0 flex-1 truncate rounded text-left text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40"
-              >
-                {DIM_LEAD[dim]}: <span className="text-foreground">{dimSummary(dim, state, productOptions)}</span>
-              </button>
-            </PopoverTrigger>
-            <PopoverContent align="start" className="w-72">
-              {picker(dim)}
-            </PopoverContent>
-          </Popover>
-          <button
-            type="button"
-            aria-label={`Убрать фильтр: ${DIM_TITLE[dim]}`}
-            onClick={() => onRemove(dim)}
-            className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40 group-hover:opacity-100"
-          >
-            <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
-              <path d="M4 4l8 8M12 4l-8 8" strokeLinecap="round" />
-            </svg>
-          </button>
-        </div>
+        <FilterCard
+          key={dim}
+          dim={dim}
+          state={state}
+          productOptions={productOptions}
+          onChange={onChange}
+          onRemove={() => onRemove(dim)}
+          picker={picker(dim)}
+        />
       ))}
     </div>
   );
