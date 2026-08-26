@@ -2,7 +2,12 @@
 
 const { hasWorkspaceRole, tenantChannelId } = require('../middleware/tenant');
 const { parseCdekPeriod } = require('../domain/cdekPeriod');
-const { normalizeCdekInclude, normalizeCdekProducts, PRODUCT_FILTER_MAX } = require('../repos/cdekRepo');
+const {
+  normalizeCdekInclude,
+  normalizeCdekProducts,
+  normalizeCdekChannels,
+  PRODUCT_FILTER_MAX,
+} = require('../repos/cdekRepo');
 
 /**
  * Роуты СДЭК Fulfillment (/api/cdek/{sources,status,import,imports,imports/:id,
@@ -216,6 +221,12 @@ function registerCdekRoutes({ app, express, requireAuth, db, audit, cdekImport }
   // где из этого значения строится SQL. Перебор потолка возвращается признаком, а не срезанным
   // списком: роут обязан ответить отказом, иначе человек увидит число не по своему выбору.
   const productsOf = (req) => normalizeCdekProducts(req.query.products);
+  /**
+   * Каналы ПРОДАЖ множественным именем `sales_channels`. Единственное число `sales_channel` уже
+   * занято лентой заказов (там выбор одиночный), а голое `channel` — каналом АРЕНДАТОРА: путаница
+   * между ними уже роняла ленту в прод (#502), и третьего раза быть не должно.
+   */
+  const channelsOf = (req) => normalizeCdekChannels(req.query.sales_channels);
 
   /** Окно + канал + часовой пояс источника — общий пролог всех читающих роутов. */
   async function resolveRead(req, res) {
@@ -229,6 +240,11 @@ function registerCdekRoutes({ app, express, requireAuth, db, audit, cdekImport }
       res.status(400).json({ error: `Можно выбрать не более ${PRODUCT_FILTER_MAX} товаров` });
       return null;
     }
+    const channels = channelsOf(req);
+    if (channels && channels.unknown) {
+      res.status(400).json({ error: 'Неизвестный канал продаж' });
+      return null;
+    }
     const channel = await resolveCdekChannel(req, res);
     if (!channel) return null;
     const source = await db.getCdekSource(channel.id);
@@ -238,6 +254,7 @@ function registerCdekRoutes({ app, express, requireAuth, db, audit, cdekImport }
       tz: (source && source.tz) || 'Europe/Moscow',
       include: includeOf(req),
       products,
+      channels,
     };
   }
 
@@ -260,7 +277,9 @@ function registerCdekRoutes({ app, express, requireAuth, db, audit, cdekImport }
       const ctx = await resolveRead(req, res);
       if (!ctx) return;
       const [totals, bounds] = await Promise.all([
-        db.getCdekSummaryForActor(ctx.channel.id, req.user, { ...ctx.period, tz: ctx.tz, include: ctx.include, products: ctx.products }),
+        db.getCdekSummaryForActor(ctx.channel.id, req.user, {
+          ...ctx.period, tz: ctx.tz, include: ctx.include, products: ctx.products, channels: ctx.channels,
+        }),
         db.getCdekBoundsForActor(ctx.channel.id, req.user),
       ]);
       res.json({
@@ -283,7 +302,7 @@ function registerCdekRoutes({ app, express, requireAuth, db, audit, cdekImport }
       const ctx = await resolveRead(req, res);
       if (!ctx) return;
       const data = await db.getCdekSeriesForActor(ctx.channel.id, req.user, {
-        ...ctx.period, tz: ctx.tz, include: ctx.include, products: ctx.products,
+        ...ctx.period, tz: ctx.tz, include: ctx.include, products: ctx.products, channels: ctx.channels,
       });
       const point = (r) => ({
         day: r.day, revenue: rub(r.revenue_kopecks), orders: int(r.orders), items: int(r.items),
@@ -317,9 +336,12 @@ function registerCdekRoutes({ app, express, requireAuth, db, audit, cdekImport }
       // списка, из которого этот фильтр набирают. Отфильтруй мы её собой — человек увидел бы
       // только уже выбранное и не смог бы добавить ничего нового.
       const products = dim === 'product' ? null : ctx.products;
+      // Разбивка ПО КАНАЛАМ ПРОДАЖ — тот же случай: отфильтруй её выбранными каналами, и она
+      // покажет ровно их, а вопрос «на кого мы завязаны» останется без ответа.
+      const channels = dim === 'channel' ? null : ctx.channels;
       const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || BREAKDOWN_LIMIT_DEFAULT, 1), BREAKDOWN_LIMIT_MAX);
       const rows = await db.getCdekBreakdownForActor(ctx.channel.id, req.user, {
-        ...ctx.period, tz: ctx.tz, include, dim, products,
+        ...ctx.period, tz: ctx.tz, include, dim, products, channels,
       });
       const truncated = rows.length > db.CDEK_BREAKDOWN_MAX_GROUPS;
       const groups = truncated ? rows.slice(0, db.CDEK_BREAKDOWN_MAX_GROUPS) : rows;

@@ -253,3 +253,79 @@ export function CdekProductFilter({
     </div>
   );
 }
+
+// ── Фильтр по каналу продаж ───────────────────────────────────────────────────────────────────
+/**
+ * Третья ось того же вопроса «что считать»: статус — КАК закончился заказ, товар — ЧТО продано,
+ * канал — ГДЕ продано (владелец: «фильтр по источнику продаж, например яндекс маркет, или
+ * wildberries или сайт»).
+ *
+ * Ключи те же, что кладёт импорт (server/domain/cdekImport → SALES_CHANNELS); человеческие
+ * подписи живут здесь, чтобы переименование витрины не требовало переигрывать импорты.
+ */
+export const CDEK_SALES_CHANNELS = [
+  { id: 'own', label: 'Своя доставка' },
+  { id: 'wildberries', label: 'Wildberries' },
+  { id: 'yandex_market', label: 'Яндекс.Маркет' },
+  { id: 'ozon', label: 'Ozon' },
+  { id: 'other', label: 'Другая служба' },
+] as const;
+
+export const cdekChannelFilterKey = (channelId: number | null | undefined): string =>
+  `cdek:sales-channels:${channelId ?? 0}`;
+
+export const normalizeCdekChannels = (ids: readonly string[] | undefined | null): string[] =>
+  [...new Set(ids ?? [])].filter((id) => CDEK_SALES_CHANNELS.some((c) => c.id === id)).sort();
+
+export const sameCdekChannels = (a: readonly string[], b: readonly string[]): boolean => {
+  const [x, y] = [normalizeCdekChannels(a), normalizeCdekChannels(b)];
+  return x.length === y.length && x.every((id, i) => id === y[i]);
+};
+
+/** Подпись — только когда выбор сужает. Полный набор и пустой одинаково означают «все каналы». */
+export function channelFilterCaption(selected: readonly string[]): string | null {
+  const picked = normalizeCdekChannels(selected);
+  if (picked.length === 0 || picked.length === CDEK_SALES_CHANNELS.length) return null;
+  const labels = picked.map((id) => CDEK_SALES_CHANNELS.find((c) => c.id === id)?.label ?? id);
+  return `Только каналы: ${labels.join(', ')}`;
+}
+
+export function CdekChannelFilter({
+  selected,
+  onChange,
+}: {
+  selected: string[];
+  onChange: (ids: string[]) => void;
+}) {
+  const toggle = (id: string) =>
+    onChange(selected.includes(id) ? selected.filter((s) => s !== id) : [...selected, id]);
+
+  return (
+    <div className="space-y-2" data-cdek-channel-filter="">
+      <span className="text-xs text-muted-foreground">
+        Каналы продаж{selected.length > 0 ? ` · выбрано ${selected.length}` : ' · все'}
+      </span>
+      <div className="flex flex-wrap gap-1.5">
+        {CDEK_SALES_CHANNELS.map((channel) => {
+          const active = selected.includes(channel.id);
+          return (
+            <button
+              key={channel.id}
+              type="button"
+              aria-pressed={active}
+              onClick={() => toggle(channel.id)}
+              className={cn(
+                'min-h-11 rounded-full border px-3 py-1 text-xs transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/50 sm:min-h-0',
+                active
+                  ? 'border-primary bg-primary/10 font-medium text-accent-foreground'
+                  : 'border-border bg-background text-ink2 hover:bg-muted hover:text-foreground',
+              )}
+            >
+              {channel.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
