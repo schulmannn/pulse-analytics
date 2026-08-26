@@ -75,3 +75,27 @@ test('снятие разреза возвращает одиночный ряд
   await expect(page.getByText('Своя доставка')).toHaveCount(0);
   await expect(page.getByText('Один ряд — без разреза')).toBeVisible();
 });
+
+/**
+ * Контрол, на который нажали и ничего не произошло, учит не доверять контролам. Под разбивкой
+ * столбцы и прошлое окно бездействовали бы молча — оба гаснут и объясняют причину.
+ */
+test('под разбивкой недоступные варианты гаснут и называют причину', async ({ page }, info) => {
+  test.skip(info.project.name !== 'desktop-1440', 'десктоп');
+  await boot(page);
+  const bars = page.getByRole('button', { name: 'Столбцы' });
+  await expect(bars).toBeEnabled();
+
+  await page.getByRole('button', { name: 'Выбрать разрез' }).click();
+  await page.getByRole('menuitem', { name: 'Каналам продаж' }).click();
+  await expect(page.getByText('Своя доставка')).toBeVisible();
+
+  await expect(bars).toBeDisabled();
+  await expect(page.getByText(/Разбивка рисуется линиями/)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Пред. период' })).toBeDisabled();
+  await expect(page.getByText(/прошлое окно не показывается/)).toBeVisible();
+
+  // Сняли разрез — оба варианта вернулись.
+  await page.getByRole('button', { name: 'Убрать разбивку' }).click();
+  await expect(bars).toBeEnabled();
+});

@@ -393,18 +393,30 @@ function CdekSeriesPage({ def }: { def: SeriesDef }) {
   // Контролы графика переехали из-над графика в rail (владелец: «возьми всю правую область из
   // Steep»). Там они и живут у Steep: над полотном остаётся только само полотно, а «чем смотрим» и
   // «с чем сравниваем» — вопросы того же рода, что «что считаем», и стоят рядом с фильтрами.
+  // Под разбивкой оба соседних контрола БЕЗДЕЙСТВОВАЛИ бы молча, и это хуже, чем их отсутствие:
+  //   • столбцы — шесть рядов за тридцать дней столбцами нечитаемы, разбивка рисуется линиями;
+  //   • пред. период — сервер при разбивке его не считает намеренно (вторая полупрозрачная копия
+  //     каждой из шести серий превратила бы полотно в частокол).
+  // Поэтому вариант гаснет и рядом печатается причина, а не остаётся кнопкой, на которую нажали и
+  // ничего не произошло.
+  const split = Boolean(splitDim);
   const viewSection = (
-    <div className="pl-[2.125rem]">
+    <div className="space-y-1.5 pl-[2.125rem]">
       <SegmentedControl
         ariaLabel="Тип графика"
         size="sm"
-        value={kind}
+        value={split ? 'line' : kind}
         onChange={setKind}
         options={[
           { value: 'line', content: 'Линия' },
-          { value: 'bar', content: 'Столбцы' },
+          { value: 'bar', content: 'Столбцы', disabled: split },
         ]}
       />
+      {split && (
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          Разбивка рисуется линиями: несколько рядов столбцами за окно нечитаемы.
+        </p>
+      )}
     </div>
   );
 
@@ -413,14 +425,20 @@ function CdekSeriesPage({ def }: { def: SeriesDef }) {
       <SegmentedControl
         ariaLabel="База сравнения"
         size="sm"
-        value={cmp}
+        value={split ? 'off' : cmp}
         onChange={setCmp}
         options={[
           { value: 'off', content: 'Выкл' },
           // На окне «Всё» сравнивать не с чем — вариант гаснет, а не молча ничего не делает.
-          { value: 'prev', content: 'Пред. период', disabled: !hasPrevWindow },
+          // Под разбивкой — по той же причине: сервер предыдущее окно для неё не считает.
+          { value: 'prev', content: 'Пред. период', disabled: !hasPrevWindow || split },
         ]}
       />
+      {split && (
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          При разбивке прошлое окно не показывается — оно удвоило бы число линий.
+        </p>
+      )}
       <div className="flex items-baseline justify-between gap-3">
         <span className="text-xs text-muted-foreground">Текущее окно</span>
         <span className="text-sm font-medium tabular-nums text-foreground">
