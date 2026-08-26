@@ -34,6 +34,8 @@ const CHANNEL_LABEL: Record<string, string> = {
 const STATUS_LABEL: Record<string, string> = {
   complete: 'Завершён',
   delivery: 'В доставке',
+  assembled: 'Собран',
+  confirmed: 'Подтверждён',
   cancel: 'Отменён',
   return: 'Возврат',
 };

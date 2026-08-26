@@ -201,8 +201,12 @@ test('normalizeCdekInclude: режимы, набор статусов, мусо�
   assert.equal(normalizeCdekInclude('status:complete'), 'status:complete');
   assert.equal(normalizeCdekInclude('status:delivery,complete'), 'status:complete,delivery', 'набор сортируется');
   assert.equal(normalizeCdekInclude('status:complete,complete'), 'status:complete', 'дубли схлопываются');
+  // Набор берётся ИЗ КОДА, а не выписан литералом: статусы приходят с выгрузкой (в новой их стало
+  // шесть), и тест, знающий их число наизусть, краснел бы на каждом пополнении вместо настоящей
+  // регрессии — что и произошло, когда приехали assembled и confirmed.
+  const { ORDER_STATUSES } = require('../server/repos/cdekRepo');
   assert.equal(
-    normalizeCdekInclude('status:complete,delivery,cancel,return'),
+    normalizeCdekInclude(`status:${[...ORDER_STATUSES].reverse().join(',')}`),
     'all',
     'полный набор — это режим «все», а не длинный список',
   );

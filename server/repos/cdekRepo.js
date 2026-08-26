@@ -1,6 +1,6 @@
 'use strict';
 
-const { SALES_CHANNELS } = require('../domain/cdekImport');
+const { SALES_CHANNELS, NON_REVENUE_STATUSES, ORDER_STATUSES } = require('../domain/cdekImport');
 
 /* ── СДЭК Fulfillment: источник, импорты и архив заказов (миграция 038) ─────────────────────────
    Первый источник без API: наполняется ручной загрузкой Excel, поэтому здесь нет ни токена, ни
@@ -65,13 +65,16 @@ const WINDOW_CASE = `
  * режим «только завершённые», `all` — вообще без фильтра статуса (нужен разбивке ПО статусам:
  * иначе она показала бы лишь те статусы, которые сама же и отобрала).
  */
+/** Набор «не выручка» в виде SQL-литерала — собирается из домена ОДИН раз при загрузке модуля. */
+const NON_REVENUE_SQL = `ARRAY[${[...NON_REVENUE_STATUSES].map((s2) => `'${s2}'`).join(', ')}]::text[]`;
+
 const REVENUE_FILTER = `
   (CASE
      WHEN $7::text LIKE 'status:%'
        THEN o.status = ANY(string_to_array(substr($7::text, 8), ','))
      WHEN $7::text = 'all' THEN true
      WHEN $7::text = 'completed' THEN o.status = 'complete'
-     ELSE o.status NOT IN ('cancel', 'return')
+     ELSE o.status <> ALL(${NON_REVENUE_SQL})
    END)`;
 
 /**
@@ -136,7 +139,8 @@ function normalizeCdekProducts(raw) {
 
 const INCLUDE_MODES = new Set(['revenue', 'completed', 'all']);
 /** Статусы заказа, известные разбору выгрузки. Произвольный набор строится ТОЛЬКО из них. */
-const ORDER_STATUSES = ['complete', 'delivery', 'cancel', 'return'];
+// Список статусов — из домена, а не переписан рядом: разойдись они, фильтр молча перестал бы
+// принимать статус, который импорт кладёт в базу.
 
 /**
  * Нормализация «что считать выручкой». Кроме трёх прежних режимов принимает явный набор статусов
@@ -555,7 +559,7 @@ function createCdekRepo({ pool, enabled, transaction, ensureExternalSource, getA
             AND (CASE $5::text
                    WHEN 'all' THEN true
                    WHEN 'completed' THEN o.status = 'complete'
-                   ELSE o.status NOT IN ('cancel', 'return')
+                   ELSE o.status <> ALL(${NON_REVENUE_SQL})
                  END)
           GROUP BY 1
        )
