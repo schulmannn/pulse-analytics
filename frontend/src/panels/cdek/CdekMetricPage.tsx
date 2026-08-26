@@ -1,7 +1,14 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
-import { CdekFilterRail } from '@/panels/cdek/CdekFilterRail';
+import {
+  CdekFilterAdd,
+  CdekFilterList,
+  CompareGlyph,
+  FilterGlyph,
+  ViewGlyph,
+  useCdekFilterDims,
+} from '@/panels/cdek/CdekFilterRail';
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
 import { ShareRows } from '@/components/ShareRows';
@@ -104,6 +111,9 @@ function CdekMetricShell({
   back,
   comparison,
   filters,
+  view,
+  filterIcon,
+  filterAction,
   onSaveFilters,
   children,
 }: {
@@ -112,6 +122,11 @@ function CdekMetricShell({
   back: { to: string; label: string };
   /** Блок управления выборкой. Живёт в rail'е — см. комментарий выше. */
   filters?: ReactNode;
+  /** Раздел «Вид» — чем рисуем полотно. */
+  view?: ReactNode;
+  /** Значок раздела фильтров и действие «+» у правого края его строки. */
+  filterIcon?: ReactNode;
+  filterAction?: ReactNode;
   /** Задан — выбор отличается от сохранённого, и в шапке появляется «Сохранить». */
   onSaveFilters?: () => void;
   comparison?: ReactNode;
@@ -139,14 +154,23 @@ function CdekMetricShell({
       <MetricColumns
         rail={
           <>
-            <RailSection title="Сравнение">
+            <RailSection title="Сравнение" variant="row" icon={CompareGlyph}>
               {comparison ?? (
                 <p className="text-xs leading-relaxed text-muted-foreground">
                   У этого разреза нет одной канонической величины периода — сравнение не рассчитывается.
                 </p>
               )}
             </RailSection>
-            {filters && <RailSection title="Фильтры">{filters}</RailSection>}
+            {view && (
+              <RailSection title="Вид" variant="row" icon={ViewGlyph}>
+                {view}
+              </RailSection>
+            )}
+            {filters && (
+              <RailSection title="Фильтры" variant="row" icon={filterIcon} action={filterAction}>
+                {filters}
+              </RailSection>
+            )}
             <Link
               to={back.to}
               className="inline-flex items-center gap-1 text-xs font-medium text-primary transition-colors hover:text-primary/80"
@@ -275,6 +299,11 @@ function CdekSeriesPage({ def }: { def: SeriesDef }) {
   const series = useCdekSeries(period, include, undefined, products, salesChannels);
   const summary = useCdekSummary(period, include, products, salesChannels);
 
+  // Хук ДО ранних возвратов: ниже страница уходит в скелетон и в ошибку, и вызов после них дал бы
+  // «Rendered more hooks than during the previous render» — известные грабли этого репо.
+  const filterState = { statuses, products, channels: salesChannels };
+  const dims = useCdekFilterDims(filterState);
+
   if (series.isPending || summary.isPending) {
     return (
       <CdekMetricShell term={def.term} descriptor={def.descriptor} back={def.back}>
@@ -304,8 +333,37 @@ function CdekSeriesPage({ def }: { def: SeriesDef }) {
   const prev = summary.data?.previous ? def.total(summary.data.previous) : null;
   const hasPrevWindow = summary.data?.previous_window != null;
 
+  // Контролы графика переехали из-над графика в rail (владелец: «возьми всю правую область из
+  // Steep»). Там они и живут у Steep: над полотном остаётся только само полотно, а «чем смотрим» и
+  // «с чем сравниваем» — вопросы того же рода, что «что считаем», и стоят рядом с фильтрами.
+  const viewSection = (
+    <div className="pl-[2.125rem]">
+      <SegmentedControl
+        ariaLabel="Тип графика"
+        size="sm"
+        value={kind}
+        onChange={setKind}
+        options={[
+          { value: 'line', content: 'Линия' },
+          { value: 'bar', content: 'Столбцы' },
+        ]}
+      />
+    </div>
+  );
+
   const comparison = (
-    <div className="space-y-2">
+    <div className="space-y-2 pl-[2.125rem]">
+      <SegmentedControl
+        ariaLabel="База сравнения"
+        size="sm"
+        value={cmp}
+        onChange={setCmp}
+        options={[
+          { value: 'off', content: 'Выкл' },
+          // На окне «Всё» сравнивать не с чем — вариант гаснет, а не молча ничего не делает.
+          { value: 'prev', content: 'Пред. период', disabled: !hasPrevWindow },
+        ]}
+      />
       <div className="flex items-baseline justify-between gap-3">
         <span className="text-xs text-muted-foreground">Текущее окно</span>
         <span className="text-sm font-medium tabular-nums text-foreground">
@@ -331,7 +389,6 @@ function CdekSeriesPage({ def }: { def: SeriesDef }) {
   // Раздел фильтров: оси не нарисованы, пока их не добавили (см. CdekFilterRail). Подпись выбора
   // печатается ПОД ним и только когда выбор ушёл от умолчания — иначе на экране висела бы строка,
   // ничего не сообщающая.
-  const filterState = { statuses, products, channels: salesChannels };
 
   // Одна кнопка на весь выбор: три оси отвечают на ОДИН вопрос «что считать», и раздельное
   // сохранение заставляло нажимать трижды, а пропустив нажатие — увезти на «Обзор» половину выбора.
@@ -345,19 +402,28 @@ function CdekSeriesPage({ def }: { def: SeriesDef }) {
     setSavedFilter(channelKey, normChannels(salesChannels));
     toastStatusFilterSaved(statuses);
   };
+  const applyFilters = (next: typeof filterState) => {
+    setSelected(next.statuses);
+    setPickedProducts(next.products);
+    setPickedChannels(next.channels);
+  };
+  const removeDim = (dim: 'status' | 'product' | 'channel') => {
+    dims.close(dim);
+    if (dim === 'status') return setSelected([...CDEK_CANON_STATUSES]);
+    if (dim === 'product') return setPickedProducts([]);
+    return setPickedChannels([]);
+  };
   const filters = (
-    <div className="space-y-3">
-      <CdekFilterRail
+    <div className="space-y-2">
+      <CdekFilterList
         state={filterState}
+        shown={dims.shown}
         productOptions={productOptions}
-        onChange={(next) => {
-          setSelected(next.statuses);
-          setPickedProducts(next.products);
-          setPickedChannels(next.channels);
-        }}
+        onChange={applyFilters}
+        onRemove={removeDim}
       />
       {(caption || productCaption || channelCaption) && (
-        <p className="text-xs leading-relaxed text-muted-foreground">
+        <p className="pl-[2.125rem] text-xs leading-relaxed text-muted-foreground">
           {[caption, productCaption, channelCaption].filter(Boolean).join(' · ')}
         </p>
       )}
@@ -371,32 +437,12 @@ function CdekSeriesPage({ def }: { def: SeriesDef }) {
       back={def.back}
       comparison={comparison}
       filters={filters}
+      view={viewSection}
+      filterIcon={FilterGlyph}
+      filterAction={<CdekFilterAdd dims={dims.addable} onAdd={dims.open} />}
       onSaveFilters={dirty ? saveFilters : undefined}
     >
       <div className="space-y-3">
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <SegmentedControl
-            ariaLabel="Тип графика"
-            size="sm"
-            value={kind}
-            onChange={setKind}
-            options={[
-              { value: 'line', content: 'Линия' },
-              { value: 'bar', content: 'Столбцы' },
-            ]}
-          />
-          <SegmentedControl
-            ariaLabel="База сравнения"
-            size="sm"
-            value={cmp}
-            onChange={setCmp}
-            options={[
-              { value: 'off', content: 'Выкл' },
-              // На окне «Всё» сравнивать не с чем — вариант гаснет, а не молча ничего не делает.
-              { value: 'prev', content: 'Пред. период', disabled: !hasPrevWindow },
-            ]}
-          />
-        </div>
         {values.length < 2 ? (
           <EmptyState compact size="chart" title="Недостаточно дней для графика за окно." />
         ) : kind === 'bar' ? (

@@ -58,13 +58,45 @@ export function RailSection({
   title,
   mark,
   variant = 'flat',
+  icon,
+  action,
   children,
 }: {
   title: string;
   mark?: string;
-  variant?: 'flat' | 'card';
+  variant?: 'flat' | 'card' | 'row';
+  /** Моно-значок 16px слева от названия (только `row`). */
+  icon?: ReactNode;
+  /** Действие у ПРАВОГО края строки названия — «+» добавления (только `row`). */
+  action?: ReactNode;
   children: ReactNode;
 }) {
+  if (variant === 'row') {
+    // Анатомия снята с метрик Steep по просьбе владельца («сделай также») — не по памяти о
+    // скриншоте, а замером живой страницы: строка названия 32px, значок 16px в приглушённом цвете,
+    // отступ 10px до названия, действие 28×28 у правого края, волосяная линия ПОД строкой во всю
+    // ширину. Название идёт ОСНОВНЫМ цветом обычного размера, а не приглушённой разрядкой: у них
+    // раздел читается как заголовок списка, а не как микроподпись.
+    //
+    // Взята анатомия, не поверхность: тёмное стекло с backdrop-blur и свечением тени остаётся у
+    // них — у нас канон «без теней, только волосяные линии», и чужая поверхность встала бы пятном.
+    return (
+      <section data-rail-card={mark} data-rail-row="">
+        <div className="flex h-8 items-center justify-between gap-2.5 border-b border-border pl-2">
+          <span className="flex min-w-0 items-center gap-2.5">
+            {icon && (
+              <span aria-hidden="true" className="flex h-4 w-4 shrink-0 items-center justify-center text-muted-foreground">
+                {icon}
+              </span>
+            )}
+            <span className="truncate text-sm font-medium text-foreground">{title}</span>
+          </span>
+          {action}
+        </div>
+        <div className="pt-1.5">{children}</div>
+      </section>
+    );
+  }
   if (variant === 'card') {
     return (
       <section
