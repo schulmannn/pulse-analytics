@@ -9,6 +9,7 @@ import {
   isDemoMode,
 } from '@/lib/demo';
 import { lazyWithReload } from '@/lib/lazyWithReload';
+import { useForcedTheme } from '@/lib/forcedTheme';
 
 const ProtectedApp = lazy(lazyWithReload(() => import('@/ProtectedApp')));
 const Landing = lazy(
@@ -257,24 +258,24 @@ function GateFallback() {
   );
 }
 
+/** Скелетон ленивого чанка лендинга: повторяет его раскладку (пилюля-топбар + центрированная
+    колонка) и так же пришпиливает тёмную тему, иначе до приезда чанка страница моргает светлым
+    и потом дёргается. */
 function LandingFallback() {
+  useForcedTheme('dark');
   return (
-    <div className="min-h-screen bg-background text-foreground">
-      <div className="mx-auto w-full max-w-[1200px] px-6 sm:px-10">
-        <div className="flex items-center justify-between py-5">
-          <Pulse className="h-6 w-28" />
-          <div className="flex items-center gap-3">
-            <Pulse className="h-9 w-20" />
-            <Pulse className="h-9 w-36" />
-          </div>
-        </div>
-        <div className="max-w-xl space-y-4 pt-16 sm:pt-24">
+    <div className="flex min-h-screen flex-col bg-background text-foreground">
+      <div className="px-4 py-3">
+        <Pulse className="mx-auto h-[52px] w-[220px] rounded-full" />
+      </div>
+      <div className="flex flex-1 items-center justify-center py-20 sm:py-28">
+        <div className="flex w-full max-w-[620px] flex-col items-center space-y-4 px-6">
           <Pulse className="h-12 w-full" />
           <Pulse className="h-12 w-4/5" />
           <Pulse className="h-4 w-2/3" />
-          <div className="flex gap-3 pt-4">
-            <Pulse className="h-11 w-40" />
-            <Pulse className="h-11 w-32" />
+          <div className="flex gap-3 pt-5">
+            <Pulse className="h-11 w-32 rounded-full" />
+            <Pulse className="h-11 w-40 rounded-full" />
           </div>
         </div>
       </div>
