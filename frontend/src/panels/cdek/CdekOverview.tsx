@@ -25,6 +25,18 @@ import { pctDelta, type MetricDelta } from '@/lib/delta';
 import { lttbDownsample } from '@/lib/downsample';
 import { CHART_MAX_POINTS } from '@/lib/msSeries';
 import { fmt, timeAxisFromDayKeys } from '@/lib/format';
+import { useSelectedChannel } from '@/lib/channel-context';
+import { useSavedFilter } from '@/lib/widgetPrefsStore';
+import {
+  CDEK_CANON_STATUSES,
+  cdekProductFilterKey,
+  cdekStatusFilterKey,
+  cdekStatusInclude,
+  normalizeCdekProducts,
+  normalizeCdekStatuses,
+  productFilterCaption,
+  statusFilterCaption,
+} from '@/panels/cdek/cdekStatusFilter';
 import { formatByRole, formatMoney, moneyFormatterFor } from '@/lib/metricNumber';
 import { useCardShowsPeriod, usePagePeriod } from '@/lib/period';
 import { useMsPagePeriod } from '@/lib/msPeriod';
@@ -147,11 +159,25 @@ export function CdekOverview() {
   // На ленте окно уже названо в шапке страницы — карточка его не повторяет (владелец).
   const periodInLabel = useCardShowsPeriod() ? windowLabel : undefined;
 
-  const summary = useCdekSummary(period);
-  const series = useCdekSeries(period);
-  const channels = useCdekBreakdown(period, 'channel');
-  const statuses = useCdekBreakdown(period, 'status');
-  const products = useCdekBreakdown(period, 'product', 'revenue', 10);
+  // Сохранённый в развороте выбор ДЕЙСТВУЕТ и здесь (владелец: «чтобы эта настройка
+  // распространилась на виджет в уменьшенном виде»). Раньше он намеренно не протекал — карточка
+  // меняла бы значение без единого видимого контрола. Опасение снято не отменой правила, а
+  // подписью: как только выбор уходит от канона, карточки ГОВОРЯТ, что именно посчитано
+  // (filterCaption ниже). Число, которое молчит о своём наборе, — вот что было бы нечестно.
+  const { channelId } = useSelectedChannel();
+  const savedStatusRaw = useSavedFilter(cdekStatusFilterKey(channelId));
+  const savedStatuses = useMemo(() => normalizeCdekStatuses(savedStatusRaw), [savedStatusRaw]);
+  const include = cdekStatusInclude(savedStatuses.length > 0 ? savedStatuses : CDEK_CANON_STATUSES);
+  const savedProductsRaw = useSavedFilter(cdekProductFilterKey(channelId));
+  const pickedProducts = useMemo(() => normalizeCdekProducts(savedProductsRaw), [savedProductsRaw]);
+
+  const summary = useCdekSummary(period, include, pickedProducts);
+  const series = useCdekSeries(period, include, undefined, pickedProducts);
+  const channels = useCdekBreakdown(period, 'channel', include, 12, pickedProducts);
+  // Разбивка ПО СТАТУСАМ остаётся на 'all': отфильтруй её выбранными статусами — и она покажет
+  // ровно то, что сама же отобрала. Фильтр товаров ей при этом осмыслен и применяется.
+  const statuses = useCdekBreakdown(period, 'status', 'all', 12, pickedProducts);
+  const products = useCdekBreakdown(period, 'product', include, 10, pickedProducts);
 
   const [channelMetric, setChannelMetric] = useState<'revenue' | 'orders'>('revenue');
   const [statusMetric, setStatusMetric] = useState<'orders' | 'revenue'>('orders');
@@ -174,8 +200,25 @@ export function CdekOverview() {
     );
   }
 
+  // Подпись выбора печатается ТОЛЬКО когда он ушёл от канона — иначе на каждой карточке висела бы
+  // строка, ничего не сообщающая (владелец уже снимал такую однажды: «убирай эту подпись»).
+  // Но если набор нестандартный, карточка обязана это сказать: иначе число значит не то, что
+  // читатель думает, и узнать об этом неоткуда.
+  // Имена для подписи берутся из УЖЕ загруженной разбивки по товарам — она отфильтрована тем же
+  // выбором, поэтому выбранный товар в ней заведомо есть. Отдельный запрос каталога ради одной
+  // строки текста здесь не нужен.
+  const productNames = (products.data?.rows ?? [])
+    .filter((row): row is typeof row & { key: string } => typeof row.key === 'string' && row.key !== '')
+    .map((row) => ({ id: row.key, name: row.title ?? row.article ?? row.key }));
+  const filterCaption = [
+    statusFilterCaption(savedStatuses),
+    productFilterCaption(pickedProducts, productNames),
+  ]
+    .filter(Boolean)
+    .join(' · ') || undefined;
+
   const storyCaption = (extra?: string) =>
-    [periodInLabel, extra].filter(Boolean).join(' · ') || undefined;
+    [periodInLabel, extra, filterCaption].filter(Boolean).join(' · ') || undefined;
 
   const revStory = {
     value: formatMoney(cur?.revenue),

@@ -70,18 +70,18 @@ export function statusFilterCaption(selected: readonly string[]): string | null 
   return `Считаются только: ${labels.join(', ').toLocaleLowerCase('ru-RU')}`;
 }
 
+/**
+ * Сохранения ЗДЕСЬ нет. Раньше у каждого фильтра была своя кнопка «Сохранить», и человек, поменяв
+ * обе оси одного вопроса «что считать», должен был нажать две. Кнопка теперь одна на страницу, в
+ * её правом верхнем углу (владелец), и сохраняет весь выбор разом.
+ */
 export function CdekStatusFilter({
   selected,
-  saved,
   onChange,
-  onSave,
 }: {
   selected: string[];
-  saved: string[];
   onChange: (ids: string[]) => void;
-  onSave: (ids: string[]) => void;
 }) {
-  const dirty = !sameCdekStatuses(selected, saved);
   const toggle = (id: string) =>
     onChange(selected.includes(id) ? selected.filter((s) => s !== id) : [...selected, id]);
 
@@ -89,14 +89,7 @@ export function CdekStatusFilter({
     // Заголовок «Статусы заказов» уже занят карточкой разбивки на «Обзоре» — фильтру нужен свой
     // якорь, иначе тест «фильтра на карточке нет» ловил бы чужой текст и зеленел вхолостую.
     <div className="space-y-2" data-cdek-status-filter="">
-      <div className="flex items-center justify-between gap-3">
-        <span className="text-xs text-muted-foreground">Какие заказы считать</span>
-        {dirty && (
-          <Button type="button" variant="secondary" size="xs" onClick={() => onSave(selected)}>
-            Сохранить
-          </Button>
-        )}
-      </div>
+      <span className="text-xs text-muted-foreground">Какие заказы считать</span>
       <div className="flex flex-wrap gap-1.5">
         {CDEK_STATUSES.map((status) => {
           const active = selected.includes(status.id);
@@ -176,15 +169,11 @@ export function productFilterCaption(
 export function CdekProductFilter({
   options,
   selected,
-  saved,
   onChange,
-  onSave,
 }: {
   options: CdekProductOption[];
   selected: string[];
-  saved: string[];
   onChange: (ids: string[]) => void;
-  onSave: (ids: string[]) => void;
 }) {
   const [query, setQuery] = useState('');
   // Свёрнут по умолчанию: список ассортимента длиннее экрана, и раскрытый он сталкивал бы график
@@ -194,7 +183,6 @@ export function CdekProductFilter({
   const visible = needle
     ? options.filter((o) => o.name.toLocaleLowerCase('ru-RU').includes(needle))
     : options;
-  const dirty = !sameCdekProducts(selected, saved);
   const full = selected.length >= CDEK_PRODUCT_MAX;
   const toggle = (id: string) => {
     if (selected.includes(id)) return onChange(selected.filter((x) => x !== id));
@@ -217,11 +205,6 @@ export function CdekProductFilter({
           {selected.length > 0 && (
             <Button type="button" variant="ghost" size="xs" onClick={() => onChange([])}>
               Сбросить
-            </Button>
-          )}
-          {dirty && (
-            <Button type="button" variant="secondary" size="xs" onClick={() => onSave(selected)}>
-              Сохранить
             </Button>
           )}
         </div>
