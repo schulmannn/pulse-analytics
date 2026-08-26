@@ -244,3 +244,38 @@ test('пустые строки в конце листа не считаются
   assert.equal(r.stats.rows_total, 1);
   assert.equal(r.stats.rows_rejected, 0);
 });
+
+/**
+ * Личный кабинет СДЭКа отдаёт выгрузку НА ЯЗЫКЕ ИНТЕРФЕЙСА. Владелец принёс файл с английской
+ * шапкой при тех же данных внутри, и импорт отбился «Не найдена строка заголовков»: из
+ * восемнадцати колонок совпадала одна — `ID`.
+ *
+ * Заголовки здесь выписаны РОВНО так, как в настоящем файле (orders_export_mFCSllY.xlsx), а не
+ * переведены на глаз: «ExtId» без пробела, «SKU» без слова «товара», «Count» вместо «Quantity».
+ */
+const CDEK_HEADER_EN = [
+  'ID', 'Created', 'ExtId', 'Tracking number', 'State', 'Comment',
+  'Product ID', 'Product name', 'Product extId', 'Product state',
+  'Article', 'SKU', 'Barcodes', 'Price', 'Count', 'Reserved count',
+  'Warehouse', 'Delivery service',
+];
+
+test('английская шапка выгрузки разбирается наравне с русской', () => {
+  const ru = parseCdekSheet([CDEK_HEADER, cdekRow({ id: 77, created: '2026-06-01 07:05:28', productId: 'BP-01' })]);
+  const en = parseCdekSheet([CDEK_HEADER_EN, cdekRow({ id: 77, created: '2026-06-01 07:05:28', productId: 'BP-01' })]);
+  assert.deepEqual(en.orders, ru.orders, 'та же строка данных даёт тот же заказ');
+  assert.equal(en.rejected.length, 0);
+});
+
+test('английская шапка без обязательных колонок — тот же внятный перечень', () => {
+  // Иначе «неполный английский файл» отбивался бы как «чужой», и человек не узнал бы, чего не хватает.
+  const partial = CDEK_HEADER_EN.filter((h) => h !== 'Price' && h !== 'Count');
+  assert.throws(
+    () => parseCdekSheet([partial, cdekRow({ id: 1, created: '2026-01-10 10:00:00', productId: 'p1' }).slice(0, partial.length)]),
+    (e) => {
+      assert.ok(e instanceof CdekParseError);
+      assert.match(e.userMessage, /Стоимость товара|Количество/);
+      return true;
+    },
+  );
+});

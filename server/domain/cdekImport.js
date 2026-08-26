@@ -41,6 +41,45 @@ const COLUMN_TITLES = {
   carrier: 'Служба доставки',
 };
 
+/**
+ * Английская шапка той же выгрузки. Личный кабинет СДЭКа отдаёт файл на языке интерфейса, и
+ * владелец принёс экспорт с английскими заголовками при тех же данных внутри (статусы `complete`,
+ * служба `Cdek`/`YM FBS` — они и в русском файле латиницей). Импорт падал на «Не найдена строка
+ * заголовков»: из восемнадцати колонок совпадала одна — `ID`.
+ *
+ * Это НЕ динамическое определение схемы, от которого владелец отказался: раскладка по-прежнему
+ * известна заранее, просто известных раскладок теперь две. Всё остальное — порядок колонок,
+ * обязательный набор, разбор значений — общее.
+ */
+const COLUMN_TITLES_EN = {
+  order_id: 'ID',
+  created: 'Created',
+  external_order_id: 'ExtId',
+  track_number: 'Tracking number',
+  status: 'State',
+  comment: 'Comment',
+  product_id: 'Product ID',
+  product_title: 'Product name',
+  product_external_id: 'Product extId',
+  item_status: 'Product state',
+  article: 'Article',
+  sku: 'SKU',
+  barcodes: 'Barcodes',
+  unit_price: 'Price',
+  qty: 'Count',
+  qty_reserved: 'Reserved count',
+  warehouse: 'Warehouse',
+  carrier: 'Delivery service',
+};
+
+/** Поле → все известные его заголовки. Порядок важен только для сообщений об ошибке (первый — тот,
+ *  что показываем человеку): русская выгрузка остаётся основной. */
+const COLUMN_ALIASES = Object.fromEntries(
+  Object.keys(COLUMN_TITLES).map((field) => [field, [COLUMN_TITLES[field], COLUMN_TITLES_EN[field]]
+    .filter(Boolean)
+    .map(normalizeHeader)]),
+);
+
 /** Без этих колонок факта нет — импорт отвергается целиком с внятным перечнем недостающих. */
 const REQUIRED_COLUMNS = ['order_id', 'created', 'status', 'product_id', 'unit_price', 'qty'];
 
@@ -58,10 +97,21 @@ const SALES_CHANNELS = {
 };
 
 /** Статусы, которые точно встречаются. Незнакомый статус НЕ роняет импорт — попадает в warnings. */
-const KNOWN_STATUSES = new Set(['complete', 'delivery', 'cancel', 'return']);
+const KNOWN_STATUSES = new Set(['complete', 'delivery', 'assembled', 'confirmed', 'cancel', 'return']);
 
-/** Статусы, исключаемые из выручки. Отмен в эталонном файле 60, возврат 1 — это 7.2% суммы. */
-const NON_REVENUE_STATUSES = new Set(['cancel', 'return']);
+/**
+ * Статусы, исключаемые из выручки. ЕДИНСТВЕННОЕ место, где записано это правило: SQL-фильтр
+ * репозитория строится из этого набора, а не повторяет его литералом (копий было четыре).
+ *
+ * Отмен в эталонном файле 60, возврат 1 — это 7.2% суммы. `assembled` (собран) и `confirmed`
+ * (подтверждён) приехали с новой выгрузкой и в выручку НЕ идут по решению владельца: канон здесь
+ * «отгруженное = проданное», а эти два ещё не отгружены. В разбивке и в фильтре они видны — их
+ * можно выбрать явно, но по умолчанию они не деньги.
+ */
+const NON_REVENUE_STATUSES = new Set(['cancel', 'return', 'assembled', 'confirmed']);
+
+/** Порядок статусов для витрин: от «деньги» к «не деньги». */
+const ORDER_STATUSES = [...KNOWN_STATUSES];
 
 /**
  * Складское движение, а не продажа. Правило намеренно узкое — по комментарию и по SKU. Нулевую
@@ -162,7 +212,7 @@ function classifyKind({ comment, sku }) {
  * отвергло бы весь файл, а поиск найдёт настоящую шапку.
  */
 function findHeaderRow(rows, scanLimit = 10) {
-  const titles = new Set(Object.values(COLUMN_TITLES).map(normalizeHeader));
+  const titles = new Set(Object.values(COLUMN_ALIASES).flat());
   let best = -1;
   let bestHits = 0;
   for (let i = 0; i < Math.min(rows.length, scanLimit); i++) {
@@ -179,8 +229,8 @@ function mapColumns(headerRow) {
     if (key && !byTitle.has(key)) byTitle.set(key, i);
   });
   const index = {};
-  for (const [field, title] of Object.entries(COLUMN_TITLES)) {
-    const at = byTitle.get(normalizeHeader(title));
+  for (const [field, aliases] of Object.entries(COLUMN_ALIASES)) {
+    const at = aliases.map((alias) => byTitle.get(alias)).find((v) => v !== undefined);
     if (at !== undefined) index[field] = at;
   }
   return index;
@@ -358,10 +408,12 @@ module.exports = {
   parseCdekSheet,
   CdekParseError,
   COLUMN_TITLES,
+  COLUMN_TITLES_EN,
   REQUIRED_COLUMNS,
   SALES_CHANNELS,
   KNOWN_STATUSES,
   NON_REVENUE_STATUSES,
+  ORDER_STATUSES,
   classifyKind,
   normalizeChannel,
   parseNaiveDate,
