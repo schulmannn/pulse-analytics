@@ -309,15 +309,21 @@ export function useCdekSeries(
   });
 }
 
-export function useCdekBreakdown(period: MsPeriod, dim: string, include: CdekInclude = 'revenue', limit = 12) {
+export function useCdekBreakdown(
+  period: MsPeriod,
+  dim: string,
+  include: CdekInclude = 'revenue',
+  limit = 12,
+  products?: readonly string[],
+) {
   const { channelId } = useSelectedChannel();
   return useQuery({
     enabled: channelId != null,
-    queryKey: qk.cdekBreakdown.window(channelId, period, include, dim, limit),
+    queryKey: qk.cdekBreakdown.window(channelId, period, include, dim, limit, productsKey(products)),
     retry: false,
     queryFn: ({ signal }) =>
       apiGet(
-        `/api/cdek/breakdown?${msPeriodQuery(period)}&include=${include}&dim=${dim}&limit=${limit}`,
+        `/api/cdek/breakdown?${msPeriodQuery(period)}&include=${include}&dim=${dim}&limit=${limit}${productsParam(products)}`,
         CdekBreakdownSchema,
         { signal, channelId },
       ),

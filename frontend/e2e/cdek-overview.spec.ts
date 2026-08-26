@@ -60,7 +60,8 @@ const fold = (rows: typeof CHANNELS) => ({
   groups: rows.length,
 });
 
-async function bootOverview(page: Page, { all = false }: { all?: boolean } = {}) {
+async function bootOverview(page: Page, opts: { all?: boolean; savedFilters?: string } = {}) {
+  const { all = false } = opts;
   const from = Date.now() - 30 * DAY;
   /** Каждый `include`, с которым уходил запрос окна — по нему видно, что фильтр реально доехал. */
   const includes: string[] = [];
@@ -114,10 +115,11 @@ async function bootOverview(page: Page, { all = false }: { all?: boolean } = {})
     return json(404, { error: 'not_stubbed' });
   });
 
-  await page.addInitScript(() => {
+  await page.addInitScript((filters) => {
     localStorage.setItem('pulse_channel', '5');
     localStorage.setItem('pulse_theme', 'dark');
-  });
+    if (filters) localStorage.setItem('pulse_saved_filters', filters);
+  }, opts.savedFilters ?? '');
   await page.goto('/cdek');
   await page.locator('main').waitFor({ state: 'visible', timeout: 25_000 });
   await page.waitForTimeout(900);
@@ -267,4 +269,29 @@ test('фильтр товаров режет метрику и тоже живё
   await expect.poll(() => productParams[productParams.length - 1]).toBe(PRODUCTS[0].key);
   // Метрика обязана СКАЗАТЬ, что считает не весь ассортимент.
   await expect(page.getByText(/Только товар/)).toBeVisible();
+});
+
+
+/**
+ * Сохранённый в развороте выбор ДЕЙСТВУЕТ на карточках «Обзора» (владелец: «чтобы эта настройка
+ * распространилась на виджет в уменьшенном виде»). Раньше он намеренно не протекал, и это было
+ * зафиксировано в коде комментарием — поэтому проверка нужна: без неё возврат к старому поведению
+ * прошёл бы незамеченным.
+ *
+ * Второе требование того же решения: карточка обязана СКАЗАТЬ, что посчитана нестандартным
+ * набором. Молчащее число значило бы не то, что читатель думает.
+ */
+test('сохранённый фильтр доезжает до карточек «Обзора» и назван подписью', async ({ page }) => {
+  const { includes } = await bootOverview(page, {
+    savedFilters: JSON.stringify({ 'cdek:status:5': ['complete'] }),
+  });
+  expect(includes.some((v) => v === 'status:complete')).toBe(true);
+  await expect(card(page, 'Выручка')).toContainText(/только: завершён/i);
+});
+
+test('канонический набор ничего не печатает и ходит каноном', async ({ page }) => {
+  // Подпись на каждой карточке при обычном выборе была бы шумом — владелец уже снимал такую.
+  const { includes } = await bootOverview(page);
+  expect(includes.every((v) => v !== 'status:complete')).toBe(true);
+  await expect(card(page, 'Выручка')).not.toContainText(/только:/i);
 });
