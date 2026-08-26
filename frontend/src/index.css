@@ -1920,11 +1920,19 @@
       scroll-behavior: auto !important;
     }
   }
-  /* Quieter scrollbars — tinted to the surface instead of the loud system default (but never
-     hidden). Firefox via scrollbar-*; WebKit/Chromium via the pseudo-elements. */
-  * {
-    scrollbar-width: thin;
-    scrollbar-color: hsl(var(--border)) transparent;
+  /* Quieter scrollbars — tinted to the surface instead of the loud system default (но НИКОГДА не
+     спрятанные: полоса — единственный индикатор того, что под сгибом ещё есть содержимое).
+     ДВА МЕХАНИЗМА НЕЛЬЗЯ ЗАДАВАТЬ ВМЕСТЕ. Современный Chromium игнорирует ВСЕ псевдоэлементы
+     `::-webkit-scrollbar`, если на том же элементе задан `scrollbar-width` или `scrollbar-color`.
+     Раньше здесь стояло и то и другое — поэтому весь скруглённый thumb был мёртв, и на экране
+     жила системная полоса по умолчанию (замер: скроллер резервировал 12px вместо заявленных 10).
+     Поэтому стандартные свойства уходят в ветку для браузеров БЕЗ псевдоэлементов (Firefox), а
+     Chromium/Safari получают полный контроль. */
+  @supports not selector(::-webkit-scrollbar) {
+    * {
+      scrollbar-width: thin;
+      scrollbar-color: hsl(var(--border)) transparent;
+    }
   }
   ::-webkit-scrollbar {
     width: 10px;
@@ -1933,13 +1941,24 @@
   ::-webkit-scrollbar-track {
     background: transparent;
   }
+  /* Отступ вокруг ползунка делается ПРОЗРАЧНОЙ рамкой с `background-clip: padding-box`, а не
+     рамкой цвета фона. Красить её в `--background` — значит печатать цвет ОБОЛОЧКИ поверх любой
+     поверхности, над которой идёт скроллер: у края карточки это читалось как светлый шов
+     (замечено владельцем). Прозрачная рамка даёт тот же отступ на любом фоне. */
   ::-webkit-scrollbar-thumb {
     background: hsl(var(--border));
+    background-clip: padding-box;
+    border: 3px solid transparent;
     border-radius: 999px;
-    border: 3px solid hsl(var(--background));
   }
   ::-webkit-scrollbar-thumb:hover {
     background: hsl(var(--muted-foreground) / 0.6);
+    background-clip: padding-box;
+  }
+  /* Место под полосу резервируется всегда: иначе появление скролла сдвигает всю раскладку на
+     ширину полосы — заметный прыжок при смене периода или разворачивании списка. */
+  [data-dashboard-scroll] {
+    scrollbar-gutter: stable;
   }
   /* Visible keyboard focus across the whole app (WCAG 2.4.7) — one rule for every
      button/link/tab; inputs keep their own focus:ring. */
