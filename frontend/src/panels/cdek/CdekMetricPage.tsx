@@ -1,6 +1,7 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
+import { CdekFilterRail } from '@/panels/cdek/CdekFilterRail';
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
 import { ShareRows } from '@/components/ShareRows';
@@ -9,9 +10,6 @@ import { useSelectedChannel } from '@/lib/channel-context';
 import { setSavedFilter, useSavedFilter } from '@/lib/widgetPrefsStore';
 import {
   CDEK_CANON_STATUSES,
-  CdekChannelFilter,
-  CdekProductFilter,
-  CdekStatusFilter,
   cdekChannelFilterKey,
   cdekProductFilterKey,
   cdekStatusFilterKey,
@@ -330,10 +328,13 @@ function CdekSeriesPage({ def }: { def: SeriesDef }) {
     </div>
   );
 
-  // Тот же блок, что раньше стоял над графиком, — теперь узел для rail'а. Подпись выбора едет
-  // ВМЕСТЕ с фильтрами: она объясняет именно их состояние, а не график сам по себе.
-  // Одна кнопка на весь выбор. Обе оси отвечают на ОДИН вопрос «что считать», и раздельное
-  // сохранение заставляло нажимать дважды, а пропустив второе — увезти на «Обзор» половину выбора.
+  // Раздел фильтров: оси не нарисованы, пока их не добавили (см. CdekFilterRail). Подпись выбора
+  // печатается ПОД ним и только когда выбор ушёл от умолчания — иначе на экране висела бы строка,
+  // ничего не сообщающая.
+  const filterState = { statuses, products, channels: salesChannels };
+
+  // Одна кнопка на весь выбор: три оси отвечают на ОДИН вопрос «что считать», и раздельное
+  // сохранение заставляло нажимать трижды, а пропустив нажатие — увезти на «Обзор» половину выбора.
   const dirty =
     !sameCdekStatuses(statuses, saved) ||
     !sameCdekProducts(products, savedProducts) ||
@@ -344,12 +345,17 @@ function CdekSeriesPage({ def }: { def: SeriesDef }) {
     setSavedFilter(channelKey, normChannels(salesChannels));
     toastStatusFilterSaved(statuses);
   };
-
   const filters = (
     <div className="space-y-3">
-      <CdekStatusFilter selected={statuses} onChange={setSelected} />
-      <CdekProductFilter options={productOptions} selected={products} onChange={setPickedProducts} />
-      <CdekChannelFilter selected={salesChannels} onChange={setPickedChannels} />
+      <CdekFilterRail
+        state={filterState}
+        productOptions={productOptions}
+        onChange={(next) => {
+          setSelected(next.statuses);
+          setPickedProducts(next.products);
+          setPickedChannels(next.channels);
+        }}
+      />
       {(caption || productCaption || channelCaption) && (
         <p className="text-xs leading-relaxed text-muted-foreground">
           {[caption, productCaption, channelCaption].filter(Boolean).join(' · ')}
