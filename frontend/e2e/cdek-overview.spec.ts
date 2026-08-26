@@ -224,9 +224,9 @@ test('«Развернуть» ведёт на страницу метрики, 
   await expect(page.getByRole('link', { name: /СДЭК · Обзор/ })).toBeVisible();
   await expect(page.getByRole('toolbar', { name: 'Тип графика' })).toBeVisible();
   await expect(page.getByRole('toolbar', { name: 'База сравнения' })).toBeVisible();
-  // Описание метрики больше не утверждает, какие статусы посчитаны: с появлением фильтра это
-  // противоречило бы выбору на том же экране. Неизменная часть — складские движения не продажи.
-  await expect(page.getByText('Складские движения в неё не входят')).toBeVisible();
+  // Строки источника и описания сняты по решению владельца («не несут инфы»): источник назван в
+  // сайдбаре, а «сумма проданного за окно» повторяла заголовок.
+  await expect(page.getByText('Складские движения в неё не входят')).toHaveCount(0);
 });
 
 test('фильтр статусов живёт только в развороте и доезжает до запроса', async ({ page }) => {
@@ -259,7 +259,10 @@ test('фильтр статусов живёт только в разворот�
   await expect.poll(() => includes[includes.length - 1]).toBe('status:cancel,complete,delivery');
 
   // И карточка теперь ГОВОРИТ, что посчитала: молча изменить смысл числа нельзя.
-  await expect(page.getByText(/Считаются только/)).toBeVisible();
+  // Гарантия та же — страница ОБЯЗАНА назвать, что посчитала, — но теперь она выражена пилюлями:
+  // каждое выбранное значение стоит в карточке и снимается на месте. Отдельная подпись под ними
+  // повторяла бы то, что уже на экране.
+  await expect(page.getByRole('button', { name: 'Убрать: Отменён' })).toBeVisible();
 });
 
 test('фильтр товаров режет метрику и тоже живёт только в развороте', async ({ page }) => {
@@ -284,7 +287,7 @@ test('фильтр товаров режет метрику и тоже живё
   await expect.poll(() => productParams.length).toBeGreaterThan(before);
   await expect.poll(() => productParams[productParams.length - 1]).toBe(PRODUCTS[0].key);
   // Метрика обязана СКАЗАТЬ, что считает не весь ассортимент.
-  await expect(page.getByText(/Только товар/)).toBeVisible();
+  await expect(page.getByRole('button', { name: `Убрать: ${PRODUCTS[0].title}` })).toBeVisible();
 });
 
 
