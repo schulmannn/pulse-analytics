@@ -112,6 +112,28 @@ export const FilterGlyph = (
   </svg>
 );
 
+/** Разрезы, по которым можно разложить ряд. Порядок — от самого частого вопроса к редкому. */
+export const CDEK_BREAKDOWN_DIMS = [
+  { id: 'channel', label: 'Каналам продаж' },
+  { id: 'status', label: 'Статусам' },
+  { id: 'product', label: 'Товарам' },
+  { id: 'carrier', label: 'Службе доставки' },
+] as const;
+
+/**
+ * Читаемый потолок числа серий. Шесть — столько же, сколько у разбивки МойСклада, и столько же
+ * цветов в категориальной палитре канона (--chart-1..6, Okabe-Ito). Семёрка потребовала бы либо
+ * повторить цвет, либо взять неразличимый — и то и другое врёт про идентичность серии.
+ */
+export const CDEK_MAX_SERIES = 6;
+
+/** Значок раздела «Разбивка». */
+export const SplitGlyph = (
+  <svg viewBox="0 0 16 16" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+    <path d="M2 8h4l2-4 2 8 2-4h2" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
 /** Значок раздела «Сравнение». */
 export const CompareGlyph = (
   <svg viewBox="0 0 16 16" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
@@ -150,6 +172,61 @@ export function CdekFilterAdd({ dims, onAdd }: { dims: CdekFilterDim[]; onAdd: (
         ))}
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+/** Выбор разреза — тем же приёмом, что и фильтры: «+» в строке раздела, выбранное строкой ниже. */
+export function CdekSplitAdd({ onPick }: { onPick: (dim: string) => void }) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          aria-label="Выбрать разрез"
+          className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40"
+        >
+          <svg viewBox="0 0 16 16" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+            <path d="M8 3.5v9M3.5 8h9" strokeLinecap="round" />
+          </svg>
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-45">
+        {CDEK_BREAKDOWN_DIMS.map((dim) => (
+          <DropdownMenuItem key={dim.id} onSelect={() => onPick(dim.id)}>
+            {dim.label}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/** Строка выбранного разреза — та же вертикаль и тот же крестик, что у строки фильтра. */
+export function CdekSplitRow({ dim, onClear }: { dim: string; onClear: () => void }) {
+  const label = CDEK_BREAKDOWN_DIMS.find((d) => d.id === dim)?.label ?? dim;
+  if (!dim) {
+    return (
+      <p className="pl-[2.125rem] text-sm leading-relaxed text-muted-foreground">
+        Один ряд — без разреза
+      </p>
+    );
+  }
+  return (
+    <div className="group flex h-8 items-center gap-2 pl-[2.125rem] pr-1">
+      <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
+        По: <span className="text-foreground">{label.toLocaleLowerCase('ru-RU')}</span>
+      </span>
+      <button
+        type="button"
+        aria-label="Убрать разбивку"
+        onClick={onClear}
+        className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40 group-hover:opacity-100"
+      >
+        <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+          <path d="M4 4l8 8M12 4l-8 8" strokeLinecap="round" />
+        </svg>
+      </button>
+    </div>
   );
 }
 

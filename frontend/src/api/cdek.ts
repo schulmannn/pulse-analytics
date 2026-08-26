@@ -200,6 +200,12 @@ const CdekSeriesSchema = z
     include: z.string(),
     current: z.array(CdekPointSchema),
     previous: z.array(CdekPointSchema),
+    // Приходит ТОЛЬКО при ?breakdown=<dim>: ряд, разложенный по измерению. Поле необязательное —
+    // обычный ряд его не несёт, и требовать его схемой значило бы ломать все прежние ответы.
+    dim: z.string().optional(),
+    groups: z
+      .array(z.object({ key: z.string().nullable(), points: z.array(CdekPointSchema) }).passthrough())
+      .optional(),
   })
   .passthrough();
 
@@ -303,15 +309,17 @@ export function useCdekSeries(
   grain?: string,
   products?: readonly string[],
   channels?: readonly string[],
+  /** Разрез: ряд приходит группами вместо одной серии. */
+  breakdown?: string,
 ) {
   const { channelId } = useSelectedChannel();
   return useQuery({
     enabled: channelId != null,
-    queryKey: qk.cdekSeries.window(channelId, period, include, grain ?? 'auto', productsKey(products), productsKey(channels)),
+    queryKey: qk.cdekSeries.window(channelId, period, include, grain ?? 'auto', productsKey(products), productsKey(channels), breakdown ?? ''),
     retry: false,
     queryFn: ({ signal }) =>
       apiGet(
-        `/api/cdek/series?${msPeriodQuery(period)}&include=${include}${grain ? `&grain=${grain}` : ''}${productsParam(products)}${channelsParam(channels)}`,
+        `/api/cdek/series?${msPeriodQuery(period)}&include=${include}${grain ? `&grain=${grain}` : ''}${productsParam(products)}${channelsParam(channels)}${breakdown ? `&breakdown=${breakdown}` : ''}`,
         CdekSeriesSchema,
         { signal, channelId },
       ),

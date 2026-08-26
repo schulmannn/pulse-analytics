@@ -247,8 +247,9 @@ test('читающие запросы: число плейсхолдеров с�
   await repo.getCdekSummaryForActor(5, { uid: 1 }, opts);
   await repo.getCdekSeriesForActor(5, { uid: 1 }, opts);
   await repo.getCdekBreakdownForActor(5, { uid: 1 }, opts);
+  await repo.getCdekSeriesBreakdownForActor(5, { uid: 1 }, opts);
 
-  assert.equal(queries.length, 3, 'три чтения — три запроса');
+  assert.equal(queries.length, 4, 'четыре чтения — четыре запроса');
   for (const { sql, params } of queries) {
     const highest = Math.max(...[...sql.matchAll(/\$(\d+)/g)].map((m) => Number(m[1])));
     assert.equal(highest, params.length,

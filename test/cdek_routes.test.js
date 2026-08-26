@@ -447,3 +447,38 @@ test('выбраны все каналы — это «фильтра нет», �
   });
   assert.equal(seen[0], null, 'полный набор сворачивается в null — короче строка, устойчивее кэш');
 });
+
+test('?breakdown=<dim> отдаёт серии вместо одного ряда', async () => {
+  const seen = [];
+  const { routes } = build({
+    db: {
+      getCdekSeriesBreakdownForActor: async (_id, _actor, opts) => {
+        seen.push(opts.dim);
+        return { grain: 'day', dim: opts.dim, groups: [
+          { key: 'own', points: [{ day: '2026-03-01', revenue_kopecks: '150000', orders: '2', items: '2' }] },
+          { key: 'ozon', points: [{ day: '2026-03-01', revenue_kopecks: '90000', orders: '1', items: '1' }] },
+        ] };
+      },
+      getCdekSeriesForActor: async () => { throw new Error('обычный ряд не должен запрашиваться'); },
+    },
+  });
+  const res = await call(routes, 'GET /api/cdek/series', { query: { days: '30', breakdown: 'channel' } });
+  assert.equal(res.status, 200);
+  assert.deepEqual(seen, ['channel']);
+  assert.equal(res.body.groups.length, 2);
+  assert.equal(res.body.groups[0].key, 'own');
+  assert.equal(res.body.groups[0].points[0].revenue, 1500, 'копейки переводятся в рубли, как у обычного ряда');
+  assert.deepEqual(res.body.current, [], 'при разбивке одиночного ряда нет');
+});
+
+test('без breakdown роут отдаёт обычный ряд и разбивку не трогает', async () => {
+  const { routes } = build({
+    db: {
+      getCdekSeriesBreakdownForActor: async () => { throw new Error('разбивка не должна запрашиваться'); },
+      getCdekSeriesForActor: async () => ({ grain: 'day', current: [], previous: [] }),
+    },
+  });
+  const res = await call(routes, 'GET /api/cdek/series', { query: { days: '30' } });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.groups, undefined);
+});
