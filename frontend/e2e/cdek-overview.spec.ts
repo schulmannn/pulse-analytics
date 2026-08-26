@@ -241,8 +241,16 @@ test('фильтр статусов живёт только в разворот�
   await expand.press('Enter');
   await expect(page).toHaveURL(/\/metrics\/cdek-revenue/);
 
-  await expect(page.locator('[data-cdek-status-filter]')).toBeVisible();
+  // Оси не нарисованы, пока их не добавили (раздел фильтров по образцу Steep): сначала «+», потом
+  // строка оси, и только по клику по ней открывается сам выбор.
+  await expect(page.locator('[data-cdek-filter-rail]')).toBeVisible();
+  await expect(page.locator('[data-cdek-status-filter]')).toHaveCount(0);
   const before = includes.length;
+
+  await page.getByRole('button', { name: 'Добавить фильтр' }).click();
+  await page.getByRole('menuitem', { name: 'Статусы заказов' }).click();
+  await page.getByRole('button', { name: /^Статусы:/ }).click();
+  await expect(page.locator('[data-cdek-status-filter]')).toBeVisible();
 
   await page.getByRole('button', { name: 'Отменён' }).click();
   await expect.poll(() => includes.length).toBeGreaterThan(before);
@@ -262,7 +270,11 @@ test('фильтр товаров режет метрику и тоже живё
   await expand.press('Enter');
   await expect(page).toHaveURL(/\/metrics\/cdek-revenue/);
 
-  await page.getByRole('button', { name: /^Товары/ }).click();
+  await expect(page.locator('[data-cdek-product-filter]')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Добавить фильтр' }).click();
+  await page.getByRole('menuitem', { name: 'Товары' }).click();
+  await page.getByRole('button', { name: /^Товары:/ }).click();
+  await page.getByRole('button', { name: /^Товары ·/ }).click();
   const first = page.getByRole('button', { name: PRODUCTS[0].title ?? '' });
   await expect(first).toBeVisible();
   const before = productParams.length;
