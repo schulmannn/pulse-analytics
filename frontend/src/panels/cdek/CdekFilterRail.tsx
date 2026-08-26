@@ -107,21 +107,21 @@ const DIMS: CdekFilterDim[] = ['status', 'product', 'channel'];
 
 /** Значок раздела — 16px, штриховой, в цвет приглушённого текста (как у Steep). */
 export const FilterGlyph = (
-  <svg viewBox="0 0 16 16" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.5">
+  <svg viewBox="0 0 16 16" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
     <path d="M2.5 4.5h11M4.5 8h7M6.5 11.5h3" strokeLinecap="round" />
   </svg>
 );
 
 /** Значок раздела «Сравнение». */
 export const CompareGlyph = (
-  <svg viewBox="0 0 16 16" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.5">
+  <svg viewBox="0 0 16 16" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
     <path d="M4.5 13V3M11.5 13V3M2 5.5l2.5-2.5L7 5.5M9 10.5l2.5 2.5 2.5-2.5" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 );
 
 /** Значок раздела «Вид» — то же семейство штриховых 16px. */
 export const ViewGlyph = (
-  <svg viewBox="0 0 16 16" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.5">
+  <svg viewBox="0 0 16 16" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
     <path d="M2.5 12.5V7M6.5 12.5V4M10.5 12.5V9M14 12.5h-13" strokeLinecap="round" />
   </svg>
 );
