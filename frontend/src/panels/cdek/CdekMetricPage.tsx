@@ -1,5 +1,4 @@
 import { useMemo, useState, type ReactNode } from 'react';
-import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { MultiLineChart } from '@/components/MultiLineChart';
 import {
@@ -52,6 +51,7 @@ import {
 } from '@/components/metric/shared';
 import { useCdekBreakdown, useCdekSeries, useCdekSummary, type CdekPoint } from '@/api/cdek';
 import { lttbDownsample } from '@/lib/downsample';
+import { densifyCdekDays } from '@/lib/cdekSeries';
 import { useExplorerChartHeight } from '@/lib/useExplorerChartHeight';
 import { fmt, pluralRu, timeAxisFromDayKeys } from '@/lib/format';
 import { formatMoney } from '@/lib/metricNumber';
@@ -150,7 +150,18 @@ function CdekMetricShell({
 
       {/* Ни строки источника, ни дескриптора: «СДЭК · Склад» уже стоит в сайдбаре над навигацией,
           а «Сумма проданного за окно» повторяет заголовок (владелец: «не несут инфы»). */}
-      <h1 className="text-2xl font-medium tracking-tight text-foreground">{term}</h1>
+      {/* «Сохранить» — В ШАПКЕ СПРАВА и КОНТРАСТНАЯ. Место внизу колонки владелец не увидел
+          («сейчас её не видно»): при его высоте окна она уходила под сгиб. Здесь она на одной
+          линии с названием метрики — то есть в первом же экране, — а инверсный цвет отличает её
+          от синих ссылок канона. Появляется только когда есть что сохранять. */}
+      <div className="flex items-start justify-between gap-4">
+        <h1 className="text-2xl font-medium tracking-tight text-foreground">{term}</h1>
+        {onSaveFilters && (
+          <Button type="button" variant="contrast" size="sm" className="shrink-0" onClick={onSaveFilters}>
+            Сохранить
+          </Button>
+        )}
+      </div>
 
       <MetricColumns
         rail={
@@ -158,8 +169,7 @@ function CdekMetricShell({
             {/* Разделы идут ВПЛОТНУЮ, одной сплошной колонкой: их разделяет волосяная черта, а
                 не воздух. `MetricColumns` расставляет детям rail'а 24px, и с ними колонка
                 распадалась на четыре плавающих островка — у Steep это единый список, где линия и
-                есть граница раздела. Обёртка забирает промежуток себе, и он остаётся ровно один —
-                перед ссылкой «Открыть раздел». */}
+                есть граница раздела. Обёртка забирает промежуток себе. */}
             <div>
               {/* Тип графика — первым, ДО разделов и без заголовка: у Steep это ряд иконок в самом
                   верху колонки. Раньше он стоял предпоследней секцией «Вид» (владелец: «должен
@@ -199,27 +209,7 @@ function CdekMetricShell({
                   </p>
                 )}
               </RailSection>
-              {/* «Сохранить» — ПОД всеми разделами и во всю ширину колонки, потому что сохраняет
-                  она всю колонку: и фильтры, и цель. Внутри раздела «Фильтры» кнопка обещала
-                  меньше, чем делала, — на это владелец и указал, добавив цель и не найдя, чем её
-                  сохранить. Появляется только когда есть что сохранять. */}
-              {onSaveFilters && (
-                <div className="px-2.5 pt-3">
-                  <Button type="button" variant="secondary" size="sm" className="w-full" onClick={onSaveFilters}>
-                    Сохранить
-                  </Button>
-                  <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
-                    На графике выбор действует сразу. Сохранение переносит его на карточки «Обзора».
-                  </p>
-                </div>
-              )}
             </div>
-            <Link
-              to={back.to}
-              className="inline-flex items-center gap-1 text-xs font-medium text-primary transition-colors hover:text-primary/80"
-            >
-              Открыть раздел <span aria-hidden="true">→</span>
-            </Link>
           </>
         }
       >
@@ -389,15 +379,34 @@ function CdekSeriesPage({ def, metricKey }: { def: SeriesDef; metricKey: SeriesK
     );
   }
 
-  const raw = (series.data?.current ?? []).map((p) => ({ day: p.day, value: def.pick(p) }));
+  // Сетка окна достраивается ЗДЕСЬ: сервер отдаёт только дни с продажами (см. densifyCdekDays).
+  // Без неё ось врала о расстояниях между датами, а призрак прошлого окна расходился с рядом по
+  // длине — и на столбцах сравнение молча пропадало.
+  const curPoints = densifyCdekDays(series.data?.current ?? [], series.data?.window.from, series.data?.window.to);
+  const prevPoints = densifyCdekDays(
+    series.data?.previous ?? [],
+    summary.data?.previous_window?.from,
+    summary.data?.previous_window?.to,
+  );
+  const raw = curPoints.map((p) => ({ day: p.day, value: def.pick(p) }));
   const shown = lttbDownsample(raw, 400, (r) => r.value ?? 0);
   const values = shown.map((r) => r.value);
   const labels = shown.map((r) => fmt.day(r.day));
   const axisLabels = timeAxisFromDayKeys(shown.map((r) => r.day));
   // Призрак прошлого окна выравнивается ПО ИНДЕКСУ: у равных окон одинаковая длина, а даты у них
-  // разные — рисовать их по своим датам значило бы сдвинуть кривую.
-  const prevRaw = (series.data?.previous ?? []).map((p) => def.pick(p) ?? 0);
-  const compare = cmp === 'prev' && prevRaw.length > 1 ? prevRaw : undefined;
+  // разные — рисовать их по своим датам значило бы сдвинуть кривую. Даунсэмплится он тем же
+  // порогом, что и ряд: иначе на длинном окне длины снова разъедутся.
+  const prevShown = lttbDownsample(
+    prevPoints.map((p) => ({ day: p.day, value: def.pick(p) })),
+    400,
+    (r) => r.value ?? 0,
+  );
+  const prevRaw = prevShown.map((r) => r.value ?? 0);
+  // Призрак передаётся ВСЕГДА, когда данные есть; переключатель отвечает только за видимость.
+  // Так строка легенды не пропадает (иначе таймбар под графиком прыгал на 21px), а линия гаснет
+  // плавно вместо снятия из DOM (владелец: «дёргано появляется»).
+  const compare = prevRaw.length > 1 ? prevRaw : undefined;
+  const compareShown = cmp === 'prev';
 
   // ── Разбивка: ряд группами ────────────────────────────────────────────────────────────────
   // Дни берутся ОБЪЕДИНЕНИЕМ по всем группам, а не из первой: у каналов дни продаж разные, и взяв
@@ -620,6 +629,11 @@ function CdekSeriesPage({ def, metricKey }: { def: SeriesDef; metricKey: SeriesK
             labels={labels}
             axisLabels={axisLabels}
             ghost={compare}
+            ghostVisible={compareShown}
+            // Своим переключателем легенда НЕ распоряжается: сравнение уже включает раздел
+            // «Сравнение» в колонке, и два контрола на одно состояние расходятся (в чипе он был
+            // включён по умолчанию и молча спорил с «Выкл»).
+            legendToggle={false}
             ghostLabel="Пред. период"
             height={chartH}
             formatValue={def.format}
@@ -631,6 +645,8 @@ function CdekSeriesPage({ def, metricKey }: { def: SeriesDef; metricKey: SeriesK
             labels={labels}
             axisLabels={axisLabels}
             ghost={compare}
+            ghostVisible={compareShown}
+            legendToggle={false}
             ghostLabel="Пред. период"
             height={chartH}
             formatValue={def.format}

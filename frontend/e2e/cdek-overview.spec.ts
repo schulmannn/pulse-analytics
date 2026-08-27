@@ -252,7 +252,7 @@ test('фильтр статусов живёт только в разворот�
   await page.getByRole('button', { name: 'Статусы заказов', expanded: false }).click();
   await expect(page.locator('[data-cdek-status-filter]')).toBeVisible();
 
-  await page.getByRole('button', { name: 'Отменён' }).click();
+  await page.getByRole('option', { name: 'Отменён' }).click();
   await expect.poll(() => includes.length).toBeGreaterThan(before);
   // Канон — «complete + delivery»; добавив отменённые, получаем явный набор из трёх статусов.
   await expect.poll(() => includes[includes.length - 1]).toBe('status:cancel,complete,delivery');
@@ -283,9 +283,13 @@ test('последний статус снять нельзя ни пилюле�
   await expect(page.getByRole('button', { name: 'Убрать: Завершён' })).toHaveCount(0);
   await expect(page.getByText('Завершён')).toBeVisible();
 
-  // И в самом выборе последний статус не отжимается.
+  // И в раскрытом выборе — тоже: единственный чип стоит без крестика, а в списке вариантов его
+  // нет (выбранное живёт чипом, как у Steep), значит снять его нечем.
   await page.getByRole('button', { name: 'Статусы заказов', expanded: false }).click();
-  await expect(page.locator('[data-cdek-status-filter]').getByRole('button', { name: 'Завершён' })).toBeDisabled();
+  const picker = page.locator('[data-cdek-status-filter]');
+  await expect(picker).toBeVisible();
+  await expect(picker.getByRole('button', { name: 'Убрать: Завершён' })).toHaveCount(0);
+  await expect(picker.getByRole('option', { name: 'Завершён' })).toHaveCount(0);
 });
 
 test('фильтр товаров режет метрику и тоже живёт только в развороте', async ({ page }) => {
@@ -300,9 +304,10 @@ test('фильтр товаров режет метрику и тоже живё
   await expect(page.locator('[data-cdek-product-filter]')).toHaveCount(0);
   await page.getByRole('button', { name: 'Добавить фильтр' }).click();
   await page.getByRole('menuitem', { name: 'Товары' }).click();
+  // Раскрытие ОДНО: карточка фильтра. Своей второй ступени («Товары · все») у списка больше нет —
+  // выбор идёт списком, как у Steep.
   await page.getByRole('button', { name: 'Товары', expanded: false }).click();
-  await page.getByRole('button', { name: /^Товары ·/ }).click();
-  const first = page.getByRole('button', { name: PRODUCTS[0].title ?? '' });
+  const first = page.getByRole('option', { name: PRODUCTS[0].title ?? '' });
   await expect(first).toBeVisible();
   const before = productParams.length;
   await first.click();

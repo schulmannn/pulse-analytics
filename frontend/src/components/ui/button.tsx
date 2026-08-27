@@ -29,6 +29,13 @@ const buttonVariants = cva(
         destructive: `border border-destructive/20 bg-background text-destructive hover:bg-destructive/5 ${PRESS_DIP}`,
         outline: `border border-border bg-background text-foreground hover:bg-muted ${PRESS_DIP}`,
         secondary: `border border-border bg-background text-foreground hover:bg-muted ${PRESS_DIP}`,
+        // Инверсия чернил и полотна: чёрная на светлой теме, белая на тёмной. Нужна там, где
+        // действие обязано быть заметнее синего акцента, — «Сохранить» на странице метрики
+        // владелец не находил дважды подряд. `default` занят единственным синим канона, поэтому
+        // у контраста свой вариант, а не переопределение классами на месте: такие переопределения
+        // уже разошлись по четырём точкам (IgContentDesktop ×2, ReportDocumentDesktop ×2) и
+        // отличаются друг от друга и токеном текста, и силой hover.
+        contrast: `bg-foreground text-background hover:bg-foreground/90 focus-visible:ring-foreground/35 ${PRESS_DIP}`,
         ghost: `text-muted-foreground hover:bg-muted hover:text-foreground ${PRESS_DIP}`,
         link: 'text-primary underline-offset-4 hover:underline',
       },

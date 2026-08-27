@@ -11,6 +11,7 @@ import { nearestPointIndex } from '@/lib/chartHover';
 import { axisLabelIndexes } from '@/lib/chartLabels';
 import { ChartTooltip, type TooltipRow, type TooltipState } from '@/components/ChartTooltip';
 import { ChartExpandedContext, ChartRefLinesContext, ExpandedChartHeightContext, WidgetTargetContext } from '@/components/ExpandableChart';
+import { clampTargetToDomain } from '@/lib/targetDomain';
 import { observeSize } from '@/lib/observeSize';
 import {
   activateChartControl,
@@ -65,6 +66,13 @@ interface LineChartProps {
       where a page-level compare control already owns turning the comparison on/off (the metric
       page) — there the chip renders as a static label so the two controls can't desync. */
   legendToggle?: boolean;
+  /**
+   * Сравнение показано? Отличается от «ghost есть»: данные прошлого окна остаются переданными, а
+   * выключенный переключатель лишь ГАСИТ линию. Так переход в обе стороны плавный (снятый из DOM
+   * элемент анимировать нечем), а строка легенды не пропадает и не дёргает вверх всё, что под
+   * графиком — таймбар окна прыгал на 21px (замер).
+   */
+  ghostVisible?: boolean;
   /** PINNED point (steep): a persistent dashed crosshair + solid marker at this index, set by
       the host page from onPointClick — the anchor for a «этот день» panel. null/undefined = off. */
   pinnedIndex?: number | null;
@@ -149,6 +157,7 @@ export function LineChart({
   fullAxes = false,
   onPointClick,
   legendToggle = true,
+  ghostVisible = true,
   pinnedIndex = null,
   hoverTitles,
   ghostTitles,
@@ -240,8 +249,11 @@ export function LineChart({
   // Toggled off (or absent), the comparison drops out of every draw/measure below; the legend
   // chip stays visible so it can be toggled back on. Derived before the plot memo (its inputs).
   const hasGhostLegend = !!ghost && ghost.length >= 2;
-  const showGhost = hasGhostLegend && !ghostHidden;
+  const showGhost = hasGhostLegend && !ghostHidden && ghostVisible;
+  // ДОМЕН считается по показанному: выключенное сравнение не имеет права растягивать шкалу под
+  // чужое окно. А вот ГЕОМЕТРИЯ ghost строится всегда, пока данные есть, — иначе гасить нечего.
   const activeGhost = showGhost ? ghost : undefined;
+  const geomGhost = hasGhostLegend ? ghost : undefined;
 
   // Stable data signature for the shape morph (see index.css «Chart motion»). Primary values plus
   // the shown comparison start a transition on a real period/filter/compare swap, while hover,
@@ -297,11 +309,15 @@ export function LineChart({
 
     // Domain covers the series, the (shown) ghost and the target — a goal above the data must
     // be visible. Только non-null: null в Math.min/max превратился бы в 0 — ложный «пол» домена.
-    const scaleVals = [
-      ...real.map((r) => r.v),
-      ...(activeGhost ?? []).filter((v): v is number => v != null),
-      ...(target != null ? [target] : []),
-    ];
+    const seriesVals = [...real.map((r) => r.v), ...(activeGhost ?? []).filter((v): v is number => v != null)];
+    // Цель имеет право растянуть шкалу — но не настолько, чтобы ряд сплющился в черту у нижнего
+    // края: недостижимую цель ставит человек, и график перестал бы отвечать на первый свой вопрос
+    // («как шло дело»), отвечая на второй. Приём тот же, что у искры (см. clampTargetToDomain):
+    // режется ОКНО ПРОСМОТРА, а выход за край помечается стрелкой в подписи.
+    const seriesMin = seriesVals.length > 0 ? Math.min(...seriesVals) : 0;
+    const seriesMax = seriesVals.length > 0 ? Math.max(...seriesVals) : 0;
+    const clamped = clampTargetToDomain(target, seriesMin, seriesMax);
+    const scaleVals = [...seriesVals, ...(clamped.value != null ? [clamped.value] : [])];
     const computedMin = Math.min(...scaleVals);
     const computedMax = Math.max(...scaleVals);
     // The caller's yMin/yMax (e.g. a zero base for volume metrics) defines the domain; the nice
@@ -388,8 +404,8 @@ export function LineChart({
     // nothing here bakes a path (the whole plot must stay OUT of the RAF loop). `null` stays a gap;
     // baseY closes each area segment. Ghost x-spacing matches the primary (gutterW + i·step).
     const primaryPoints: MorphPoint[] = points.map((p) => ({ x: p.x, y: p.y }));
-    const ghostPoints: MorphPoint[] | null = activeGhost
-      ? activeGhost.map((v, i) => ({ x: gutterW + i * step, y: v != null ? yFor(v) : null }))
+    const ghostPoints: MorphPoint[] | null = geomGhost
+      ? geomGhost.map((v, i) => ({ x: gutterW + i * step, y: v != null ? yFor(v) : null }))
       : null;
 
     // Real x-axis ticks (axes mode): width-aware stride so labels never collide — one label
@@ -484,16 +500,19 @@ export function LineChart({
         ))}
 
         {/* Target level (widget pref) — a dashed goal line with a small right-aligned label */}
-        {target != null && (
+        {clamped.value != null && (
           <>
-            <line x1={gutterW} y1={yFor(target)} x2={W} y2={yFor(target)} stroke="hsl(var(--chart-role-neutral))" strokeDasharray="6 4" strokeWidth="1.2" opacity="0.8" vectorEffect="non-scaling-stroke" />
+            {/* Линия стоит на УРЕЗАННОМ уровне, а число в подписи — настоящее: стрелка говорит, что
+                цель выше окна. Молча нарисовать её у края значило бы соврать про уровень. */}
+            <line x1={gutterW} y1={yFor(clamped.value)} x2={W} y2={yFor(clamped.value)} stroke="hsl(var(--chart-role-neutral))" strokeDasharray="6 4" strokeWidth="1.2" opacity="0.8" vectorEffect="non-scaling-stroke" />
             <text
               x={W - 4}
-              y={yFor(target) - 4 < 10 ? yFor(target) + 12 : yFor(target) - 4}
+              y={yFor(clamped.value) - 4 < 10 ? yFor(clamped.value) + 12 : yFor(clamped.value) - 4}
               textAnchor="end"
               className="pointer-events-none select-none fill-muted-foreground text-2xs font-medium tabular-nums"
             >
-              цель {fmt.short(target)}
+              цель {fmt.short(target ?? clamped.value)}
+              {clamped.clipped ? ' ↑' : ''}
             </text>
           </>
         )}
@@ -599,7 +618,7 @@ export function LineChart({
       staticUnder, staticOver,
       morphGeom: { primary: primaryPoints, ghost: ghostPoints, baseY } as MorphGeom,
     };
-  }, [values, labels, axisLabels, activeGhost, hasGhostLegend, target, refLines, yMin, yMax, width, ctxHeight, height, expanded, showAxes, markExtremes, showPoints, anomalyIdx, gradientId, gapPatternId, rhea, comparison, richStyle]);
+  }, [values, labels, axisLabels, activeGhost, geomGhost, hasGhostLegend, target, refLines, yMin, yMax, width, ctxHeight, height, expanded, showAxes, markExtremes, showPoints, anomalyIdx, gradientId, gapPatternId, rhea, comparison, richStyle]);
 
   // Hover-only lines remain one passive named graphic. Pointer scrubbing is supplementary to its
   // accessible summary and is registered on the DOM node. A drillable line instead uses the real
@@ -815,6 +834,7 @@ export function LineChart({
           signature={motionSignature}
           primaryGradientId={gradientId}
           comparison={comparison}
+          ghostMuted={hasGhostLegend && !showGhost}
           richStyle={richStyle}
           poles={!richStyle}
         />
@@ -1039,7 +1059,10 @@ export function LineChart({
               {ghostLabel}
             </button>
           ) : (
-            <span className="flex select-none items-center gap-1.5">
+            // Выключенное сравнение НЕ уносит чип из потока: место остаётся за ним, иначе строка
+            // легенды пропадает целиком и всё, что под графиком, дёргается вверх. Но и утверждать
+            // «пред. период» он не должен — поэтому становится невидим, а не приглушён.
+            <span className={`flex select-none items-center gap-1.5${ghostVisible ? '' : ' invisible'}`} aria-hidden={!ghostVisible}>
               <span aria-hidden="true" className="w-4 border-t-2 border-dashed" style={{ borderColor: 'hsl(var(--chart-role-comparison))' }} />
               {ghostLabel}
             </span>

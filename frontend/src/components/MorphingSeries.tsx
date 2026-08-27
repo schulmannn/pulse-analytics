@@ -29,6 +29,9 @@ interface MorphingSeriesProps {
   /** `comparison` appearance: the ghost keeps the canonical dashed no-fill shape, just a touch
       stronger (2px @0.95) than the legacy hosts' 1.8px @0.8. */
   comparison: boolean;
+  /** Сравнение выключено: путь остаётся в DOM и становится прозрачным — снятие элемента давало
+      рывок в обе стороны (владелец: «дёргано появляется»). Переход описан в index.css. */
+  ghostMuted?: boolean;
   /** Rich hosts (rhea/comparison) use a softer 2px primary stroke vs the 2.5px default. */
   richStyle: boolean;
   /** Полюса линии (steep): начало — полая точка, конец — сплошной маркер «сейчас». Рисуются
@@ -61,6 +64,7 @@ export function MorphingSeries({
   signature,
   primaryGradientId,
   comparison,
+  ghostMuted = false,
   richStyle,
   poles = false,
 }: MorphingSeriesProps) {
@@ -218,12 +222,13 @@ export function MorphingSeries({
       {ghost && ghost.line && (
         <path
           data-chart-series="comparison"
+          data-chart-comparison-muted={ghostMuted ? '' : undefined}
           d={ghost.line}
           fill="none"
           stroke="hsl(var(--chart-role-comparison))"
           strokeWidth={comparison ? '2' : '1.8'}
           strokeDasharray="5 4"
-          strokeOpacity={comparison ? '0.95' : '0.8'}
+          strokeOpacity={ghostMuted ? '0' : comparison ? '0.95' : '0.8'}
           strokeLinejoin="round"
           strokeLinecap="round"
           vectorEffect="non-scaling-stroke"
