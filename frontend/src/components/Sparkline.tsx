@@ -1,10 +1,12 @@
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useContext, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { seriesMotionKey } from '@/lib/chartMotion';
 import type { MorphPoint } from '@/lib/chartMorph';
 import { ChartTooltip, type TooltipState } from '@/components/ChartTooltip';
 import { SparklineSeries } from '@/components/SparklineSeries';
 import { cn } from '@/lib/utils';
 import { sparkDomain } from '@/lib/robustDomain';
+import { clampTargetToDomain } from '@/lib/targetDomain';
+import { WidgetTargetContext } from '@/components/ExpandableChart';
 
 interface SparklineProps {
   /**
@@ -124,9 +126,32 @@ export function Sparkline({
   // `points` and never restarts; a period/filter swap hands down a new array → new geometry → morph.
   // Домен считается ОДИН раз и делится между геометрией морфа и разметкой ниже: если посчитать
   // его дважды, кадр морфа и статический рендер разъедутся. Мемо по той же ссылке `values`.
-  const domain = useMemo(() => sparkDomain(values ?? []), [values]);
+  // Целевой уровень виджета — та же `prefs.target`, что рисует линию у LineChart/BarChart. Пока
+  // искра её не читала, один и тот же pref работал на карточках со столбцами и молчал на карточках
+  // с линией: цель, поставленная в развороте, на «Обзоре» просто не появлялась.
+  const targetCtx = useContext(WidgetTargetContext);
+  const rawTarget = targetCtx != null && Number.isFinite(targetCtx) ? targetCtx : null;
+  const baseDomain = useMemo(() => sparkDomain(values ?? []), [values]);
+  // Цель расширяет ОКНО ПРОСМОТРА, но не имеет права сплющить ряд (clampTargetToDomain, ряду не
+  // меньше 60%). А если цель ушла ВЫШЕ потолка, линии на карточке НЕ БУДЕТ: подписать её здесь
+  // нечем (искра — без осей и подписей), а линия не на своём уровне и без числа врала бы про
+  // расстояние до цели. Настоящий уровень с числом и стрелкой живёт в развороте.
+  const goal = useMemo(() => {
+    const c = clampTargetToDomain(rawTarget, baseDomain.min, baseDomain.max);
+    return c.clipped ? null : c.value;
+  }, [rawTarget, baseDomain]);
+  const domain = useMemo(
+    () => (goal != null && goal > baseDomain.max ? { ...baseDomain, max: goal } : baseDomain),
+    [baseDomain, goal],
+  );
   const clippedSet = useMemo(() => new Set(domain.clipped), [domain]);
   const points = useMemo(() => computeSparkPoints(values ?? [], domain), [values, domain]);
+  // Y цели в тех же координатах viewBox, что и точки (та же формула, что в computeSparkPoints).
+  const goalY = useMemo(() => {
+    if (goal == null) return null;
+    const range = domain.max - domain.min || 1;
+    return VBH - PAD - ((goal - domain.min) / range) * (VBH - PAD * 2);
+  }, [goal, domain]);
 
   /**
    * Разметка оси. Буквенная ось короткого окна (axisLabels: «M T W T F S S») показывает ВСЕ
@@ -273,6 +298,22 @@ export function Sparkline({
           {/* The line/area MORPH from the previous shape into the new one on a data change (same as the
               full LineChart) instead of remounting + fading — one stable node whose point geometry
               interpolates. The mount-only reveal fade lives on data-chart-motion="morph" in index.css. */}
+          {/* Целевой уровень — ПУНКТИР БЕЗ ПОДПИСИ: в 200×32 без осей числу негде встать, а линия
+              и так читается как ориентир («докуда надо»). Число живёт в развороте, у графика с
+              осью. Рисуется ПОД серией, чтобы не резать её штрихом. */}
+          {goal != null && (
+            <line
+              x1={0}
+              x2={VBW}
+              y1={goalY ?? 0}
+              y2={goalY ?? 0}
+              stroke="hsl(var(--chart-role-neutral))"
+              strokeDasharray="4 3"
+              strokeWidth="1"
+              opacity="0.55"
+              vectorEffect="non-scaling-stroke"
+            />
+          )}
           <SparklineSeries
             points={points}
             signature={motionKey}
