@@ -42,3 +42,23 @@ export function clampTargetToDomain(
   const allowed = dataMin + span / MIN_SERIES_SHARE;
   return target > allowed ? { value: allowed, clipped: true } : { value: target, clipped: false };
 }
+
+/**
+ * Строка цели для читалки — ОДНА на оба графика: линия и столбцы печатают её одинаково, и две
+ * копии разошлись бы по знаку отклонения или по маркеру. Кольцо, а не точка: величина назначена
+ * человеком, а не измерена.
+ */
+export function targetTooltipRow(
+  target: number,
+  current: number,
+  format: (n: number) => string,
+): { label: string; value: string; color: string; mark: 'ring'; delta?: number } {
+  const d = target !== 0 ? ((current - target) / Math.abs(target)) * 100 : null;
+  return {
+    label: 'Цель',
+    value: format(target),
+    color: 'hsl(var(--chart-role-neutral))',
+    mark: 'ring',
+    delta: d != null && Number.isFinite(d) ? d : undefined,
+  };
+}

@@ -192,19 +192,17 @@ export function ChartTooltip({ tip, appearance = 'default' }: { tip: TooltipStat
                     />
                   )}
                   <span className="min-w-0">
-                    <span className="block truncate">{r.label}</span>
+                    {r.label}
                     {r.sub && <span className="block text-2xs text-muted-foreground/80">{r.sub}</span>}
                   </span>
                 </span>
                 <span className="shrink-0 text-right">
                   <span className="block tabular-nums text-foreground">{r.value}</span>
                   {r.delta != null && Number.isFinite(r.delta) && (
-                    <ComparisonDelta
-                      delta={r.delta}
-                      format={(abs: number) => `${abs >= 100 ? abs.toFixed(0) : abs.toFixed(1)}%`}
-                      evaluative
-                      className="text-2xs"
-                    />
+                    // Формат и оценочность — по умолчанию модуля: тот же один знак после запятой,
+                    // что у всех дельт продукта. Передавать их отдельно значило бы держать в
+                    // читалке собственную версию правила.
+                    <ComparisonDelta delta={r.delta} className="text-2xs" />
                   )}
                 </span>
               </div>

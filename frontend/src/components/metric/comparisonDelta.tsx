@@ -1,5 +1,3 @@
-import { cn } from '@/lib/utils';
-
 /**
  * Оценочная дельта сравнения живёт в СВОЁМ модуле, а не в metric/shared: её читает и ChartTooltip,
  * а тот попадает в чанк каждой вертикали. Импорт из shared тащил бы за собой весь модуль страницы
@@ -34,8 +32,11 @@ export function ComparisonDelta({
   const spoken = delta > 0 ? 'рост на ' : delta < 0 ? 'снижение на ' : 'без изменений, ';
   const ink =
     !evaluative || delta === 0 ? 'text-muted-foreground' : delta > 0 ? 'text-verdant' : 'text-ember';
+  // Шаблон вместо cn(): читалка тянет этот модуль в чанк КАЖДОЙ вертикали, а классы здесь не
+  // конфликтуют — разрешать их через tailwind-merge не за чем, и лишняя зависимость дорога
+  // (маршрут «TG обзор» перебирал потолок на 92 байта).
   return (
-    <span className={cn('font-medium tabular-nums', ink, className)}>
+    <span className={`font-medium tabular-nums ${ink}${className ? ` ${className}` : ''}`}>
       <span aria-hidden="true">{glyph}</span>
       <span className="sr-only">{spoken}</span>
       {format(Math.abs(delta))}

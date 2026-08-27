@@ -7,12 +7,13 @@
 
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
+import { cn } from '@/lib/utils';
 // Реэкспорт: правило дельты живёт в своём лёгком модуле (см. comparisonDelta), но все прежние
 // импорты `from '@/components/metric/shared'` продолжают работать.
 import { ComparisonDelta } from '@/components/metric/comparisonDelta';
+import { isPlainLeftClick, useViewTransitionNavigate } from '@/lib/viewTransitionNavigate';
 
 export { ComparisonDelta };
-import { isPlainLeftClick, useViewTransitionNavigate } from '@/lib/viewTransitionNavigate';
 
 /** Back-ссылка metric-страницы («← Обзор» / «← Instagram» / …): единый глиф (скрыт от SR),
     размер и hover-переход хлебной крошки — чтобы копии вертикалей не расходились. */

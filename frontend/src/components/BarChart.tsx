@@ -16,7 +16,7 @@ import {
   nextChartControlIndex,
 } from '@/lib/chartOverlayControl';
 import { ChartExpandedContext, ChartRefLinesContext, ExpandedChartHeightContext, WidgetTargetContext } from '@/components/ExpandableChart';
-import { clampTargetToDomain } from '@/lib/targetDomain';
+import { clampTargetToDomain, targetTooltipRow } from '@/lib/targetDomain';
 
 interface BarChartProps {
   /**
@@ -668,16 +668,7 @@ export function BarChart({
           delta: comparisonDelta && d != null && Number.isFinite(d) ? d : undefined,
         },
       ];
-      if (target != null) {
-        const td = target !== 0 ? ((cur - target) / Math.abs(target)) * 100 : null;
-        rows.push({
-          label: 'Цель',
-          value: formatValue(target),
-          color: 'hsl(var(--chart-role-neutral))',
-          mark: 'ring',
-          delta: td != null && Number.isFinite(td) ? td : undefined,
-        });
-      }
+      if (target != null) rows.push(targetTooltipRow(target, cur, formatValue));
       return { x, y, title: labels?.[i], rows };
     }
     if (expanded) {
@@ -747,7 +738,44 @@ export function BarChart({
   };
 
   return (
-    <div ref={containerRef} className="relative w-full">
+    <div className="w-full">
+      {/* ЛЕГЕНДА СВЕРХУ — по образцу Steep (кадр владельца). Вынесена ЗА `relative`-контейнер
+          полотна намеренно: читалка позиционируется абсолютно внутри него и берёт координаты
+          столбца из системы svg — сдвинь полотно вниз, и тултип встанет выше курсора. */}
+      {/* Comparison legend — names both series whenever a ghost is present; the comparison chip is a
+          toggle (steep #9): click to hide/show the overlay. Where a page-level compare control already
+          owns the on/off (legendToggle=false, the metric page) the chip is a static label instead. */}
+      {hasGhost && (
+        <div className="mb-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-2xs font-medium text-muted-foreground">
+          <span className="flex select-none items-center gap-1.5">
+            <span aria-hidden="true" className="h-2 w-3 rounded-sm" style={{ backgroundColor: 'hsl(var(--chart-role-primary))' }} />
+            {primaryLabel === 'Текущий' ? 'Текущий период' : primaryLabel}
+          </span>
+          {legendToggle ? (
+            <button
+              type="button"
+              aria-pressed={!ghostHidden}
+              onClick={() => setGhostHidden((v) => !v)}
+              title={ghostHidden ? 'Показать сравнение' : 'Скрыть сравнение'}
+              className={`flex select-none items-center gap-1.5 rounded transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40 ${ghostHidden ? 'opacity-40 line-through' : ''}`}
+            >
+              {/* Свотч-прямоугольник: сравнение здесь рисуется столбцами, не пунктиром, и свотч
+                  повторяет ровно ту же альфу (GHOST_FILL), что и сами столбцы. */}
+              <span aria-hidden="true" className="h-2 w-3 rounded-sm" style={{ backgroundColor: GHOST_FILL }} />
+              {ghostLabel}
+            </button>
+          ) : (
+            // Место чипа остаётся за ним при выключенном сравнении: иначе строка легенды пропадает
+            // целиком и таймбар под графиком прыгает вверх (замер: 21px). Утверждать «пред. период»
+            // невидимый чип при этом не может.
+            <span className={`flex select-none items-center gap-1.5${ghostVisible ? '' : ' invisible'}`} aria-hidden={!ghostVisible}>
+              <span aria-hidden="true" className="h-2 w-3 rounded-sm" style={{ backgroundColor: GHOST_FILL }} />
+              {ghostLabel}
+            </span>
+          )}
+        </div>
+      )}
+      <div ref={containerRef} className="relative w-full">
       <svg
         ref={svgRef}
         data-chart-kind="bar"
@@ -893,41 +921,9 @@ export function BarChart({
           }}
         />
       )}
-      {/* Comparison legend — names both series whenever a ghost is present; the comparison chip is a
-          toggle (steep #9): click to hide/show the overlay. Where a page-level compare control already
-          owns the on/off (legendToggle=false, the metric page) the chip is a static label instead. */}
-      {hasGhost && (
-        <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-2xs font-medium text-muted-foreground">
-          <span className="flex select-none items-center gap-1.5">
-            <span aria-hidden="true" className="h-2 w-3 rounded-sm" style={{ backgroundColor: 'hsl(var(--chart-role-primary))' }} />
-            {primaryLabel === 'Текущий' ? 'Текущий период' : primaryLabel}
-          </span>
-          {legendToggle ? (
-            <button
-              type="button"
-              aria-pressed={!ghostHidden}
-              onClick={() => setGhostHidden((v) => !v)}
-              title={ghostHidden ? 'Показать сравнение' : 'Скрыть сравнение'}
-              className={`flex select-none items-center gap-1.5 rounded transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40 ${ghostHidden ? 'opacity-40 line-through' : ''}`}
-            >
-              {/* Свотч-прямоугольник: сравнение здесь рисуется столбцами, не пунктиром, и свотч
-                  повторяет ровно ту же альфу (GHOST_FILL), что и сами столбцы. */}
-              <span aria-hidden="true" className="h-2 w-3 rounded-sm" style={{ backgroundColor: GHOST_FILL }} />
-              {ghostLabel}
-            </button>
-          ) : (
-            // Место чипа остаётся за ним при выключенном сравнении: иначе строка легенды пропадает
-            // целиком и таймбар под графиком прыгает вверх (замер: 21px). Утверждать «пред. период»
-            // невидимый чип при этом не может.
-            <span className={`flex select-none items-center gap-1.5${ghostVisible ? '' : ' invisible'}`} aria-hidden={!ghostVisible}>
-              <span aria-hidden="true" className="h-2 w-3 rounded-sm" style={{ backgroundColor: GHOST_FILL }} />
-              {ghostLabel}
-            </span>
-          )}
-        </div>
-      )}
       {/* Readout anchored to the hovered bar's top-center (not the cursor) */}
       <ChartTooltip tip={hover && hover.i < n ? buildTip(hover.i) : null} appearance={appearance} />
+      </div>
     </div>
   );
 }
