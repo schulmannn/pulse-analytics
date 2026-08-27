@@ -31,10 +31,16 @@ describe('clampTargetToDomain', () => {
   });
 
   it('порог считается от РАЗМАХА, а не от нуля', () => {
-    // Ряд 1000…1100 (размах 100): цель 1200 далеко от нуля, но по размаху — вдвое дальше потолка.
-    const r = clampTargetToDomain(1200, 1000, 1100);
+    // Ряд 1000…1100 (размах 100): 1200 — ровно потолок, дальше уже клип.
+    expect(clampTargetToDomain(1200, 1000, 1100)).toEqual({ value: 1200, clipped: false });
+    const r = clampTargetToDomain(1500, 1000, 1100);
     expect(r.clipped).toBe(true);
     expect(r.value).toBeCloseTo(1000 + 100 / MIN_SERIES_SHARE, 6);
+  });
+
+  it('цель «на 15% выше достигнутого» НЕ отсекается на узком размахе', () => {
+    // Ровно тот случай, ради которого порог ослаблен с 60% до половины.
+    expect(clampTargetToDomain(2800, 2000, 2400)).toEqual({ value: 2800, clipped: false });
   });
 
   it('плоский ряд не сплющить — цель берётся как есть', () => {

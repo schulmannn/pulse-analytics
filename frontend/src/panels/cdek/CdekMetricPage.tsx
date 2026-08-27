@@ -23,6 +23,7 @@ import { ShareRows } from '@/components/ShareRows';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { setPrefs, setSavedFilter, useSavedFilter, useWidgetPrefs } from '@/lib/widgetPrefsStore';
+import { setMetricRailHidden, useMetricRailHidden } from '@/lib/metricRail';
 import {
   CDEK_CANON_STATUSES,
   cdekChannelFilterKey,
@@ -144,6 +145,7 @@ function CdekMetricShell({
   comparison?: ReactNode;
   children: ReactNode;
 }) {
+  const railHidden = useMetricRailHidden();
   return (
     <div className="space-y-5">
       <MetricBackLink to={back.to}>{back.label}</MetricBackLink>
@@ -156,14 +158,36 @@ function CdekMetricShell({
           от синих ссылок канона. Появляется только когда есть что сохранять. */}
       <div className="flex items-start justify-between gap-4">
         <h1 className="text-2xl font-medium tracking-tight text-foreground">{term}</h1>
-        {onSaveFilters && (
-          <Button type="button" variant="contrast" size="sm" className="shrink-0" onClick={onSaveFilters}>
-            Сохранить
+        <span className="flex shrink-0 items-center gap-2">
+          {onSaveFilters && (
+            <Button type="button" variant="contrast" size="sm" onClick={onSaveFilters}>
+              Сохранить
+            </Button>
+          )}
+          {/* Свернуть колонку — значок «панель справа», как у Steep (замер: 32×32 у правого края
+              шапки). Когда смотришь на график, фильтры и цели уже выбраны: колонка держит 300px,
+              которых полотну не хватает. Выбор ЗАПОМИНАЕТСЯ (см. metricRail): развернув полотно
+              на выручке, человек хочет широкое полотно и на заказах. */}
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            aria-pressed={railHidden}
+            aria-label={railHidden ? 'Показать фильтры' : 'Скрыть фильтры'}
+            title={railHidden ? 'Показать фильтры' : 'Скрыть фильтры'}
+            onClick={() => setMetricRailHidden(!railHidden)}
+          >
+            <svg viewBox="0 0 16 16" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden="true">
+              <rect x="1.15" y="2.15" width="13.7" height="11.7" rx="2.2" />
+              <path d="M9.9 2.6v10.8" />
+              {!railHidden && <rect x="9.9" y="2.6" width="4.5" height="10.8" fill="currentColor" stroke="none" opacity="0.35" />}
+            </svg>
           </Button>
-        )}
+        </span>
       </div>
 
       <MetricColumns
+        railHidden={railHidden}
         rail={
           <>
             {/* Разделы идут ВПЛОТНУЮ, одной сплошной колонкой: их разделяет волосяная черта, а

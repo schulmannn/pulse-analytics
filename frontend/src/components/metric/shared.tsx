@@ -34,11 +34,26 @@ export function MetricBackLink({ to, children }: { to: string; children: ReactNo
     + правый rail 300px; на <lg rail уезжает под основной блок. Инспекторные гриды
     (var(--inspector-w) + InspectorHandle в MetricPage/IgMetricPage) сюда намеренно НЕ входят —
     у них другая колонка, обёртка и ритм rail'а. */
-export function MetricColumns({ children, rail }: { children: ReactNode; rail: ReactNode }) {
+export function MetricColumns({
+  children,
+  rail,
+  railHidden = false,
+}: {
+  children: ReactNode;
+  rail: ReactNode;
+  /** Колонка свёрнута: полотно занимает её место. Панель уходит ИЗ ПОТОКА, а не прячется
+      прозрачностью — иначе широкий график остался бы обрезанным по прежней сетке. */
+  railHidden?: boolean;
+}) {
   return (
-    <div className="grid grid-cols-1 gap-6 xl:gap-8 lg:grid-cols-[minmax(0,1fr)_300px]">
+    <div
+      className={cn(
+        'grid grid-cols-1 gap-6 xl:gap-8',
+        !railHidden && 'lg:grid-cols-[minmax(0,1fr)_300px]',
+      )}
+    >
       <div className="min-w-0 space-y-6">{children}</div>
-      <aside className="space-y-6">{rail}</aside>
+      {!railHidden && <aside className="space-y-6">{rail}</aside>}
     </div>
   );
 }

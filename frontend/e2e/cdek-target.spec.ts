@@ -155,3 +155,29 @@ test('снятая цель тоже уходит через «Сохранит�
   await page.getByRole('button', { name: 'Сохранить' }).click();
   await expect.poll(() => savedTarget(page)).toBe(null);
 });
+
+/**
+ * Полноэкранный режим полотна (владелец: «кнопка toggle чтобы скрыть все фильтры и прочее… также
+ * как у Steep»). Колонка уходит ИЗ ПОТОКА, а не прячется прозрачностью — иначе полотно осталось бы
+ * обрезанным по прежней сетке.
+ */
+test('колонка сворачивается, полотно занимает её место, выбор запоминается', async ({ page }, info) => {
+  test.skip(info.project.name !== 'desktop-1440', 'десктоп');
+  await boot(page);
+  const surface = page.locator('main .bg-card').first();
+  const wide = await surface.boundingBox();
+
+  await page.getByRole('button', { name: 'Скрыть фильтры' }).click();
+  await expect(page.locator('[data-cdek-filter-rail]')).toHaveCount(0);
+  await expect.poll(async () => Math.round((await surface.boundingBox())?.width ?? 0)).toBeGreaterThan(
+    Math.round(wide?.width ?? 0),
+  );
+
+  // Выбор — свойство рабочего места, а не метрики: он переживает переход на соседнюю страницу.
+  await page.goto('/metrics/cdek-orders');
+  await page.locator('main').waitFor({ state: 'visible', timeout: 25_000 });
+  await expect(page.locator('[data-cdek-filter-rail]')).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Показать фильтры' }).click();
+  await expect(page.locator('[data-cdek-filter-rail]')).toBeVisible();
+});
