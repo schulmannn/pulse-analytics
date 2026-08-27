@@ -17,7 +17,7 @@ import {
   useCdekFilterDims,
 } from '@/panels/cdek/CdekFilterRail';
 import { LineChart } from '@/components/LineChart';
-import { WidgetTargetContext } from '@/components/ExpandableChart';
+import { ChartExpandedContext, WidgetTargetContext } from '@/components/ExpandableChart';
 import { BarChart } from '@/components/BarChart';
 import { ShareRows } from '@/components/ShareRows';
 import { SegmentedControl } from '@/components/SegmentedControl';
@@ -605,7 +605,14 @@ function CdekSeriesPage({ def, metricKey }: { def: SeriesDef; metricKey: SeriesK
       {/* Линия цели: LineChart и BarChart читают её из ОДНОГО контекста, поэтому цель переживает
           переключение линия↔столбцы. При разбивке контекст пуст — см. targetHint. */}
       <WidgetTargetContext.Provider value={splitDim ? null : target}>
+      {/* Полотно живёт НА СВОЕЙ ПОВЕРХНОСТИ и с полной осью — как метрики Instagram и кампаний
+          (владелец: «выдели сам график чуть цветом и добавь оси, по типу как на /metrics/ig-reach»;
+          замер той страницы: карточка bg-card, рамка 0.8px, радиус 20px, 21 линия сетки и подписи
+          6k/4k/2k/0 слева). Оси включает ChartExpandedContext — тем же приёмом, что CampaignMetricPage:
+          у BarChart своего `fullAxes` нет, ось Y, шаг подписей и место под неё он берёт отсюда. */}
+      <ChartExpandedContext.Provider value={true}>
       <div className="space-y-3">
+        <div className="rounded-2xl border border-border bg-card p-4 shadow-xs dark:border-white/6 sm:p-5">
         {splitDim && splitModel ? (
           <MultiLineChart
             series={splitModel.series}
@@ -652,10 +659,12 @@ function CdekSeriesPage({ def, metricKey }: { def: SeriesDef; metricKey: SeriesK
             formatValue={def.format}
           />
         )}
+        </div>
         <WindowBarShell>
           <PeriodChips ariaLabel="Окно" value={days} onChange={setDays} range={range} onRangeChange={setRange} />
         </WindowBarShell>
       </div>
+      </ChartExpandedContext.Provider>
       </WidgetTargetContext.Provider>
     </CdekMetricShell>
   );
