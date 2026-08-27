@@ -8,10 +8,10 @@ import {
   CDEK_MAX_SERIES,
   CompareGlyph,
   FilterGlyph,
+  CdekChartKind,
   CdekSplitAdd,
   CdekSplitRow,
   SplitGlyph,
-  ViewGlyph,
   useCdekFilterDims,
 } from '@/panels/cdek/CdekFilterRail';
 import { LineChart } from '@/components/LineChart';
@@ -28,9 +28,6 @@ import {
   cdekStatusInclude,
   normalizeCdekStatuses,
   normalizeCdekProducts,
-  productFilterCaption,
-  statusFilterCaption,
-  channelFilterCaption,
   normalizeCdekChannels as normChannels,
   sameCdekChannels,
   sameCdekProducts,
@@ -39,7 +36,6 @@ import {
   type CdekProductOption,
 } from '@/panels/cdek/cdekStatusFilter';
 import { PeriodChips } from '@/components/PeriodChips';
-import { SourceIdentity } from '@/components/SourceIdentity';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -47,7 +43,6 @@ import {
   ComparisonDeltaRow,
   MetricBackLink,
   MetricColumns,
-  MetricDescriptor,
   RailSection,
   WindowBarShell,
 } from '@/components/metric/shared';
@@ -112,7 +107,6 @@ const STATUS_LABEL: Record<string, string> = {
  */
 function CdekMetricShell({
   term,
-  descriptor,
   back,
   comparison,
   filters,
@@ -125,7 +119,6 @@ function CdekMetricShell({
   children,
 }: {
   term: string;
-  descriptor?: string;
   back: { to: string; label: string };
   /** Блок управления выборкой. Живёт в rail'е — см. комментарий выше. */
   filters?: ReactNode;
@@ -146,24 +139,17 @@ function CdekMetricShell({
     <div className="space-y-5">
       <MetricBackLink to={back.to}>{back.label}</MetricBackLink>
 
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <h1 className="text-2xl font-medium tracking-tight text-foreground">{term}</h1>
-          <SourceIdentity network="cdek" className="mt-1 max-w-full" />
-          {descriptor && <MetricDescriptor>{descriptor}</MetricDescriptor>}
-        </div>
-        {/* Появляется, только когда есть что сохранять: кнопка, ничего не делающая при нажатии,
-            учит не доверять кнопкам. */}
-        {onSaveFilters && (
-          <Button type="button" size="sm" className="shrink-0" onClick={onSaveFilters}>
-            Сохранить
-          </Button>
-        )}
-      </div>
+      {/* Ни строки источника, ни дескриптора: «СДЭК · Склад» уже стоит в сайдбаре над навигацией,
+          а «Сумма проданного за окно» повторяет заголовок (владелец: «не несут инфы»). */}
+      <h1 className="text-2xl font-medium tracking-tight text-foreground">{term}</h1>
 
       <MetricColumns
         rail={
           <>
+            {/* Тип графика — первым, ДО разделов и без заголовка: у Steep это ряд иконок в самом
+                верху колонки. Раньше он стоял предпоследней секцией «Вид» (владелец: «должен быть
+                в самом начале»). */}
+            {view}
             {/* Порядок — как у Steep: сначала «из чего сложилось» и «что считаем», и только потом
                 «с чем сравниваем» и «чем рисуем». У нас он был буквально перевёрнут: сравнение
                 стояло первым, фильтры последними (замечено владельцем по кадру). */}
@@ -173,7 +159,24 @@ function CdekMetricShell({
               </RailSection>
             )}
             {filters && (
-              <RailSection title="Фильтры" variant="row" icon={filterIcon} action={filterAction}>
+              <RailSection
+                title="Фильтры"
+                variant="row"
+                icon={filterIcon}
+                action={
+                  // «Сохранить» стоит У ФИЛЬТРОВ, а не в шапке страницы: владелец не нашёл её там,
+                  // и справедливо — кнопка обязана быть рядом с тем, что сохраняет. Показывается
+                  // только когда есть что сохранять.
+                  <span className="flex items-center gap-1">
+                    {onSaveFilters && (
+                      <Button type="button" variant="secondary" size="xs" onClick={onSaveFilters}>
+                        Сохранить
+                      </Button>
+                    )}
+                    {filterAction}
+                  </span>
+                }
+              >
                 {filters}
               </RailSection>
             )}
@@ -184,11 +187,6 @@ function CdekMetricShell({
                 </p>
               )}
             </RailSection>
-            {view && (
-              <RailSection title="Вид" variant="row" icon={ViewGlyph}>
-                {view}
-              </RailSection>
-            )}
             <Link
               to={back.to}
               className="inline-flex items-center gap-1 text-xs font-medium text-primary transition-colors hover:text-primary/80"
@@ -288,7 +286,6 @@ function CdekSeriesPage({ def }: { def: SeriesDef }) {
   const [selected, setSelected] = useState<string[] | null>(null);
   const statuses = selected ?? (saved.length > 0 ? saved : CDEK_CANON_STATUSES);
   const include = cdekStatusInclude(statuses);
-  const caption = statusFilterCaption(statuses);
 
   // Товары — вторая ось того же вопроса «что считать». Список берётся из разбивки по товарам,
   // которая ФИЛЬТР ИГНОРИРУЕТ (иначе выбранное было бы единственным, что можно выбрать).
@@ -304,7 +301,6 @@ function CdekSeriesPage({ def }: { def: SeriesDef }) {
       .map((row) => ({ id: row.key, name: row.title ?? row.article ?? row.key })),
     [catalogue.data?.rows],
   );
-  const productCaption = productFilterCaption(products, productOptions);
 
   // Третья ось того же вопроса: статус — КАК закончился заказ, товар — ЧТО продано, канал — ГДЕ.
   const channelKey = cdekChannelFilterKey(channelId);
@@ -312,7 +308,6 @@ function CdekSeriesPage({ def }: { def: SeriesDef }) {
   const savedChannels = useMemo(() => normChannels(savedChannelsRaw), [savedChannelsRaw]);
   const [pickedChannels, setPickedChannels] = useState<string[] | null>(null);
   const salesChannels = pickedChannels ?? savedChannels;
-  const channelCaption = channelFilterCaption(salesChannels);
 
   // Разбивка: ряд приходит группами вместо одной серии. Пока разрез не выбран, запрос прежний —
   // лишнего похода за данными «на всякий случай» нет.
@@ -327,14 +322,14 @@ function CdekSeriesPage({ def }: { def: SeriesDef }) {
 
   if (series.isPending || summary.isPending) {
     return (
-      <CdekMetricShell term={def.term} descriptor={def.descriptor} back={def.back}>
+      <CdekMetricShell term={def.term} back={def.back}>
         <Skeleton className="h-[420px] w-full" />
       </CdekMetricShell>
     );
   }
   if (series.isError || summary.isError) {
     return (
-      <CdekMetricShell term={def.term} descriptor={def.descriptor} back={def.back}>
+      <CdekMetricShell term={def.term} back={def.back}>
         <ErrorState title="Не удалось получить данные СДЭКа" onRetry={() => series.refetch()} />
       </CdekMetricShell>
     );
@@ -399,17 +394,8 @@ function CdekSeriesPage({ def }: { def: SeriesDef }) {
   // ничего не произошло.
   const split = Boolean(splitDim);
   const viewSection = (
-    <div className="space-y-1.5 pl-[2.125rem]">
-      <SegmentedControl
-        ariaLabel="Тип графика"
-        size="sm"
-        value={split ? 'line' : kind}
-        onChange={setKind}
-        options={[
-          { value: 'line', content: 'Линия' },
-          { value: 'bar', content: 'Столбцы', disabled: split },
-        ]}
-      />
+    <div className="space-y-1.5">
+      <CdekChartKind value={split ? 'line' : kind} onChange={setKind} disabled={split ? ['bar'] : undefined} />
       {split && (
         <p className="text-xs leading-relaxed text-muted-foreground">
           Разбивка рисуется линиями: несколько рядов столбцами за окно нечитаемы.
@@ -490,8 +476,11 @@ function CdekSeriesPage({ def }: { def: SeriesDef }) {
   // сегментированным контролом в 300px колонку не влезают — подписи налезали друг на друга.
   const splitSection = <CdekSplitRow dim={splitDim} onClear={() => setSplitDim('')} />;
 
+  // Подписи выбора («Только каналы: Ozon») здесь БОЛЬШЕ НЕ ПЕЧАТАЮТСЯ: значения видны пилюлями
+  // прямо в карточке, и строка под ними повторяла бы то, что читатель уже видит. На карточках
+  // «Обзора» она остаётся — там выбора не видно вовсе, и молчащее число было бы нечестным.
   const filters = (
-    <div className="space-y-2">
+    <div>
       <CdekFilterList
         state={filterState}
         shown={dims.shown}
@@ -499,18 +488,13 @@ function CdekSeriesPage({ def }: { def: SeriesDef }) {
         onChange={applyFilters}
         onRemove={removeDim}
       />
-      {(caption || productCaption || channelCaption) && (
-        <p className="pl-[2.125rem] text-xs leading-relaxed text-muted-foreground">
-          {[caption, productCaption, channelCaption].filter(Boolean).join(' · ')}
-        </p>
-      )}
     </div>
   );
 
   return (
     <CdekMetricShell
       term={def.term}
-      descriptor={def.descriptor}
+     
       back={def.back}
       comparison={comparison}
       filters={filters}
@@ -645,7 +629,7 @@ function CdekBreakdownPage({ def }: { def: BreakdownDef }) {
   };
 
   return (
-    <CdekMetricShell term={def.term} descriptor={def.descriptor} back={def.back}>
+    <CdekMetricShell term={def.term} back={def.back}>
       <div className="space-y-3">
         <div className="flex justify-end">
           <SegmentedControl

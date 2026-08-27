@@ -117,6 +117,61 @@ export const ViewGlyph = (
   </svg>
 );
 
+/**
+ * Тип графика — ИКОННЫМ рядом в самом верху колонки, над разделами (владелец: «возьми из Steep»).
+ * У них это первое, что видишь: чем рисуем — вопрос до того, что рисуем. Текстовые пилюли внизу
+ * колонки отвечали на него последними.
+ */
+export const CHART_KIND_ICONS: { id: 'line' | 'bar'; label: string; path: string }[] = [
+  { id: 'line', label: 'Линия', path: 'M2 12l3.5-4 3 2.5L13 4' },
+  { id: 'bar', label: 'Столбцы', path: 'M3 13V8M7 13V4M11 13V10M15 13H1' },
+];
+
+export function CdekChartKind({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: 'line' | 'bar';
+  onChange: (v: 'line' | 'bar') => void;
+  /** Типы, недоступные при текущем состоянии: гаснут, а не бездействуют молча. Под разбивкой это
+   *  столбцы — несколько рядов столбцами за окно нечитаемы. */
+  disabled?: ReadonlyArray<'line' | 'bar'>;
+}) {
+  return (
+    <div
+      role="toolbar"
+      aria-label="Тип графика"
+      className="flex items-center gap-0.5 rounded-lg border border-border p-1"
+      data-cdek-chart-kind=""
+    >
+      {CHART_KIND_ICONS.map((kind) => {
+        const active = value === kind.id;
+        const off = disabled?.includes(kind.id) ?? false;
+        return (
+          <button
+            key={kind.id}
+            type="button"
+            aria-pressed={active}
+            aria-label={kind.label}
+            title={kind.label}
+            disabled={off}
+            onClick={() => onChange(kind.id)}
+            className={cn(
+              'inline-flex h-8 flex-1 items-center justify-center rounded-md transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40 disabled:pointer-events-none disabled:opacity-40',
+              active ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground',
+            )}
+          >
+            <svg viewBox="0 0 16 16" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+              <path d={kind.path} strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 /** «+» у правого края строки раздела: 28×28, приглушённый, без заливки. */
 export function CdekFilterAdd({ dims, onAdd }: { dims: CdekFilterDim[]; onAdd: (d: CdekFilterDim) => void }) {
   if (dims.length === 0) return null;
