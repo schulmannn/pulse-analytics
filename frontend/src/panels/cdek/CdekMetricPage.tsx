@@ -11,15 +11,19 @@ import {
   CdekChartKind,
   CdekSplitAdd,
   CdekSplitRow,
+  CdekTargetAdd,
+  CdekTargetRow,
   SplitGlyph,
+  TargetGlyph,
   useCdekFilterDims,
 } from '@/panels/cdek/CdekFilterRail';
 import { LineChart } from '@/components/LineChart';
+import { WidgetTargetContext } from '@/components/ExpandableChart';
 import { BarChart } from '@/components/BarChart';
 import { ShareRows } from '@/components/ShareRows';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { useSelectedChannel } from '@/lib/channel-context';
-import { setSavedFilter, useSavedFilter } from '@/lib/widgetPrefsStore';
+import { setPrefs, setSavedFilter, useSavedFilter, useWidgetPrefs } from '@/lib/widgetPrefsStore';
 import {
   CDEK_CANON_STATUSES,
   cdekChannelFilterKey,
@@ -70,7 +74,7 @@ import { isCdekMetricKey } from '@/panels/cdek/cdekMetricKeys';
 export function CdekMetricPage({ metricKey }: { metricKey: string }) {
   if (!isCdekMetricKey(metricKey)) return null;
   const series = SERIES_DEFS[metricKey as SeriesKey];
-  if (series) return <CdekSeriesPage def={series} />;
+  if (series) return <CdekSeriesPage def={series} metricKey={metricKey as SeriesKey} />;
   const breakdown = BREAKDOWN_DEFS[metricKey as BreakdownKey];
   return breakdown ? <CdekBreakdownPage def={breakdown} /> : null;
 }
@@ -113,6 +117,8 @@ function CdekMetricShell({
   view,
   split,
   splitAction,
+  target,
+  targetAction,
   filterIcon,
   filterAction,
   onSaveFilters,
@@ -127,6 +133,9 @@ function CdekMetricShell({
   /** Раздел «Разбивка» — по какому разрезу раскладываем ряд, и «+» выбора у правого края строки. */
   split?: ReactNode;
   splitAction?: ReactNode;
+  /** Раздел «Цели» — уровень, до которого сверяемся, и «+» у правого края строки. */
+  target?: ReactNode;
+  targetAction?: ReactNode;
   /** Значок раздела фильтров и действие «+» у правого края его строки. */
   filterIcon?: ReactNode;
   filterAction?: ReactNode;
@@ -146,47 +155,63 @@ function CdekMetricShell({
       <MetricColumns
         rail={
           <>
-            {/* Тип графика — первым, ДО разделов и без заголовка: у Steep это ряд иконок в самом
-                верху колонки. Раньше он стоял предпоследней секцией «Вид» (владелец: «должен быть
-                в самом начале»). */}
-            {view}
+            {/* Разделы идут ВПЛОТНУЮ, одной сплошной колонкой: их разделяет волосяная черта, а
+                не воздух. `MetricColumns` расставляет детям rail'а 24px, и с ними колонка
+                распадалась на четыре плавающих островка — у Steep это единый список, где линия и
+                есть граница раздела. Обёртка забирает промежуток себе, и он остаётся ровно один —
+                перед ссылкой «Открыть раздел». */}
+            <div>
+              {/* Тип графика — первым, ДО разделов и без заголовка: у Steep это ряд иконок в самом
+                  верху колонки. Раньше он стоял предпоследней секцией «Вид» (владелец: «должен
+                  быть в самом начале»). */}
+              <div className="border-b border-border px-2.5 pb-3">{view}</div>
             {/* Порядок — как у Steep: сначала «из чего сложилось» и «что считаем», и только потом
                 «с чем сравниваем» и «чем рисуем». У нас он был буквально перевёрнут: сравнение
                 стояло первым, фильтры последними (замечено владельцем по кадру). */}
-            {split && (
               <RailSection title="Разбивка" variant="row" icon={SplitGlyph} action={splitAction}>
                 {split}
               </RailSection>
-            )}
-            {filters && (
-              <RailSection
-                title="Фильтры"
-                variant="row"
-                icon={filterIcon}
-                action={
-                  // «Сохранить» стоит У ФИЛЬТРОВ, а не в шапке страницы: владелец не нашёл её там,
-                  // и справедливо — кнопка обязана быть рядом с тем, что сохраняет. Показывается
-                  // только когда есть что сохранять.
-                  <span className="flex items-center gap-1">
-                    {onSaveFilters && (
-                      <Button type="button" variant="secondary" size="xs" onClick={onSaveFilters}>
-                        Сохранить
-                      </Button>
-                    )}
-                    {filterAction}
-                  </span>
-                }
-              >
-                {filters}
-              </RailSection>
-            )}
-            <RailSection title="Сравнение" variant="row" icon={CompareGlyph}>
-              {comparison ?? (
-                <p className="text-xs leading-relaxed text-muted-foreground">
-                  У этого разреза нет одной канонической величины периода — сравнение не рассчитывается.
-                </p>
+              {filters && (
+                <RailSection
+                  title="Фильтры"
+                  variant="row"
+                  icon={filterIcon}
+                  action={
+                    // «Сохранить» стоит У ФИЛЬТРОВ, а не в шапке страницы: владелец не нашёл её
+                    // там, и справедливо — кнопка обязана быть рядом с тем, что сохраняет.
+                    // Показывается только когда есть что сохранять.
+                    <span className="flex items-center gap-1">
+                      {onSaveFilters && (
+                        <Button type="button" variant="secondary" size="xs" onClick={onSaveFilters}>
+                          Сохранить
+                        </Button>
+                      )}
+                      {filterAction}
+                    </span>
+                  }
+                >
+                  {filters}
+                </RailSection>
               )}
-            </RailSection>
+              {/* Порядок разделов — как у Steep: Breakdown · Filter · Targets · Compare. Цель
+                  стоит ПОСЛЕ фильтров осознанно: сначала «что считаем», потом «с чем сверяемся». */}
+              {(target || targetAction) && (
+                // Только там, где цель ЕСТЬ или её можно поставить. На страницах-разрезах
+                // («Статусы», «Каналы») уровня нет — раздел был бы строкой без содержимого и без
+                // действия, то есть ровно тем мёртвым контролом, который мы отовсюду убираем.
+                <RailSection title="Цели" variant="row" icon={TargetGlyph} action={targetAction}>
+                  {target}
+                </RailSection>
+              )}
+              <RailSection title="Сравнение" variant="row" icon={CompareGlyph}>
+                {comparison ?? (
+                  <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
+                    У этого разреза нет одной канонической величины периода — сравнение не
+                    рассчитывается.
+                  </p>
+                )}
+              </RailSection>
+            </div>
             <Link
               to={back.to}
               className="inline-flex items-center gap-1 text-xs font-medium text-primary transition-colors hover:text-primary/80"
@@ -268,12 +293,28 @@ const SERIES_DEFS: Record<SeriesKey, SeriesDef> = {
   },
 };
 
-function CdekSeriesPage({ def }: { def: SeriesDef }) {
+function CdekSeriesPage({ def, metricKey }: { def: SeriesDef; metricKey: SeriesKey }) {
   const chartH = useExplorerChartHeight();
   const { days, setDays, range, setRange } = usePeriod();
   const period = useMsResolvedPeriod({ days, range });
   const [kind, setKind] = useState<'line' | 'bar'>('line');
   const [cmp, setCmp] = useState<'off' | 'prev'>('prev');
+
+  // ЦЕЛЬ — та же `prefs.target`, что задаёт «Целевой уровень» в редакторе виджета, и тот же ключ,
+  // что у карточки «Обзора» (id виджета = ключу метрики). Второго механизма не заводим: цель,
+  // поставленная здесь, видна и в редакторе виджета, и на карточке — но ТОЛЬКО там, где карточка
+  // рисует LineChart/BarChart (проверено: «Заказы» показывают «цель 3»).
+  //
+  // На карточке-ИСКРЕ линии нет, и это не недосмотр: у Sparkline своё усечённое окно просмотра
+  // (sparkDomain режет выбросы по квантилям и метит их карéткой). Цель выше этого окна либо
+  // осталась бы невидимой, либо расплющила бы сам ряд в черту — то есть испортила главное ради
+  // второстепенного. Полный домен с целью живёт на этой странице, у графика с осью.
+  const prefs = useWidgetPrefs(metricKey);
+  const target = prefs.target ?? null;
+  const [targetOpen, setTargetOpen] = useState(false);
+  const showTarget = target != null || targetOpen;
+  const setTarget = (next: number | null) => setPrefs(metricKey, { ...prefs, target: next ?? undefined });
+
 
   // Фильтр статусов живёт ТОЛЬКО здесь, внутри разворота (решение владельца). Карточка «Обзора»
   // остаётся на каноне и потому не имеет скрытого состояния: число на ней всегда значит одно и то
@@ -283,8 +324,12 @@ function CdekSeriesPage({ def }: { def: SeriesDef }) {
   const filterKey = cdekStatusFilterKey(channelId);
   const savedRaw = useSavedFilter(filterKey);
   const saved = useMemo(() => normalizeCdekStatuses(savedRaw), [savedRaw]);
+  // ДЕЙСТВУЮЩИЙ сохранённый набор, а не сырой: пустые настройки означают канон, и сравнивать с
+  // пустотой нельзя — иначе на свежем аккаунте «Сохранить» горит с первого кадра, предлагая
+  // сохранить то, что человек не выбирал.
+  const savedEffective = saved.length > 0 ? saved : CDEK_CANON_STATUSES;
   const [selected, setSelected] = useState<string[] | null>(null);
-  const statuses = selected ?? (saved.length > 0 ? saved : CDEK_CANON_STATUSES);
+  const statuses = selected ?? savedEffective;
   const include = cdekStatusInclude(statuses);
 
   // Товары — вторая ось того же вопроса «что считать». Список берётся из разбивки по товарам,
@@ -452,7 +497,7 @@ function CdekSeriesPage({ def }: { def: SeriesDef }) {
   // Одна кнопка на весь выбор: три оси отвечают на ОДИН вопрос «что считать», и раздельное
   // сохранение заставляло нажимать трижды, а пропустив нажатие — увезти на «Обзор» половину выбора.
   const dirty =
-    !sameCdekStatuses(statuses, saved) ||
+    !sameCdekStatuses(statuses, savedEffective) ||
     !sameCdekProducts(products, savedProducts) ||
     !sameCdekChannels(salesChannels, savedChannels);
   const saveFilters = () => {
@@ -474,21 +519,48 @@ function CdekSeriesPage({ def }: { def: SeriesDef }) {
   };
   // Разрез выбирается тем же приёмом, что и фильтры, и по той же причине: пять вариантов
   // сегментированным контролом в 300px колонку не влезают — подписи налезали друг на друга.
-  const splitSection = <CdekSplitRow dim={splitDim} onClear={() => setSplitDim('')} />;
+  const splitSection = (
+    <CdekSplitRow dim={splitDim} onPick={setSplitDim} onClear={() => setSplitDim('')} />
+  );
+
+  // Достижение считается по ТОЧКАМ ряда, а не по итогу окна: цель — дневной уровень (сервер отдаёт
+  // grain=day), и «12 из 30 дней» — утверждение, которое можно проверить глазами по линии. Доля от
+  // суммы окна потребовала бы выбрать базу («цель × дней»?) и молча домыслить за человека.
+  const targetHint = (() => {
+    if (target == null) return undefined;
+    if (splitDim) {
+      // Цель задана для всей метрики, а не для отдельного ряда: линия поверх шести серий читалась
+      // бы как цель каждой из них.
+      return 'При разбивке линия цели не рисуется: цель у метрики одна, а рядов несколько.';
+    }
+    const known = values.filter((v): v is number => v != null);
+    if (known.length === 0) return undefined;
+    const hit = known.filter((v) => v >= target).length;
+    return `Достигнута в ${hit} из ${known.length} ${pluralRu(known.length, ['дня', 'дней', 'дней'])}`;
+  })();
+  const targetSection = showTarget ? (
+    <CdekTargetRow
+      value={target}
+      onChange={setTarget}
+      onRemove={() => {
+        setTarget(null);
+        setTargetOpen(false);
+      }}
+      hint={targetHint}
+    />
+  ) : null;
 
   // Подписи выбора («Только каналы: Ozon») здесь БОЛЬШЕ НЕ ПЕЧАТАЮТСЯ: значения видны пилюлями
   // прямо в карточке, и строка под ними повторяла бы то, что читатель уже видит. На карточках
   // «Обзора» она остаётся — там выбора не видно вовсе, и молчащее число было бы нечестным.
   const filters = (
-    <div>
-      <CdekFilterList
-        state={filterState}
-        shown={dims.shown}
-        productOptions={productOptions}
-        onChange={applyFilters}
-        onRemove={removeDim}
-      />
-    </div>
+    <CdekFilterList
+      state={filterState}
+      shown={dims.shown}
+      productOptions={productOptions}
+      onChange={applyFilters}
+      onRemove={removeDim}
+    />
   );
 
   return (
@@ -501,10 +573,15 @@ function CdekSeriesPage({ def }: { def: SeriesDef }) {
       view={viewSection}
       split={splitSection}
       splitAction={splitDim ? undefined : <CdekSplitAdd onPick={setSplitDim} />}
+      target={targetSection}
+      targetAction={showTarget ? undefined : <CdekTargetAdd onAdd={() => setTargetOpen(true)} />}
       filterIcon={FilterGlyph}
       filterAction={<CdekFilterAdd dims={dims.addable} onAdd={dims.open} />}
       onSaveFilters={dirty ? saveFilters : undefined}
     >
+      {/* Линия цели: LineChart и BarChart читают её из ОДНОГО контекста, поэтому цель переживает
+          переключение линия↔столбцы. При разбивке контекст пуст — см. targetHint. */}
+      <WidgetTargetContext.Provider value={splitDim ? null : target}>
       <div className="space-y-3">
         {splitDim && splitModel ? (
           <MultiLineChart
@@ -549,6 +626,7 @@ function CdekSeriesPage({ def }: { def: SeriesDef }) {
           <PeriodChips ariaLabel="Окно" value={days} onChange={setDays} range={range} onRangeChange={setRange} />
         </WindowBarShell>
       </div>
+      </WidgetTargetContext.Provider>
     </CdekMetricShell>
   );
 }

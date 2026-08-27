@@ -50,8 +50,14 @@ test('разрез раскладывает ряд на серии и назыв
   await expect(page.getByText('Своя доставка')).toBeVisible();
   await expect(page.getByText('Яндекс.Маркет')).toBeVisible();
   await expect.poll(() => asked.some((q) => q.includes('breakdown=channel'))).toBe(true);
-  // Строка раздела говорит, по чему разложено.
-  await expect(page.getByText(/По: каналам продаж/)).toBeVisible();
+  // Строка раздела говорит, по чему разложено — и это СЕЛЕКТ: соседний разрез выбирается на
+  // месте, без «снять и добавить заново» (анатомия элемента раздела у Steep).
+  const picked = page.getByRole('button', { name: 'Разрез', exact: true });
+  await expect(picked).toHaveText(/Каналам продаж/);
+  await picked.click();
+  await page.getByRole('menuitem', { name: 'Статусам' }).click();
+  await expect(picked).toHaveText(/Статусам/);
+  await expect.poll(() => asked.some((q) => q.includes('breakdown=status'))).toBe(true);
 });
 
 test('серий не больше читаемого потолка, а хвост назван числом', async ({ page }, info) => {
@@ -73,7 +79,10 @@ test('снятие разреза возвращает одиночный ряд
 
   await page.getByRole('button', { name: 'Убрать разбивку' }).click();
   await expect(page.getByText('Своя доставка')).toHaveCount(0);
-  await expect(page.getByText('Один ряд — без разреза')).toBeVisible();
+  // Пустой раздел МОЛЧИТ: отсутствие строки и есть отсутствие разреза — подпись про это была
+  // пересказом пустоты и снята по замечанию владельца.
+  await expect(page.getByRole('button', { name: 'Разрез', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Выбрать разрез' })).toBeVisible();
 });
 
 /**

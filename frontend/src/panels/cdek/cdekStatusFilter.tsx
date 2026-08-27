@@ -91,8 +91,18 @@ export function CdekStatusFilter({
   selected: string[];
   onChange: (ids: string[]) => void;
 }) {
-  const toggle = (id: string) =>
-    onChange(selected.includes(id) ? selected.filter((s) => s !== id) : [...selected, id]);
+  // Снять ПОСЛЕДНИЙ статус нельзя. Пустой набор здесь не «ничего не считаем», а тихий возврат к
+  // канону (см. cdekStatusInclude): человек снимал бы галочки до нуля и получал не ноль заказов, а
+  // отгруженное — число, которого он не выбирал. Раз состояния «пусто» не существует по смыслу,
+  // его не должно быть и в контроле.
+  const lastOne = selected.length <= 1;
+  const toggle = (id: string) => {
+    if (selected.includes(id)) {
+      if (lastOne) return;
+      return onChange(selected.filter((s) => s !== id));
+    }
+    onChange([...selected, id]);
+  };
 
   return (
     // Заголовок «Статусы заказов» уже занят карточкой разбивки на «Обзоре» — фильтру нужен свой
@@ -107,9 +117,11 @@ export function CdekStatusFilter({
               key={status.id}
               type="button"
               aria-pressed={active}
+              disabled={active && lastOne}
+              title={active && lastOne ? 'Хотя бы один статус должен остаться выбранным' : undefined}
               onClick={() => toggle(status.id)}
               className={cn(
-                'min-h-11 rounded-full border px-3 py-1 text-xs transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/50 sm:min-h-0',
+                'min-h-11 rounded-full border px-3 py-1 text-xs transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/50 disabled:pointer-events-none sm:min-h-0',
                 active
                   ? 'border-primary bg-primary/10 font-medium text-accent-foreground'
                   : 'border-border bg-background text-ink2 hover:bg-muted hover:text-foreground',
@@ -306,8 +318,18 @@ export function CdekChannelFilter({
   selected: string[];
   onChange: (ids: string[]) => void;
 }) {
-  const toggle = (id: string) =>
-    onChange(selected.includes(id) ? selected.filter((s) => s !== id) : [...selected, id]);
+  // Снять ПОСЛЕДНИЙ статус нельзя. Пустой набор здесь не «ничего не считаем», а тихий возврат к
+  // канону (см. cdekStatusInclude): человек снимал бы галочки до нуля и получал не ноль заказов, а
+  // отгруженное — число, которого он не выбирал. Раз состояния «пусто» не существует по смыслу,
+  // его не должно быть и в контроле.
+  const lastOne = selected.length <= 1;
+  const toggle = (id: string) => {
+    if (selected.includes(id)) {
+      if (lastOne) return;
+      return onChange(selected.filter((s) => s !== id));
+    }
+    onChange([...selected, id]);
+  };
 
   return (
     <div className="space-y-2" data-cdek-channel-filter="">

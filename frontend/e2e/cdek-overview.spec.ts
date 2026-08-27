@@ -241,15 +241,14 @@ test('фильтр статусов живёт только в разворот�
   await expand.press('Enter');
   await expect(page).toHaveURL(/\/metrics\/cdek-revenue/);
 
-  // Оси не нарисованы, пока их не добавили (раздел фильтров по образцу Steep): сначала «+», потом
-  // строка оси, и только по клику по ней открывается сам выбор.
+  // Статусы стоят карточкой С ПЕРВОГО КАДРА, потому что фильтруют всегда: канон считает только
+  // отгруженное. Прочие оси по-прежнему не нарисованы, пока их не добавили.
   await expect(page.locator('[data-cdek-filter-rail]')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Статусы заказов', expanded: false })).toBeVisible();
+  // Сам выбор при этом свёрнут: раскрывается ВНУТРИ карточки (как у Steep), а не в поповере.
   await expect(page.locator('[data-cdek-status-filter]')).toHaveCount(0);
   const before = includes.length;
 
-  await page.getByRole('button', { name: 'Добавить фильтр' }).click();
-  await page.getByRole('menuitem', { name: 'Статусы заказов' }).click();
-  // Выбор раскрывается ВНУТРИ карточки (как у Steep), а не в поповере: клик по названию.
   await page.getByRole('button', { name: 'Статусы заказов', expanded: false }).click();
   await expect(page.locator('[data-cdek-status-filter]')).toBeVisible();
 
@@ -263,6 +262,30 @@ test('фильтр статусов живёт только в разворот�
   // каждое выбранное значение стоит в карточке и снимается на месте. Отдельная подпись под ними
   // повторяла бы то, что уже на экране.
   await expect(page.getByRole('button', { name: 'Убрать: Отменён' })).toBeVisible();
+});
+
+/**
+ * Пустой набор статусов не «ничего не считаем», а тихий возврат к канону — состояние, которого
+ * человек не выбирал. Раз его не существует по смыслу, до него нельзя доехать и руками.
+ */
+test('последний статус снять нельзя ни пилюлей, ни в выборе', async ({ page }) => {
+  await bootOverview(page);
+  const expand = page.getByRole('button', { name: 'Развернуть виджет «Выручка»' });
+  await expand.focus();
+  await expand.press('Enter');
+  await expect(page).toHaveURL(/\/metrics\/cdek-revenue/);
+
+  // Канон — две пилюли, у каждой свой крестик.
+  await expect(page.getByRole('button', { name: 'Убрать: Завершён' })).toBeVisible();
+  await page.getByRole('button', { name: 'Убрать: В доставке' }).click();
+
+  // Осталась одна — крестика у неё больше нет.
+  await expect(page.getByRole('button', { name: 'Убрать: Завершён' })).toHaveCount(0);
+  await expect(page.getByText('Завершён')).toBeVisible();
+
+  // И в самом выборе последний статус не отжимается.
+  await page.getByRole('button', { name: 'Статусы заказов', expanded: false }).click();
+  await expect(page.locator('[data-cdek-status-filter]').getByRole('button', { name: 'Завершён' })).toBeDisabled();
 });
 
 test('фильтр товаров режет метрику и тоже живёт только в развороте', async ({ page }) => {
@@ -346,9 +369,7 @@ test('пилюля значения снимается на месте и дое
   await expand.press('Enter');
   await expect(page).toHaveURL(/\/metrics\/cdek-revenue/);
 
-  await page.getByRole('button', { name: 'Добавить фильтр' }).click();
-  await page.getByRole('menuitem', { name: 'Статусы заказов' }).click();
-  // Канон — «завершён + в доставке»: обе пилюли на месте.
+  // Карточка статусов стоит сразу — канон «завершён + в доставке», обе пилюли на месте.
   await expect(page.getByRole('button', { name: 'Убрать: Завершён' })).toBeVisible();
 
   const before = includes.length;
