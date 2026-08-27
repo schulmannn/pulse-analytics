@@ -80,9 +80,15 @@ export function RailSection({
     //
     // Взята анатомия, не поверхность: тёмное стекло с backdrop-blur и свечением тени остаётся у
     // них — у нас канон «без теней, только волосяные линии», и чужая поверхность встала бы пятном.
+    //
+    // ЛИНИЯ ОТДЕЛЯЕТ РАЗДЕЛ ОТ РАЗДЕЛА, а не заголовок от собственного тела. Прошлая редакция
+    // ставила её сразу под строкой названия, и раздел визуально разваливался: подпись оставалась
+    // сверху, а её содержимое уезжало под черту — читалось как начало СЛЕДУЮЩЕГО раздела. У Steep
+    // раздел — блок `px-2.5 py-2` с волосяной чертой ПО НИЖНЕМУ краю всего блока (замер: шаг 49px
+    // при строке 32px), поэтому заголовок и его содержимое всегда по одну сторону линии.
     return (
-      <section data-rail-card={mark} data-rail-row="">
-        <div className="flex h-8 items-center justify-between gap-2.5 border-b border-border pl-2">
+      <section data-rail-card={mark} data-rail-row="" className="border-b border-border px-2.5 py-2">
+        <div className="flex h-8 items-center justify-between gap-2.5 pl-2">
           <span className="flex min-w-0 items-center gap-2.5">
             {icon && (
               <span aria-hidden="true" className="flex h-4 w-4 shrink-0 items-center justify-center text-muted-foreground">
@@ -93,7 +99,7 @@ export function RailSection({
           </span>
           {action}
         </div>
-        <div className="pt-1.5">{children}</div>
+        {children}
       </section>
     );
   }
