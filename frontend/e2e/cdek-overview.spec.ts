@@ -328,28 +328,34 @@ test('фильтр товаров режет метрику и тоже живё
  * Второе требование того же решения: карточка обязана СКАЗАТЬ, что посчитана нестандартным
  * набором. Молчащее число значило бы не то, что читатель думает.
  */
-test('сохранённый фильтр доезжает до карточек «Обзора» и назван подписью', async ({ page }) => {
+/**
+ * Сохранённый выбор ДЕЙСТВУЕТ на карточках, но БОЛЬШЕ НЕ ПЕЧАТАЕТСЯ припиской (владелец: «это
+ * лишнее»). Проверяется теперь то, что и есть суть: набор доезжает до запроса. Прежняя гарантия
+ * «карточка обязана назвать нестандартный набор» снята сознательно — выбор виден в развороте,
+ * где он стоит карточками фильтров прямо над графиком.
+ */
+test('сохранённый фильтр доезжает до карточек «Обзора» и не печатает приписку', async ({ page }) => {
   const { includes } = await bootOverview(page, {
     savedFilters: JSON.stringify({ 'cdek:status:5': ['complete'] }),
   });
   expect(includes.some((v) => v === 'status:complete')).toBe(true);
-  await expect(card(page, 'Выручка')).toContainText(/только: завершён/i);
+  await expect(card(page, 'Выручка')).not.toContainText(/только: завершён/i);
+  await expect(card(page, 'Выручка')).not.toContainText(/считаются/i);
 });
 
-test('канонический набор ничего не печатает и ходит каноном', async ({ page }) => {
-  // Подпись на каждой карточке при обычном выборе была бы шумом — владелец уже снимал такую.
+test('канонический набор ходит каноном', async ({ page }) => {
   const { includes } = await bootOverview(page);
   expect(includes.every((v) => v !== 'status:complete')).toBe(true);
   await expect(card(page, 'Выручка')).not.toContainText(/только:/i);
 });
 
 
-test('сохранённый канал продаж режет метрику и назван подписью', async ({ page }) => {
+test('сохранённый канал продаж режет метрику', async ({ page }) => {
   const { channelParams } = await bootOverview(page, {
     savedFilters: JSON.stringify({ 'cdek:sales-channels:5': ['ozon', 'wildberries'] }),
   });
   expect(channelParams.some((v) => v === 'ozon,wildberries')).toBe(true);
-  await expect(card(page, 'Выручка')).toContainText(/только каналы: .*wildberries/i);
+  await expect(card(page, 'Выручка')).not.toContainText(/только каналы/i);
 });
 
 test('кольцо каналов фильтр по каналам не сужает — иначе оно покажет ровно себя', async ({ page }) => {

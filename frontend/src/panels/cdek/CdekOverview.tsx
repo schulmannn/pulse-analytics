@@ -33,12 +33,9 @@ import {
   cdekProductFilterKey,
   cdekStatusFilterKey,
   cdekStatusInclude,
-  channelFilterCaption,
   normalizeCdekChannels,
   normalizeCdekProducts,
   normalizeCdekStatuses,
-  productFilterCaption,
-  statusFilterCaption,
 } from '@/panels/cdek/cdekStatusFilter';
 import { formatByRole, formatMoney, moneyFormatterFor } from '@/lib/metricNumber';
 import { useCardShowsPeriod, usePagePeriod } from '@/lib/period';
@@ -214,22 +211,11 @@ export function CdekOverview() {
   // строка, ничего не сообщающая (владелец уже снимал такую однажды: «убирай эту подпись»).
   // Но если набор нестандартный, карточка обязана это сказать: иначе число значит не то, что
   // читатель думает, и узнать об этом неоткуда.
-  // Имена для подписи берутся из УЖЕ загруженной разбивки по товарам — она отфильтрована тем же
-  // выбором, поэтому выбранный товар в ней заведомо есть. Отдельный запрос каталога ради одной
-  // строки текста здесь не нужен.
-  const productNames = (products.data?.rows ?? [])
-    .filter((row): row is typeof row & { key: string } => typeof row.key === 'string' && row.key !== '')
-    .map((row) => ({ id: row.key, name: row.title ?? row.article ?? row.key }));
-  const filterCaption = [
-    statusFilterCaption(savedStatuses),
-    productFilterCaption(pickedProducts, productNames),
-    channelFilterCaption(salesChannels),
-  ]
-    .filter(Boolean)
-    .join(' · ') || undefined;
-
+  // Приписка о сохранённом фильтре с карточек СНЯТА (владелец: «это лишнее»). Раньше карточка
+  // обязана была назвать нестандартный набор, потому что узнать о нём было неоткуда; теперь выбор
+  // виден в развороте — там он стоит карточками фильтров прямо над графиком.
   const storyCaption = (extra?: string) =>
-    [periodInLabel, extra, filterCaption].filter(Boolean).join(' · ') || undefined;
+    [periodInLabel, extra].filter(Boolean).join(' · ') || undefined;
 
   const revStory = {
     value: formatMoney(cur?.revenue),
