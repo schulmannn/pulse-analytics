@@ -110,23 +110,48 @@ test('под разбивкой линия цели снимается и при
   await expect(page.getByText(/цель у метрики одна, а рядов несколько/)).toBeVisible();
 });
 
-test('цель живёт в тех же prefs, что «Целевой уровень» виджета', async ({ page }, info) => {
+const savedTarget = (page: Page) =>
+  page.evaluate(() => JSON.parse(localStorage.getItem('pulse_widget_prefs') ?? '{}')?.['cdek-revenue']?.target ?? null);
+
+/**
+ * У колонки ОДИН договор: на графике выбор действует сразу, на карточке «Обзора» — после
+ * «Сохранить». Раньше цель его нарушала — писалась в prefs прямо из поля и молча уезжала на
+ * карточку, пока фильтры рядом ждали кнопку. Владелец на этом и споткнулся: «почему нет кнопки
+ * сохранить? я добавил фильтры и добавил target значение».
+ */
+test('цель ждёт «Сохранить», как и фильтры', async ({ page }, info) => {
+  test.skip(info.project.name !== 'desktop-1440', 'десктоп');
+  await boot(page);
+  const save = page.getByRole('button', { name: 'Сохранить' });
+
+  // Нечего сохранять — кнопки нет.
+  await expect(save).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Добавить цель' }).click();
+  await page.getByRole('spinbutton', { name: 'Цель за день' }).fill('3000');
+
+  // На графике цель уже видна, но на карточку ещё НЕ уехала.
+  await expect(goalLabels(page)).toHaveCount(1);
+  await expect(save).toBeVisible();
+  await expect.poll(() => savedTarget(page)).toBe(null);
+
+  await save.click();
+  // Ключ — id виджета «Обзора», а не свой собственный: два механизма целей развели бы одну и ту
+  // же настройку по двум местам, и карточка перестала бы совпадать с разворотом.
+  await expect.poll(() => savedTarget(page)).toBe(3000);
+  await expect(save).toHaveCount(0);
+});
+
+test('снятая цель тоже уходит через «Сохранить», а не остаётся нулём', async ({ page }, info) => {
   test.skip(info.project.name !== 'desktop-1440', 'десктоп');
   await boot(page);
   await page.getByRole('button', { name: 'Добавить цель' }).click();
   await page.getByRole('spinbutton', { name: 'Цель за день' }).fill('3000');
-  await expect(goalLabels(page)).toHaveCount(1);
+  await page.getByRole('button', { name: 'Сохранить' }).click();
+  await expect.poll(() => savedTarget(page)).toBe(3000);
 
-  // Ключ — id виджета «Обзора», а не свой собственный: два механизма целей развели бы одну и ту
-  // же настройку по двум местам, и карточка перестала бы совпадать с разворотом.
-  await expect
-    .poll(async () => await page.evaluate(() => JSON.parse(localStorage.getItem('pulse_widget_prefs') ?? '{}')?.['cdek-revenue']?.target))
-    .toBe(3000);
-
-  // Убрали — и настройка ушла целиком, а не осталась нулём.
   await page.getByRole('button', { name: 'Убрать цель' }).click();
   await expect(goalLabels(page)).toHaveCount(0);
-  await expect
-    .poll(async () => await page.evaluate(() => JSON.parse(localStorage.getItem('pulse_widget_prefs') ?? '{}')?.['cdek-revenue']?.target ?? null))
-    .toBe(null);
+  await page.getByRole('button', { name: 'Сохранить' }).click();
+  await expect.poll(() => savedTarget(page)).toBe(null);
 });
