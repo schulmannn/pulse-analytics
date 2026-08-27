@@ -176,19 +176,7 @@ function CdekMetricShell({
                   title="Фильтры"
                   variant="row"
                   icon={filterIcon}
-                  action={
-                    // «Сохранить» стоит У ФИЛЬТРОВ, а не в шапке страницы: владелец не нашёл её
-                    // там, и справедливо — кнопка обязана быть рядом с тем, что сохраняет.
-                    // Показывается только когда есть что сохранять.
-                    <span className="flex items-center gap-1">
-                      {onSaveFilters && (
-                        <Button type="button" variant="secondary" size="xs" onClick={onSaveFilters}>
-                          Сохранить
-                        </Button>
-                      )}
-                      {filterAction}
-                    </span>
-                  }
+                  action={filterAction}
                 >
                   {filters}
                 </RailSection>
@@ -211,6 +199,20 @@ function CdekMetricShell({
                   </p>
                 )}
               </RailSection>
+              {/* «Сохранить» — ПОД всеми разделами и во всю ширину колонки, потому что сохраняет
+                  она всю колонку: и фильтры, и цель. Внутри раздела «Фильтры» кнопка обещала
+                  меньше, чем делала, — на это владелец и указал, добавив цель и не найдя, чем её
+                  сохранить. Появляется только когда есть что сохранять. */}
+              {onSaveFilters && (
+                <div className="px-2.5 pt-3">
+                  <Button type="button" variant="secondary" size="sm" className="w-full" onClick={onSaveFilters}>
+                    Сохранить
+                  </Button>
+                  <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
+                    На графике выбор действует сразу. Сохранение переносит его на карточки «Обзора».
+                  </p>
+                </div>
+              )}
             </div>
             <Link
               to={back.to}
@@ -310,10 +312,17 @@ function CdekSeriesPage({ def, metricKey }: { def: SeriesDef; metricKey: SeriesK
   // осталась бы невидимой, либо расплющила бы сам ряд в черту — то есть испортила главное ради
   // второстепенного. Полный домен с целью живёт на этой странице, у графика с осью.
   const prefs = useWidgetPrefs(metricKey);
-  const target = prefs.target ?? null;
+  const savedTarget = prefs.target ?? null;
+  // ЧЕРНОВИК, как у фильтров: undefined — «не трогали», дальше живёт выбор человека. Раньше цель
+  // писалась в prefs прямо из onChange, и два соседних раздела вели себя по-разному — фильтры
+  // ждали «Сохранить», а цель молча уезжала на карточку «Обзора». Владелец на этом и споткнулся
+  // («почему нет кнопки сохранить? я добавил фильтры и добавил target»): кнопка была, но к цели
+  // отношения не имела. Теперь у колонки ОДНО правило — на графике видно сразу, на карточке
+  // после сохранения.
+  const [draftTarget, setDraftTarget] = useState<number | null | undefined>(undefined);
+  const target = draftTarget !== undefined ? draftTarget : savedTarget;
   const [targetOpen, setTargetOpen] = useState(false);
   const showTarget = target != null || targetOpen;
-  const setTarget = (next: number | null) => setPrefs(metricKey, { ...prefs, target: next ?? undefined });
 
 
   // Фильтр статусов живёт ТОЛЬКО здесь, внутри разворота (решение владельца). Карточка «Обзора»
@@ -496,14 +505,19 @@ function CdekSeriesPage({ def, metricKey }: { def: SeriesDef; metricKey: SeriesK
 
   // Одна кнопка на весь выбор: три оси отвечают на ОДИН вопрос «что считать», и раздельное
   // сохранение заставляло нажимать трижды, а пропустив нажатие — увезти на «Обзор» половину выбора.
-  const dirty =
+  // «Есть что сохранять» считается по ВСЕЙ колонке, а не по одним фильтрам: цель — такая же
+  // настройка метрики, и разделять их значило бы держать на странице два разных договора.
+  const filtersDirty =
     !sameCdekStatuses(statuses, savedEffective) ||
     !sameCdekProducts(products, savedProducts) ||
     !sameCdekChannels(salesChannels, savedChannels);
+  const dirty = filtersDirty || target !== savedTarget;
   const saveFilters = () => {
     setSavedFilter(filterKey, normalizeCdekStatuses(statuses));
     setSavedFilter(productKey, normalizeCdekProducts(products));
     setSavedFilter(channelKey, normChannels(salesChannels));
+    setPrefs(metricKey, { ...prefs, target: target ?? undefined });
+    setDraftTarget(undefined);
     toastStatusFilterSaved(statuses);
   };
   const applyFilters = (next: typeof filterState) => {
@@ -541,9 +555,9 @@ function CdekSeriesPage({ def, metricKey }: { def: SeriesDef; metricKey: SeriesK
   const targetSection = showTarget ? (
     <CdekTargetRow
       value={target}
-      onChange={setTarget}
+      onChange={setDraftTarget}
       onRemove={() => {
-        setTarget(null);
+        setDraftTarget(null);
         setTargetOpen(false);
       }}
       hint={targetHint}
