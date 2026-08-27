@@ -113,6 +113,83 @@ export const SplitGlyph = (
   </svg>
 );
 
+/** Значок раздела «Цели» — концентрические круги, как у Steep (мишень). */
+export const TargetGlyph = (
+  <svg viewBox="0 0 16 16" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+    <circle cx="8" cy="8" r="5.5" />
+    <circle cx="8" cy="8" r="1.75" />
+  </svg>
+);
+
+/**
+ * Цель метрики — тот же `prefs.target`, что задаёт «Целевой уровень» в редакторе виджета. Второго
+ * механизма НЕ заводим: id виджета «Обзора» и ключ метрики совпадают (`cdek-revenue`), поэтому
+ * цель, заданная здесь, доезжает до карточки сама — как и сохранённый фильтр.
+ *
+ * Цель — уровень НА ДЕНЬ, а не план на окно: линия рисуется в координатах ряда, а ряд у СДЭКа
+ * всегда дневной (сервер отдаёт grain=day). Подпись обязана это называть, иначе человек введёт
+ * сумму за месяц и получит линию далеко над данными.
+ */
+export function CdekTargetAdd({ onAdd }: { onAdd: () => void }) {
+  return (
+    <button
+      type="button"
+      aria-label="Добавить цель"
+      onClick={onAdd}
+      className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40"
+    >
+      <svg viewBox="0 0 16 16" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+        <path d="M8 3.5v9M3.5 8h9" strokeLinecap="round" />
+      </svg>
+    </button>
+  );
+}
+
+export function CdekTargetRow({
+  value,
+  onChange,
+  onRemove,
+  hint,
+}: {
+  value: number | null;
+  onChange: (next: number | null) => void;
+  onRemove: () => void;
+  /** Строка под полем: достигнута ли цель — или почему линии сейчас нет. */
+  hint?: string;
+}) {
+  return (
+    <div className="mt-1 mb-1.5 pl-[2.125rem]">
+      <div className="group flex h-7 items-center gap-2">
+        <input
+          type="number"
+          inputMode="numeric"
+          min={0}
+          aria-label="Цель за день"
+          placeholder="значение за день"
+          value={value ?? ''}
+          onChange={(e) => {
+            const raw = e.target.value.trim();
+            const num = raw === '' ? null : Number(raw);
+            onChange(num != null && Number.isFinite(num) && num > 0 ? num : null);
+          }}
+          className="h-7 min-w-0 flex-1 rounded-md border border-border bg-background px-2 text-sm tabular-nums text-foreground outline-hidden placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
+        />
+        <button
+          type="button"
+          aria-label="Убрать цель"
+          onClick={onRemove}
+          className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40 group-hover:opacity-100"
+        >
+          <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+            <path d="M4 4l8 8M12 4l-8 8" strokeLinecap="round" />
+          </svg>
+        </button>
+      </div>
+      {hint && <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{hint}</p>}
+    </div>
+  );
+}
+
 /** Значок раздела «Сравнение». */
 export const CompareGlyph = (
   <svg viewBox="0 0 16 16" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
@@ -423,7 +500,7 @@ function FilterCard({
         {onRemove && (
           <button
             type="button"
-            aria-label={'Убрать фильтр: ' + DIM_TITLE[dim]}
+            aria-label={`Убрать фильтр: ${DIM_TITLE[dim]}`}
             onClick={onRemove}
             className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40"
           >
@@ -451,7 +528,7 @@ function FilterCard({
               {!locked && (
                 <button
                   type="button"
-                  aria-label={'Убрать: ' + v.label}
+                  aria-label={`Убрать: ${v.label}`}
                   onClick={() => dropValue(v.id)}
                   className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-primary/15 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40"
                 >
