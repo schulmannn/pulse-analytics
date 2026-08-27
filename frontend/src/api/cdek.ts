@@ -290,9 +290,19 @@ export function useCdekSummary(
   channels?: readonly string[],
 ) {
   const { channelId } = useSelectedChannel();
-  return useQuery({
+  // Явный TData (как у useTgFull/useIgInsights): без него колбэк placeholderData роняет вывод
+  // типов у каждого потребителя `.data`.
+  return useQuery<z.infer<typeof CdekSummarySchema>>({
     enabled: channelId != null,
     queryKey: qk.cdekSummary.window(channelId, period, include, productsKey(products), productsKey(channels)),
+    // Прошлое окно остаётся смонтированным, пока грузится новое (тот же приём, что у useTgFull).
+    // Без него КАЖДАЯ правка фильтра роняла страницу в скелетон: дерево rail'а размонтировалось,
+    // раскрытая карточка фильтра захлопывалась, и чтобы выбрать второе значение, приходилось
+    // открывать её заново (владелец: «страница полностью перезагружается… я должен опять жать на
+    // фильтр»). Заодно график получает старую геометрию для морфа вместо пустого полотна.
+    // Данные НИКОГДА не переносятся между каналами: иначе мелькнули бы числа чужого склада.
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[1] === channelId ? previous : undefined,
     retry: false,
     queryFn: ({ signal }) =>
       apiGet(
@@ -313,9 +323,12 @@ export function useCdekSeries(
   breakdown?: string,
 ) {
   const { channelId } = useSelectedChannel();
-  return useQuery({
+  return useQuery<z.infer<typeof CdekSeriesSchema>>({
     enabled: channelId != null,
     queryKey: qk.cdekSeries.window(channelId, period, include, grain ?? 'auto', productsKey(products), productsKey(channels), breakdown ?? ''),
+    // Прошлое окно держится, пока грузится новое — см. useCdekSummary.
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[1] === channelId ? previous : undefined,
     retry: false,
     queryFn: ({ signal }) =>
       apiGet(
@@ -335,9 +348,12 @@ export function useCdekBreakdown(
   channels?: readonly string[],
 ) {
   const { channelId } = useSelectedChannel();
-  return useQuery({
+  return useQuery<CdekBreakdown>({
     enabled: channelId != null,
     queryKey: qk.cdekBreakdown.window(channelId, period, include, dim, limit, productsKey(products), productsKey(channels)),
+    // Прошлое окно держится, пока грузится новое — см. useCdekSummary.
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[1] === channelId ? previous : undefined,
     retry: false,
     queryFn: ({ signal }) =>
       apiGet(
