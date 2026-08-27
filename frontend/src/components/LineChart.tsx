@@ -11,7 +11,7 @@ import { nearestPointIndex } from '@/lib/chartHover';
 import { axisLabelIndexes } from '@/lib/chartLabels';
 import { ChartTooltip, type TooltipRow, type TooltipState } from '@/components/ChartTooltip';
 import { ChartExpandedContext, ChartRefLinesContext, ExpandedChartHeightContext, WidgetTargetContext } from '@/components/ExpandableChart';
-import { clampTargetToDomain } from '@/lib/targetDomain';
+import { clampTargetToDomain, targetTooltipRow } from '@/lib/targetDomain';
 import { observeSize } from '@/lib/observeSize';
 import {
   activateChartControl,
@@ -700,17 +700,21 @@ export function LineChart({
     const prev = activeGhost?.[i];
     if (prev != null) {
       const cur = v;
+      const d = prev !== 0 ? ((cur - prev) / Math.abs(prev)) * 100 : null;
       const rows: TooltipRow[] = [
         { label: primaryLabel ?? 'Текущий', value: formatValue(cur), color: 'hsl(var(--chart-role-primary))' },
         {
-          // Своя дата у строки сравнения (артефакт v2): «Пред. период · вт, 18 июн».
-          label: ghostTitles?.[i] ? `${ghostLabel} · ${ghostTitles[i]}` : ghostLabel,
+          label: ghostLabel,
+          // Дата прошлого окна — ПРИПИСКОЙ под меткой, а не через «·» в самой метке: длинная
+          // склейка «Пред. период · вт, 18 июн» упиралась в ширину плашки и переносилась.
+          sub: ghostTitles?.[i],
           value: formatValue(prev),
           color: 'hsl(var(--chart-role-comparison))',
+          // Дельта живёт ПРИ величине, к которой относится, а не отдельной строкой с меткой «Δ».
+          delta: comparisonDelta && d != null && Number.isFinite(d) ? d : undefined,
         },
       ];
-      const d = prev !== 0 ? ((cur - prev) / Math.abs(prev)) * 100 : null;
-      if (comparisonDelta && d != null && Number.isFinite(d)) rows.push({ label: 'Δ', value: `${d >= 0 ? '+' : '−'}${Math.abs(d).toFixed(1)}%` });
+      if (target != null) rows.push(targetTooltipRow(target, cur, formatValue));
       return { x: p.x, y: py, title: cardTitle(i), rows };
     }
     if (expanded || rhea) {
@@ -801,7 +805,47 @@ export function LineChart({
       : [];
 
   return (
-    <div ref={containerRef} className="relative w-full">
+    <div className="w-full">
+      {/* ЛЕГЕНДА СВЕРХУ — по образцу Steep (кадр владельца: чипы рядов стоят НАД полотном).
+          Читатель узнаёт, что за линии, до того как всмотрится, а не после.
+          Вынесена ЗА `relative`-контейнер полотна НАМЕРЕННО: читалка позиционируется абсолютно
+          внутри него и берёт координаты точки из системы svg. Оставь легенду внутри — и svg
+          сдвинулся бы вниз на её высоту, а тултип встал бы выше курсора ровно на эти 22px. */}
+      {/* Comparison legend — names both series whenever a ghost is present; the comparison chip is a
+          toggle (steep #9): click to hide/show the ghost series (the current-period chip stays put,
+          hiding the metric itself is meaningless). Where a page-level compare control already owns the
+          on/off (legendToggle=false, the metric page) the chip is a static label instead.
+          Чипы одинаковы во ВСЕХ appearance и повторяют язык линий: сплошной штрих — текущий период,
+          пунктир — сравнение (квадрат-заливка врал бы про несуществующую area прошлого периода). */}
+      {ghost && ghost.length >= 2 && (
+        <div className="mb-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-2xs font-medium text-muted-foreground">
+          <span className="flex select-none items-center gap-1.5">
+            <span aria-hidden="true" className="h-0.5 w-4 rounded-full" style={{ backgroundColor: 'hsl(var(--chart-role-primary))' }} />
+            {primaryLabel ?? 'Текущий период'}
+          </span>
+          {legendToggle ? (
+            <button
+              type="button"
+              aria-pressed={!ghostHidden}
+              onClick={() => setGhostHidden((v) => !v)}
+              title={ghostHidden ? 'Показать сравнение' : 'Скрыть сравнение'}
+              className={`flex select-none items-center gap-1.5 rounded transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40 ${ghostHidden ? 'opacity-40 line-through' : ''}`}
+            >
+              <span aria-hidden="true" className="w-4 border-t-2 border-dashed" style={{ borderColor: 'hsl(var(--chart-role-comparison))' }} />
+              {ghostLabel}
+            </button>
+          ) : (
+            // Выключенное сравнение НЕ уносит чип из потока: место остаётся за ним, иначе строка
+            // легенды пропадает целиком и всё, что под графиком, дёргается вверх. Но и утверждать
+            // «пред. период» он не должен — поэтому становится невидим, а не приглушён.
+            <span className={`flex select-none items-center gap-1.5${ghostVisible ? '' : ' invisible'}`} aria-hidden={!ghostVisible}>
+              <span aria-hidden="true" className="w-4 border-t-2 border-dashed" style={{ borderColor: 'hsl(var(--chart-role-comparison))' }} />
+              {ghostLabel}
+            </span>
+          )}
+        </div>
+      )}
+      <div ref={containerRef} className="relative w-full">
       <svg
         ref={svgRef}
         data-chart-kind="line"
@@ -1035,44 +1079,11 @@ export function LineChart({
         </div>
       )}
 
-      {/* Comparison legend — names both series whenever a ghost is present; the comparison chip is a
-          toggle (steep #9): click to hide/show the ghost series (the current-period chip stays put,
-          hiding the metric itself is meaningless). Where a page-level compare control already owns the
-          on/off (legendToggle=false, the metric page) the chip is a static label instead.
-          Чипы одинаковы во ВСЕХ appearance и повторяют язык линий: сплошной штрих — текущий период,
-          пунктир — сравнение (квадрат-заливка врал бы про несуществующую area прошлого периода). */}
-      {ghost && ghost.length >= 2 && (
-        <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-2xs font-medium text-muted-foreground">
-          <span className="flex select-none items-center gap-1.5">
-            <span aria-hidden="true" className="h-0.5 w-4 rounded-full" style={{ backgroundColor: 'hsl(var(--chart-role-primary))' }} />
-            {primaryLabel ?? 'Текущий период'}
-          </span>
-          {legendToggle ? (
-            <button
-              type="button"
-              aria-pressed={!ghostHidden}
-              onClick={() => setGhostHidden((v) => !v)}
-              title={ghostHidden ? 'Показать сравнение' : 'Скрыть сравнение'}
-              className={`flex select-none items-center gap-1.5 rounded transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40 ${ghostHidden ? 'opacity-40 line-through' : ''}`}
-            >
-              <span aria-hidden="true" className="w-4 border-t-2 border-dashed" style={{ borderColor: 'hsl(var(--chart-role-comparison))' }} />
-              {ghostLabel}
-            </button>
-          ) : (
-            // Выключенное сравнение НЕ уносит чип из потока: место остаётся за ним, иначе строка
-            // легенды пропадает целиком и всё, что под графиком, дёргается вверх. Но и утверждать
-            // «пред. период» он не должен — поэтому становится невидим, а не приглушён.
-            <span className={`flex select-none items-center gap-1.5${ghostVisible ? '' : ' invisible'}`} aria-hidden={!ghostVisible}>
-              <span aria-hidden="true" className="w-4 border-t-2 border-dashed" style={{ borderColor: 'hsl(var(--chart-role-comparison))' }} />
-              {ghostLabel}
-            </span>
-          )}
-        </div>
-      )}
 
       {/* Readout anchored to the snapped data point (not the cursor) so it stays inside the chart */}
       {/* Тултип — ТОЛЬКО у собственного hover; sync-подсветка соседей живёт без читалки. */}
       <ChartTooltip tip={hover && hover.i < n ? buildTip(hover.i) : null} appearance={appearance} />
+      </div>
     </div>
   );
 }
