@@ -700,17 +700,30 @@ export function LineChart({
     const prev = activeGhost?.[i];
     if (prev != null) {
       const cur = v;
+      const d = prev !== 0 ? ((cur - prev) / Math.abs(prev)) * 100 : null;
       const rows: TooltipRow[] = [
         { label: primaryLabel ?? 'Текущий', value: formatValue(cur), color: 'hsl(var(--chart-role-primary))' },
         {
-          // Своя дата у строки сравнения (артефакт v2): «Пред. период · вт, 18 июн».
-          label: ghostTitles?.[i] ? `${ghostLabel} · ${ghostTitles[i]}` : ghostLabel,
+          label: ghostLabel,
+          // Дата прошлого окна — ПРИПИСКОЙ под меткой, а не через «·» в самой метке: длинная
+          // склейка «Пред. период · вт, 18 июн» упиралась в ширину плашки и переносилась.
+          sub: ghostTitles?.[i],
           value: formatValue(prev),
           color: 'hsl(var(--chart-role-comparison))',
+          // Дельта живёт ПРИ величине, к которой относится, а не отдельной строкой с меткой «Δ».
+          delta: comparisonDelta && d != null && Number.isFinite(d) ? d : undefined,
         },
       ];
-      const d = prev !== 0 ? ((cur - prev) / Math.abs(prev)) * 100 : null;
-      if (comparisonDelta && d != null && Number.isFinite(d)) rows.push({ label: 'Δ', value: `${d >= 0 ? '+' : '−'}${Math.abs(d).toFixed(1)}%` });
+      if (target != null) {
+        const td = target !== 0 ? ((cur - target) / Math.abs(target)) * 100 : null;
+        rows.push({
+          label: 'Цель',
+          value: formatValue(target),
+          color: 'hsl(var(--chart-role-neutral))',
+          mark: 'ring',
+          delta: td != null && Number.isFinite(td) ? td : undefined,
+        });
+      }
       return { x: p.x, y: py, title: cardTitle(i), rows };
     }
     if (expanded || rhea) {

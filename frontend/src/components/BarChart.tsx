@@ -655,14 +655,29 @@ export function BarChart({
     if (activeGhost && activeGhost[i] != null) {
       const cur = values[i];
       const prev = activeGhost[i];
+      const d = prev !== 0 ? ((cur - prev) / Math.abs(prev)) * 100 : null;
       const rows: TooltipRow[] = [
         { label: primaryLabel, value: formatValue(cur), color: 'hsl(var(--chart-role-primary))' },
         // Свотч сравнения повторяет ровно ту же альфу, что столбцы и чипы легенды (GHOST_FILL):
         // один ряд не может звучать в трёх насыщенностях одновременно.
-        { label: ghostLabel, value: formatValue(prev), color: GHOST_FILL },
+        {
+          label: ghostLabel,
+          value: formatValue(prev),
+          color: GHOST_FILL,
+          // Дельта — ПРИ величине сравнения, а не отдельной строкой с меткой «Δ» (см. TooltipRow).
+          delta: comparisonDelta && d != null && Number.isFinite(d) ? d : undefined,
+        },
       ];
-      const d = prev !== 0 ? ((cur - prev) / Math.abs(prev)) * 100 : null;
-      if (comparisonDelta && d != null && Number.isFinite(d)) rows.push({ label: 'Δ', value: `${d >= 0 ? '+' : '−'}${Math.abs(d).toFixed(1)}%` });
+      if (target != null) {
+        const td = target !== 0 ? ((cur - target) / Math.abs(target)) * 100 : null;
+        rows.push({
+          label: 'Цель',
+          value: formatValue(target),
+          color: 'hsl(var(--chart-role-neutral))',
+          mark: 'ring',
+          delta: td != null && Number.isFinite(td) ? td : undefined,
+        });
+      }
       return { x, y, title: labels?.[i], rows };
     }
     if (expanded) {

@@ -1,7 +1,25 @@
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
+import { ComparisonDelta } from '@/components/metric/comparisonDelta';
 
-/** One line of a structured readout: a label (with an optional series-colour dot) and a value. */
-export type TooltipRow = { label: string; value: string; color?: string };
+/**
+ * Строка читалки: метка (с точкой цвета серии) слева, величина справа.
+ *
+ * `delta` печатается ВТОРОЙ строкой под величиной — оценочной, со стрелкой ▲/▼ и цветом
+ * (ComparisonDelta). Прежде дельта приходила ОТДЕЛЬНОЙ строкой с меткой «Δ», и греческая буква
+ * читалась как посторонний значок (владелец: «сейчас у нас какой то треугольник»). Цвет здесь
+ * канону не противоречит: он разрешён ровно одной оценочной дельте сравнения периодов, а это она.
+ *
+ * `sub` — приписка под меткой (дата прошлого окна). `mark` различает роль: сплошная точка у
+ * измеренных серий, ПОЛОЕ кольцо у цели — она не измерена, а назначена человеком.
+ */
+export type TooltipRow = {
+  label: string;
+  value: string;
+  color?: string;
+  sub?: string;
+  delta?: number;
+  mark?: 'dot' | 'ring';
+};
 /** Either a plain `text` readout (legacy callers) or a structured `title` + `rows` card (series
  *  charts showing current vs comparison). `rows` wins when present. */
 export type TooltipState =
@@ -154,18 +172,41 @@ export function ChartTooltip({ tip, appearance = 'default' }: { tip: TooltipStat
           {tip.title && <div data-chart-tooltip-title className="mb-2 whitespace-nowrap text-xs font-semibold text-foreground">{tip.title}</div>}
           <div className="space-y-1">
             {tip.rows.map((r, i) => (
-              <div key={i} data-chart-tooltip-row className="flex items-center justify-between gap-4 whitespace-nowrap">
-                <span className="flex items-center gap-1.5 text-muted-foreground">
+              <div key={i} data-chart-tooltip-row className="flex items-start justify-between gap-4 whitespace-nowrap">
+                <span className="flex min-w-0 items-start gap-1.5 text-muted-foreground">
                   {r.color && (
                     <span
                       aria-hidden="true"
-                      className={compact ? 'h-2.5 w-2.5 shrink-0 rounded-[3px]' : 'h-1.5 w-1.5 shrink-0 rounded-full'}
-                      style={{ backgroundColor: r.color }}
+                      className={
+                        compact
+                          ? 'mt-0.5 h-2.5 w-2.5 shrink-0 rounded-[3px]'
+                          : 'mt-1 h-2 w-2 shrink-0 rounded-full'
+                      }
+                      // Кольцо у назначенной величины (цель), заливка — у измеренной: точка
+                      // говорит «столько было», кольцо — «столько хотели».
+                      style={
+                        r.mark === 'ring'
+                          ? { border: `1.5px solid ${r.color}` }
+                          : { backgroundColor: r.color }
+                      }
                     />
                   )}
-                  {r.label}
+                  <span className="min-w-0">
+                    <span className="block truncate">{r.label}</span>
+                    {r.sub && <span className="block text-2xs text-muted-foreground/80">{r.sub}</span>}
+                  </span>
                 </span>
-                <span className="tabular-nums text-foreground">{r.value}</span>
+                <span className="shrink-0 text-right">
+                  <span className="block tabular-nums text-foreground">{r.value}</span>
+                  {r.delta != null && Number.isFinite(r.delta) && (
+                    <ComparisonDelta
+                      delta={r.delta}
+                      format={(abs: number) => `${abs >= 100 ? abs.toFixed(0) : abs.toFixed(1)}%`}
+                      evaluative
+                      className="text-2xs"
+                    />
+                  )}
+                </span>
               </div>
             ))}
           </div>
