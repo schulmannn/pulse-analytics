@@ -16,6 +16,7 @@ import {
   nextChartControlIndex,
 } from '@/lib/chartOverlayControl';
 import { ChartExpandedContext, ChartRefLinesContext, ExpandedChartHeightContext, WidgetTargetContext } from '@/components/ExpandableChart';
+import { clampTargetToDomain } from '@/lib/targetDomain';
 
 interface BarChartProps {
   /**
@@ -59,6 +60,13 @@ interface BarChartProps {
   /** Visual relationship between two series. The default keeps legacy grouped pairs; `stacked`
       is the shadcn-style detail-view treatment with one segmented column per date. */
   comparisonStyle?: 'grouped' | 'stacked';
+  /**
+   * Сравнение показано? Данные прошлого окна остаются переданными, а выключенный переключатель
+   * лишь снимает столбцы — строка легенды при этом НЕ пропадает, и всё, что под графиком, не
+   * дёргается вверх (у линии тот же проп, там он ещё и гасит путь плавно; на столбцах включение
+   * сравнения вдобавок делит полосу надвое, и это скачок формы, а не прозрачности).
+   */
+  ghostVisible?: boolean;
   /** Compact shadcn-style tooltip and higher-contrast series treatment for the metric explorer. */
   appearance?: 'default' | 'comparison';
 }
@@ -132,6 +140,7 @@ export function BarChart({
   legendToggle = true,
   pinnedIndex = null,
   comparisonStyle = 'grouped',
+  ghostVisible = true,
   appearance = 'default',
 }: BarChartProps) {
   // Геометрия столбцов числовая, а пропуск в ней невыразим — сводим его к нулевой высоте ОДИН
@@ -225,7 +234,7 @@ export function BarChart({
   const hasGhost = !!ghost && ghost.length === values.length && ghost.length >= 2;
   // Toggled off, the comparison drops out of every draw/measure below; the legend chip stays
   // visible so it can be toggled back on. Derived before the plot memo (its inputs).
-  const showGhost = hasGhost && !ghostHidden;
+  const showGhost = hasGhost && !ghostHidden && ghostVisible;
   const activeGhost = showGhost ? ghost : undefined;
 
   // Stable data signature for the UPDATE morph (see index.css «Chart motion»). Keyed on the SERIES
@@ -249,7 +258,11 @@ export function BarChart({
     // round values, like LineChart — the old max/mid pair printed «262» next to «2.5k».
     // A stacked comparison owns the sum-domain; grouped pairs keep the larger individual value.
     const stackedTotals = stacked ? values.map((value, i) => value + (activeGhost?.[i] ?? 0)) : [];
-    const rawMax = Math.max(...values, 1, target ?? 0, ...(activeGhost ?? []), ...stackedTotals);
+    // Цель не растягивает шкалу без предела — см. clampTargetToDomain у LineChart: недостижимый
+    // уровень сплющил бы столбцы в полоску у самого низа.
+    const barVals = [...values, ...(activeGhost ?? []), ...stackedTotals];
+    const clamped = clampTargetToDomain(target, 0, Math.max(...barVals, 1));
+    const rawMax = Math.max(...values, 1, clamped.value ?? 0, ...(activeGhost ?? []), ...stackedTotals);
     const scale = expanded ? niceScale(0, rawMax) : null;
     const max = scale ? scale.hi : rawMax;
     const n = values.length;
@@ -478,16 +491,18 @@ export function BarChart({
         })}
 
         {/* Target level (widget pref) — dashed goal line + right-aligned label, above the bars */}
-        {target != null && (
+        {clamped.value != null && (
           <>
-            <line x1={gutterW} y1={barTop(target)} x2={chartWidth} y2={barTop(target)} stroke="hsl(var(--chart-role-neutral))" strokeDasharray="6 4" strokeWidth="1.2" opacity="0.8" vectorEffect="non-scaling-stroke" className="pointer-events-none" />
+            {/* Линия — на УРЕЗАННОМ уровне, число в подписи настоящее, стрелка говорит «выше окна». */}
+            <line x1={gutterW} y1={barTop(clamped.value)} x2={chartWidth} y2={barTop(clamped.value)} stroke="hsl(var(--chart-role-neutral))" strokeDasharray="6 4" strokeWidth="1.2" opacity="0.8" vectorEffect="non-scaling-stroke" className="pointer-events-none" />
             <text
               x={chartWidth - 4}
-              y={barTop(target) - 4 < 10 ? barTop(target) + 12 : barTop(target) - 4}
+              y={barTop(clamped.value) - 4 < 10 ? barTop(clamped.value) + 12 : barTop(clamped.value) - 4}
               textAnchor="end"
               className="pointer-events-none select-none fill-muted-foreground text-2xs font-medium tabular-nums"
             >
-              цель {fmt.short(target)}
+              цель {fmt.short(target ?? clamped.value)}
+              {clamped.clipped ? ' ↑' : ''}
             </text>
           </>
         )}
@@ -886,7 +901,10 @@ export function BarChart({
               {ghostLabel}
             </button>
           ) : (
-            <span className="flex select-none items-center gap-1.5">
+            // Место чипа остаётся за ним при выключенном сравнении: иначе строка легенды пропадает
+            // целиком и таймбар под графиком прыгает вверх (замер: 21px). Утверждать «пред. период»
+            // невидимый чип при этом не может.
+            <span className={`flex select-none items-center gap-1.5${ghostVisible ? '' : ' invisible'}`} aria-hidden={!ghostVisible}>
               <span aria-hidden="true" className="h-2 w-3 rounded-sm" style={{ backgroundColor: GHOST_FILL }} />
               {ghostLabel}
             </span>

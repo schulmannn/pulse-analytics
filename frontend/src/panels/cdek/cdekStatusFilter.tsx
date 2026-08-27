@@ -1,9 +1,6 @@
-import { useState } from 'react';
 import { toast } from 'sonner';
 import type { CdekInclude } from '@/api/cdek';
-import { SearchField } from '@/components/SearchField';
-import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
+import { CdekPicker } from '@/panels/cdek/CdekPicker';
 
 /**
  * Фильтр статусов для метрик СДЭКа: какие заказы вообще попадают в число.
@@ -91,48 +88,21 @@ export function CdekStatusFilter({
   selected: string[];
   onChange: (ids: string[]) => void;
 }) {
-  // Снять ПОСЛЕДНИЙ статус нельзя. Пустой набор здесь не «ничего не считаем», а тихий возврат к
-  // канону (см. cdekStatusInclude): человек снимал бы галочки до нуля и получал не ноль заказов, а
-  // отгруженное — число, которого он не выбирал. Раз состояния «пусто» не существует по смыслу,
-  // его не должно быть и в контроле.
-  const lastOne = selected.length <= 1;
-  const toggle = (id: string) => {
-    if (selected.includes(id)) {
-      if (lastOne) return;
-      return onChange(selected.filter((s) => s !== id));
-    }
-    onChange([...selected, id]);
-  };
-
+  // Заголовок «Статусы заказов» уже занят карточкой разбивки на «Обзоре» — фильтру нужен свой
+  // якорь, иначе тест «фильтра на карточке нет» ловил бы чужой текст и зеленел вхолостую.
+  //
+  // Снять ПОСЛЕДНИЙ статус нельзя (lockLast): пустой набор здесь не «ничего не считаем», а тихий
+  // возврат к канону (см. cdekStatusInclude) — человек снимал бы значения до нуля и получал не
+  // ноль заказов, а отгруженное, то есть число, которого он не выбирал.
   return (
-    // Заголовок «Статусы заказов» уже занят карточкой разбивки на «Обзоре» — фильтру нужен свой
-    // якорь, иначе тест «фильтра на карточке нет» ловил бы чужой текст и зеленел вхолостую.
-    <div className="space-y-2" data-cdek-status-filter="">
-      <span className="text-xs text-muted-foreground">Какие заказы считать</span>
-      <div className="flex flex-wrap gap-1.5">
-        {CDEK_STATUSES.map((status) => {
-          const active = selected.includes(status.id);
-          return (
-            <button
-              key={status.id}
-              type="button"
-              aria-pressed={active}
-              disabled={active && lastOne}
-              title={active && lastOne ? 'Хотя бы один статус должен остаться выбранным' : undefined}
-              onClick={() => toggle(status.id)}
-              className={cn(
-                'min-h-11 rounded-full border px-3 py-1 text-xs transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/50 disabled:pointer-events-none sm:min-h-0',
-                active
-                  ? 'border-primary bg-primary/10 font-medium text-accent-foreground'
-                  : 'border-border bg-background text-ink2 hover:bg-muted hover:text-foreground',
-              )}
-            >
-              {status.label}
-            </button>
-          );
-        })}
-      </div>
-    </div>
+    <CdekPicker
+      mark="cdek-status-filter"
+      ariaLabel="Статусы заказов"
+      options={CDEK_STATUSES}
+      selected={selected}
+      onChange={onChange}
+      lockLast
+    />
   );
 }
 
@@ -196,82 +166,18 @@ export function CdekProductFilter({
   selected: string[];
   onChange: (ids: string[]) => void;
 }) {
-  const [query, setQuery] = useState('');
-  // Свёрнут по умолчанию: список ассортимента длиннее экрана, и раскрытый он сталкивал бы график
-  // под сгиб при каждом заходе (тот же приём, что у фильтра каналов МойСклада).
-  const [open, setOpen] = useState(false);
-  const needle = query.trim().toLocaleLowerCase('ru-RU');
-  const visible = needle
-    ? options.filter((o) => o.name.toLocaleLowerCase('ru-RU').includes(needle))
-    : options;
-  const full = selected.length >= CDEK_PRODUCT_MAX;
-  const toggle = (id: string) => {
-    if (selected.includes(id)) return onChange(selected.filter((x) => x !== id));
-    if (full) return;
-    onChange([...selected, id]);
-  };
-
+  // Свой список с поиском и своей кнопкой раскрытия у товаров БОЛЬШЕ НЕТ: карточка фильтра уже
+  // раскрывается сама, и вторая ступень раскрытия внутри неё была лишним щелчком. Поиск теперь
+  // включается по длине списка, а не по оси — триста товаров и пять каналов выглядят одинаково.
   return (
-    <div className="space-y-2" data-cdek-product-filter="">
-      <div className="flex items-center justify-between gap-3">
-        <button
-          type="button"
-          aria-expanded={open}
-          onClick={() => setOpen((v) => !v)}
-          className="text-xs text-muted-foreground transition-colors hover:text-foreground"
-        >
-          Товары{selected.length > 0 ? ` · выбрано ${selected.length}` : ' · все'}
-        </button>
-        <div className="flex items-center gap-2">
-          {selected.length > 0 && (
-            <Button type="button" variant="ghost" size="xs" onClick={() => onChange([])}>
-              Сбросить
-            </Button>
-          )}
-        </div>
-      </div>
-      {open && (
-        <div className="space-y-2 rounded-lg border border-border p-2.5">
-          <SearchField value={query} onChange={setQuery} ariaLabel="Поиск товара" placeholder="Название товара" />
-          {full && (
-            <p className="px-1 text-2xs text-muted-foreground">
-              Выбрано максимум — {CDEK_PRODUCT_MAX}. Снимите лишний, чтобы добавить другой.
-            </p>
-          )}
-          <div className="max-h-56 space-y-0.5 overflow-y-auto">
-            {visible.length === 0 ? (
-              <p className="px-1 py-2 text-xs text-muted-foreground">Ничего не нашлось.</p>
-            ) : (
-              visible.map((option) => {
-                const active = selected.includes(option.id);
-                return (
-                  <button
-                    key={option.id}
-                    type="button"
-                    aria-pressed={active}
-                    disabled={!active && full}
-                    onClick={() => toggle(option.id)}
-                    className={cn(
-                      'flex min-h-11 w-full items-center gap-2.5 rounded px-2 py-1.5 text-left text-xs transition-colors disabled:pointer-events-none disabled:opacity-45 sm:min-h-0',
-                      active ? 'bg-primary/10 text-foreground' : 'text-ink2 hover:bg-muted hover:text-foreground',
-                    )}
-                  >
-                    <span
-                      aria-hidden="true"
-                      className={cn(
-                        'h-3.5 w-3.5 shrink-0 rounded-sm border',
-                        active ? 'border-primary bg-primary' : 'border-border',
-                      )}
-                    />
-                    <span className="min-w-0 flex-1 truncate">{option.name}</span>
-                  </button>
-                );
-              })
-            )}
-          </div>
-        </div>
-      )}
-    </div>
+    <CdekPicker
+      mark="cdek-product-filter"
+      ariaLabel="Товары"
+      options={options.map((o) => ({ id: o.id, label: o.name }))}
+      selected={selected}
+      onChange={onChange}
+      max={CDEK_PRODUCT_MAX}
+    />
   );
 }
 
@@ -318,45 +224,13 @@ export function CdekChannelFilter({
   selected: string[];
   onChange: (ids: string[]) => void;
 }) {
-  // Снять ПОСЛЕДНИЙ статус нельзя. Пустой набор здесь не «ничего не считаем», а тихий возврат к
-  // канону (см. cdekStatusInclude): человек снимал бы галочки до нуля и получал не ноль заказов, а
-  // отгруженное — число, которого он не выбирал. Раз состояния «пусто» не существует по смыслу,
-  // его не должно быть и в контроле.
-  const lastOne = selected.length <= 1;
-  const toggle = (id: string) => {
-    if (selected.includes(id)) {
-      if (lastOne) return;
-      return onChange(selected.filter((s) => s !== id));
-    }
-    onChange([...selected, id]);
-  };
-
   return (
-    <div className="space-y-2" data-cdek-channel-filter="">
-      <span className="text-xs text-muted-foreground">
-        Каналы продаж{selected.length > 0 ? ` · выбрано ${selected.length}` : ' · все'}
-      </span>
-      <div className="flex flex-wrap gap-1.5">
-        {CDEK_SALES_CHANNELS.map((channel) => {
-          const active = selected.includes(channel.id);
-          return (
-            <button
-              key={channel.id}
-              type="button"
-              aria-pressed={active}
-              onClick={() => toggle(channel.id)}
-              className={cn(
-                'min-h-11 rounded-full border px-3 py-1 text-xs transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/50 sm:min-h-0',
-                active
-                  ? 'border-primary bg-primary/10 font-medium text-accent-foreground'
-                  : 'border-border bg-background text-ink2 hover:bg-muted hover:text-foreground',
-              )}
-            >
-              {channel.label}
-            </button>
-          );
-        })}
-      </div>
-    </div>
+    <CdekPicker
+      mark="cdek-channel-filter"
+      ariaLabel="Каналы продаж"
+      options={CDEK_SALES_CHANNELS}
+      selected={selected}
+      onChange={onChange}
+    />
   );
 }

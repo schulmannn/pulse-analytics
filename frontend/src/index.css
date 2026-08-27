@@ -1994,6 +1994,15 @@
     from { opacity: 0; }
     to { opacity: 1; }
   }
+
+  /* Сравнение включают и выключают переключателем страницы, и прежде линия при этом СНИМАЛАСЬ из
+     DOM — анимировать было нечего, обе стороны выглядели рывком (владелец: «дёргано появляется»).
+     Теперь путь остаётся на месте и меняет только непрозрачность; переход идёт по той же лестнице
+     токенов, что и остальные смены состояния контролов. Геометрия при этом продолжает морфиться
+     своим RAF-слоем — здесь ровно один канал, opacity, и он не может подсветить пунктир. */
+  [data-chart-series='comparison'] {
+    transition: stroke-opacity var(--motion-base) var(--ease-standard);
+  }
   @keyframes chart-bar-grow {
     from { transform: scaleY(0); }
     to { transform: scaleY(1); }
@@ -2102,6 +2111,10 @@
     }
     [data-chart-tooltip] {
       animation: none;
+      transition: none;
+    }
+    /* Сравнение по-прежнему появляется и уходит — просто мгновенно. */
+    [data-chart-series='comparison'] {
       transition: none;
     }
   }
