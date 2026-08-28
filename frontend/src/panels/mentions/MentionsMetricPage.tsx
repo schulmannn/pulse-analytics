@@ -29,7 +29,7 @@ import { usePeriod, type PeriodDays } from '@/lib/period';
 import { useExplorerChartHeight } from '@/lib/useExplorerChartHeight';
 import { SegSelect } from '@/components/metric/SegSelect';
 import { isMentionsMetricKey } from '@/panels/mentions/mentionsMetricKeys';
-import { ComparisonDeltaRow, MetricBackLink, MetricColumns, MetricDescriptor, WindowBarShell, RailSection } from '@/components/metric/shared';
+import { ComparisonDeltaRow, MetricColumns, MetricDescriptor, WindowBarShell, RailSection, MetricPageHeader} from '@/components/metric/shared';
 
 type ChartKind = 'line' | 'bar';
 type CompareMode = 'off' | 'prev';
@@ -84,7 +84,7 @@ function MentionsMetricShell({
 }) {
   return (
     <div className="space-y-5">
-      <MetricBackLink to={backTo}>Упоминания</MetricBackLink>
+      <MetricPageHeader back={{ to: backTo, label: 'Упоминания' }} />
 
       <div>
         <h1 className="text-2xl font-medium tracking-tight text-foreground">{term}</h1>

@@ -37,7 +37,9 @@ import { isIgChartMetricKey } from '@/panels/igMetricKeys';
 import { useIgScopedPosts } from '@/panels/instagram/igContentScope';
 import { useExplorerChartHeight } from '@/lib/useExplorerChartHeight';
 import type { ReactNode } from 'react';
-import { ComparisonDelta, ComparisonDeltaRow, MetricBackLink, MetricDescriptor, WindowBarShell, RailSection } from '@/components/metric/shared';
+import { cn } from '@/lib/utils';
+import { useMetricRailHidden } from '@/lib/metricRail';
+import { ComparisonDelta, ComparisonDeltaRow, MetricDescriptor, WindowBarShell, RailSection, MetricPageHeader} from '@/components/metric/shared';
 
 /**
  * Instagram metric pages — the drill target the unified chart contract points IG cards at
@@ -199,6 +201,11 @@ function WindowBar({ value, onChange, allowAll = true }: { value: number; onChan
 }
 
 export function IgMetricPage({ metricKey }: { metricKey: string }) {
+  // Свёрнутая колонка уходит ИЗ ПОТОКА, и сетка становится одноколоночной. Общий MetricColumns
+  // здесь не подходит: у инспектора СВОЯ изменяемая ширина (--inspector-w). Правило при этом одно
+  // на все источники — состояние живёт в metricRail, переключатель стоит в шапке страницы.
+  const railHidden = useMetricRailHidden();
+
   const ig = useIgData();
   const chartH = useExplorerChartHeight();
   // Page-local window for the daily explorer (the aggregate pages follow the GLOBAL IG period —
@@ -333,7 +340,7 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
 
   return (
     <div className="space-y-5">
-      <MetricBackLink to="/instagram">Instagram</MetricBackLink>
+      <MetricPageHeader back={{ to: '/instagram', label: 'Instagram' }} />
 
       {/* Тихая шапка v2: страница ведёт ИМЕНЕМ метрики, итог окна живёт в «Сравнении» справа
           (hero в шапке его дублировал), окно — в тайм-баре под графиком. На <lg rail уезжает под
@@ -377,8 +384,11 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
         </div>
       )}
 
-      <div className="relative grid grid-cols-1 gap-6 xl:gap-8 lg:grid-cols-[minmax(0,1fr)_var(--inspector-w,300px)]">
-        <InspectorHandle controlsId="ig-metric-inspector" />
+      <div className={cn(
+          'relative grid grid-cols-1 gap-6 xl:gap-8',
+          !railHidden && 'lg:grid-cols-[minmax(0,1fr)_var(--inspector-w,300px)]',
+        )}>
+        {!railHidden && <InspectorHandle controlsId="ig-metric-inspector" />}
         <div className="min-w-0 space-y-6">
           {lvl != null && (
             <>
@@ -542,6 +552,7 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
         </div>
 
         {/* Explore rail — flat hairline sections (no widget chrome: these are controls, not cards). */}
+        {!railHidden && (
         <aside id="ig-metric-inspector" className="space-y-6">
           <RailSection title="Сравнение">
             {/* Итог окна — канонический дом итога после тихой шапки (v2: hero переехал сюда).
@@ -607,6 +618,7 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
             Открыть IG-аналитику <span aria-hidden="true">→</span>
           </Link>
         </aside>
+        )}
       </div>
     </div>
   );
@@ -616,6 +628,11 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
     totals per insights window, so a daily chart would be fabricated. Window = the GLOBAL IG
     period (the layout's 7д/30д/90д pills). */
 function IgAggregatePage({ def, pair, windowDays, handle }: { def: IgAggDef; pair: WindowPair; windowDays: number; handle: string | null }) {
+  // Свёрнутая колонка уходит ИЗ ПОТОКА, и сетка становится одноколоночной. Общий MetricColumns
+  // здесь не подходит: у инспектора СВОЯ изменяемая ширина (--inspector-w). Правило при этом одно
+  // на все источники — состояние живёт в metricRail, переключатель стоит в шапке страницы.
+  const railHidden = useMetricRailHidden();
+
   // These pages live OUTSIDE the IG feed (no page period) — their window is the GLOBAL period
   // useIgData falls back to, and this is now the page's own control (the feed header used to be
   // the only steering wheel; after the feeds moved to page periods it no longer reaches here).
@@ -624,7 +641,7 @@ function IgAggregatePage({ def, pair, windowDays, handle }: { def: IgAggDef; pai
   const deltaPct = pair.hasPrev && pair.prev > 0 ? ((pair.cur - pair.prev) / pair.prev) * 100 : null;
   return (
     <div className="space-y-5">
-      <MetricBackLink to="/instagram">Instagram</MetricBackLink>
+      <MetricPageHeader back={{ to: '/instagram', label: 'Instagram' }} />
 
       {/* Тихая шапка v2: имя метрики ведёт, итог окна живёт в «Сравнении» справа; компактный итог
           остаётся только на узких экранах (там rail уезжает под основной блок). */}
@@ -640,8 +657,11 @@ function IgAggregatePage({ def, pair, windowDays, handle }: { def: IgAggDef; pai
         <MetricDescriptor>агрегат за выбранное окно</MetricDescriptor>
       </div>
 
-      <div className="relative grid grid-cols-1 gap-6 xl:gap-8 lg:grid-cols-[minmax(0,1fr)_var(--inspector-w,300px)]">
-        <InspectorHandle controlsId="ig-aggregate-inspector" />
+      <div className={cn(
+          'relative grid grid-cols-1 gap-6 xl:gap-8',
+          !railHidden && 'lg:grid-cols-[minmax(0,1fr)_var(--inspector-w,300px)]',
+        )}>
+        {!railHidden && <InspectorHandle controlsId="ig-aggregate-inspector" />}
         <div className="min-w-0 space-y-6">
           <ChartSection title="Период против периода" defaultSize="full" noExpand>
             {pair.hasCur ? (
@@ -678,6 +698,7 @@ function IgAggregatePage({ def, pair, windowDays, handle }: { def: IgAggDef; pai
           <WindowBar value={days} onChange={setDays} allowAll={false} />
         </div>
 
+        {!railHidden && (
         <aside id="ig-aggregate-inspector" className="space-y-6">
           {/* v2: итог живёт в «Сравнении» — первая секция rail. Прошлый период у агрегатной
               страницы уже разложен в основном блоке, поэтому здесь только строка итога. */}
@@ -691,6 +712,7 @@ function IgAggregatePage({ def, pair, windowDays, handle }: { def: IgAggDef; pai
             Открыть IG-аналитику <span aria-hidden="true">→</span>
           </Link>
         </aside>
+        )}
       </div>
     </div>
   );
@@ -728,6 +750,10 @@ function IgErPage({
   windowDays: number;
   handle: string | null;
 }) {
+  // Свёрнутая колонка уходит ИЗ ПОТОКА, и сетка становится одноколоночной. Общий MetricColumns
+  // здесь не подходит: у инспектора СВОЯ изменяемая ширина (--inspector-w). Правило при этом одно
+  // на все источники — состояние живёт в metricRail, переключатель стоит в шапке страницы.
+  const railHidden = useMetricRailHidden();
   // GLOBAL window — this page's own control now (see IgAggregatePage).
   const { days, setDays } = usePeriod();
   const hasCur = erReach > 0;
@@ -736,7 +762,7 @@ function IgErPage({
   const trend = hasCur && hasPrev ? pctDelta(erReach, erReachPrev) : null;
   return (
     <div className="space-y-5">
-      <MetricBackLink to="/instagram">Instagram</MetricBackLink>
+      <MetricPageHeader back={{ to: '/instagram', label: 'Instagram' }} />
 
       {/* Тихая шапка v2: имя метрики ведёт, итог окна живёт в «Сравнении» справа; компактный итог
           остаётся только на узких экранах (там rail уезжает под основной блок). */}
@@ -752,8 +778,11 @@ function IgErPage({
         <MetricDescriptor>агрегат за выбранное окно</MetricDescriptor>
       </div>
 
-      <div className="relative grid grid-cols-1 gap-6 xl:gap-8 lg:grid-cols-[minmax(0,1fr)_var(--inspector-w,300px)]">
-        <InspectorHandle controlsId="ig-er-inspector" />
+      <div className={cn(
+          'relative grid grid-cols-1 gap-6 xl:gap-8',
+          !railHidden && 'lg:grid-cols-[minmax(0,1fr)_var(--inspector-w,300px)]',
+        )}>
+        {!railHidden && <InspectorHandle controlsId="ig-er-inspector" />}
         <div className="min-w-0 space-y-6">
           <ChartSection title="Период против периода" defaultSize="full" noExpand>
             {hasCur ? (
@@ -794,6 +823,7 @@ function IgErPage({
           <WindowBar value={days} onChange={setDays} allowAll={false} />
         </div>
 
+        {!railHidden && (
         <aside id="ig-er-inspector" className="space-y-6">
           {/* v2: итог живёт в «Сравнении» — первая секция rail. Прошлый период у ER уже
               разложен в основном блоке, поэтому здесь только строка итога. */}
@@ -807,6 +837,7 @@ function IgErPage({
             Открыть IG-аналитику <span aria-hidden="true">→</span>
           </Link>
         </aside>
+        )}
       </div>
     </div>
   );
@@ -844,9 +875,11 @@ function IgChartShell({
   about: IgAboutDef;
   children: ReactNode;
 }) {
+  // Та же одна настройка на все источники — см. metricRail.
+  const railHidden = useMetricRailHidden();
   return (
     <div className="space-y-5">
-      <MetricBackLink to={back.to}>{back.label}</MetricBackLink>
+      <MetricPageHeader back={back} />
 
       <div>
         <h1 className="text-2xl font-medium tracking-tight text-foreground">{term}</h1>
@@ -854,15 +887,20 @@ function IgChartShell({
         {descriptor && <MetricDescriptor>{descriptor}</MetricDescriptor>}
       </div>
 
-      <div className="relative grid grid-cols-1 gap-6 xl:gap-8 lg:grid-cols-[minmax(0,1fr)_var(--inspector-w,300px)]">
-        <InspectorHandle controlsId="ig-shell-inspector" />
+      <div className={cn(
+          'relative grid grid-cols-1 gap-6 xl:gap-8',
+          !railHidden && 'lg:grid-cols-[minmax(0,1fr)_var(--inspector-w,300px)]',
+        )}>
+        {!railHidden && <InspectorHandle controlsId="ig-shell-inspector" />}
         <div className="min-w-0 space-y-6">{children}</div>
+        {!railHidden && (
         <aside id="ig-shell-inspector" className="space-y-6">
           <RailSection title="Сравнение">{comparison}</RailSection>
           <Link to={back.to} className="inline-flex items-center gap-1 text-xs font-medium text-primary transition-colors hover:text-primary/80">
             Открыть раздел <span aria-hidden="true">→</span>
           </Link>
         </aside>
+        )}
       </div>
     </div>
   );

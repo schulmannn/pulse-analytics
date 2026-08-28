@@ -42,7 +42,7 @@ import {
 } from '@/panels/TgAnalytics';
 import { deriveWeekdayReach, deriveFormatViews } from '@/panels/Compare';
 import { deriveHashtags } from '@/panels/Hashtags';
-import { AboutRow, MetricBackLink, MetricColumns, MetricDescriptor, WindowBarShell, RailSection } from '@/components/metric/shared';
+import { AboutRow, MetricColumns, MetricDescriptor, WindowBarShell, RailSection, MetricPageHeader} from '@/components/metric/shared';
 
 /**
  * Полностраничные «дополнительные» графики Telegram — `/metrics/tg-*`. Это те карточки вкладок
@@ -107,7 +107,7 @@ function TgMetricShell({
 }) {
   return (
     <div className="space-y-5">
-      <MetricBackLink to={back.to}>{back.label}</MetricBackLink>
+      <MetricPageHeader back={back} />
 
       <div>
         <h1 className="text-2xl font-medium tracking-tight text-foreground">{term}</h1>

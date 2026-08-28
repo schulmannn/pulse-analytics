@@ -350,7 +350,7 @@ function ordersBuild(seen) {
           : id === 0 ? { id: 1, owner_uid: 7, source: 'tg', title: 'Канал', member_role: 'owner' } : null
       ),
       getCdekOrdersForActor: async (channelId, _actor, opts) => {
-        seen.push({ channelId, channel: opts.channel, status: opts.status });
+        seen.push({ channelId, channel: opts.channel, include: opts.include });
         return { rows: [], total: 0 };
       },
     },
@@ -360,12 +360,26 @@ function ordersBuild(seen) {
 test('фильтр по каналу продаж не подменяет канал арендатора', async () => {
   const seen = [];
   const { routes } = ordersBuild(seen);
+  // Статусы ленты едут В `include` — отдельного параметра у неё больше нет: своим условием они
+  // ложились ПОВЕРХ канона (REVENUE_FILTER) и давали противоречивый предикат.
   const res = await call(routes, 'GET /api/cdek/orders', {
-    query: { sales_channel: 'yandex_market', status: 'complete' },
+    query: { sales_channel: 'yandex_market', include: 'status:complete' },
     headers: { 'x-channel-id': '5' },
   });
   assert.equal(res.status, 200);
-  assert.deepEqual(seen, [{ channelId: 5, channel: 'yandex_market', status: 'complete' }]);
+  assert.deepEqual(seen, [{ channelId: 5, channel: 'yandex_market', include: 'status:complete' }]);
+});
+
+test('мусорный набор статусов в include падает на канон, а не на пустую ленту', async () => {
+  // «Ноль заказов» человек прочитал бы как «продаж не было» — нормализация страхует от опечатки.
+  const seen = [];
+  const { routes } = ordersBuild(seen);
+  const res = await call(routes, 'GET /api/cdek/orders', {
+    query: { include: 'status:опечатка' },
+    headers: { 'x-channel-id': '5' },
+  });
+  assert.equal(res.status, 200);
+  assert.equal(seen[0].include, 'revenue');
 });
 
 test('вкладка, открытая до выката, шлёт старое имя — фильтр всё равно доезжает', async () => {

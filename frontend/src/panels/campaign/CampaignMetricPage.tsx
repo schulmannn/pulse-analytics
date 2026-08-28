@@ -50,7 +50,7 @@ import {
   campaignBackPath,
   isCampaignMetricKey,
 } from '@/panels/campaign/campaignMetricKeys';
-import { MetricBackLink, MetricColumns, MetricDescriptor, WindowBarShell, RailSection } from '@/components/metric/shared';
+import { MetricColumns, MetricDescriptor, WindowBarShell, RailSection, MetricPageHeader} from '@/components/metric/shared';
 
 type ChartKind = 'line' | 'bar';
 
@@ -195,7 +195,7 @@ function CampaignMetricShell({
 }) {
   return (
     <div className="space-y-5">
-      <MetricBackLink to={backTo}>{campaign.name}</MetricBackLink>
+      <MetricPageHeader back={{ to: backTo, label: campaign.name }} />
 
       <div>
         <div className="flex flex-wrap items-center gap-2">

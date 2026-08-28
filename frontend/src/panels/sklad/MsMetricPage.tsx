@@ -87,7 +87,7 @@ import {
 } from '@/panels/sklad/MsTopProducts';
 import { MsStockTable, STOCK_SORT_OPTIONS, type MsStockSort } from '@/panels/sklad/MsStock';
 import { isMsMetricKey } from '@/panels/sklad/msMetricKeys';
-import { ComparisonDeltaRow, MetricBackLink, MetricColumns, MetricDescriptor, WindowBarShell, RailSection } from '@/components/metric/shared';
+import { ComparisonDeltaRow, MetricColumns, MetricDescriptor, WindowBarShell, RailSection, MetricPageHeader} from '@/components/metric/shared';
 
 /**
  * Полностраничные метрики МойСклада — `/metrics/ms-*`. Каждая раскрываемая карточка Обзора/Клиентов/
@@ -302,7 +302,7 @@ function MsMetricShell({
 }) {
   return (
     <div className="space-y-5">
-      <MetricBackLink to={back.to}>{back.label}</MetricBackLink>
+      <MetricPageHeader back={back} />
 
       <div>
         <h1 className="text-2xl font-medium tracking-tight text-foreground">{term}</h1>

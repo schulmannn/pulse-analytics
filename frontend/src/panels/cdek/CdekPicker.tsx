@@ -1,5 +1,11 @@
-import { useState } from 'react';
+import { useContext, useState } from 'react';
 import { cn } from '@/lib/utils';
+import { ChartExpandedContext } from '@/components/ExpandableChart';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 
 /**
  * Выбор значений фильтра СПИСКОМ — устройство Steep, снятое замером живой панели (владелец:
@@ -138,5 +144,59 @@ export function CdekPicker({
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * Фильтр ЛЕНТЫ заказов: та же механика выбора, что в развороте метрики, но в поповере — у ленты
+ * нет правой колонки, а место над таблицей делят с поиском. Кнопка называет ось и показывает,
+ * сколько значений выбрано: свёрнутый фильтр обязан говорить, что он действует.
+ */
+export function CdekOrderFilter({
+  label,
+  options,
+  selected,
+  onChange,
+}: {
+  label: string;
+  options: readonly CdekPickerOption[];
+  selected: string[];
+  onChange: (next: string[]) => void;
+}) {
+  const expanded = useContext(ChartExpandedContext);
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          className={cn(
+            // Мобильная цель нажатия — 44px канона (min-h-11), на десктопе высота обычная.
+            'inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-md border px-3 text-sm transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40 sm:min-h-0 sm:h-8',
+            selected.length > 0
+              ? 'border-primary/30 bg-primary/10 text-accent-foreground'
+              : 'border-border bg-background text-foreground hover:bg-muted',
+          )}
+        >
+          {label}
+          {selected.length > 0 && <span className="tabular-nums">· {selected.length}</span>}
+          <svg viewBox="0 0 16 16" className="h-3 w-3 shrink-0 text-muted-foreground" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+            <path d="M4.5 6.5L8 10l3.5-3.5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+      </DropdownMenuTrigger>
+      {/* В РАЗВЁРНУТОЙ карточке поповер обязан жить на модальном слое: лента лежит внутри виджета,
+          который разворачивается в оверлей с затемнением (z-modal), и на слое страницы меню
+          уезжало ПОД него — фильтр открывался в никуда. Слой задаётся ПРОПОМ: z-класс через
+          className съедает tailwind-merge (грабля репо, PR #493). */}
+      <DropdownMenuContent align="start" layer={expanded ? 'modal' : 'page'} className="w-72 p-2">
+        <CdekPicker
+          mark={`cdek-order-${label === 'Статусы' ? 'status' : 'channel'}-filter`}
+          ariaLabel={label}
+          options={options}
+          selected={selected}
+          onChange={onChange}
+        />
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }

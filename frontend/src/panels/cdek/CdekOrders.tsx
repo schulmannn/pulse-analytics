@@ -1,10 +1,11 @@
 import { useMemo, useState } from 'react';
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
-import { SegmentedControl } from '@/components/SegmentedControl';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { TableSkeleton } from '@/components/ui/dataSkeleton';
 import { useCdekHourly, useCdekOrders, type CdekOrder } from '@/api/cdek';
+import { CdekOrderFilter } from '@/panels/cdek/CdekPicker';
+import { CDEK_SALES_CHANNELS, CDEK_STATUSES, cdekStatusInclude } from '@/panels/cdek/cdekStatusFilter';
 import { useVirtualRows } from '@/lib/useVirtualRows';
 import { useScrollEdgeFade } from '@/lib/useScrollEdgeFade';
 import { fmt } from '@/lib/format';
@@ -50,12 +51,18 @@ export function CdekOrders() {
   const windowLabel = pp?.range ? 'за выбранный период' : days === 0 ? 'за всё время' : `за ${days} дн.`;
   const periodInLabel = useCardShowsPeriod() ? windowLabel : undefined;
 
-  const [channel, setChannel] = useState('');
-  const [status, setStatus] = useState('');
+  const [channels, setChannels] = useState<string[]>([]);
+  const [statuses, setStatuses] = useState<string[]>([]);
   const [q, setQ] = useState('');
 
-  const hourly = useCdekHourly(period);
-  const orders = useCdekOrders(period, { channel: channel || undefined, status: status || undefined, q: q || undefined });
+  // Выбранные статусы едут через `include` — тем же каноном, что и на метриках (cdekStatusInclude):
+  // пусто → отгруженное, набор → ровно он, все шесть → «все». Отдельным полем они ложились ПОВЕРХ
+  // канона, и «Возврат» давал всегда пустую ленту: «статус равен return И не равен return».
+  // Почасовой профиль ходит с тем же include — иначе карточка «Когда покупают» считала бы другой
+  // набор заказов, чем таблица под ней.
+  const include = cdekStatusInclude(statuses);
+  const hourly = useCdekHourly(period, include);
+  const orders = useCdekOrders(period, { channel: channels, q: q || undefined }, include);
 
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-6">
@@ -80,29 +87,21 @@ export function CdekOrders() {
             placeholder="Номер заказа, внешний номер или трек"
             className="h-9 min-w-0 flex-1 rounded border border-border bg-background px-3 text-sm text-foreground outline-hidden placeholder:text-muted-foreground focus:ring-1 focus:ring-primary sm:max-w-xs"
           />
-          <SegmentedControl
-            ariaLabel="Канал продаж"
-            size="sm"
-            value={channel}
-            onChange={setChannel}
-            options={[
-              { value: '', content: 'Все каналы' },
-              { value: 'own', content: 'Своя' },
-              { value: 'wildberries', content: 'WB' },
-              { value: 'yandex_market', content: 'ЯМ' },
-              { value: 'ozon', content: 'Ozon' },
-            ]}
+          {/* Те же оси и те же значения, что в развороте метрики: набор, а не одиночный выбор, и
+              список ВЫВОДИТСЯ из канона источника. Прежние сегменты жили своей жизнью — четыре
+              канала из пяти (без «Другой службы») с сокращёнными подписями «Своя»/«WB»/«ЯМ» и два
+              статуса из шести. Заказ со статусом «Возврат» было нечем найти вовсе. */}
+          <CdekOrderFilter
+            label="Каналы продаж"
+            options={CDEK_SALES_CHANNELS}
+            selected={channels}
+            onChange={setChannels}
           />
-          <SegmentedControl
-            ariaLabel="Статус заказа"
-            size="sm"
-            value={status}
-            onChange={setStatus}
-            options={[
-              { value: '', content: 'Все статусы' },
-              { value: 'complete', content: 'Завершён' },
-              { value: 'delivery', content: 'В доставке' },
-            ]}
+          <CdekOrderFilter
+            label="Статусы"
+            options={CDEK_STATUSES}
+            selected={statuses}
+            onChange={setStatuses}
           />
         </div>
         {orders.isPending ? (

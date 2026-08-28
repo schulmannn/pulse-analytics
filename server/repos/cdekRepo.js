@@ -118,6 +118,21 @@ function normalizeCdekChannels(raw) {
   return picked.length === SALES_CHANNEL_KEYS.length ? null : picked;
 }
 
+/**
+ * Наборы фильтров ЛЕНТЫ заказов. Отличие от метрик одно: лента показывает СТРОКИ, а не считает
+ * число, поэтому «выбраны все» здесь тоже честно значит «фильтра нет», а незнакомый ключ —
+ * отказ, как и везде (пустая лента, неотличимая от «заказов не было», — худший из ответов).
+ */
+function normalizeKeySet(raw, known) {
+  const list = Array.isArray(raw) ? raw : typeof raw === 'string' && raw ? raw.split(',') : [];
+  const picked = [...new Set(list.map((v) => String(v).trim()).filter(Boolean))].sort();
+  if (picked.length === 0) return null;
+  if (picked.some((key) => !known.includes(key))) return { unknown: true };
+  return picked.length === known.length ? null : picked;
+}
+
+const normalizeOrderChannels = (raw) => normalizeKeySet(raw, SALES_CHANNEL_KEYS);
+
 /** Ограничение набора товаров: столько влезает в осмысленный выбор, дальше это уже «все». */
 const PRODUCT_FILTER_MAX = 50;
 
@@ -608,21 +623,31 @@ function createCdekRepo({ pool, enabled, transaction, ensureExternalSource, getA
   async function getCdekOrdersForActor(channelId, actor, opts = {}) {
     if (!enabled || !(await allowed(channelId, actor))) return { rows: [], total: 0 };
     const limit = Math.min(Math.max(parseInt(opts.limit, 10) || 200, 1), ORDERS_MAX_ROWS);
-    const status = typeof opts.status === 'string' && opts.status ? opts.status : null;
-    const channel = typeof opts.channel === 'string' && opts.channel ? opts.channel : null;
+    // СТАТУСЫ ЛЕНТЫ ЕДУТ ЧЕРЕЗ `include`, а не отдельным условием. Своим параметром они ЛОЖИЛИСЬ
+    // ПОВЕРХ канона: REVENUE_FILTER при include='revenue' уже исключает cancel/return/assembled/
+    // confirmed, и `status = ANY(['return'])` рядом с ним давал противоречивый предикат — лента
+    // молча возвращала ноль строк на четырёх чипах из шести. То есть ровно то, ради чего фильтр
+    // и переделывался («заказ со статусом „Возврат" было нечем найти»), не работало, а мёртвый
+    // чип врал убедительнее прежнего отсутствия. `include` — единственное место, где решается,
+    // какие статусы вообще видны (см. REVENUE_FILTER и normalizeCdekInclude).
+    const channel = normalizeOrderChannels(opts.channel);
+    if (channel?.unknown) return { unknown: true, rows: [], total: 0 };
     const q = typeof opts.q === 'string' && opts.q.trim() ? opts.q.trim().slice(0, 64) : null;
-    const params = [...windowParams(channelId, opts), status, channel, q, limit];
+    const params = [...windowParams(channelId, opts), channel, q, limit];
     const { rows } = await pool.query(
       `WITH b AS (${WINDOW_BOUNDS}),
        o AS (
          SELECT o.*, ${WINDOW_CASE} AS win
            FROM cdek_orders o CROSS JOIN b
           WHERE o.channel_id = $1 AND o.kind = 'sale' AND ${REVENUE_FILTER}
-            AND ($8::text IS NULL OR o.status = $8)
-            AND ($9::text IS NULL OR COALESCE(o.channel, '') = $9)
-            AND ($10::text IS NULL OR o.order_id ILIKE '%' || $10 || '%'
-                 OR COALESCE(o.external_order_id, '') ILIKE '%' || $10 || '%'
-                 OR COALESCE(o.track_number, '') ILIKE '%' || $10 || '%')
+            -- Заказ без перевозчика (normalizeChannel вернул null на пустом carrier) — это
+            -- «прочее», ровно как неизвестный перевозчик у импорта. С пустой строкой он не
+            -- совпадал НИ С ОДНИМ чипом и был недоступен любому фильтру — та же дыра, что была
+            -- у статуса «Возврат»: строка есть в базе, а найти её нечем.
+            AND ($8::text[] IS NULL OR COALESCE(o.channel, 'other') = ANY($8))
+            AND ($9::text IS NULL OR o.order_id ILIKE '%' || $9 || '%'
+                 OR COALESCE(o.external_order_id, '') ILIKE '%' || $9 || '%'
+                 OR COALESCE(o.track_number, '') ILIKE '%' || $9 || '%')
        ),
        w AS (SELECT * FROM o WHERE win = 1)
        SELECT w.order_id,
@@ -637,7 +662,7 @@ function createCdekRepo({ pool, enabled, transaction, ensureExternalSource, getA
         GROUP BY w.order_id, w.created_ts, w.status, w.channel, w.carrier,
                  w.external_order_id, w.track_number, w.comment
         ORDER BY w.created_ts DESC
-        LIMIT $11`,
+        LIMIT $10`,
       params);
     return { rows, total: rows[0] ? Number(rows[0].total) : 0 };
   }

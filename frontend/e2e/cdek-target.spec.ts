@@ -159,7 +159,8 @@ test('снятая цель тоже уходит через «Сохранит�
 /**
  * Полноэкранный режим полотна (владелец: «кнопка toggle чтобы скрыть все фильтры и прочее… также
  * как у Steep»). Колонка уходит ИЗ ПОТОКА, а не прячется прозрачностью — иначе полотно осталось бы
- * обрезанным по прежней сетке.
+ * обрезанным по прежней сетке. Кнопка называет ПРАВУЮ ПАНЕЛЬ, а не фильтры: колонка держит ещё
+ * сравнение, цели и разбивку, а «Скрыть панель» уже занято сворачиванием сайдбара.
  */
 test('колонка сворачивается, полотно занимает её место, выбор запоминается', async ({ page }, info) => {
   test.skip(info.project.name !== 'desktop-1440', 'десктоп');
@@ -167,8 +168,10 @@ test('колонка сворачивается, полотно занимает
   const surface = page.locator('main .bg-card').first();
   const wide = await surface.boundingBox();
 
-  await page.getByRole('button', { name: 'Скрыть фильтры' }).click();
-  await expect(page.locator('[data-cdek-filter-rail]')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Скрыть правую панель' }).click();
+  // Узел остаётся в разметке, но на десктопе снят с потока (lg:hidden): ниже lg колонка нужна —
+  // она стоит под графиком, ширины у него не отнимает, и прятать её значило бы отнять сравнение.
+  await expect(page.locator('[data-cdek-filter-rail]')).toBeHidden();
   await expect.poll(async () => Math.round((await surface.boundingBox())?.width ?? 0)).toBeGreaterThan(
     Math.round(wide?.width ?? 0),
   );
@@ -176,8 +179,8 @@ test('колонка сворачивается, полотно занимает
   // Выбор — свойство рабочего места, а не метрики: он переживает переход на соседнюю страницу.
   await page.goto('/metrics/cdek-orders');
   await page.locator('main').waitFor({ state: 'visible', timeout: 25_000 });
-  await expect(page.locator('[data-cdek-filter-rail]')).toHaveCount(0);
+  await expect(page.locator('[data-cdek-filter-rail]')).toBeHidden();
 
-  await page.getByRole('button', { name: 'Показать фильтры' }).click();
+  await page.getByRole('button', { name: 'Показать правую панель' }).click();
   await expect(page.locator('[data-cdek-filter-rail]')).toBeVisible();
 });

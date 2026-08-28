@@ -42,6 +42,13 @@ function manyOrders(count: number) {
   }));
 }
 
+/** Заказ вне канона: до правки его нельзя было найти вовсе — ни фильтром, ни поиском. */
+const RETURNED = {
+  order_id: '33905599', created_at: '2026-08-22T12:00:00', status: 'return', channel: 'other',
+  carrier: 'Прочее', external_order_id: null, track_number: null, comment: null,
+  amount: 1990, items: 1, positions: 1,
+};
+
 async function bootOrders(page: Page, orders: typeof ORDERS = ORDERS) {
   const seen: string[] = [];
   await page.route(/^https?:\/\/[^/]+\/api\//, async (route) => {
@@ -69,13 +76,21 @@ async function bootOrders(page: Page, orders: typeof ORDERS = ORDERS) {
     if (path === '/api/cdek/orders') {
       seen.push(url.search);
       const q = url.searchParams.get('q');
-      const status = url.searchParams.get('status');
+      // Стаб повторяет СЕРВЕРНОЕ правило: какие статусы видны, решает `include` (REVENUE_FILTER),
+      // а не отдельный параметр. Пока стаб фильтровал по `status`, он зеленел на предикате,
+      // который на сервере всегда пуст: `status = ANY(['return'])` рядом с
+      // `status <> ALL(['cancel','return',...])` не пропускает ни строки.
+      const include = url.searchParams.get('include') ?? 'revenue';
+      const visible = (st: string) =>
+        include === 'all' ? true
+        : include.startsWith('status:') ? include.slice(7).split(',').includes(st)
+        : !['cancel', 'return', 'assembled', 'confirmed'].includes(st);
       // ИМЕННО `sales_channel`: `channel` на сервере означает канал АРЕНДАТОРА (склад), и пока
       // фильтр ходил под тем же именем, выбор канала уводил запрос на чужой канал (прод-баг).
       const channel = url.searchParams.get('sales_channel');
       // Стаб фильтрует так же, как сервер: по трём номерам сразу, статусу и каналу.
       const rows = orders.filter((o) => {
-        if (status && o.status !== status) return false;
+        if (!visible(o.status)) return false;
         if (channel && o.channel !== channel) return false;
         if (!q) return true;
         return [o.order_id, o.external_order_id, o.track_number].some((v) => v && v.includes(q));
@@ -161,7 +176,12 @@ test('ненайденный номер объясняет, где вообще 
 
 test('фильтр канала и статуса уходит на сервер, а не режет уже полученное', async ({ page }) => {
   const seen = await bootOrders(page);
-  await page.getByRole('button', { name: 'ЯМ' }).click();
+  // Фильтр ленты — НАБОР со списком значений, как в развороте метрики: прежние сегменты давали
+  // четыре канала из пяти сокращёнными подписями («ЯМ») и два статуса из шести.
+  await page.getByRole('button', { name: /Каналы продаж/ }).click();
+  await page.getByRole('option', { name: 'Яндекс.Маркет' }).click();
+  // Поповер закрываем: открытым он лежит поверх таблицы, и строка под ним не «видима».
+  await page.keyboard.press('Escape');
   await expect(page.getByRole('row', { name: /33905573/ })).toBeVisible();
   await expect(page.getByRole('row', { name: /33905564/ })).toHaveCount(0);
   // Проверяем ИМЯ параметра точно, а не подстрокой: `s.includes('channel=yandex_market')` зеленел
@@ -181,4 +201,57 @@ test('ритм называет пик словами, а не оставляе�
 test('ни одна карточка не переполняется внутренним скроллом', async ({ page }) => {
   await bootOrders(page);
   expect(await overflowingCards(page)).toEqual([]);
+});
+
+/**
+ * Прежние сегменты знали ЧЕТЫРЕ канала из пяти и ДВА статуса из шести: заказ со статусом
+ * «Возврат» или каналом «Другая служба» было нечем найти вовсе. Список значений выводится из
+ * канона источника, поэтому новый статус или канал попадает в ленту сам.
+ */
+test('в выборе ленты все статусы и все каналы источника', async ({ page }) => {
+  await bootOrders(page);
+  await page.getByRole('button', { name: /Статусы/ }).click();
+  for (const label of ['Завершён', 'В доставке', 'Собран', 'Подтверждён', 'Отменён', 'Возврат']) {
+    await expect(page.getByRole('option', { name: label })).toBeVisible();
+  }
+  await page.keyboard.press('Escape');
+
+  await page.getByRole('button', { name: /Каналы продаж/ }).click();
+  for (const label of ['Своя доставка', 'Wildberries', 'Яндекс.Маркет', 'Ozon', 'Другая служба']) {
+    await expect(page.getByRole('option', { name: label })).toBeVisible();
+  }
+});
+
+test('несколько статусов уходят одним набором', async ({ page }) => {
+  const seen = await bootOrders(page);
+  await page.getByRole('button', { name: /Статусы/ }).click();
+  await page.getByRole('option', { name: 'Отменён' }).click();
+  await page.getByRole('option', { name: 'Возврат' }).click();
+  // Набор едет в `include` — единственном месте, где решается, какие статусы видны.
+  await expect
+    .poll(() => seen.map((s) => new URLSearchParams(s).get('include')).some((v) => v === 'status:cancel,return'))
+    .toBe(true);
+});
+
+/**
+ * САМОЕ ВАЖНОЕ в этой правке: выбранные статусы едут через `include`, а не отдельным условием.
+ * Отдельным полем они ложились ПОВЕРХ канона — `status = ANY(['return'])` рядом с
+ * `status <> ALL(['cancel','return',…])` даёт «равен return И не равен return», то есть всегда
+ * пустую ленту. Четыре чипа из шести были мертвы и врали убедительнее прежнего их отсутствия.
+ */
+test('«Возврат» действительно находит заказ, а не отдаёт пустую ленту', async ({ page }) => {
+  const seen = await bootOrders(page, [...ORDERS, RETURNED]);
+  // По канону возврата в ленте нет — он не отгрузка.
+  await expect(page.getByRole('row', { name: /33905599/ })).toHaveCount(0);
+
+  await page.getByRole('button', { name: /Статусы/ }).click();
+  await page.getByRole('option', { name: 'Возврат' }).click();
+  await page.keyboard.press('Escape');
+
+  await expect(page.getByRole('row', { name: /33905599/ })).toBeVisible();
+  // И набор ушёл именно в include — отдельного параметра status больше нет.
+  await expect
+    .poll(() => seen.map((s) => new URLSearchParams(s)).some((p) => p.get('include') === 'status:return'))
+    .toBe(true);
+  expect(seen.every((s) => new URLSearchParams(s).get('status') === null)).toBe(true);
 });

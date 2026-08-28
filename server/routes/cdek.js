@@ -428,7 +428,7 @@ function registerCdekRoutes({ app, express, requireAuth, db, audit, cdekImport }
   });
 
   /**
-   * GET /api/cdek/orders?status=&sales_channel=&q=&limit= — лента заказов окна.
+   * GET /api/cdek/orders?include=&sales_channel=&q=&limit= — лента заказов окна.
    *
    * Фильтр по каналу ПРОДАЖ зовётся `sales_channel`, а не `channel`: `?channel=` уже занят каналом
    * АРЕНДАТОРА (см. tenantChannelId). Пока имена совпадали, выбор «ЯМ» в ленте уводил запрос на
@@ -441,14 +441,21 @@ function registerCdekRoutes({ app, express, requireAuth, db, audit, cdekImport }
       const data = await db.getCdekOrdersForActor(ctx.channel.id, req.user, {
         ...ctx.period,
         tz: ctx.tz,
+        // Статусы ленты приходят В `include` (ctx.include: `status:<набор>` | `all` | `revenue`) —
+        // единственном месте, где решается, какие статусы видны. Отдельным параметром они ложились
+        // ПОВЕРХ канона и давали противоречивый предикат: «Возврат» при include='revenue' — это
+        // «статус равен return И не равен return», то есть всегда пустая лента.
         include: ctx.include,
-        status: req.query.status,
         // Совместимость на окно деплоя: вкладка, открытая до выката, шлёт старое имя. Принимаем
         // его только НЕЧИСЛОВЫМ — числовое там всегда было каналом арендатора, а не фильтром.
         channel: req.query.sales_channel ?? legacySalesChannel(req.query.channel),
         q: req.query.q,
         limit: req.query.limit,
       });
+      // Незнакомый канал продаж — ОТКАЗ, а не пустая лента: «заказов не нашлось» неотличимо от
+      // «фильтр написан с опечаткой» (тот же приём, что у каналов метрик). Статусы такой проверки
+      // не требуют: мусорный набор в `include` нормализуется в канон (normalizeCdekInclude).
+      if (data.unknown) return res.status(400).json({ error: 'Неизвестный канал продаж' });
       res.json({
         window: { days: ctx.period.days, from: ctx.period.from, to: ctx.period.to, all: ctx.period.all },
         total: data.total,

@@ -8,6 +8,8 @@
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
+import { setMetricRailHidden, useMetricRailHidden } from '@/lib/metricRail';
 // Реэкспорт: правило дельты живёт в своём лёгком модуле (см. comparisonDelta), но все прежние
 // импорты `from '@/components/metric/shared'` продолжают работать.
 import { ComparisonDelta } from '@/components/metric/comparisonDelta';
@@ -39,26 +41,96 @@ export function MetricBackLink({ to, children }: { to: string; children: ReactNo
     + правый rail 300px; на <lg rail уезжает под основной блок. Инспекторные гриды
     (var(--inspector-w) + InspectorHandle в MetricPage/IgMetricPage) сюда намеренно НЕ входят —
     у них другая колонка, обёртка и ритм rail'а. */
+/**
+ * Шапка страницы метрики: возврат слева, действия страницы справа — ОДНОЙ строкой.
+ *
+ * Шесть источников (TG, IG, МойСклад, Метрика, упоминания, кампании, СДЭК) держали одинаковый
+ * скелет копиями, и всякая правка доезжала до одного из них. Переключатель колонки так и жил
+ * только у СДЭКа, хотя полотну не хватает 300px на любой метрике.
+ *
+ * Кнопка сворачивания стоит ЗДЕСЬ, а не в самой колонке: спрятанную колонку нечем было бы вернуть.
+ */
+export function MetricPageHeader({
+  back,
+  actions,
+}: {
+  back: { to: string; label: string };
+  /** Действия конкретной страницы (например, «Сохранить») — левее переключателя. */
+  actions?: ReactNode;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-4">
+      <MetricBackLink to={back.to}>{back.label}</MetricBackLink>
+      <span className="flex shrink-0 items-center gap-2">
+        {actions}
+        <MetricRailToggle />
+      </span>
+    </div>
+  );
+}
+
+/**
+ * Сам переключатель — отдельно от шапки: у страницы метрик Telegram шапка своя, со «Закрепить».
+ *
+ * Называется он «правая панель», а не «фильтры»: колонка держит ещё сравнение, цели и разбивку,
+ * и на метрике без единого фильтра прежнее имя обещало не то. Слово «правая» обязательно —
+ * «Скрыть панель» уже занято сворачиванием САЙДБАРА, и два разных контрола звучали одинаково
+ * (поймано тестом: strict mode violation, два элемента на одно имя). Прячется он ТОЛЬКО на десктопе — ниже
+ * lg колонка и так стоит под графиком, горизонтального места не занимает, и скрывать её значило
+ * бы просто отнять у человека сравнение.
+ */
+export function MetricRailToggle() {
+  const railHidden = useMetricRailHidden();
+  return (
+    <>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          // Ниже lg колонка стоит под графиком — скрывать там нечего.
+          className="hidden lg:inline-flex"
+          aria-pressed={railHidden}
+          aria-label={railHidden ? 'Показать правую панель' : 'Скрыть правую панель'}
+          title={railHidden ? 'Показать правую панель' : 'Скрыть правую панель'}
+          onClick={() => setMetricRailHidden(!railHidden)}
+        >
+          <svg viewBox="0 0 16 16" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden="true">
+            <rect x="1.15" y="2.15" width="13.7" height="11.7" rx="2.2" />
+            <path d="M9.9 2.6v10.8" />
+            {!railHidden && <rect x="9.9" y="2.6" width="4.5" height="10.8" fill="currentColor" stroke="none" opacity="0.35" />}
+          </svg>
+        </Button>
+    </>
+  );
+}
+
 export function MetricColumns({
   children,
   rail,
-  railHidden = false,
+  railHidden,
 }: {
   children: ReactNode;
   rail: ReactNode;
   /** Колонка свёрнута: полотно занимает её место. Панель уходит ИЗ ПОТОКА, а не прячется
-      прозрачностью — иначе широкий график остался бы обрезанным по прежней сетке. */
+      прозрачностью — иначе широкий график остался бы обрезанным по прежней сетке.
+      По умолчанию состояние берётся из общего хранилища: переключатель стоит в шапке страницы, и
+      требовать от каждой из шести страниц метрик прокидывать одно и то же значение значило бы
+      снова развести одну настройку по шести копиям. */
   railHidden?: boolean;
 }) {
+  const storedHidden = useMetricRailHidden();
+  const hidden = railHidden ?? storedHidden;
   return (
     <div
       className={cn(
         'grid grid-cols-1 gap-6 xl:gap-8',
-        !railHidden && 'lg:grid-cols-[minmax(0,1fr)_300px]',
+        !hidden && 'lg:grid-cols-[minmax(0,1fr)_300px]',
       )}
     >
       <div className="min-w-0 space-y-6">{children}</div>
-      {!railHidden && <aside className="space-y-6">{rail}</aside>}
+      {/* Ниже lg колонка остаётся ВСЕГДА: там она под графиком и места у него не отнимает, а
+          вместе с ней ушли бы сравнение, цели и разбивка — без всякой выгоды по ширине. */}
+      <aside className={cn('space-y-6', hidden && 'lg:hidden')}>{rail}</aside>
     </div>
   );
 }

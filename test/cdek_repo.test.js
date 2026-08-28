@@ -273,3 +273,61 @@ test('без фильтра канал не сужается — парамет�
   await repo.getCdekSummaryForActor(5, { uid: 1 }, { from: '2026-03-01', to: '2026-03-31' });
   assert.equal(queries[0].params[queries[0].params.length - 1], null);
 });
+
+// ── Лента заказов: фильтры ────────────────────────────────────────────────────────────────────
+// Лента жила своим языком: одиночный статус и одиночный канал, тогда как метрики того же склада
+// давно фильтровались наборами. Главное, что здесь закреплено, — статусы НЕ идут отдельным
+// условием: рядом с REVENUE_FILTER они давали противоречивый предикат и пустую ленту.
+
+test('статусы ленты НЕ ложатся поверх канона отдельным условием', async () => {
+  // Регресс, стоивший четырёх мёртвых чипов: `status = ANY(['return'])` рядом с
+  // `status <> ALL(['cancel','return',...])` — это «равен return И не равен return».
+  const { repo, queries } = repoWith({ accessible: true });
+  await repo.getCdekOrdersForActor(5, { id: 1 }, { days: 30, include: 'status:return' });
+  const q = find(queries, /FROM cdek_orders/);
+  assert.doesNotMatch(q.sql, /o\.status = ANY\(\$8\)/, 'своего условия по статусу у ленты нет');
+  assert.equal(q.params[6], 'status:return', 'набор статусов едет в include ($7)');
+  // REVENUE_FILTER сам разбирает `status:` — именно он решает, какие статусы видны.
+  assert.match(q.sql, /\$7::text LIKE 'status:%'/);
+});
+
+test('канал продаж фильтруется НАБОРОМ', async () => {
+  const { repo, queries } = repoWith({ accessible: true });
+  await repo.getCdekOrdersForActor(5, { id: 1 }, { days: 30, channel: 'ozon,wildberries' });
+  const q = find(queries, /FROM cdek_orders/);
+  // COALESCE к 'other', а не к пустой строке: заказ без перевозчика — это «прочее», иначе он не
+  // совпадает ни с одним чипом и недоступен любому фильтру.
+  assert.match(q.sql, /COALESCE\(o\.channel, 'other'\) = ANY\(\$8\)/);
+  assert.deepEqual(q.params[7], ['ozon', 'wildberries']);
+});
+
+test('выбраны ВСЕ каналы — это «фильтра нет», а не длинный список', async () => {
+  const { repo, queries } = repoWith({ accessible: true });
+  await repo.getCdekOrdersForActor(5, { id: 1 }, {
+    days: 30,
+    channel: 'own,wildberries,yandex_market,ozon,other',
+  });
+  const q = find(queries, /FROM cdek_orders/);
+  assert.equal(q.params[7], null);
+});
+
+test('незнакомый канал — ОТКАЗ, а не пустая лента', async () => {
+  // «Заказов не нашлось» неотличимо от «фильтр написан с опечаткой»: молчать здесь нельзя.
+  const { repo, queries } = repoWith({ accessible: true });
+  const out = await repo.getCdekOrdersForActor(5, { id: 1 }, { days: 30, channel: 'ozon,опечатка' });
+  assert.equal(out.unknown, true);
+  assert.equal(out.rows.length, 0);
+  assert.equal(find(queries, /FROM cdek_orders/), undefined, 'до базы такой запрос не доходит');
+});
+
+test('плейсхолдеры ленты не разъезжаются с параметрами', async () => {
+  // Сдвиг индекса $N до базы ничем себя не выдаёт. Проверка не тавтологична: длина params задаётся
+  // кодом репозитория, а максимальный $N — текстом SQL, и правка одного без другого краснеет
+  // (так и поймано, когда статусы ушли из параметров: LIMIT остался на $11 при десяти значениях).
+  const { repo, queries } = repoWith({ accessible: true });
+  await repo.getCdekOrdersForActor(5, { id: 1 }, { days: 30, channel: 'own', q: 'A-1' });
+  const q = find(queries, /FROM cdek_orders/);
+  const maxPlaceholder = Math.max(...[...q.sql.matchAll(/\$(\d+)/g)].map((m) => Number(m[1])));
+  assert.equal(maxPlaceholder, q.params.length, 'максимальный $N равен длине params');
+  assert.equal(q.params.length, 10);
+});
