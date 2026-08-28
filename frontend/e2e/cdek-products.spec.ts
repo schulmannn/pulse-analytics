@@ -34,8 +34,10 @@ function series(count: number, from: number) {
   }));
 }
 
-async function bootProducts(page: Page) {
+async function bootProducts(page: Page, savedFilters?: string) {
   const from = Date.now() - 30 * DAY;
+  /** Что уходило в запросы окна — по этому видно, доехал ли сохранённый выбор. */
+  const asked: string[] = [];
   await page.route(/^https?:\/\/[^/]+\/api\//, async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -43,6 +45,11 @@ async function bootProducts(page: Page) {
     const json = (status: number, body: unknown) =>
       route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 
+    if (path === '/api/cdek/series' || path === '/api/cdek/breakdown') {
+      asked.push(
+        `${path.split('/').pop()} include=${url.searchParams.get('include') ?? ''} products=${url.searchParams.get('products') ?? ''} channels=${url.searchParams.get('sales_channels') ?? ''}`,
+      );
+    }
     if (path === '/api/auth/me') return json(200, { uid: 11, email: 'cdek@test.local', role: 'user', avatar: null });
     if (path === '/api/channels') {
       return json(200, {
@@ -74,13 +81,15 @@ async function bootProducts(page: Page) {
     return json(404, { error: 'not_stubbed' });
   });
 
-  await page.addInitScript(() => {
+  await page.addInitScript((filters) => {
     localStorage.setItem('pulse_channel', '5');
     localStorage.setItem('pulse_theme', 'dark');
-  });
+    if (filters) localStorage.setItem('pulse_saved_filters', filters);
+  }, savedFilters ?? '');
   await page.goto('/cdek/products');
   await page.locator('main').waitFor({ state: 'visible', timeout: 25_000 });
   await page.waitForTimeout(700);
+  return asked;
 }
 
 const card = (page: Page, title: string | RegExp) =>
@@ -130,4 +139,34 @@ test('ни одна карточка не переполняется внутр�
   // из контекста — без флекс-колонки вокруг ChartBand карточка переполняется молча.
   await bootProducts(page);
   expect(await overflowingCards(page)).toEqual([]);
+});
+
+/**
+ * Сохранённый выбор действует и на «Товарах». Страница ходила мимо него совсем, и соседние экраны
+ * одного источника отвечали на разные вопросы: «Обзор» считал отгруженное по выбранным каналам, а
+ * «Товары» — весь оборот целиком, без единой подсказки почему.
+ *
+ * Фильтр ПО ТОВАРАМ при этом не применяется НИГДЕ на этой странице: сузь её выбранными товарами —
+ * и она покажет ровно их, а ABC «сколько первых товаров дают 80% выручки» превратится в «три из
+ * трёх». Тот же довод, по которому кольцо каналов не сужается каналами.
+ */
+test('сохранённые статусы и каналы доезжают, а фильтр товаров список не сужает', async ({ page }) => {
+  const asked = await bootProducts(
+    page,
+    JSON.stringify({
+      'cdek:status:5': ['complete'],
+      'cdek:sales-channels:5': ['ozon'],
+      'cdek:products:5': ['p1'],
+    }),
+  );
+
+  await expect.poll(() => asked.some((q) => q.includes('include=status:complete'))).toBe(true);
+  await expect.poll(() => asked.some((q) => q.includes('channels=ozon'))).toBe(true);
+  // Ни один запрос страницы не сужен по товарам.
+  expect(asked.every((q) => q.includes('products='))).toBe(true);
+  expect(asked.some((q) => /products=\S/.test(q))).toBe(false);
+
+  // И список остаётся полным: второй товар на месте, хотя в фильтре стоит только первый.
+  // Ищем по АРТИКУЛУ: название несёт кавычки-ёлочки и ™, и дословный поиск по нему хрупок.
+  await expect(page.getByText(PRODUCTS[1].article, { exact: false }).first()).toBeVisible();
 });

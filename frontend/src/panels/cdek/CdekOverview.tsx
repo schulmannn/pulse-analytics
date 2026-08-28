@@ -196,9 +196,8 @@ export function CdekOverview() {
   // Календарная сетка окна — та же, что на странице метрики (densifyCdekDays): сервер отдаёт
   // ТОЛЬКО дни с продажами, и без уплотнения ось врёт о расстояниях между датами, а карточка
   // показывает не ту форму, что разворот того же числа.
-  const points = densifyCdekDays(series.data?.current ?? [], series.data?.window.from, series.data?.window.to);
+  const points = densifyCdekDays(series.data?.current ?? [], series.data?.window.from, series.data?.window.to, series.data?.grain);
   // Подпись ряда честно называет ЕДИНИЦУ корзины: на длинном окне это уже не дни.
-  const grainWord = series.data?.grain === 'month' ? 'по месяцам' : series.data?.grain === 'week' ? 'по неделям' : 'по дням';
 
   if (summary.isError) {
     return (
@@ -260,7 +259,7 @@ export function CdekOverview() {
           <CdekStory
             value={formatByRole(cur?.orders ?? 0, 'headline')}
             delta={pctDelta(cur?.orders, prev?.orders)}
-            caption={storyCaption(grainWord)}
+            caption={storyCaption()}
             points={points}
             pick={(p) => p.orders}
             formatValue={(v) => fmt.num(Math.round(v))}
@@ -276,7 +275,7 @@ export function CdekOverview() {
           <CdekStory
             value={formatMoney(cur?.avg_check)}
             delta={pctDelta(cur?.avg_check, prev?.avg_check)}
-            caption={storyCaption(grainWord)}
+            caption={storyCaption()}
             points={points}
             pick={(p) => (p.orders > 0 ? (p.revenue ?? 0) / p.orders : 0)}
             formatValue={rub}
