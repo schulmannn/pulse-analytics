@@ -67,20 +67,6 @@ export function cdekStatusInclude(selected: readonly string[]): CdekInclude {
   return `status:${picked.join(',')}` as CdekInclude;
 }
 
-/** Подпись под числом — только когда выбор ушёл от канона. Иначе на карточке нет лишней строки. */
-export function statusFilterCaption(selected: readonly string[]): string | null {
-  const picked = sortedUnique(selected);
-  if (picked.length === 0 || sameCdekStatuses(picked, CANON)) return null;
-  if (picked.length === CDEK_STATUSES.length) return 'Считаются заказы всех статусов';
-  const labels = picked.map((id) => CDEK_STATUSES.find((s) => s.id === id)?.label ?? id);
-  return `Считаются только: ${labels.join(', ').toLocaleLowerCase('ru-RU')}`;
-}
-
-/**
- * Сохранения ЗДЕСЬ нет. Раньше у каждого фильтра была своя кнопка «Сохранить», и человек, поменяв
- * обе оси одного вопроса «что считать», должен был нажать две. Кнопка теперь одна на страницу, в
- * её правом верхнем углу (владелец), и сохраняет весь выбор разом.
- */
 export function CdekStatusFilter({
   selected,
   onChange,
@@ -143,20 +129,6 @@ export const sameCdekProducts = (a: readonly string[], b: readonly string[]): bo
   return x.length === y.length && x.every((id, i) => id === y[i]);
 };
 
-/** Подпись — только когда выбор сделан: без него метрика считает весь ассортимент, как и раньше. */
-export function productFilterCaption(
-  selected: readonly string[],
-  options: readonly CdekProductOption[],
-): string | null {
-  const picked = normalizeCdekProducts(selected);
-  if (picked.length === 0) return null;
-  if (picked.length === 1) {
-    const name = options.find((o) => o.id === picked[0])?.name ?? picked[0];
-    return `Только товар: ${name}`;
-  }
-  return `Только выбранные товары: ${picked.length}`;
-}
-
 export function CdekProductFilter({
   options,
   selected,
@@ -208,14 +180,6 @@ export const sameCdekChannels = (a: readonly string[], b: readonly string[]): bo
   const [x, y] = [normalizeCdekChannels(a), normalizeCdekChannels(b)];
   return x.length === y.length && x.every((id, i) => id === y[i]);
 };
-
-/** Подпись — только когда выбор сужает. Полный набор и пустой одинаково означают «все каналы». */
-export function channelFilterCaption(selected: readonly string[]): string | null {
-  const picked = normalizeCdekChannels(selected);
-  if (picked.length === 0 || picked.length === CDEK_SALES_CHANNELS.length) return null;
-  const labels = picked.map((id) => CDEK_SALES_CHANNELS.find((c) => c.id === id)?.label ?? id);
-  return `Только каналы: ${labels.join(', ')}`;
-}
 
 export function CdekChannelFilter({
   selected,

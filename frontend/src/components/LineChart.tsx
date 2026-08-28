@@ -422,15 +422,29 @@ export function LineChart({
           const indexes = letterAxis
             ? values.map((_, i) => i)
             : axisLabelIndexes(n, plotW, { minLabelPx: expanded ? 76 : 88, maxLabels: expanded ? 12 : 8 });
-          return indexes
+          const laid = indexes
             .map((i) => {
               const text = letterAxis ? letterAxis[i] : labels?.[i] ?? '';
               if (!text) return null;
               const halfW = (text.length * CHAR_W) / 2;
               const x = Math.min(Math.max(points[i].x, gutterW + halfW), Math.max(W - padR - halfW, gutterW + halfW));
-              return { i, px: points[i].x, x, text };
+              return { i, px: points[i].x, x, text, halfW };
             })
-            .filter((t): t is { i: number; px: number; x: number; text: string } => t !== null);
+            .filter((t): t is { i: number; px: number; x: number; text: string; halfW: number } => t !== null);
+          // Месяц-тики идут ПО ТОЙ ЖЕ ветке, что буквы дней недели, а там прореживание выключено
+          // («буквы узкие и не сталкиваются»). Для месяцев это неверно: частичный месяц у кромки
+          // окна отстоит от следующего на считаные дни, и на 90 днях «May» налезал на «Jun»
+          // (замер: 46+23 против 68). Отбор идёт СПРАВА НАЛЕВО, поэтому последний тик — тот, что
+          // несёт пилюлю «сейчас», — остаётся всегда, а жертвой становится кромка.
+          const GAP = 6;
+          const keptTicks: typeof laid = [];
+          for (let k = laid.length - 1; k >= 0; k -= 1) {
+            const t = laid[k];
+            const right = keptTicks[keptTicks.length - 1];
+            if (right && t.x + t.halfW + GAP > right.x - right.halfW) continue;
+            keptTicks.push(t);
+          }
+          return keptTicks.reverse();
         })()
       : [];
 

@@ -147,8 +147,14 @@ function CdekMetricShell({
 }) {
   const railHidden = useMetricRailHidden();
   return (
-    <div className="space-y-5">
-      <MetricBackLink to={back.to}>{back.label}</MetricBackLink>
+    <div className="space-y-4">
+      {/* Возврат и кнопки страницы — ОДНОЙ строкой, и колонка начинается сразу под ней. Раньше
+          крошка и заголовок занимали две полосы во всю ширину, и правая колонка стартовала только
+          под ними: справа сверху зияла пустая полоса высотой в заголовок (владелец: «подтянем
+          чуть выше, а то сейчас там пустое пространство»). Заголовок метрики уехал в ЛЕВУЮ
+          колонку — он относится к полотну, а не к фильтрам. */}
+      <div className="flex items-center justify-between gap-4">
+        <MetricBackLink to={back.to}>{back.label}</MetricBackLink>
 
       {/* Ни строки источника, ни дескриптора: «СДЭК · Склад» уже стоит в сайдбаре над навигацией,
           а «Сумма проданного за окно» повторяет заголовок (владелец: «не несут инфы»). */}
@@ -156,8 +162,6 @@ function CdekMetricShell({
           («сейчас её не видно»): при его высоте окна она уходила под сгиб. Здесь она на одной
           линии с названием метрики — то есть в первом же экране, — а инверсный цвет отличает её
           от синих ссылок канона. Появляется только когда есть что сохранять. */}
-      <div className="flex items-start justify-between gap-4">
-        <h1 className="text-2xl font-medium tracking-tight text-foreground">{term}</h1>
         <span className="flex shrink-0 items-center gap-2">
           {onSaveFilters && (
             <Button type="button" variant="contrast" size="sm" onClick={onSaveFilters}>
@@ -237,6 +241,9 @@ function CdekMetricShell({
           </>
         }
       >
+        {/* Заголовок — в ЛЕВОЙ колонке, над полотном: он называет то, что нарисовано, а не всю
+            страницу целиком. Так правая колонка встаёт вровень с ним, а не под ним. */}
+        <h1 className="text-2xl font-medium tracking-tight text-foreground">{term}</h1>
         {children}
       </MetricColumns>
     </div>
