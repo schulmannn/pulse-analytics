@@ -1,6 +1,19 @@
 import type { PeriodDays } from '@/lib/period';
 import type { WidgetSize } from '@/lib/widgetPrefsStore';
 
+/**
+ * Пилюли периода карточки. Живут ЗДЕСЬ, а не в EditWidgetDialog: строка пилюль на самой карточке
+ * читает тот же список, и статический импорт константы из модуля диалога держал весь редактор
+ * (вместе с ui/switch и ui/select) в чанке КАЖДОГО маршрута с графиками — при том что диалог
+ * открывается по действию и до первого клика не нужен вовсе.
+ */
+export const WIDGET_PERIODS: Array<{ days: PeriodDays; label: string }> = [
+  { days: 7, label: '7д' },
+  { days: 30, label: '30д' },
+  { days: 90, label: '90д' },
+  { days: 0, label: 'Всё' },
+];
+
 export const SIZE_COL_SPAN: Record<WidgetSize, string> = {
   third: 'lg:col-span-2',
   half: 'lg:col-span-3',

@@ -1,4 +1,4 @@
-import { WIDGET_PERIODS } from '@/components/widgets/EditWidgetDialog';
+import { WIDGET_PERIODS } from '@/components/chartWidget/constants';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { usePagePeriod } from '@/lib/period';
 import type { PeriodDays } from '@/lib/period';

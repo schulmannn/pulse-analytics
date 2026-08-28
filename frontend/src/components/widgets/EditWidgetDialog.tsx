@@ -13,15 +13,10 @@ import { Switch } from '@/components/ui/switch';
 import { SwatchButton } from '@/components/ui/swatch-button';
 import type { SeriesGrain, WidgetPrefs, WidgetSize } from '@/lib/widgetPrefsStore';
 import { SIZE_RANK, type WidgetVariant } from '@/components/widgets/variants';
+import { WIDGET_PERIODS } from '@/components/chartWidget/constants';
 
 const SWATCHES = [1, 2, 3, 4, 5, 6] as const;
 
-export const WIDGET_PERIODS: Array<{ days: PeriodDays; label: string }> = [
-  { days: 7, label: '7д' },
-  { days: 30, label: '30д' },
-  { days: 90, label: '90д' },
-  { days: 0, label: 'Всё' },
-];
 
 
 /** The edit dialog's «Период» segment — the same follow/override semantics as the card's pill
