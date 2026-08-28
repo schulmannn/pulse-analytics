@@ -295,20 +295,30 @@ test('канал продаж фильтруется НАБОРОМ', async () =
   const { repo, queries } = repoWith({ accessible: true });
   await repo.getCdekOrdersForActor(5, { id: 1 }, { days: 30, channel: 'ozon,wildberries' });
   const q = find(queries, /FROM cdek_orders/);
-  // COALESCE к 'other', а не к пустой строке: заказ без перевозчика — это «прочее», иначе он не
-  // совпадает ни с одним чипом и недоступен любому фильтру.
-  assert.match(q.sql, /COALESCE\(o\.channel, 'other'\) = ANY\(\$8\)/);
+  assert.match(q.sql, /COALESCE\(o\.channel, ''\) = ANY\(\$8\)/);
   assert.deepEqual(q.params[7], ['ozon', 'wildberries']);
 });
 
 test('выбраны ВСЕ каналы — это «фильтра нет», а не длинный список', async () => {
+  // «Все» — это ШЕСТЬ ключей: пять служб плюс «Без канала». Пять известных без него фильтром
+  // ОСТАЮТСЯ: иначе последний клик втягивал бы заказы, которых нет ни в одном чипе.
+  const { repo, queries } = repoWith({ accessible: true });
+  await repo.getCdekOrdersForActor(5, { id: 1 }, {
+    days: 30,
+    channel: 'own,wildberries,yandex_market,ozon,other,none',
+  });
+  const q = find(queries, /FROM cdek_orders/);
+  assert.equal(q.params[7], null);
+});
+
+test('пять служб без «Без канала» — это фильтр, а не «всё»', async () => {
   const { repo, queries } = repoWith({ accessible: true });
   await repo.getCdekOrdersForActor(5, { id: 1 }, {
     days: 30,
     channel: 'own,wildberries,yandex_market,ozon,other',
   });
   const q = find(queries, /FROM cdek_orders/);
-  assert.equal(q.params[7], null);
+  assert.deepEqual(q.params[7], ['other', 'own', 'ozon', 'wildberries', 'yandex_market']);
 });
 
 test('незнакомый канал — ОТКАЗ, а не пустая лента', async () => {
@@ -330,4 +340,14 @@ test('плейсхолдеры ленты не разъезжаются с па�
   const maxPlaceholder = Math.max(...[...q.sql.matchAll(/\$(\d+)/g)].map((m) => Number(m[1])));
   assert.equal(maxPlaceholder, q.params.length, 'максимальный $N равен длине params');
   assert.equal(q.params.length, 10);
+});
+
+test('«Без канала» — свой ключ фильтра, а не подмена «Другой службой»', async () => {
+  // У таких заказов служба доставки в выгрузке пуста. Разбивка показывает их отдельной группой, и
+  // таблица подписывает строку «Без канала» — схлопнуть их в 'other' значило бы показать под чипом
+  // «Другая служба» строки, подписанные иначе.
+  const { repo, queries } = repoWith({ accessible: true });
+  await repo.getCdekOrdersForActor(5, { id: 1 }, { days: 30, channel: 'none,ozon' });
+  const q = find(queries, /FROM cdek_orders/);
+  assert.deepEqual(q.params[7], ['', 'ozon'], 'ключ none едет в SQL пустой строкой');
 });

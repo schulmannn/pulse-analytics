@@ -20,6 +20,7 @@ export function MultiLineChart({
   height,
   format,
   legend,
+  axisLabels,
   bridgeGaps = false,
   ariaLabel,
 }: {
@@ -30,6 +31,8 @@ export function MultiLineChart({
   format: (n: number | null | undefined) => string;
   /** Хвост легенды: чем меряем и оговорки («только периоды с заказами», «ещё N не показаны»). */
   legend?: string;
+  /** Каноническая ось времени (timeAxisFromDayKeys): буквы дней на коротком окне, месяцы на длинном. */
+  axisLabels?: string[];
   /** Соединять разрывы: у среднего чека null значит «в этот день заказов не было», а не пропуск
    *  измерения, и рвать по нему линию было бы неправдой. Для счётных величин разрыв честен. */
   bridgeGaps?: boolean;
@@ -83,7 +86,13 @@ export function MultiLineChart({
     const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / Math.max(rect.width, 1)));
     setHovered(Math.round(ratio * Math.max(n - 1, 0)));
   };
-  const axisIndexes = [...new Set([0, Math.floor((n - 1) / 2), n - 1])].filter((i) => i >= 0);
+  // Буквенная ось короткого окна метит КАЖДУЮ точку — буквы узкие и не сталкиваются, и только
+  // полный ряд даёт ритм недели (канон одиночного графика). Даты остаются тройкой «первая,
+  // середина, последняя»: больше в ширину не влезает без наложения.
+  const letterAxis = axisLabels?.length === n && axisLabels.every((t) => t.length <= 2);
+  const axisIndexes = letterAxis
+    ? labels.map((_, i) => i)
+    : [...new Set([0, Math.floor((n - 1) / 2), n - 1])].filter((i) => i >= 0);
   const hoverX = hovered == null ? null : x(hovered);
   // Stable data signature for the reveal (see index.css «Chart motion») — the up-to-6 series fade in
   // when the metric/period/selection changes, never on hover (separate state) or a container resize.
@@ -95,8 +104,23 @@ export function MultiLineChart({
         .map((item) => `${item.name}: ${format(item.values[activeIndex])}`)
         .join('; ')}`
     : 'Нет данных';
+  // ОСЬ И ЛЕГЕНДА — ПО ТОМУ ЖЕ КАНОНУ, что у одиночного ряда. Раньше этот график жил мимо обоих
+  // правил: подписи оси брались из `labels` (даты) вместо канонической оси, а легенда рядов стояла
+  // ПОД полотном. Из-за этого один клик по разбивке на семидневном окне переписывал язык оси
+  // (буквы дней → даты) и переставлял легенду сверху вниз — человек решал, что смотрит на другой
+  // график.
+  const axisText = (index: number) => (axisLabels?.[index] ?? labels[index] ?? '');
   return (
     <div>
+      <div className="mb-1.5 flex flex-wrap gap-x-4 gap-y-1">
+        {series.map((s) => (
+          <span key={s.name} className="inline-flex items-center gap-1.5 text-2xs text-muted-foreground">
+            <span aria-hidden="true" className="h-1.5 w-3 rounded-full" style={{ backgroundColor: s.color }} />
+            <span className="max-w-40 truncate">{s.name}</span>
+          </span>
+        ))}
+        {legend && <span className="text-2xs text-muted-foreground">· {legend}</span>}
+      </div>
       <div className={expanded ? 'relative pl-12' : undefined}>
         {expanded && (
           <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 left-0 w-11 text-right text-2xs text-muted-foreground">
@@ -207,18 +231,9 @@ export function MultiLineChart({
       </div>
       {axisIndexes.length > 1 && (
         <div className={`mt-1 flex justify-between text-2xs text-muted-foreground ${expanded ? 'ml-12' : ''}`} aria-hidden="true">
-          {axisIndexes.map((index) => <span key={index}>{labels[index]}</span>)}
+          {axisIndexes.map((index) => <span key={index}>{axisText(index)}</span>)}
         </div>
       )}
-      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
-        {series.map((s) => (
-          <span key={s.name} className="inline-flex items-center gap-1.5 text-2xs text-muted-foreground">
-            <span aria-hidden="true" className="h-1.5 w-3 rounded-full" style={{ backgroundColor: s.color }} />
-            <span className="max-w-40 truncate">{s.name}</span>
-          </span>
-        ))}
-        {legend && <span className="text-2xs text-muted-foreground">· {legend}</span>}
-      </div>
     </div>
   );
 }

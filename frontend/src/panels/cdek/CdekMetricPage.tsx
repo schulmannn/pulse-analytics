@@ -37,6 +37,7 @@ import {
   sameCdekStatuses,
   toastStatusFilterSaved,
   type CdekProductOption,
+  cdekStatusLabel,
 } from '@/panels/cdek/cdekStatusFilter';
 import { PeriodChips } from '@/components/PeriodChips';
 import { EmptyState } from '@/components/EmptyState';
@@ -90,13 +91,6 @@ const CHANNEL_LABEL: Record<string, string> = {
   yandex_market: 'Яндекс.Маркет',
   ozon: 'Ozon',
   other: 'Другая служба',
-};
-
-const STATUS_LABEL: Record<string, string> = {
-  complete: 'Завершён',
-  delivery: 'В доставке',
-  cancel: 'Отменён',
-  return: 'Возврат',
 };
 
 /** Тихая шапка + две колонки, как у `/metrics/ms-*`. `back` меняется: товарные метрики
@@ -430,6 +424,8 @@ function CdekSeriesPage({ def, metricKey }: { def: SeriesDef; metricKey: SeriesK
   // Дни берутся ОБЪЕДИНЕНИЕМ по всем группам, а не из первой: у каналов дни продаж разные, и взяв
   // сетку одной серии, остальные пришлось бы натягивать на чужие даты.
   const groups = splitDim ? (series.data?.groups ?? []) : [];
+  // Производные метрики делят одно на другое: у них нет «нуля от отсутствия».
+  const derived = metricKey === 'cdek-aov' || metricKey === 'cdek-price';
   const splitModel = (() => {
     if (groups.length === 0) return null;
     const days = [...new Set(groups.flatMap((g) => g.points.map((p) => p.day)))].sort();
@@ -441,7 +437,7 @@ function CdekSeriesPage({ def, metricKey }: { def: SeriesDef; metricKey: SeriesK
         : splitDim === 'channel'
           ? (CHANNEL_LABEL[key] ?? key)
           : splitDim === 'status'
-            ? (STATUS_LABEL[key] ?? key)
+            ? cdekStatusLabel(key)
             : (productOptions.find((o) => o.id === key)?.name ?? key);
     return {
       days,
@@ -452,9 +448,12 @@ function CdekSeriesPage({ def, metricKey }: { def: SeriesDef; metricKey: SeriesK
         return {
           name: label(g.key),
           color: `hsl(var(--chart-${i + 1}))`,
-          // День, которого у группы нет, — это НОЛЬ продаж, а не пропуск измерения: выгрузка
-          // сплошная, и разрыв линии читался бы как «данных не собрали».
-          values: days.map((d) => byDay.get(d) ?? 0),
+          // Для СЧЁТНЫХ величин (выручка, заказы, штуки) день без продаж — честный ноль: выгрузка
+          // сплошная. А для ПРОИЗВОДНЫХ (средний чек, средняя цена) ноль — вымысел: делить не на
+          // что, и «средний чек 0 ₽» значит не «чек был нулевым», а «чека не было». У канала с
+          // неизменным чеком 400 ₽ линия ходила пилой 400 ↔ 0 через день, растягивая ось выдуманным
+          // нулём и сплющивая соседние серии.
+          values: days.map((d) => byDay.get(d) ?? (derived ? null : 0)),
         };
       }),
     };
@@ -660,6 +659,12 @@ function CdekSeriesPage({ def, metricKey }: { def: SeriesDef; metricKey: SeriesK
           <MultiLineChart
             series={splitModel.series}
             labels={splitModel.labels}
+            // Та же каноническая ось, что у одиночного ряда: без неё клик по разбивке переписывал
+            // язык подписей (буквы дней короткого окна превращались в даты).
+            axisLabels={timeAxisFromDayKeys(splitModel.days)}
+            // Разрыв у производной метрики означает «не с чего считать»; соединять его прямой
+            // линией честнее, чем ронять серию в выдуманный ноль (тот же приём у МойСклада).
+            bridgeGaps={derived}
             height={420}
             format={(v) => (v == null ? '—' : def.format(v))}
             ariaLabel={`${def.term} по разрезу`}
@@ -722,7 +727,8 @@ interface BreakdownDef {
   descriptor: string;
   back: { to: string; label: string };
   dim: string;
-  dict: Record<string, string>;
+  /** Подпись ключа разреза — функция канона, а не копия словаря (см. cdekStatusLabel). */
+  dict: (id: string) => string;
   fallback: string;
   tailWord: string;
 }
@@ -733,7 +739,7 @@ const BREAKDOWN_DEFS: Record<BreakdownKey, BreakdownDef> = {
     descriptor: 'Служба доставки в выгрузке — это канал: у своей доставки есть трек-номер, у маркетплейсов только внешний номер заказа.',
     back: OVERVIEW_BACK,
     dim: 'channel',
-    dict: CHANNEL_LABEL,
+    dict: (id: string) => CHANNEL_LABEL[id] ?? id,
     fallback: 'Без канала',
     tailWord: 'рублей',
   },
@@ -742,7 +748,7 @@ const BREAKDOWN_DEFS: Record<BreakdownKey, BreakdownDef> = {
     descriptor: 'Все заказы окна, включая отменённые и возвращённые — иначе разбивка показала бы лишь те статусы, которые сама и отобрала.',
     back: OVERVIEW_BACK,
     dim: 'status',
-    dict: STATUS_LABEL,
+    dict: cdekStatusLabel,
     fallback: 'Без статуса',
     tailWord: 'рублей',
   },
@@ -751,7 +757,8 @@ const BREAKDOWN_DEFS: Record<BreakdownKey, BreakdownDef> = {
     descriptor: 'Выручка по товарам за окно.',
     back: PRODUCTS_BACK,
     dim: 'product',
-    dict: {},
+    // У товаров подписи приходят с сервера (title), словарь ключей не нужен.
+    dict: (id: string) => id,
     fallback: 'Без названия',
     tailWord: 'рублей',
   },
@@ -776,7 +783,7 @@ function CdekBreakdownPage({ def }: { def: BreakdownDef }) {
       <ShareRows
         rows={rows.map((r) => ({
           key: r.key ?? 'none',
-          label: r.title || (r.key == null ? def.fallback : (def.dict[r.key] ?? r.key)),
+          label: r.title || (r.key == null ? def.fallback : def.dict(r.key)),
           value: metric === 'revenue' ? (r.revenue ?? 0) : r.orders,
         }))}
         total={total}

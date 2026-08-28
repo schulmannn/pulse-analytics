@@ -37,6 +37,7 @@ import {
   normalizeCdekChannels,
   normalizeCdekProducts,
   normalizeCdekStatuses,
+  cdekStatusLabel,
 } from '@/panels/cdek/cdekStatusFilter';
 import { formatByRole, formatMoney, moneyFormatterFor } from '@/lib/metricNumber';
 import { useCardShowsPeriod, usePagePeriod } from '@/lib/period';
@@ -68,25 +69,16 @@ const CHANNEL_LABEL: Record<string, string> = {
   other: 'Другая служба',
 };
 
-const STATUS_LABEL: Record<string, string> = {
-  complete: 'Завершён',
-  delivery: 'В доставке',
-  assembled: 'Собран',
-  confirmed: 'Подтверждён',
-  cancel: 'Отменён',
-  return: 'Возврат',
-};
-
 /** Тултипы/таблицы/подписи графиков — за цифрой идут именно сюда, поэтому роль `exact`.
  *  Крупное число карточки печатает formatMoney без аргумента (роль headline). */
 const rub = (n: number) => formatMoney(n, 'exact');
 const rubShort = (n: number) => fmt.kpi(Math.round(n));
 
 /** Ключ разреза → подпись. Пустой ключ — отсутствие значения, а не категория с именем. */
-const labelOf = (row: CdekBreakdownRow, dict: Record<string, string>, fallback: string) => {
+const labelOf = (row: CdekBreakdownRow, label: (id: string) => string, fallback: string) => {
   if (row.title) return row.title;
   if (row.key == null) return fallback;
-  return dict[row.key] ?? row.key;
+  return label(row.key);
 };
 
 /** Тело story-карточки: hero-число слева, ряд по дням справа. Один раз объявляет «Линия/Столбцы». */
@@ -309,7 +301,7 @@ export function CdekOverview() {
           <ShareRows
             rows={statuses.data.rows.map((r) => ({
               key: r.key ?? 'none',
-              label: labelOf(r, STATUS_LABEL, 'Без статуса'),
+              label: labelOf(r, cdekStatusLabel, 'Без статуса'),
               value: statusMetric === 'orders' ? r.orders : (r.revenue ?? 0),
             }))}
             total={statusMetric === 'orders' ? statuses.data.total.orders : statuses.data.total.revenue}
@@ -363,7 +355,7 @@ export function CdekOverview() {
         ) : (
           <RankChart
             items={products.data.rows.map((r) => ({
-              label: labelOf(r, {}, 'Без названия'),
+              label: labelOf(r, (id: string) => id, 'Без названия'),
               value: r.revenue ?? 0,
               compare: summary.data?.previous_window ? r.prev_revenue : null,
             }))}
@@ -390,7 +382,7 @@ export function CdekOverview() {
           data={contribution === 'channel' ? channels.data : products.data}
           pending={contribution === 'channel' ? channels.isPending : products.isPending}
           hasPrevious={!!summary.data?.previous_window}
-          dict={contribution === 'channel' ? CHANNEL_LABEL : {}}
+          dict={contribution === 'channel' ? (id: string) => CHANNEL_LABEL[id] ?? id : (id: string) => id}
           fallback={contribution === 'channel' ? 'Без канала' : 'Без названия'}
         />
       </ChartWidget>
@@ -410,7 +402,7 @@ function ChannelDonut({
   const total = metric === 'revenue' ? data.total.revenue : data.total.orders;
   const format = metric === 'revenue' ? rub : fmt.num;
   const rows = data.rows.filter((r) => value(r) > 0);
-  const labels = rows.map((r) => labelOf(r, CHANNEL_LABEL, 'Без канала'));
+  const labels = rows.map((r) => labelOf(r, (id: string) => CHANNEL_LABEL[id] ?? id, 'Без канала'));
   const values = rows.map(value);
   return (
     <PieChart
@@ -435,7 +427,8 @@ function Contribution({
   data: CdekBreakdown | undefined;
   pending: boolean;
   hasPrevious: boolean;
-  dict: Record<string, string>;
+  /** Подпись ключа — функция, а не копия словаря (канон живёт в cdekStatusFilter). */
+  dict: (id: string) => string;
   fallback: string;
 }) {
   if (pending) return <ChartSkeleton />;

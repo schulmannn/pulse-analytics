@@ -52,6 +52,15 @@ export const sameCdekStatuses = (a: readonly string[], b: readonly string[]): bo
 };
 
 /** Ключ сохранённого фильтра — по каналу: у каждого склада свой набор. */
+/**
+ * Подписи статусов — ОДНИМ словарём, выведенным из канона. Копий было четыре (лента, «Обзор»,
+ * страница метрики и сам канон), и одна из них потеряла два статуса: карточка «Статусы заказов»
+ * печатала «Собран», а её же разворот показывал сырое `assembled` из базы. Любой новый статус в
+ * выгрузке добавлял бы такую пару снова.
+ */
+export const cdekStatusLabel = (id: string): string =>
+  CDEK_STATUSES.find((s) => s.id === id)?.label ?? id;
+
 export const cdekStatusFilterKey = (channelId: number | null | undefined): string =>
   `cdek:status:${channelId ?? 0}`;
 

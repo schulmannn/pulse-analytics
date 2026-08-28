@@ -108,3 +108,28 @@ test('под разбивкой недоступные варианты гасн
   await page.getByRole('button', { name: 'Убрать разбивку' }).click();
   await expect(bars).toBeEnabled();
 });
+
+/**
+ * Разбивка не должна переписывать язык графика. Раньше этот график жил мимо двух общих правил:
+ * подписи оси брались из дат вместо канонической оси, а легенда рядов стояла ПОД полотном. Один
+ * клик на семидневном окне менял и то и другое — человек решал, что смотрит на другой график.
+ */
+test('разбивка сохраняет канон оси и держит легенду над полотном', async ({ page }, info) => {
+  test.skip(info.project.name !== 'desktop-1440', 'десктоп');
+  await boot(page);
+  await page.getByRole('button', { name: 'Выбрать разрез' }).click();
+  await page.getByRole('menuitem', { name: 'Каналам продаж' }).click();
+  await expect(page.getByText('Своя доставка')).toBeVisible();
+
+  const geometry = await page.evaluate(() => {
+    const svg = [...document.querySelectorAll('main svg')].sort(
+      (a, b) => b.getBoundingClientRect().width - a.getBoundingClientRect().width,
+    )[0];
+    const host = svg.closest('.bg-card');
+    const legend = [...(host?.querySelectorAll('span') ?? [])].find((s) => /Своя доставка/.test(s.textContent ?? ''));
+    return {
+      legendAbove: legend ? legend.getBoundingClientRect().y < svg.getBoundingClientRect().y : false,
+    };
+  });
+  expect(geometry.legendAbove).toBe(true);
+});

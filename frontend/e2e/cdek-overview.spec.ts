@@ -408,3 +408,18 @@ test('карточка достраивает дни без продаж, как
   await bootOverview(page, { sparse: true });
   await expect(card(page, 'Заказы')).toContainText('30 июл.');
 });
+
+/**
+ * Подписи статусов жили ЧЕТЫРЬМЯ копиями, и в развороте метрики копия потеряла два значения:
+ * карточка печатала «Собран», а её же «Развернуть» показывало сырое `assembled` из базы. Любой
+ * новый статус в выгрузке добавлял бы такую пару снова.
+ */
+test('разворот статусов подписывает их по-русски, как и карточка', async ({ page }) => {
+  await bootOverview(page);
+  const expand = page.getByRole('button', { name: 'Развернуть виджет «Статусы заказов»' });
+  await expand.focus();
+  await expand.press('Enter');
+  await expect(page).toHaveURL(/\/metrics\/cdek-statuses/);
+  // Ни одного сырого ключа из базы на экране.
+  await expect(page.getByText(/assembled|confirmed/)).toHaveCount(0);
+});
