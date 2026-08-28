@@ -496,3 +496,17 @@ test('без breakdown роут отдаёт обычный ряд и разби
   assert.equal(res.status, 200);
   assert.equal(res.body.groups, undefined);
 });
+
+test('неизвестный ?breakdown отвергается, а не подменяется каналом', async () => {
+  // Репозиторий подставлял 'channel' молча, и клиент рисовал каналы под подписью, которую держал
+  // у себя: график «по статусам» показывал совсем другое и выглядел правдоподобно.
+  const { routes } = build({
+    db: {
+      getCdekSeriesBreakdownForActor: async () => { throw new Error('репозиторий не должен вызываться'); },
+      getCdekSeriesForActor: async () => { throw new Error('обычный ряд тоже не должен'); },
+    },
+  });
+  const res = await call(routes, 'GET /api/cdek/series', { query: { days: '30', breakdown: 'warehouse' } });
+  assert.equal(res.status, 400);
+  assert.equal(res.body.error, 'unknown_breakdown');
+});

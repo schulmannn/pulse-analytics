@@ -133,3 +133,30 @@ test('разбивка сохраняет канон оси и держит ле
   });
   expect(geometry.legendAbove).toBe(true);
 });
+
+/**
+ * РАЗРЕЗЫ ПРИВЯЗАНЫ К МЕТРИКЕ. Список был один на все: «Средний чек по товарам» делил выручку
+ * товара на заказы, в которых он есть, — величина под чужим именем, ровно та ошибка, от которой
+ * отдельно предостерегает описание «Средней цены продажи». Пункт не исчезает, а ГАСНЕТ С
+ * ПРИЧИНОЙ: исчезнувший человек ищет глазами и решает, что сломалось.
+ */
+test('«Средний чек» гасит разрез по товарам и называет причину', async ({ page }, info) => {
+  test.skip(info.project.name !== 'desktop-1440', 'десктоп');
+  await boot(page);
+  await page.goto('/metrics/cdek-aov');
+  await page.locator('main').waitFor({ state: 'visible', timeout: 25_000 });
+  await page.getByRole('button', { name: 'Выбрать разрез' }).click();
+
+  const item = page.getByRole('menuitem', { name: /Товарам/ });
+  await expect(item).toHaveAttribute('data-disabled', '');
+  await expect(item).toContainText('это не средний чек');
+  // Соседние разрезы у той же метрики живы.
+  await expect(page.getByRole('menuitem', { name: 'Каналам продаж' })).not.toHaveAttribute('data-disabled', '');
+});
+
+test('«Выручка» разрез по товарам разрешает', async ({ page }, info) => {
+  test.skip(info.project.name !== 'desktop-1440', 'десктоп');
+  await boot(page);
+  await page.getByRole('button', { name: 'Выбрать разрез' }).click();
+  await expect(page.getByRole('menuitem', { name: /Товарам/ })).not.toHaveAttribute('data-disabled', '');
+});

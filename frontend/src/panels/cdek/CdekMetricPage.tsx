@@ -4,6 +4,7 @@ import { MultiLineChart } from '@/components/MultiLineChart';
 import {
   CdekFilterAdd,
   CdekFilterList,
+  CDEK_DIMS_ALL,
   CDEK_MAX_SERIES,
   CompareGlyph,
   FilterGlyph,
@@ -15,6 +16,7 @@ import {
   SplitGlyph,
   TargetGlyph,
   useCdekFilterDims,
+  type CdekBreakdownDim,
 } from '@/panels/cdek/CdekFilterRail';
 import { LineChart } from '@/components/LineChart';
 import { ChartExpandedContext, WidgetTargetContext } from '@/components/ExpandableChart';
@@ -238,7 +240,22 @@ interface SeriesDef {
   total: (t: { revenue: number | null; orders: number; items: number; avg_check: number | null }) => number | null;
   format: (n: number) => string;
   unit?: string;
+  /**
+   * Разрезы, по которым ЭТУ метрику можно разложить (ср. MetricDef.dimensions у виджетов).
+   * Список на метрике, а не один на источник: разбивка «Среднего чека» по товарам делит выручку
+   * товара на заказы, в которых он есть, — это не средний чек ни заказа, ни товара, а величина
+   * под чужим именем.
+   */
+  dims: readonly CdekBreakdownDim[];
+  /** Почему недоступный разрез недоступен: пункт ГАСНЕТ С ПРИЧИНОЙ, а не исчезает. */
+  dimBlocked?: Partial<Record<CdekBreakdownDim, string>>;
 }
+
+/** Разрез по товарам НЕ-АДДИТИВЕН для счёта заказов: заказ с тремя товарами попадёт в три серии. */
+const ORDERS_BY_PRODUCT =
+  'Заказ с несколькими товарами попадёт в каждую серию — сумма рядов будет больше числа заказов окна.';
+/** А для среднего чека он ещё и меняет саму величину. */
+const AOV_BY_PRODUCT = 'Выручка товара ÷ заказы, в которых он есть, — это не средний чек.';
 
 const SERIES_DEFS: Record<SeriesKey, SeriesDef> = {
   'cdek-revenue': {
@@ -251,6 +268,7 @@ const SERIES_DEFS: Record<SeriesKey, SeriesDef> = {
     pick: (p) => p.revenue ?? 0,
     total: (t) => t.revenue,
     format: rub,
+    dims: CDEK_DIMS_ALL,
   },
   'cdek-orders': {
     term: 'Заказы',
@@ -259,6 +277,8 @@ const SERIES_DEFS: Record<SeriesKey, SeriesDef> = {
     pick: (p) => p.orders,
     total: (t) => t.orders,
     format: fmt.num,
+    dims: CDEK_DIMS_ALL,
+    dimBlocked: { product: ORDERS_BY_PRODUCT },
   },
   'cdek-aov': {
     term: 'Средний чек',
@@ -267,6 +287,8 @@ const SERIES_DEFS: Record<SeriesKey, SeriesDef> = {
     pick: (p) => (p.orders > 0 ? (p.revenue ?? 0) / p.orders : null),
     total: (t) => t.avg_check,
     format: rub,
+    dims: ['channel', 'status', 'carrier'],
+    dimBlocked: { product: AOV_BY_PRODUCT },
   },
   'cdek-units': {
     term: 'Штук продано',
@@ -275,6 +297,7 @@ const SERIES_DEFS: Record<SeriesKey, SeriesDef> = {
     pick: (p) => p.items,
     total: (t) => t.items,
     format: fmt.num,
+    dims: CDEK_DIMS_ALL,
   },
   'cdek-price': {
     term: 'Средняя цена продажи',
@@ -284,6 +307,7 @@ const SERIES_DEFS: Record<SeriesKey, SeriesDef> = {
     pick: (p) => (p.items > 0 ? (p.revenue ?? 0) / p.items : null),
     total: (t) => (t.items > 0 && t.revenue != null ? t.revenue / t.items : null),
     format: rub,
+    dims: CDEK_DIMS_ALL,
   },
 };
 
@@ -357,7 +381,13 @@ function CdekSeriesPage({ def, metricKey }: { def: SeriesDef; metricKey: SeriesK
 
   // Разбивка: ряд приходит группами вместо одной серии. Пока разрез не выбран, запрос прежний —
   // лишнего похода за данными «на всякий случай» нет.
-  const [splitDim, setSplitDim] = useState<string>('');
+  const [splitDimRaw, setSplitDim] = useState<string>('');
+  // КАНОНИЗАЦИЯ ДО ЗАПРОСА, а не после. Страница метрики — один компонент на все ключи СДЭКа:
+  // переход «Выручка → Средний чек» её не размонтирует, и выбранный разрез переезжает вместе с
+  // человеком. Разрез, запрещённый новой метрике, обязан отвалиться ЗДЕСЬ: иначе он уедет в
+  // queryKey, вернёт группы и нарисует ровно тот график, который мы запрещаем. Чистое выражение,
+  // без хука и без эффекта — хук после ранних возвратов ниже уронил бы страницу целиком.
+  const splitDim = def.dims.includes(splitDimRaw as CdekBreakdownDim) ? splitDimRaw : '';
   const series = useCdekSeries(period, include, undefined, products, salesChannels, splitDim || undefined);
   const summary = useCdekSummary(period, include, products, salesChannels);
 
@@ -560,7 +590,13 @@ function CdekSeriesPage({ def, metricKey }: { def: SeriesDef; metricKey: SeriesK
   // Разрез выбирается тем же приёмом, что и фильтры, и по той же причине: пять вариантов
   // сегментированным контролом в 300px колонку не влезают — подписи налезали друг на друга.
   const splitSection = (
-    <CdekSplitRow dim={splitDim} onPick={setSplitDim} onClear={() => setSplitDim('')} />
+    <CdekSplitRow
+      dim={splitDim}
+      dims={def.dims}
+      blocked={def.dimBlocked}
+      onPick={setSplitDim}
+      onClear={() => setSplitDim('')}
+    />
   );
 
   // ЦЕЛЬ ЗАДАНА НА ДЕНЬ, А РЯД — НЕ ВСЕГДА ДНЕВНОЙ. Сервер сам укрупняет длинные окна (свыше 31 дня
@@ -637,7 +673,9 @@ function CdekSeriesPage({ def, metricKey }: { def: SeriesDef; metricKey: SeriesK
       filters={filters}
       view={viewSection}
       split={splitSection}
-      splitAction={splitDim ? undefined : <CdekSplitAdd onPick={setSplitDim} />}
+      splitAction={
+        splitDim ? undefined : <CdekSplitAdd dims={def.dims} blocked={def.dimBlocked} onPick={setSplitDim} />
+      }
       target={targetSection}
       targetAction={showTarget ? undefined : <CdekTargetAdd onAdd={() => setTargetOpen(true)} />}
       filterIcon={FilterGlyph}
