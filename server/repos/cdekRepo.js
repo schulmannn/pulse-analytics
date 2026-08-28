@@ -131,7 +131,15 @@ function normalizeKeySet(raw, known) {
   return picked.length === known.length ? null : picked;
 }
 
-const normalizeOrderChannels = (raw) => normalizeKeySet(raw, SALES_CHANNEL_KEYS);
+/**
+ * Ключи каналов ЛЕНТЫ: к пяти известным добавлен `none` — заказ без перевозчика. В SQL он значит
+ * пустую строку (COALESCE над NULL), но в списке через запятую пустое значение не передать.
+ */
+const ORDER_CHANNEL_KEYS = [...SALES_CHANNEL_KEYS, 'none'];
+const normalizeOrderChannels = (raw) => {
+  const picked = normalizeKeySet(raw, ORDER_CHANNEL_KEYS);
+  return Array.isArray(picked) ? picked.map((k) => (k === 'none' ? '' : k)) : picked;
+};
 
 /** Ограничение набора товаров: столько влезает в осмысленный выбор, дальше это уже «все». */
 const PRODUCT_FILTER_MAX = 50;
@@ -640,11 +648,12 @@ function createCdekRepo({ pool, enabled, transaction, ensureExternalSource, getA
          SELECT o.*, ${WINDOW_CASE} AS win
            FROM cdek_orders o CROSS JOIN b
           WHERE o.channel_id = $1 AND o.kind = 'sale' AND ${REVENUE_FILTER}
-            -- Заказ без перевозчика (normalizeChannel вернул null на пустом carrier) — это
-            -- «прочее», ровно как неизвестный перевозчик у импорта. С пустой строкой он не
-            -- совпадал НИ С ОДНИМ чипом и был недоступен любому фильтру — та же дыра, что была
-            -- у статуса «Возврат»: строка есть в базе, а найти её нечем.
-            AND ($8::text[] IS NULL OR COALESCE(o.channel, 'other') = ANY($8))
+            -- Заказ без перевозчика (normalizeChannel вернул null на пустом carrier) — ОТДЕЛЬНЫЙ
+            -- случай, а не «прочее»: разбивка показывает его группой «Без канала», и таблица
+            -- подписывает строку так же. Схлопнуть его в 'other' значило бы показать под чипом
+            -- «Другая служба» строки, подписанные иначе. Ключ пустой строки едет с фронта как
+            -- 'none' (см. normalizeKeySet) — иначе его не передать в списке через запятую.
+            AND ($8::text[] IS NULL OR COALESCE(o.channel, '') = ANY($8))
             AND ($9::text IS NULL OR o.order_id ILIKE '%' || $9 || '%'
                  OR COALESCE(o.external_order_id, '') ILIKE '%' || $9 || '%'
                  OR COALESCE(o.track_number, '') ILIKE '%' || $9 || '%')

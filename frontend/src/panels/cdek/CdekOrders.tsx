@@ -10,6 +10,7 @@ import {
   CDEK_SALES_CHANNELS,
   CDEK_STATUSES,
   cdekStatusInclude,
+  cdekStatusLabel,
 } from '@/panels/cdek/cdekStatusFilter';
 import { useVirtualRows } from '@/lib/useVirtualRows';
 import { useScrollEdgeFade } from '@/lib/useScrollEdgeFade';
@@ -35,15 +36,6 @@ const CHANNEL_LABEL: Record<string, string> = {
   yandex_market: 'Яндекс.Маркет',
   ozon: 'Ozon',
   other: 'Другая служба',
-};
-
-const STATUS_LABEL: Record<string, string> = {
-  complete: 'Завершён',
-  delivery: 'В доставке',
-  assembled: 'Собран',
-  confirmed: 'Подтверждён',
-  cancel: 'Отменён',
-  return: 'Возврат',
 };
 
 /** Лента заказов — таблица: за суммой заказа идут именно сюда, роль `exact`. */
@@ -104,7 +96,10 @@ export function CdekOrders() {
               статуса из шести. Заказ со статусом «Возврат» было нечем найти вовсе. */}
           <CdekOrderFilter
             label="Каналы продаж"
-            options={CDEK_SALES_CHANNELS}
+            // «Без канала» — свой вариант, а не «Другая служба»: у таких заказов служба доставки в
+            // выгрузке пуста, разбивка показывает их отдельной группой, и таблица подписывает строку
+            // так же. Без этого варианта их было НЕ НАЙТИ ни одним чипом.
+            options={[...CDEK_SALES_CHANNELS, { id: 'none', label: 'Без канала' }]}
             selected={channels}
             onChange={setChannels}
           />
@@ -229,7 +224,7 @@ function OrdersTable({ rows, total, truncated }: { rows: CdekOrder[]; total: num
     <>
       <td className="whitespace-nowrap font-medium">{row.order_id}</td>
       <td className="whitespace-nowrap text-muted-foreground">{row.created_at ? fmt.date(row.created_at) : '—'}</td>
-      <td className="whitespace-nowrap">{STATUS_LABEL[row.status] ?? row.status}</td>
+      <td className="whitespace-nowrap">{cdekStatusLabel(row.status)}</td>
       <td className="whitespace-nowrap text-muted-foreground">
         {row.channel ? (CHANNEL_LABEL[row.channel] ?? row.channel) : 'Без канала'}
       </td>
