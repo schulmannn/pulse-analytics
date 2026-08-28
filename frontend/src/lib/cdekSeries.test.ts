@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { densifyCdekDays } from '@/lib/cdekSeries';
+import { cdekGrid, densifyCdekDays } from '@/lib/cdekSeries';
 import type { CdekPoint } from '@/api/cdek';
 
 const pt = (day: string, revenue: number, orders = 1): CdekPoint => ({ day, revenue, orders, items: orders });
@@ -75,5 +75,37 @@ describe('densifyCdekDays уважает грануляцию', () => {
   it('грануляция по умолчанию — дневная (прежнее поведение вызовов без grain)', () => {
     const dense = densifyCdekDays([pt('2026-06-01', 10)], '2026-06-01', '2026-06-03');
     expect(dense.map((p) => p.day)).toEqual(['2026-06-01', '2026-06-02', '2026-06-03']);
+  });
+});
+
+describe('cdekGrid: длина корзины и краевые', () => {
+  it('дневная сетка — по одному дню, краевых нет', () => {
+    const grid = cdekGrid('2026-06-01', '2026-06-03', 'day');
+    expect(grid.map((b) => b.days)).toEqual([1, 1, 1]);
+    expect(grid.some((b) => b.partial)).toBe(false);
+  });
+
+  it('окно 90 дней: первая и последняя недели НЕПОЛНЫЕ', () => {
+    // 2026-06-03 — среда: первая неделя покрыта окном на 5 дней из 7.
+    const grid = cdekGrid('2026-06-03', '2026-08-31', 'week');
+    expect(grid[0].days).toBe(5);
+    expect(grid[0].partial).toBe(true);
+    // Последняя корзина — понедельник 31 августа, из неё в окне один день.
+    expect(grid[grid.length - 1].days).toBe(1);
+    expect(grid[grid.length - 1].partial).toBe(true);
+    // Внутренние недели полные — их и сравнивают между собой.
+    expect(grid.slice(1, -1).every((b) => b.days === 7 && !b.partial)).toBe(true);
+  });
+
+  it('месяцы знают свою длину, февраль не равен марту', () => {
+    const grid = cdekGrid('2026-01-01', '2026-04-30', 'month');
+    expect(grid.map((b) => b.days)).toEqual([31, 28, 31, 30]);
+    expect(grid.every((b) => !b.partial)).toBe(true);
+  });
+
+  it('окно внутри одного месяца — корзина неполная', () => {
+    const grid = cdekGrid('2026-03-10', '2026-03-20', 'month');
+    expect(grid).toHaveLength(1);
+    expect(grid[0]).toEqual({ key: '2026-03-01', days: 11, partial: true });
   });
 });

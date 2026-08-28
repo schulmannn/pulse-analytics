@@ -51,7 +51,7 @@ import {
 } from '@/components/metric/shared';
 import { useCdekBreakdown, useCdekSeries, useCdekSummary, type CdekPoint } from '@/api/cdek';
 import { lttbDownsample } from '@/lib/downsample';
-import { densifyCdekDays } from '@/lib/cdekSeries';
+import { bucketWords, cdekGrid, densifyCdekDays, type CdekBucket } from '@/lib/cdekSeries';
 import { useExplorerChartHeight } from '@/lib/useExplorerChartHeight';
 import { fmt, pluralRu, timeAxisFromDayKeys } from '@/lib/format';
 import { formatMoney } from '@/lib/metricNumber';
@@ -410,11 +410,20 @@ function CdekSeriesPage({ def, metricKey }: { def: SeriesDef; metricKey: SeriesK
     400,
     (r) => r.value ?? 0,
   );
-  const prevRaw = prevShown.map((r) => r.value ?? 0);
+  // ДЛИНЫ ОКОН ВЫРАВНИВАЮТСЯ. Сетки текущего и прошлого окна строятся каждая от своего понедельника,
+  // и на укрупнённых корзинах их число расходится (90 дней на 7 не делятся) — BarChart тогда молча
+  // снимает призрак вместе со строкой легенды, и «на столбцах не видно сравнения» возвращается
+  // ровно тем же симптомом, ради которого его чинили. Берём ПОСЛЕДНИЕ корзины прошлого окна: их и
+  // сопоставляют с текущими по индексу (канон «призрак выравнивается по индексу»), а лишние с
+  // начала — хвост чужой недели, которому в паре места нет.
+  const prevAligned = prevShown.length > shown.length ? prevShown.slice(prevShown.length - shown.length) : prevShown;
+  const prevRaw = prevAligned.map((r) => r.value ?? 0);
   // Призрак передаётся ВСЕГДА, когда данные есть; переключатель отвечает только за видимость.
   // Так строка легенды не пропадает (иначе таймбар под графиком прыгал на 21px), а линия гаснет
   // плавно вместо снятия из DOM (владелец: «дёргано появляется»).
-  const compare = prevRaw.length > 1 ? prevRaw : undefined;
+  // Короче ряда призрак быть не должен: столбцы сравнивались бы со сдвигом. Если корзин меньше —
+  // сравнение честнее не показывать вовсе, чем поставить чужой день под сегодняшний.
+  const compare = prevRaw.length > 1 && prevRaw.length === shown.length ? prevRaw : undefined;
   const compareShown = cmp === 'prev';
 
   // ── Разбивка: ряд группами ────────────────────────────────────────────────────────────────
@@ -555,9 +564,22 @@ function CdekSeriesPage({ def, metricKey }: { def: SeriesDef; metricKey: SeriesK
     <CdekSplitRow dim={splitDim} onPick={setSplitDim} onClear={() => setSplitDim('')} />
   );
 
-  // Достижение считается по ТОЧКАМ ряда, а не по итогу окна: цель — дневной уровень (сервер отдаёт
-  // grain=day), и «12 из 30 дней» — утверждение, которое можно проверить глазами по линии. Доля от
-  // суммы окна потребовала бы выбрать базу («цель × дней»?) и молча домыслить за человека.
+  // ЦЕЛЬ ЗАДАНА НА ДЕНЬ, А РЯД — НЕ ВСЕГДА ДНЕВНОЙ. Сервер сам укрупняет длинные окна (свыше 31 дня
+  // недели, свыше 180 месяцы), и прежний счёт сравнивал дневную цель с НЕДЕЛЬНОЙ суммой, называя
+  // недели днями: при выручке 9 000 ₽ в день и цели 10 000 ₽ подпись рапортовала «достигнута в 13 из
+  // 13 дней», хотя правда — ноль из девяноста. Один клик по пилюле окна переворачивал вердикт.
+  //
+  // Сравнивается СРЕДНИЙ ДЕНЬ корзины: величина недели, делённая на её дни, — это и есть то, с чем
+  // цель за день сопоставима. Краевые корзины из счёта ИСКЛЮЧЕНЫ: они покрыты окном частично, и их
+  // средний день считался бы по обрезку.
+  // БЕЗ useMemo НАМЕРЕННО: этот участок идёт ПОСЛЕ ранних возвратов (скелетон, ошибка), и хук
+  // здесь даёт «Rendered more hooks than during the previous render» — грабля этого репо, на
+  // которой я споткнулся уже трижды. Сетка — десятки объектов на рендер, мемоизировать нечего.
+  const grid =
+    series.data?.window.from && series.data?.window.to
+      ? cdekGrid(series.data.window.from, series.data.window.to, series.data.grain ?? 'day')
+      : [];
+  const grain = series.data?.grain ?? 'day';
   const targetHint = (() => {
     if (target == null) return undefined;
     if (splitDim) {
@@ -565,11 +587,23 @@ function CdekSeriesPage({ def, metricKey }: { def: SeriesDef; metricKey: SeriesK
       // бы как цель каждой из них.
       return 'При разбивке линия цели не рисуется: цель у метрики одна, а рядов несколько.';
     }
-    const known = values.filter((v): v is number => v != null);
-    if (known.length === 0) return undefined;
-    const hit = known.filter((v) => v >= target).length;
-    return `Достигнута в ${hit} из ${known.length} ${pluralRu(known.length, ['дня', 'дней', 'дней'])}`;
+    const full = shown
+      .map((row, i) => ({ value: values[i], bucket: grid.find((b) => b.key === row.day) }))
+      .filter((x) => x.value != null && x.bucket && !x.bucket.partial);
+    if (full.length === 0) return undefined;
+    const hit = full.filter((x) => (x.value as number) / (x.bucket as CdekBucket).days >= target).length;
+    const word = pluralRu(full.length, bucketWords(grain));
+    // На укрупнённом окне сравнение идёт по среднему дню — и подпись обязана это назвать, иначе
+    // «достигнута в 5 из 13 недель» прочитается как «неделя целиком дала цель за день».
+    const suffix = grain === 'day' ? '' : ' (по среднему дню)';
+    return `Достигнута в ${hit} из ${full.length} ${word}${suffix}`;
   })();
+
+  // Линия цели на полотне живёт в тех же величинах, что ряд: на недельных корзинах дневная цель
+  // рисуется как цель НЕДЕЛИ (×7). Месяцы разной длины, одной горизонталью их не описать честно —
+  // там линия не рисуется вовсе, а счёт достижения остаётся (он считает средний день).
+  const targetLevel =
+    target == null || splitDim ? null : grain === 'week' ? target * 7 : grain === 'day' ? target : null;
   const targetSection = showTarget ? (
     <CdekTargetRow
       value={target}
@@ -613,7 +647,7 @@ function CdekSeriesPage({ def, metricKey }: { def: SeriesDef; metricKey: SeriesK
     >
       {/* Линия цели: LineChart и BarChart читают её из ОДНОГО контекста, поэтому цель переживает
           переключение линия↔столбцы. При разбивке контекст пуст — см. targetHint. */}
-      <WidgetTargetContext.Provider value={splitDim ? null : target}>
+      <WidgetTargetContext.Provider value={targetLevel}>
       {/* Полотно живёт НА СВОЕЙ ПОВЕРХНОСТИ и с полной осью — как метрики Instagram и кампаний
           (владелец: «выдели сам график чуть цветом и добавь оси, по типу как на /metrics/ig-reach»;
           замер той страницы: карточка bg-card, рамка 0.8px, радиус 20px, 21 линия сетки и подписи
