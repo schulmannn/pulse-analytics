@@ -305,6 +305,12 @@ function registerCdekRoutes({ app, express, requireAuth, db, audit, cdekImport }
       // Ответ несёт groups ВМЕСТО current/previous: разбивка отвечает на «из чего сложилось», и
       // вторая полупрозрачная копия каждой серии превратила бы полотно в частокол.
       const breakdownDim = typeof req.query.breakdown === 'string' ? req.query.breakdown : '';
+      // Неизвестный разрез — ОШИБКА, а не тихая подмена. Репозиторий подставлял 'channel', и
+      // клиент рисовал чужие серии под подписью, которую держал у себя: график «по статусам»
+      // показывал каналы и выглядел совершенно правдоподобно.
+      if (breakdownDim && !['channel', 'status', 'product', 'carrier'].includes(breakdownDim)) {
+        return res.status(400).json({ error: 'unknown_breakdown' });
+      }
       if (breakdownDim) {
         const split = await db.getCdekSeriesBreakdownForActor(ctx.channel.id, req.user, {
           ...ctx.period, tz: ctx.tz, include: ctx.include, products: ctx.products,

@@ -91,13 +91,26 @@ export const FilterGlyph = (
   </svg>
 );
 
-/** Разрезы, по которым можно разложить ряд. Порядок — от самого частого вопроса к редкому. */
+/**
+ * Разрезы, по которым можно разложить ряд. Порядок — от самого частого вопроса к редкому.
+ *
+ * «Служба доставки» названа «как в выгрузке» не для красоты: это ТОТ ЖЕ столбец файла, что и
+ * «Каналы продаж», только до нормализации (server/domain/cdekImport: normalizeChannel сводит
+ * четыре известные службы в каналы, а всё незнакомое — в «Другую службу»). Без оговорки два
+ * соседних пункта меню отвечали на один вопрос двумя разными списками; с ней видно, зачем нужен
+ * второй: он показывает, что именно спрятано внутри «Другой службы».
+ */
 export const CDEK_BREAKDOWN_DIMS = [
   { id: 'channel', label: 'Каналам продаж' },
   { id: 'status', label: 'Статусам' },
   { id: 'product', label: 'Товарам' },
-  { id: 'carrier', label: 'Службе доставки' },
+  { id: 'carrier', label: 'Службе доставки (как в выгрузке)' },
 ] as const;
+
+export type CdekBreakdownDim = (typeof CDEK_BREAKDOWN_DIMS)[number]['id'];
+
+/** Разрезы, осмысленные для ЛЮБОЙ метрики СДЭКа: у заказа ровно один канал, статус и служба. */
+export const CDEK_DIMS_ALL: readonly CdekBreakdownDim[] = ['channel', 'status', 'product', 'carrier'];
 
 /**
  * Читаемый потолок числа серий. Шесть — столько же, сколько у разбивки МойСклада, и столько же
@@ -303,7 +316,21 @@ export function CdekFilterAdd({ dims, onAdd }: { dims: CdekFilterDim[]; onAdd: (
 }
 
 /** Выбор разреза — тем же приёмом, что и фильтры: «+» в строке раздела, выбранное строкой ниже. */
-export function CdekSplitAdd({ onPick }: { onPick: (dim: string) => void }) {
+/**
+ * ДОГОВОР МЕНЮ РАЗРЕЗОВ: `dims` — что метрике разрешено, `blocked` — почему остальное нельзя.
+ * Запрещённый пункт ГАСНЕТ С ПРИЧИНОЙ, а не исчезает: исчезнувший пункт человек ищет глазами и
+ * решает, что сломалось, — тот же канон, что у widgetCapabilities («показываем недоступное,
+ * чтобы узнать почему») и у соседних контролов этой же панели (столбцы, пред. период).
+ */
+export function CdekSplitAdd({
+  dims,
+  blocked,
+  onPick,
+}: {
+  dims: readonly CdekBreakdownDim[];
+  blocked?: Partial<Record<CdekBreakdownDim, string>>;
+  onPick: (dim: string) => void;
+}) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -318,11 +345,21 @@ export function CdekSplitAdd({ onPick }: { onPick: (dim: string) => void }) {
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-45">
-        {CDEK_BREAKDOWN_DIMS.map((dim) => (
-          <DropdownMenuItem key={dim.id} onSelect={() => onPick(dim.id)}>
-            {dim.label}
-          </DropdownMenuItem>
-        ))}
+        {CDEK_BREAKDOWN_DIMS.map((dim) => {
+          const why = dims.includes(dim.id) ? undefined : blocked?.[dim.id];
+          if (!dims.includes(dim.id) && !why) return null;
+          return (
+            <DropdownMenuItem
+              key={dim.id}
+              disabled={why != null}
+              onSelect={() => onPick(dim.id)}
+              className={why ? 'flex-col items-start gap-0.5' : undefined}
+            >
+              {dim.label}
+              {why && <span className="text-2xs leading-snug text-muted-foreground">{why}</span>}
+            </DropdownMenuItem>
+          );
+        })}
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -339,10 +376,14 @@ export function CdekSplitAdd({ onPick }: { onPick: (dim: string) => void }) {
  */
 export function CdekSplitRow({
   dim,
+  dims,
+  blocked,
   onPick,
   onClear,
 }: {
   dim: string;
+  dims: readonly CdekBreakdownDim[];
+  blocked?: Partial<Record<CdekBreakdownDim, string>>;
   onPick: (dim: string) => void;
   onClear: () => void;
 }) {
@@ -364,11 +405,21 @@ export function CdekSplitRow({
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-45">
-          {CDEK_BREAKDOWN_DIMS.map((d) => (
-            <DropdownMenuItem key={d.id} onSelect={() => onPick(d.id)}>
-              {d.label}
-            </DropdownMenuItem>
-          ))}
+          {CDEK_BREAKDOWN_DIMS.map((d) => {
+            const why = dims.includes(d.id) ? undefined : blocked?.[d.id];
+            if (!dims.includes(d.id) && !why) return null;
+            return (
+              <DropdownMenuItem
+                key={d.id}
+                disabled={why != null}
+                onSelect={() => onPick(d.id)}
+                className={why ? 'flex-col items-start gap-0.5' : undefined}
+              >
+                {d.label}
+                {why && <span className="text-2xs leading-snug text-muted-foreground">{why}</span>}
+              </DropdownMenuItem>
+            );
+          })}
         </DropdownMenuContent>
       </DropdownMenu>
       <button
