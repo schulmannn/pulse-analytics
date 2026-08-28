@@ -33,8 +33,11 @@ const buttonVariants = cva(
         // действие обязано быть заметнее синего акцента, — «Сохранить» на странице метрики
         // владелец не находил дважды подряд. `default` занят единственным синим канона, поэтому
         // у контраста свой вариант, а не переопределение классами на месте: такие переопределения
-        // уже разошлись по четырём точкам (IgContentDesktop ×2, ReportDocumentDesktop ×2) и
-        // отличаются друг от друга и токеном текста, и силой hover.
+        // успели разойтись по четырём точкам (IgContentDesktop ×2, ReportDocumentDesktop ×2) и
+        // отличались друг от друга и токеном текста, и силой hover, и цветом focus-кольца. Все
+        // четыре сведены сюда; осталось одно НАМЕРЕННОЕ отличие — у Instagram чернила берутся по
+        // местной плите (text-surface-table), потому что кнопка стоит на bg-surface-table.
+        // Возврат копий стережёт правило contrast-button-retyped в scripts/design-motion-lint.
         contrast: `bg-foreground text-background hover:bg-foreground/90 focus-visible:ring-foreground/35 ${PRESS_DIP}`,
         ghost: `text-muted-foreground hover:bg-muted hover:text-foreground ${PRESS_DIP}`,
         link: 'text-primary underline-offset-4 hover:underline',

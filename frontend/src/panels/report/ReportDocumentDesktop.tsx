@@ -247,7 +247,8 @@ export function ReportDocumentDesktop({
               pending={savePending}
               disabled={savePending || !nameValid || !sourceValid || !dirty}
               size="sm"
-              className="report-control bg-foreground text-background shadow-xs hover:bg-foreground/80"
+              variant="contrast"
+              className="report-control shadow-xs"
             >
               <Save aria-hidden="true" />
               {savePending ? 'Сохранение…' : 'Сохранить'}
@@ -280,7 +281,8 @@ export function ReportDocumentDesktop({
               type="button"
               onClick={enterEdit}
               size="sm"
-              className="report-control bg-foreground text-background shadow-xs hover:bg-foreground/80"
+              variant="contrast"
+              className="report-control shadow-xs"
             >
               <Pencil aria-hidden="true" />
               Редактировать

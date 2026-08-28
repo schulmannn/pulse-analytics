@@ -494,8 +494,10 @@ picture of a button. Under `prefers-reduced-motion` the dip is dropped outright
 (`motion-reduce:active:scale-100`) rather than left to the global 0.01ms net, which would turn it into
 a teleport — the reduced-motion rule is «keep the colour half, drop the transform half», the same split
 as the hover gate below. Disabled buttons never reach `:active` (`disabled:pointer-events-none`).
-Bespoke controls that predate this (`edit-toggle`, `add-widget-trigger`, `report-control`) keep their
-own `scale(0.98)` — same band, and they are not `Button` instances.
+Bespoke controls that predate this (`edit-toggle`, `add-widget-trigger`) keep their own `scale(0.98)`
+— same band, and they are not `Button` instances. `report-control` is different: it is a LEXICON laid
+over real `Button`s inside `.report-rhea` (radius 1rem plus a `translateY(1px)` press), so those
+buttons keep their variant — including `contrast` — and add only what belongs to the report.
 Gated by `e2e/press-and-exit.spec.ts`, which measures computed `scale` under a held pointer: a
 class-name assertion would pass even if the rule lost a specificity tie.
 
