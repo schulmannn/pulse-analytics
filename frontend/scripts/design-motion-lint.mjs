@@ -102,6 +102,19 @@ const rules = [
     exempt: (rel) => rel.endsWith('.css') || rel.endsWith('components/chartWidget/KpiValue.tsx'),
   },
   {
+    id: 'contrast-button-retyped',
+    hint: 'use <Button variant="contrast"> — inverted ink/canvas lives in one variant',
+    // Инверсия «чернила ↔ полотно» была набрана руками в четырёх местах, и копии разошлись:
+    // у одной пары чернила брались по плите таблицы, у другой hover светлел на /80 вместо /90,
+    // а focus-кольцо оставалось СИНИМ на чёрной кнопке. Правило ловит голый bg-foreground рядом
+    // с инвертированными чернилами: под альфой (bg-foreground/10) это заливка, а не инверсия, и
+    // под префиксом состояния (data-[state=checked]:bg-foreground у чекбокса) — не кнопка.
+    test: (line) =>
+      /(?<![:/\w-])bg-foreground(?![/\w-])/.test(line) &&
+      /(?<![:/\w-])text-(background|surface-table|card)(?![/\w-])/.test(line),
+    exempt: (rel) => rel.endsWith('.css') || rel.endsWith('components/ui/button.tsx'),
+  },
+  {
     id: 'money-formatted-inline',
     hint: 'format money through lib/metricNumber (formatMoney / formatMetricNumber)',
     // Один смысл — «сколько рублей» — жил в ШЕСТИ объявлениях по трём разным правилам: СДЭК звал

@@ -680,7 +680,12 @@ export function IgContentDesktop({ ig }: { ig: IgData }) {
             size="sm"
             onClick={() => setAddItems(selectedItems)}
             data-testid="add-to-campaign"
-            className="bg-foreground text-surface-table hover:bg-foreground/90 focus-visible:ring-foreground/35"
+            variant="contrast"
+            // Чернила по МЕСТНОЙ плите, и это единственное намеренное отличие от варианта:
+            // кнопка стоит на bg-surface-table, а в тёмной теме --surface-table (#0D0D0F) и
+            // --background (#080808) расходятся на 2% светлоты (гейт ig-content.spec:302
+            // сверяет цвет кнопки именно с плитой таблицы, и сверяет в тёмной теме).
+            className="text-surface-table"
           >
             Добавить в кампанию
           </Button>
@@ -943,7 +948,12 @@ function IgPostInspector({
               type="button"
               size="xs"
               onClick={() => onOpenFull(post.id!)}
-              className="bg-foreground text-surface-table hover:bg-foreground/90 focus-visible:ring-foreground/35"
+              variant="contrast"
+            // Чернила по МЕСТНОЙ плите, и это единственное намеренное отличие от варианта:
+            // кнопка стоит на bg-surface-table, а в тёмной теме --surface-table (#0D0D0F) и
+            // --background (#080808) расходятся на 2% светлоты (гейт ig-content.spec:302
+            // сверяет цвет кнопки именно с плитой таблицы, и сверяет в тёмной теме).
+            className="text-surface-table"
             >
               Открыть подробнее
             </Button>
