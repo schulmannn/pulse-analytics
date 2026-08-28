@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { AxeBuilder } from '@axe-core/playwright';
 import { overflowingCards } from './helpers';
 
 // «Заказы» СДЭКа — рабочая лента склада. Проверяется то, ради чего страница существует: найти
@@ -262,4 +263,54 @@ test('«Возврат» действительно находит заказ, �
     .toBe(true);
   await expect(page.getByRole('row', { name: /33905564/ })).toBeVisible();
   expect(seen.every((s) => new URLSearchParams(s).get('status') === null)).toBe(true);
+});
+
+/**
+ * Поле поиска на телефоне делило строку с двумя кнопками фильтров и схлопывалось до 43 пикселей —
+ * в него помещался курсор и ничего больше. На узком экране оно обязано занимать свою строку
+ * целиком и держать 44px тач-канона.
+ */
+test('поиск на телефоне занимает свою строку, а не 43 пикселя', async ({ page }) => {
+  await page.setViewportSize({ width: 430, height: 900 });
+  await bootOrders(page);
+  const search = page.getByRole('searchbox', { name: 'Поиск заказа' });
+  await expect(search).toBeVisible();
+  const box = (await search.boundingBox())!;
+  expect(box.width).toBeGreaterThan(300);
+  expect(box.height).toBeGreaterThanOrEqual(44);
+});
+
+/**
+ * Таблица шире экрана прокручивалась ТОЛЬКО мышью: у ячеек нет фокусируемого содержимого, Tab
+ * пролетал контейнер насквозь, и правые колонки с клавиатуры было не достать (WCAG 2.1.1).
+ */
+test('лента заказов прокручивается с клавиатуры и называет себя', async ({ page }) => {
+  await page.setViewportSize({ width: 430, height: 900 });
+  await bootOrders(page);
+  const region = page.locator('.data-table-scroll[tabindex="0"]').first();
+  await expect(region).toHaveAttribute('role', 'region');
+  await expect(region).toHaveAttribute('aria-label', /прокрутка по горизонтали/);
+  await region.focus();
+  await page.keyboard.press('ArrowRight');
+  await expect.poll(() => region.evaluate((el) => el.scrollLeft)).toBeGreaterThan(0);
+});
+
+/**
+ * Общий a11y-гейт ходит по демо-маршрутам, а у СДЭКа демо-фикстур нет — поэтому скан живёт здесь,
+ * на его собственных стабах. Иначе целый источник (лента, фильтры, таблица) не проверялся вовсе.
+ */
+test('axe: лента заказов без серьёзных нарушений', async ({ page }, testInfo) => {
+  await bootOrders(page);
+  const results = await new AxeBuilder({ page })
+    .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+    .disableRules(['color-contrast'])
+    .analyze();
+  await testInfo.attach(`axe-cdek-orders-${testInfo.project.name}`, {
+    body: JSON.stringify(results.violations, null, 2),
+    contentType: 'application/json',
+  });
+  const serious = results.violations
+    .filter((v) => v.impact === 'serious' || v.impact === 'critical')
+    .map((v) => ({ id: v.id, help: v.help, nodes: v.nodes.slice(0, 5).map((n) => n.target.join(' ')) }));
+  expect(serious, JSON.stringify(serious, null, 2)).toEqual([]);
 });
