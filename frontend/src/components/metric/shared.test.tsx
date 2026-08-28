@@ -1,17 +1,9 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { AboutRow, ComparisonDelta, ComparisonDeltaRow, RailSection } from './shared';
+import { ComparisonDelta, ComparisonDeltaRow, RailSection } from './shared';
 
 // Эти элементы — общие для всех metric-страниц (7 вертикалей): тест пинит канон разметки,
 // чтобы правка «для одной страницы» не разъехалась молча по остальным.
-
-describe('AboutRow', () => {
-  it('renders the term/description pair with the canonical classes', () => {
-    const html = renderToStaticMarkup(<AboutRow label="Как считается" text="Сумма за окно." />);
-    expect(html).toContain('<dt class="text-2xs tracking-wide text-muted-foreground">Как считается</dt>');
-    expect(html).toContain('Сумма за окно.');
-  });
-});
 
 describe('RailSection', () => {
   it('renders the flat variant: hairline heading, no card frame', () => {

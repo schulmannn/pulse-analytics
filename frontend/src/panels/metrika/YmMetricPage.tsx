@@ -24,11 +24,7 @@ import { useExplorerChartHeight } from '@/lib/useExplorerChartHeight';
 import { usePeriod, type DateRange, type PeriodDays } from '@/lib/period';
 import { useMsResolvedPeriod, type MsPeriod } from '@/lib/msPeriod';
 import { useYmGoals, useYmHourly, useYmSummary } from '@/api/queries';
-import {
-  YM_BREAKDOWN_BY_KEY,
-  type AboutDef,
-  type YmBreakdownDef,
-} from '@/panels/metrika/ymBreakdowns';
+import { YM_BREAKDOWN_BY_KEY, type YmBreakdownDef } from '@/panels/metrika/ymBreakdowns';
 import { isYmMetricKey } from '@/panels/metrika/ymMetricKeys';
 import { ComparisonDeltaRow, MetricColumns, MetricDescriptor, WindowBarShell, RailSection, MetricPageHeader} from '@/components/metric/shared';
 
@@ -81,7 +77,6 @@ function YmMetricShell({
 }: {
   term: string;
   descriptor?: string;
-  about: AboutDef;
   comparison?: ReactNode;
   children: ReactNode;
 }) {
@@ -213,7 +208,6 @@ interface YmSeriesDef {
   /** true — аддитивная метрика (сумма по дням = период). false — посетители: дневные уникальные
       не суммируются в истинный уникум, подпись честно говорит «сумма дневных уникальных». */
   additive: boolean;
-  about: AboutDef;
 }
 
 const SERIES_DEFS: Record<'ym-visits' | 'ym-users' | 'ym-pageviews', YmSeriesDef> = {
@@ -222,34 +216,18 @@ const SERIES_DEFS: Record<'ym-visits' | 'ym-users' | 'ym-pageviews', YmSeriesDef
     term: 'Визиты',
     genitive: 'визитов',
     additive: true,
-    about: {
-      formula: 'Число визитов по дням; заголовок окна — сумма за выбранное окно.',
-      included: 'Визиты аддитивны — сумма по дням равна периоду. Роботы «по поведению» учтены, а не исключены молча.',
-      source: 'Дневные отчёты Reporting API Метрики (accuracy=full) + архив ym_daily.',
-    },
   },
   'ym-users': {
     block: 'users',
     term: 'Посетители',
     genitive: 'посетителей',
     additive: false,
-    about: {
-      formula: 'Число посетителей по дням; заголовок окна — СУММА дневных уникальных за окно.',
-      included:
-        'Дневные уникальные не складываются в истинный уникум за период (одного человека в разные дни считаем повторно) — сумма выше периодного уникума. Обе цифры честные, но отвечают на разные вопросы.',
-      source: 'Дневные отчёты Reporting API Метрики (accuracy=full) + архив ym_daily.',
-    },
   },
   'ym-pageviews': {
     block: 'pageviews',
     term: 'Просмотры страниц',
     genitive: 'просмотров',
     additive: true,
-    about: {
-      formula: 'Число просмотров страниц по дням; заголовок окна — сумма за выбранное окно.',
-      included: 'Просмотры аддитивны — сумма по дням равна периоду. Это hits-метрика, не визиты.',
-      source: 'Дневные отчёты Reporting API Метрики (accuracy=full) + архив ym_daily.',
-    },
   },
 };
 
@@ -273,14 +251,14 @@ function YmSeriesPage({ def }: { def: YmSeriesDef }) {
 
   if (summary.isPending) {
     return (
-      <YmMetricShell term={def.term} about={def.about}>
+      <YmMetricShell term={def.term}>
         <Skeleton className="h-[420px] w-full" />
       </YmMetricShell>
     );
   }
   if (summary.isError) {
     return (
-      <YmMetricShell term={def.term} about={def.about}>
+      <YmMetricShell term={def.term}>
         <ErrorState
           title="Не удалось получить данные Яндекс.Метрики"
           reason={summary.error instanceof Error ? summary.error.message : 'ошибка'}
@@ -341,7 +319,6 @@ function YmSeriesPage({ def }: { def: YmSeriesDef }) {
     <YmMetricShell
       term={def.term}
       descriptor={`Веб-аналитика сайта за выбранное окно · ${sumCaption}`}
-      about={def.about}
       comparison={
         <div className="space-y-3">
           <div className="flex items-baseline justify-between gap-3">
@@ -523,7 +500,6 @@ function YmBreakdownPage({ def }: { def: YmBreakdownDef }) {
     <YmMetricShell
       term={def.title}
       descriptor={def.descriptor}
-      about={def.about}
       comparison={<NoComparison text={LIST_COMPARISON} />}
     >
       <YmReportCard
@@ -556,11 +532,6 @@ function YmHourlyPage() {
     <YmMetricShell
       term="Трафик по часам"
       descriptor="Суточный профиль визитов за выбранное окно"
-      about={{
-        formula: 'Распределение визитов по часу суток (0..23) — всегда 24 плотные клетки, насыщенность нормирована на максимум окна.',
-        included: 'Часы — в часовом поясе счётчика. Визиты — своя единица, не TG-просмотры и не IG-охват.',
-        source: 'Отчёт визитов Метрики (ym:s:hour).',
-      }}
       comparison={
         <NoComparison text="Ритм по часам — форма распределения за окно, а не одна метрика периода; сравнение периодов не рассчитывается." />
       }

@@ -105,11 +105,6 @@ export function MsMetricPage({ metricKey }: { metricKey: string }) {
           metric="revenue"
           term="Выручка"
           descriptor="Продажи МойСклада за выбранное окно"
-          about={{
-            formula: 'Сумма продаж по дням; бакет недели/месяца — сумма за бакет.',
-            included: 'Возвраты считаются отдельно и из выручки не вычитаются.',
-            source: 'Отчёт продаж МойСклада (plotseries) + дневной архив ms_daily.',
-          }}
         />
       );
     case 'ms-orders':
@@ -118,10 +113,6 @@ export function MsMetricPage({ metricKey }: { metricKey: string }) {
           metric="orders"
           term="Заказы"
           descriptor="Число заказов МойСклада за выбранное окно"
-          about={{
-            formula: 'Число заказов по дням; бакет недели/месяца — сумма заказов за бакет.',
-            source: 'Заказы МойСклада (ms_orders) + дневной архив ms_daily.',
-          }}
         />
       );
     case 'ms-aov':
@@ -130,11 +121,6 @@ export function MsMetricPage({ metricKey }: { metricKey: string }) {
           metric="aov"
           term="Средний чек"
           descriptor="Средний чек МойСклада за выбранное окно"
-          about={{
-            formula:
-              'Σ суммы заказов ÷ Σ числа заказов за бакет (не среднее дневных чеков). В период без заказов не определён.',
-            source: 'Заказы МойСклада (ms_orders) + дневной архив ms_daily.',
-          }}
         />
       );
     case 'ms-customers':
@@ -276,11 +262,6 @@ const BACK_OVERVIEW: Back = { to: '/sklad', label: 'МойСклад · Обзо
 const BACK_CLIENTS: Back = { to: '/sklad/clients', label: 'МойСклад · Клиенты' };
 const BACK_CHANNELS: Back = { to: '/sklad/channels', label: 'МойСклад · Каналы' };
 
-interface AboutDef {
-  formula: string;
-  included?: string;
-  source: string;
-}
 
 /** Тихая шапка + две колонки (главный блок + rail «О метрике»), как у `/metrics/ig-reach`. */
 function MsMetricShell({
@@ -294,7 +275,6 @@ function MsMetricShell({
   back: Back;
   term: string;
   descriptor?: string;
-  about: AboutDef;
   comparison?: ReactNode;
   /** Optional explorer controls: above the chart on phone, first in the right rail on desktop. */
   tools?: ReactNode;
@@ -513,12 +493,10 @@ function MsSummaryPage({
   metric,
   term,
   descriptor,
-  about,
 }: {
   metric: Metric;
   term: string;
   descriptor: string;
-  about: AboutDef;
 }) {
   const window = useMsMetricWindow();
   const controls = useMsMetricUrlControls(SUMMARY_URL);
@@ -540,7 +518,6 @@ function MsSummaryPage({
       back={BACK_OVERVIEW}
       term={term}
       descriptor={descriptor}
-      about={about}
       comparison={
         <ComparisonReadout
           current={valueOf(current.data)}
@@ -610,12 +587,6 @@ function MsCustomerPage({
       back={BACK_CLIENTS}
       term={term}
       descriptor={descriptor}
-      about={{
-        formula:
-          '«Новый» = первый заказ контрагента за всю историю канала; «повторный» — последующие. Доля повторной выручки = Σ повторной выручки ÷ Σ общей выручки.',
-        included: 'Заказы без контрагента не учитываются — некому приписать повторность.',
-        source: 'Архив заказов МойСклада (ms_orders).',
-      }}
       comparison={
         <ComparisonReadout
           current={valueOf(current.data)}
@@ -743,11 +714,6 @@ function MsChannelsPage() {
       back={BACK_CHANNELS}
       term="Каналы продаж"
       descriptor="Динамика по каналам продаж за выбранное окно"
-      about={{
-        formula:
-          'Выручка / заказы / средний чек по каналу продаж заказа. Пустой фильтр — все каналы в агрегате; мультивыбор агрегирует выбранные; разбивка рисует до 6 каналов отдельными сериями.',
-        source: 'Заказы МойСклада с salesChannel + дневной архив ms_daily.',
-      }}
       tools={filterEditor}
       comparison={
         <ComparisonReadout
@@ -976,10 +942,6 @@ function MsFunnelPage() {
       back={BACK_OVERVIEW}
       term="Структура заказов по статусам"
       descriptor="Заказы, созданные в выбранном окне, по последнему сохранённому статусу"
-      about={{
-        formula: 'Заказы, созданные в выбранном окне, сгруппированы по последнему статусу, полученному при обновлении истории. Переключатель показывает число заказов или их выручку. Это не история переходов, не конверсия и не порядок этапов.',
-        source: 'Заказы МойСклада (ms_orders, state_id).',
-      }}
       comparison={
         <ComparisonReadout
           current={valueOf(funnel.data)}
@@ -1056,13 +1018,6 @@ function MsProductsPage() {
           периодом. Для окна «Всё» сопоставимого предыдущего периода нет.
         </p>
       }
-      about={{
-        formula:
-          'Концентрация — доля топ-N в положительной выручке или валовой прибыли (знаменатель по полному отчёту до limit). Рейтинг — сортировка по выручке / прибыли / марже. Динамика сравнивает окно с предыдущим равным по выручке / валовой прибыли / штукам.',
-        included:
-          'Маржа определена только при положительной выручке; убыточные позиции показаны отдельно. Динамика доказывает лишь наличие/отсутствие продаж в окнах; для «Всё» предыдущего равного окна нет. Возвраты не вычитаются.',
-        source: 'Отчёт по товарам МойСклада (profit).',
-      }}
     >
       <MsReportCard id="ms-page-products" title="Отчёт по товарам">
         <MsTopProductsCard
@@ -1098,13 +1053,6 @@ function MsStockPage() {
       back={BACK_OVERVIEW}
       term="Остатки"
       descriptor="Что заканчивается: остатки склада и дни до нуля по скорости продаж окна"
-      about={{
-        formula:
-          '«~Дней до нуля» = остаток ÷ средняя дневная скорость продаж выбранного окна (продано за окно ÷ дней в окне). Резерв из остатка не вычитается — показан отдельной колонкой.',
-        included:
-          'Товар без продаж за окно получает «нет продаж» — прогноз для него не определён. Окно «Всё» недоступно: скорости нужен конечный знаменатель, выбор переводится в 30 дн. Показаны первые 200 позиций по срочности.',
-        source: 'Живой отчёт остатков МойСклада (stock/all) + отчёт продаж по товарам (profit).',
-      }}
       comparison={
         <p className="text-xs leading-relaxed text-muted-foreground">
           Остатки — живой снимок склада на сейчас; окно задаёт только скорость продаж, поэтому
@@ -1151,11 +1099,6 @@ function MsReturnsPage() {
       back={BACK_OVERVIEW}
       term="Возвраты"
       descriptor="Возвраты МойСклада за выбранное окно"
-      about={{
-        formula: 'Число и сумма возвратов (salesreturn), созданных в выбранном окне, дневной серией из архива.',
-        included: 'Возвраты считаются отдельно и из выручки/RFM заказов НЕ вычитаются.',
-        source: 'Архив возвратов МойСклада (ms_returns).',
-      }}
       comparison={
         <ComparisonReadout
           current={valueOf(current.data)}
@@ -1223,12 +1166,6 @@ function MsSalesChannelsPage() {
       back={BACK_CHANNELS}
       term="Продажи по каналам"
       descriptor="Доля каждого канала и его абсолютный вклад в изменение выручки или заказов"
-      about={{
-        formula:
-          'Доля канала = его выручка или заказы ÷ общий результат окна, включая заказы без канала. Вклад в изменение — знаковая абсолютная разница канала против равного предыдущего окна; положительные и отрицательные изменения в сумме дают общее изменение.',
-        included: 'Заказы без канала — отдельная синтетическая строка «Без канала», а не сноска. Для окна «Всё» предыдущего равного периода нет — изменение не рассчитывается.',
-        source: 'Заказы МойСклада с salesChannel.',
-      }}
       comparison={
         <ComparisonReadout
           current={totalOf(channels.data)}
@@ -1313,10 +1250,6 @@ function MsGeographyPage() {
       back={BACK_CHANNELS}
       term="География заказов"
       descriptor="Города доставки за выбранное окно"
-      about={{
-        formula: 'Города доставки по числу заказов и сумме; самовывоз / без города вынесен отдельно.',
-        source: 'Адрес доставки заказов МойСклада (ms_orders).',
-      }}
       comparison={
         <ComparisonReadout
           current={geo.data?.total_orders ?? null}
@@ -1368,11 +1301,6 @@ function MsTopCustomersPage() {
       back={BACK_CLIENTS}
       term="Топ покупателей"
       descriptor="Контрагенты окна по сумме заказов"
-      about={{
-        formula: 'Контрагенты окна по сумме заказов; имена резолвит справочник counterparty по id.',
-        included: 'Удалённый / безымянный контрагент показывается заглушкой, а не выпадает из топа.',
-        source: 'Архив заказов МойСклада (ms_orders) + справочник counterparty.',
-      }}
       comparison={
         <ComparisonReadout
           current={sumOf(topCustomers.data)}
@@ -1410,13 +1338,6 @@ function MsRfmPage() {
       back={BACK_CLIENTS}
       term="RFM-сегменты"
       descriptor="Относительная ценность и активность покупателей выбранного окна"
-      about={{
-        formula:
-          'R — календарные дни от последнего заказа до конца окна; F — число заказов; M — сумма заказов. Для каждой величины покупатели получают относительный score 1–5 по mid-rank: одинаковые значения всегда получают одинаковую оценку, а полностью одинаковая выборка — нейтральную 3.',
-        included:
-          'Только контрагенты с заказом в выбранном окне. Заказы без контрагента показаны отдельно. Возвраты не вычитаются: их архив и семантика выпускаются отдельной метрикой.',
-        source: 'Архив заказов МойСклада (ms_orders); расчёт на точную дату конца выбранного окна.',
-      }}
       comparison={
         <ComparisonReadout
           current={rfm.data?.customers ?? null}
@@ -1479,12 +1400,6 @@ function MsCohortsPage() {
       back={BACK_CLIENTS}
       term="Когорты"
       descriptor="Возвращаемость и монетизация по месяцу первой покупки"
-      about={{
-        formula: meta.formula,
-        included:
-          'Все режимы нормированы на исходный размер когорты, поэтому когорты разного размера сравнимы. Будущие месяцы когорты — пустые (данных ещё нет), а не ноль.',
-        source: 'Архив заказов МойСклада (ms_orders); суммы в рублях, возвраты не вычитаются.',
-      }}
     >
       <MsReportCard
         id="ms-page-cohorts"
