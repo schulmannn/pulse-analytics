@@ -1232,8 +1232,11 @@ export function MetricPage() {
         {/* Composer rail (артефакт): аналитические карточки вместо волосяных секций у бордюра.
             «Сравнение» первым и с явной иерархией — итог окна доминирует, база и Δ вторичны;
             ниже — Разбивка и «О метрике» той же карточной иерархией. */}
-        {!railHidden && (
-        <aside id="tg-metric-inspector" className="space-y-4">
+        {/* Панель НЕ выбрасывается из разметки: она гаснет только на широком экране, как это делает
+            общий MetricColumns. Пока её снимали совсем, на ноутбуке в половину экрана и на телефоне
+            вместе с ней исчезала и кнопка возврата — итог окна, база сравнения, разбивка и «О
+            метрике» пропадали, и вернуть их можно было только через чистку хранилища браузера. */}
+        <aside id="tg-metric-inspector" className={cn('space-y-4', railHidden && 'lg:hidden')}>
           <RailSection title="Сравнение" mark="comparison" variant="card">
             {/* Итог окна — доминанта карточки (hero переехал сюда после тихой шапки). */}
             <div className="text-2xs tracking-wide text-muted-foreground">Текущий период</div>
@@ -1297,7 +1300,6 @@ export function MetricPage() {
             Открыть аналитику <span aria-hidden="true">→</span>
           </Link>
         </aside>
-        )}
       </div>
 
       {openPost && (

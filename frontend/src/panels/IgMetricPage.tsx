@@ -552,8 +552,11 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
         </div>
 
         {/* Explore rail — flat hairline sections (no widget chrome: these are controls, not cards). */}
-        {!railHidden && (
-        <aside id="ig-metric-inspector" className="space-y-6">
+        {/* Панель НЕ выбрасывается из разметки: она гаснет только на широком экране, как это делает
+            общий MetricColumns. Пока её снимали совсем, на ноутбуке в половину экрана и на телефоне
+            вместе с ней исчезала и кнопка возврата — итог окна, база сравнения, разбивка и «О
+            метрике» пропадали, и вернуть их можно было только через чистку хранилища браузера. */}
+        <aside id="ig-metric-inspector" className={cn('space-y-6', railHidden && 'lg:hidden')}>
           <RailSection title="Сравнение">
             {/* Итог окна — канонический дом итога после тихой шапки (v2: hero переехал сюда).
                 Для ig-follows это текущая база (то, чем ведёт страница), не сумма подписок. */}
@@ -618,7 +621,6 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
             Открыть IG-аналитику <span aria-hidden="true">→</span>
           </Link>
         </aside>
-        )}
       </div>
     </div>
   );
@@ -698,8 +700,11 @@ function IgAggregatePage({ def, pair, windowDays, handle }: { def: IgAggDef; pai
           <WindowBar value={days} onChange={setDays} allowAll={false} />
         </div>
 
-        {!railHidden && (
-        <aside id="ig-aggregate-inspector" className="space-y-6">
+        {/* Панель НЕ выбрасывается из разметки: она гаснет только на широком экране, как это делает
+            общий MetricColumns. Пока её снимали совсем, на ноутбуке в половину экрана и на телефоне
+            вместе с ней исчезала и кнопка возврата — итог окна, база сравнения, разбивка и «О
+            метрике» пропадали, и вернуть их можно было только через чистку хранилища браузера. */}
+        <aside id="ig-aggregate-inspector" className={cn('space-y-6', railHidden && 'lg:hidden')}>
           {/* v2: итог живёт в «Сравнении» — первая секция rail. Прошлый период у агрегатной
               страницы уже разложен в основном блоке, поэтому здесь только строка итога. */}
           <RailSection title="Сравнение">
@@ -712,7 +717,6 @@ function IgAggregatePage({ def, pair, windowDays, handle }: { def: IgAggDef; pai
             Открыть IG-аналитику <span aria-hidden="true">→</span>
           </Link>
         </aside>
-        )}
       </div>
     </div>
   );
@@ -823,8 +827,11 @@ function IgErPage({
           <WindowBar value={days} onChange={setDays} allowAll={false} />
         </div>
 
-        {!railHidden && (
-        <aside id="ig-er-inspector" className="space-y-6">
+        {/* Панель НЕ выбрасывается из разметки: она гаснет только на широком экране, как это делает
+            общий MetricColumns. Пока её снимали совсем, на ноутбуке в половину экрана и на телефоне
+            вместе с ней исчезала и кнопка возврата — итог окна, база сравнения, разбивка и «О
+            метрике» пропадали, и вернуть их можно было только через чистку хранилища браузера. */}
+        <aside id="ig-er-inspector" className={cn('space-y-6', railHidden && 'lg:hidden')}>
           {/* v2: итог живёт в «Сравнении» — первая секция rail. Прошлый период у ER уже
               разложен в основном блоке, поэтому здесь только строка итога. */}
           <RailSection title="Сравнение">
@@ -837,7 +844,6 @@ function IgErPage({
             Открыть IG-аналитику <span aria-hidden="true">→</span>
           </Link>
         </aside>
-        )}
       </div>
     </div>
   );
@@ -893,14 +899,16 @@ function IgChartShell({
         )}>
         {!railHidden && <InspectorHandle controlsId="ig-shell-inspector" />}
         <div className="min-w-0 space-y-6">{children}</div>
-        {!railHidden && (
-        <aside id="ig-shell-inspector" className="space-y-6">
+        {/* Панель НЕ выбрасывается из разметки: она гаснет только на широком экране, как это делает
+            общий MetricColumns. Пока её снимали совсем, на ноутбуке в половину экрана и на телефоне
+            вместе с ней исчезала и кнопка возврата — итог окна, база сравнения, разбивка и «О
+            метрике» пропадали, и вернуть их можно было только через чистку хранилища браузера. */}
+        <aside id="ig-shell-inspector" className={cn('space-y-6', railHidden && 'lg:hidden')}>
           <RailSection title="Сравнение">{comparison}</RailSection>
           <Link to={back.to} className="inline-flex items-center gap-1 text-xs font-medium text-primary transition-colors hover:text-primary/80">
             Открыть раздел <span aria-hidden="true">→</span>
           </Link>
         </aside>
-        )}
       </div>
     </div>
   );

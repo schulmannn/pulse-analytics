@@ -32,6 +32,53 @@ function mondayOf(ms: number): number {
   return ms - shift * DAY_MS;
 }
 
+/** Полная длина корзины в днях: столько дней она накрывает, когда лежит внутри окна целиком. */
+export function bucketFullDays(grain: string, key: string): number {
+  if (grain === 'week') return 7;
+  if (grain !== 'month') return 1;
+  const ms = Date.parse(`${key}T00:00:00Z`);
+  const d = new Date(ms);
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
+}
+
+/** Единица корзины для подписей: окно 90 дней показано НЕДЕЛЯМИ, и называть их днями нельзя. */
+export function bucketWords(grain: string): [string, string, string] {
+  if (grain === 'week') return ['недели', 'недель', 'недель'];
+  if (grain === 'month') return ['месяца', 'месяцев', 'месяцев'];
+  return ['дня', 'дней', 'дней'];
+}
+
+export interface CdekBucket {
+  key: string;
+  /** Сколько дней ОКНА накрывает корзина: у краевых меньше полной длины. */
+  days: number;
+  /** Корзина покрыта окном не целиком — её величина несравнима с соседними. */
+  partial: boolean;
+}
+
+/**
+ * Сетка окна с длиной каждой корзины.
+ *
+ * КРАЕВЫЕ КОРЗИНЫ НЕПОЛНЫЕ. Окно «90 дней» почти никогда не начинается в понедельник и не кончается
+ * в воскресенье: первая неделя может быть покрыта одним днём из семи, последняя — пятью. Рисовать их
+ * наравне с полными значит показывать скачок в начале и обвал в конце у совершенно ровного бизнеса —
+ * а правый край читают как «что происходит сейчас», и он падал ВСЕГДА: на 90д, 365д и «Всё».
+ */
+export function cdekGrid(from: string, to: string, grain: string): CdekBucket[] {
+  const start = Date.parse(`${from}T00:00:00Z`);
+  const end = Date.parse(`${to}T00:00:00Z`);
+  const keys = cdekGridKeys(from, to, grain);
+  return keys.map((key) => {
+    const full = bucketFullDays(grain, key);
+    const bucketStart = Date.parse(`${key}T00:00:00Z`);
+    const bucketEnd = bucketStart + (full - 1) * DAY_MS;
+    const covered =
+      Math.round((Math.min(bucketEnd, end) - Math.max(bucketStart, start)) / DAY_MS) + 1;
+    const days = Math.max(0, Math.min(full, covered));
+    return { key, days, partial: days > 0 && days < full };
+  });
+}
+
 /** Ключи сетки окна для заданной грануляции — ровно те, какими их печатает date_trunc. */
 export function cdekGridKeys(from: string, to: string, grain: string): string[] {
   const start = Date.parse(`${from}T00:00:00Z`);

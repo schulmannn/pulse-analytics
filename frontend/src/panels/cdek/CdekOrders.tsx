@@ -5,7 +5,12 @@ import { ErrorState } from '@/components/ErrorState';
 import { TableSkeleton } from '@/components/ui/dataSkeleton';
 import { useCdekHourly, useCdekOrders, type CdekOrder } from '@/api/cdek';
 import { CdekOrderFilter } from '@/panels/cdek/CdekPicker';
-import { CDEK_SALES_CHANNELS, CDEK_STATUSES, cdekStatusInclude } from '@/panels/cdek/cdekStatusFilter';
+import {
+  CDEK_CANON_STATUSES,
+  CDEK_SALES_CHANNELS,
+  CDEK_STATUSES,
+  cdekStatusInclude,
+} from '@/panels/cdek/cdekStatusFilter';
 import { useVirtualRows } from '@/lib/useVirtualRows';
 import { useScrollEdgeFade } from '@/lib/useScrollEdgeFade';
 import { fmt } from '@/lib/format';
@@ -52,7 +57,13 @@ export function CdekOrders() {
   const periodInLabel = useCardShowsPeriod() ? windowLabel : undefined;
 
   const [channels, setChannels] = useState<string[]>([]);
-  const [statuses, setStatuses] = useState<string[]>([]);
+  // ФИЛЬТР СТАРТУЕТ С КАНОНА, а не с пустоты. Пустой набор на сервере означает «только отгруженное»
+  // (завершён + в доставке), то есть лента и раньше показывала два статуса из шести — но кнопка при
+  // этом выглядела невыбранной, без числа и подсветки, и читалась как «фильтра нет». Человек искал
+  // отменённый заказ по верному номеру, получал «Ничего не нашлось» и совет проверить номер —
+  // совет заведомо бесполезный. Теперь состояние видно: «Статусы · 2», и первый выбор ДОБАВЛЯЕТ
+  // статус к видимым, а не подменяет ленту целиком.
+  const [statuses, setStatuses] = useState<string[]>([...CDEK_CANON_STATUSES]);
   const [q, setQ] = useState('');
 
   // Выбранные статусы едут через `include` — тем же каноном, что и на метриках (cdekStatusInclude):
@@ -113,7 +124,26 @@ export function CdekOrders() {
             compact
             size="table"
             title={q ? 'Ничего не нашлось' : 'Нет заказов за период.'}
-            reason={q ? 'Проверьте номер: поиск идёт по номеру заказа, внешнему номеру и трек-номеру.' : undefined}
+            // Пустая лента ОБЯЗАНА назвать действующий фильтр: искомый заказ может лежать под
+            // снятым статусом или каналом, и совет «проверьте номер» уводил в сторону от причины.
+            reason={
+              [
+                q ? 'Поиск идёт по номеру заказа, внешнему номеру и трек-номеру.' : null,
+                statuses.length > 0 && statuses.length < CDEK_STATUSES.length
+                  ? `Считаются только: ${statuses
+                      .map((id) => CDEK_STATUSES.find((x) => x.id === id)?.label ?? id)
+                      .join(', ')
+                      .toLocaleLowerCase('ru-RU')}.`
+                  : null,
+                channels.length > 0 && channels.length < CDEK_SALES_CHANNELS.length
+                  ? `Каналы: ${channels
+                      .map((id) => CDEK_SALES_CHANNELS.find((x) => x.id === id)?.label ?? id)
+                      .join(', ')}.`
+                  : null,
+              ]
+                .filter(Boolean)
+                .join(' ') || undefined
+            }
           />
         ) : (
           <OrdersTable

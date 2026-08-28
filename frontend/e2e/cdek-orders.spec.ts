@@ -211,7 +211,13 @@ test('ни одна карточка не переполняется внутр�
 test('в выборе ленты все статусы и все каналы источника', async ({ page }) => {
   await bootOrders(page);
   await page.getByRole('button', { name: /Статусы/ }).click();
-  for (const label of ['Завершён', 'В доставке', 'Собран', 'Подтверждён', 'Отменён', 'Возврат']) {
+  // Канон выбран с первого кадра и стоит ЧИПАМИ — кнопка показывает «Статусы · 2», а не выглядит
+  // невыбранной при том, что лента показывает два статуса из шести.
+  for (const label of ['Завершён', 'В доставке']) {
+    await expect(page.getByRole('button', { name: `Убрать: ${label}` })).toBeVisible();
+  }
+  // Остальные ждут в списке — их можно ДОБАВИТЬ к видимым.
+  for (const label of ['Собран', 'Подтверждён', 'Отменён', 'Возврат']) {
     await expect(page.getByRole('option', { name: label })).toBeVisible();
   }
   await page.keyboard.press('Escape');
@@ -227,9 +233,9 @@ test('несколько статусов уходят одним набором
   await page.getByRole('button', { name: /Статусы/ }).click();
   await page.getByRole('option', { name: 'Отменён' }).click();
   await page.getByRole('option', { name: 'Возврат' }).click();
-  // Набор едет в `include` — единственном месте, где решается, какие статусы видны.
+  // Выбор ДОБАВЛЯЕТ статусы к видимым, а не подменяет ленту: к канону прибавились два.
   await expect
-    .poll(() => seen.map((s) => new URLSearchParams(s).get('include')).some((v) => v === 'status:cancel,return'))
+    .poll(() => seen.map((s) => new URLSearchParams(s).get('include')).some((v) => v === 'status:cancel,complete,delivery,return'))
     .toBe(true);
 });
 
@@ -249,9 +255,11 @@ test('«Возврат» действительно находит заказ, �
   await page.keyboard.press('Escape');
 
   await expect(page.getByRole('row', { name: /33905599/ })).toBeVisible();
-  // И набор ушёл именно в include — отдельного параметра status больше нет.
+  // Набор ушёл в include (отдельного параметра status больше нет) и ДОБАВИЛСЯ к канону: прежние
+  // отгрузки остались на месте, возврат прибавился к ним.
   await expect
-    .poll(() => seen.map((s) => new URLSearchParams(s)).some((p) => p.get('include') === 'status:return'))
+    .poll(() => seen.map((s) => new URLSearchParams(s)).some((p) => p.get('include') === 'status:complete,delivery,return'))
     .toBe(true);
+  await expect(page.getByRole('row', { name: /33905564/ })).toBeVisible();
   expect(seen.every((s) => new URLSearchParams(s).get('status') === null)).toBe(true);
 });
