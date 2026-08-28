@@ -39,7 +39,7 @@ import { useExplorerChartHeight } from '@/lib/useExplorerChartHeight';
 import type { ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 import { useMetricRailHidden } from '@/lib/metricRail';
-import { ComparisonDelta, ComparisonDeltaRow, MetricBackLink, MetricDescriptor, WindowBarShell, RailSection, MetricPageHeader} from '@/components/metric/shared';
+import { ComparisonDelta, ComparisonDeltaRow, MetricDescriptor, WindowBarShell, RailSection, MetricPageHeader} from '@/components/metric/shared';
 
 /**
  * Instagram metric pages — the drill target the unified chart contract points IG cards at
@@ -388,7 +388,7 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
           'relative grid grid-cols-1 gap-6 xl:gap-8',
           !railHidden && 'lg:grid-cols-[minmax(0,1fr)_var(--inspector-w,300px)]',
         )}>
-        <InspectorHandle controlsId="ig-metric-inspector" />
+        {!railHidden && <InspectorHandle controlsId="ig-metric-inspector" />}
         <div className="min-w-0 space-y-6">
           {lvl != null && (
             <>
@@ -661,7 +661,7 @@ function IgAggregatePage({ def, pair, windowDays, handle }: { def: IgAggDef; pai
           'relative grid grid-cols-1 gap-6 xl:gap-8',
           !railHidden && 'lg:grid-cols-[minmax(0,1fr)_var(--inspector-w,300px)]',
         )}>
-        <InspectorHandle controlsId="ig-aggregate-inspector" />
+        {!railHidden && <InspectorHandle controlsId="ig-aggregate-inspector" />}
         <div className="min-w-0 space-y-6">
           <ChartSection title="Период против периода" defaultSize="full" noExpand>
             {pair.hasCur ? (
@@ -782,7 +782,7 @@ function IgErPage({
           'relative grid grid-cols-1 gap-6 xl:gap-8',
           !railHidden && 'lg:grid-cols-[minmax(0,1fr)_var(--inspector-w,300px)]',
         )}>
-        <InspectorHandle controlsId="ig-er-inspector" />
+        {!railHidden && <InspectorHandle controlsId="ig-er-inspector" />}
         <div className="min-w-0 space-y-6">
           <ChartSection title="Период против периода" defaultSize="full" noExpand>
             {hasCur ? (
@@ -879,7 +879,7 @@ function IgChartShell({
   const railHidden = useMetricRailHidden();
   return (
     <div className="space-y-5">
-      <MetricBackLink to={back.to}>{back.label}</MetricBackLink>
+      <MetricPageHeader back={back} />
 
       <div>
         <h1 className="text-2xl font-medium tracking-tight text-foreground">{term}</h1>
@@ -891,7 +891,7 @@ function IgChartShell({
           'relative grid grid-cols-1 gap-6 xl:gap-8',
           !railHidden && 'lg:grid-cols-[minmax(0,1fr)_var(--inspector-w,300px)]',
         )}>
-        <InspectorHandle controlsId="ig-shell-inspector" />
+        {!railHidden && <InspectorHandle controlsId="ig-shell-inspector" />}
         <div className="min-w-0 space-y-6">{children}</div>
         {!railHidden && (
         <aside id="ig-shell-inspector" className="space-y-6">

@@ -23,7 +23,6 @@ import { ShareRows } from '@/components/ShareRows';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { setPrefs, setSavedFilter, useSavedFilter, useWidgetPrefs } from '@/lib/widgetPrefsStore';
-import { setMetricRailHidden, useMetricRailHidden } from '@/lib/metricRail';
 import {
   CDEK_CANON_STATUSES,
   cdekChannelFilterKey,
@@ -45,8 +44,8 @@ import { ErrorState } from '@/components/ErrorState';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   ComparisonDeltaRow,
-  MetricBackLink,
   MetricColumns,
+  MetricPageHeader,
   RailSection,
   WindowBarShell,
 } from '@/components/metric/shared';
@@ -145,53 +144,26 @@ function CdekMetricShell({
   comparison?: ReactNode;
   children: ReactNode;
 }) {
-  const railHidden = useMetricRailHidden();
   return (
     <div className="space-y-4">
-      {/* Возврат и кнопки страницы — ОДНОЙ строкой, и колонка начинается сразу под ней. Раньше
-          крошка и заголовок занимали две полосы во всю ширину, и правая колонка стартовала только
-          под ними: справа сверху зияла пустая полоса высотой в заголовок (владелец: «подтянем
-          чуть выше, а то сейчас там пустое пространство»). Заголовок метрики уехал в ЛЕВУЮ
-          колонку — он относится к полотну, а не к фильтрам. */}
-      <div className="flex items-center justify-between gap-4">
-        <MetricBackLink to={back.to}>{back.label}</MetricBackLink>
+      {/* Возврат и действия страницы — ОДНОЙ строкой общей шапкой (MetricPageHeader): своя копия
+          этого блока была ровно тем, за что здесь и ругают — одна кнопка в шести местах. Заголовок
+          метрики уехал в ЛЕВУЮ колонку, поэтому панель начинается вровень с ним, а не под ним.
 
-      {/* Ни строки источника, ни дескриптора: «СДЭК · Склад» уже стоит в сайдбаре над навигацией,
-          а «Сумма проданного за окно» повторяет заголовок (владелец: «не несут инфы»). */}
-      {/* «Сохранить» — В ШАПКЕ СПРАВА и КОНТРАСТНАЯ. Место внизу колонки владелец не увидел
-          («сейчас её не видно»): при его высоте окна она уходила под сгиб. Здесь она на одной
-          линии с названием метрики — то есть в первом же экране, — а инверсный цвет отличает её
-          от синих ссылок канона. Появляется только когда есть что сохранять. */}
-        <span className="flex shrink-0 items-center gap-2">
-          {onSaveFilters && (
+          «Сохранить» — контрастная и в первом экране: внизу колонки владелец её не увидел, при его
+          высоте окна она уходила под сгиб. Появляется только когда есть что сохранять. */}
+      <MetricPageHeader
+        back={back}
+        actions={
+          onSaveFilters ? (
             <Button type="button" variant="contrast" size="sm" onClick={onSaveFilters}>
               Сохранить
             </Button>
-          )}
-          {/* Свернуть колонку — значок «панель справа», как у Steep (замер: 32×32 у правого края
-              шапки). Когда смотришь на график, фильтры и цели уже выбраны: колонка держит 300px,
-              которых полотну не хватает. Выбор ЗАПОМИНАЕТСЯ (см. metricRail): развернув полотно
-              на выручке, человек хочет широкое полотно и на заказах. */}
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            aria-pressed={railHidden}
-            aria-label={railHidden ? 'Показать фильтры' : 'Скрыть фильтры'}
-            title={railHidden ? 'Показать фильтры' : 'Скрыть фильтры'}
-            onClick={() => setMetricRailHidden(!railHidden)}
-          >
-            <svg viewBox="0 0 16 16" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden="true">
-              <rect x="1.15" y="2.15" width="13.7" height="11.7" rx="2.2" />
-              <path d="M9.9 2.6v10.8" />
-              {!railHidden && <rect x="9.9" y="2.6" width="4.5" height="10.8" fill="currentColor" stroke="none" opacity="0.35" />}
-            </svg>
-          </Button>
-        </span>
-      </div>
+          ) : undefined
+        }
+      />
 
       <MetricColumns
-        railHidden={railHidden}
         rail={
           <>
             {/* Разделы идут ВПЛОТНУЮ, одной сплошной колонкой: их разделяет волосяная черта, а

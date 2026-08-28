@@ -69,7 +69,16 @@ export function MetricPageHeader({
   );
 }
 
-/** Сам переключатель — отдельно от шапки: у страницы метрик Telegram шапка своя, со «Закрепить». */
+/**
+ * Сам переключатель — отдельно от шапки: у страницы метрик Telegram шапка своя, со «Закрепить».
+ *
+ * Называется он «правая панель», а не «фильтры»: колонка держит ещё сравнение, цели и разбивку,
+ * и на метрике без единого фильтра прежнее имя обещало не то. Слово «правая» обязательно —
+ * «Скрыть панель» уже занято сворачиванием САЙДБАРА, и два разных контрола звучали одинаково
+ * (поймано тестом: strict mode violation, два элемента на одно имя). Прячется он ТОЛЬКО на десктопе — ниже
+ * lg колонка и так стоит под графиком, горизонтального места не занимает, и скрывать её значило
+ * бы просто отнять у человека сравнение.
+ */
 export function MetricRailToggle() {
   const railHidden = useMetricRailHidden();
   return (
@@ -78,9 +87,11 @@ export function MetricRailToggle() {
           type="button"
           variant="ghost"
           size="icon-sm"
+          // Ниже lg колонка стоит под графиком — скрывать там нечего.
+          className="hidden lg:inline-flex"
           aria-pressed={railHidden}
-          aria-label={railHidden ? 'Показать фильтры' : 'Скрыть фильтры'}
-          title={railHidden ? 'Показать фильтры' : 'Скрыть фильтры'}
+          aria-label={railHidden ? 'Показать правую панель' : 'Скрыть правую панель'}
+          title={railHidden ? 'Показать правую панель' : 'Скрыть правую панель'}
           onClick={() => setMetricRailHidden(!railHidden)}
         >
           <svg viewBox="0 0 16 16" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden="true">
@@ -117,7 +128,9 @@ export function MetricColumns({
       )}
     >
       <div className="min-w-0 space-y-6">{children}</div>
-      {!hidden && <aside className="space-y-6">{rail}</aside>}
+      {/* Ниже lg колонка остаётся ВСЕГДА: там она под графиком и места у него не отнимает, а
+          вместе с ней ушли бы сравнение, цели и разбивка — без всякой выгоды по ширине. */}
+      <aside className={cn('space-y-6', hidden && 'lg:hidden')}>{rail}</aside>
     </div>
   );
 }

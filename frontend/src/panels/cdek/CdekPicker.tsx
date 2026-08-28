@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useContext, useState } from 'react';
 import { cn } from '@/lib/utils';
+import { ChartExpandedContext } from '@/components/ExpandableChart';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -162,13 +163,15 @@ export function CdekOrderFilter({
   selected: string[];
   onChange: (next: string[]) => void;
 }) {
+  const expanded = useContext(ChartExpandedContext);
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <button
           type="button"
           className={cn(
-            'inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md border px-3 text-sm transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40 sm:h-8',
+            // Мобильная цель нажатия — 44px канона (min-h-11), на десктопе высота обычная.
+            'inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-md border px-3 text-sm transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40 sm:min-h-0 sm:h-8',
             selected.length > 0
               ? 'border-primary/30 bg-primary/10 text-accent-foreground'
               : 'border-border bg-background text-foreground hover:bg-muted',
@@ -181,7 +184,11 @@ export function CdekOrderFilter({
           </svg>
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-72 p-2">
+      {/* В РАЗВЁРНУТОЙ карточке поповер обязан жить на модальном слое: лента лежит внутри виджета,
+          который разворачивается в оверлей с затемнением (z-modal), и на слое страницы меню
+          уезжало ПОД него — фильтр открывался в никуда. Слой задаётся ПРОПОМ: z-класс через
+          className съедает tailwind-merge (грабля репо, PR #493). */}
+      <DropdownMenuContent align="start" layer={expanded ? 'modal' : 'page'} className="w-72 p-2">
         <CdekPicker
           mark={`cdek-order-${label === 'Статусы' ? 'status' : 'channel'}-filter`}
           ariaLabel={label}

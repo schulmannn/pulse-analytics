@@ -764,8 +764,9 @@ export function MetricPage() {
       {/* Breadcrumb + страничные действия (артефакт v2): «Закрепить» кладёт метрику на Главную. */}
       <div className="flex items-center justify-between gap-3">
         <MetricBackLink to="/">Обзор</MetricBackLink>
-        {/* Переключатель колонки — тот же, что на остальных источниках (см. MetricRailToggle):
-            здесь шапка своя, со «Закрепить», поэтому он встаёт рядом с ней. */}
+        {/* Действия страницы — ОДНОЙ группой у правого края. Без обёртки justify-between разносил
+            три элемента по краям и центру, и «Закрепить» повисало посреди строки. */}
+        <span className="flex shrink-0 items-center gap-2">
         <button
           type="button"
           onClick={pinMetricToHome}
@@ -774,7 +775,8 @@ export function MetricPage() {
         >
           {pinnedToHome ? '✓ На Главной' : 'Закрепить на Главной'}
         </button>
-        <MetricRailToggle />
+          <MetricRailToggle />
+        </span>
       </div>
 
       {/* Headline v2 (артефакт владельца): страница ведёт ИМЕНЕМ метрики — тихая шапка, только

@@ -401,8 +401,14 @@ const CdekHourlySchema = z
 export type CdekOrder = z.infer<typeof CdekOrderSchema>;
 
 export interface CdekOrderFilters {
-  /** НАБОРЫ, а не одиночный выбор: лента говорит тем же языком, что метрики того же склада. */
-  status?: readonly string[];
+  /**
+   * Каналы — НАБОР, как у метрик того же склада.
+   *
+   * СТАТУСОВ здесь нет намеренно: какие статусы видны, решает `include` — единственное место, где
+   * это вообще решается (см. REVENUE_FILTER на сервере). Отдельным полем они ложились ПОВЕРХ
+   * канона и давали противоречивый предикат: «Возврат» рядом с include='revenue' — это «статус
+   * равен return И не равен return», то есть всегда пустая лента.
+   */
   channel?: readonly string[];
   q?: string;
 }
@@ -411,7 +417,6 @@ export function useCdekOrders(period: MsPeriod, filters: CdekOrderFilters = {}, 
   const { channelId } = useSelectedChannel();
   const query = new URLSearchParams(msPeriodQuery(period));
   query.set('include', include);
-  if (filters.status?.length) query.set('status', [...filters.status].sort().join(','));
   // ИМЕННО `sales_channel`: `channel` — это канал арендатора (склад), и сервер разбирает его
   // раньше фильтра. Пока имена совпадали, выбор «ЯМ» уводил запрос на чужой канал и лента
   // отвечала «Не удалось получить заказы».
@@ -426,7 +431,6 @@ export function useCdekOrders(period: MsPeriod, filters: CdekOrderFilters = {}, 
       channelId,
       period,
       include,
-      [...(filters.status ?? [])].sort().join(','),
       [...(filters.channel ?? [])].sort().join(','),
       filters.q ?? '',
     ),

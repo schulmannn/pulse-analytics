@@ -5,7 +5,7 @@ import { ErrorState } from '@/components/ErrorState';
 import { TableSkeleton } from '@/components/ui/dataSkeleton';
 import { useCdekHourly, useCdekOrders, type CdekOrder } from '@/api/cdek';
 import { CdekOrderFilter } from '@/panels/cdek/CdekPicker';
-import { CDEK_SALES_CHANNELS, CDEK_STATUSES } from '@/panels/cdek/cdekStatusFilter';
+import { CDEK_SALES_CHANNELS, CDEK_STATUSES, cdekStatusInclude } from '@/panels/cdek/cdekStatusFilter';
 import { useVirtualRows } from '@/lib/useVirtualRows';
 import { useScrollEdgeFade } from '@/lib/useScrollEdgeFade';
 import { fmt } from '@/lib/format';
@@ -55,8 +55,14 @@ export function CdekOrders() {
   const [statuses, setStatuses] = useState<string[]>([]);
   const [q, setQ] = useState('');
 
-  const hourly = useCdekHourly(period);
-  const orders = useCdekOrders(period, { channel: channels, status: statuses, q: q || undefined });
+  // Выбранные статусы едут через `include` — тем же каноном, что и на метриках (cdekStatusInclude):
+  // пусто → отгруженное, набор → ровно он, все шесть → «все». Отдельным полем они ложились ПОВЕРХ
+  // канона, и «Возврат» давал всегда пустую ленту: «статус равен return И не равен return».
+  // Почасовой профиль ходит с тем же include — иначе карточка «Когда покупают» считала бы другой
+  // набор заказов, чем таблица под ней.
+  const include = cdekStatusInclude(statuses);
+  const hourly = useCdekHourly(period, include);
+  const orders = useCdekOrders(period, { channel: channels, q: q || undefined }, include);
 
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-6">
