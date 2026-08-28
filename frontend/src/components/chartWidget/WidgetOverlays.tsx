@@ -1,7 +1,7 @@
-import type { CSSProperties, ReactNode } from 'react';
+import { Suspense, lazy, type CSSProperties, type ReactNode } from 'react';
 import { ChartExpandOverlay } from '@/components/ExpandableChart';
 import { WidgetErrorBoundary } from '@/components/WidgetErrorBoundary';
-import { EditWidgetDialog } from '@/components/widgets/EditWidgetDialog';
+import { lazyWithReload } from '@/lib/lazyWithReload';
 import type { ChartExpandConfig } from '@/components/ExpandableChart';
 import type { PeriodDays } from '@/lib/period';
 import type { WidgetPrefs, WidgetSize } from '@/lib/widgetPrefsStore';
@@ -27,9 +27,23 @@ interface WidgetEditOverlayProps {
   onClose: () => void;
 }
 
+/**
+ * Редактор карточки — ЗА ЛЕНИВОЙ ГРАНИЦЕЙ. Он открывается по действию из меню карточки, а
+ * статический импорт держал его (вместе с ui/switch, ui/swatch-button и целым ui/select) в чанке
+ * каждого маршрута с графиками. Граница напрашивалась сама: оверлей и так возвращает null, пока
+ * закрыт, — мешала только константа WIDGET_PERIODS, которую строка пилюль тянула из этого же
+ * модуля (переехала в chartWidget/constants).
+ */
+const EditWidgetDialog = lazy(
+  lazyWithReload(() =>
+    import('@/components/widgets/EditWidgetDialog').then((m) => ({ default: m.EditWidgetDialog })),
+  ),
+);
+
 export function WidgetEditOverlay({ open, configDriven, ...props }: WidgetEditOverlayProps) {
   if (!open || configDriven) return null;
   return (
+    <Suspense fallback={null}>
     <EditWidgetDialog
       defaultTitle={props.title}
       prefs={props.prefs}
@@ -45,6 +59,7 @@ export function WidgetEditOverlay({ open, configDriven, ...props }: WidgetEditOv
       onChange={props.onChange}
       onClose={props.onClose}
     />
+    </Suspense>
   );
 }
 

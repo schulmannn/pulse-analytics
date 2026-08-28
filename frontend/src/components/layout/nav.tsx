@@ -1,6 +1,5 @@
 import { useLocation } from 'react-router-dom';
 import type { IconName } from '@/components/nav-icons';
-import { getMetric } from '@/lib/widgetMetrics';
 import { NETWORKS, networkByKey, type Network } from '@/lib/networks';
 import { useNetworkSelection } from '@/lib/networkStore';
 
@@ -81,14 +80,19 @@ export function isFeedRoute(pathname: string): boolean {
   );
 }
 
-/** Topbar h1 for the current route; metric pages resolve to the metric's display name. */
+/**
+ * Topbar h1 для текущего маршрута.
+ *
+ * СТРАНИЦЫ МЕТРИК СВОЙ ЗАГОЛОВОК НЕ ОТДАЮТ СЮДА: топбар на них не монтируется вовсе
+ * (DashboardLayout, isDesktopExplorerRoute — на md+ его нет, а ниже md вместо него MobileHeader,
+ * который routeTitle не читает). Раньше эта ветка звала getMetric и тянула ВЕСЬ каталог метрик
+ * (4.4KB gzip) в чанк оболочки — ради строки, которую никто не рисует. Заголовок метрики рисует
+ * сама страница, из своего реестра.
+ */
 export function routeTitle(pathname: string): string {
   const exact = TITLES[pathname];
   if (exact) return exact;
-  if (pathname.startsWith('/metrics/')) {
-    const key = pathname.split('/')[2];
-    return getMetric(`tg.${key}`)?.label ?? 'Метрика';
-  }
+  if (pathname.startsWith('/metrics/') || pathname.startsWith('/widgets/')) return 'Метрика';
   if (pathname.startsWith('/reports/')) return 'Отчёт';
   if (pathname.startsWith('/campaigns/')) return 'Кампания';
   return pathname.startsWith('/instagram') ? 'Instagram' : 'Atlavue';
