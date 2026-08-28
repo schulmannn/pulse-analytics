@@ -161,7 +161,12 @@ test('ненайденный номер объясняет, где вообще 
 
 test('фильтр канала и статуса уходит на сервер, а не режет уже полученное', async ({ page }) => {
   const seen = await bootOrders(page);
-  await page.getByRole('button', { name: 'ЯМ' }).click();
+  // Фильтр ленты — НАБОР со списком значений, как в развороте метрики: прежние сегменты давали
+  // четыре канала из пяти сокращёнными подписями («ЯМ») и два статуса из шести.
+  await page.getByRole('button', { name: /Каналы продаж/ }).click();
+  await page.getByRole('option', { name: 'Яндекс.Маркет' }).click();
+  // Поповер закрываем: открытым он лежит поверх таблицы, и строка под ним не «видима».
+  await page.keyboard.press('Escape');
   await expect(page.getByRole('row', { name: /33905573/ })).toBeVisible();
   await expect(page.getByRole('row', { name: /33905564/ })).toHaveCount(0);
   // Проверяем ИМЯ параметра точно, а не подстрокой: `s.includes('channel=yandex_market')` зеленел
@@ -181,4 +186,33 @@ test('ритм называет пик словами, а не оставляе�
 test('ни одна карточка не переполняется внутренним скроллом', async ({ page }) => {
   await bootOrders(page);
   expect(await overflowingCards(page)).toEqual([]);
+});
+
+/**
+ * Прежние сегменты знали ЧЕТЫРЕ канала из пяти и ДВА статуса из шести: заказ со статусом
+ * «Возврат» или каналом «Другая служба» было нечем найти вовсе. Список значений выводится из
+ * канона источника, поэтому новый статус или канал попадает в ленту сам.
+ */
+test('в выборе ленты все статусы и все каналы источника', async ({ page }) => {
+  await bootOrders(page);
+  await page.getByRole('button', { name: /Статусы/ }).click();
+  for (const label of ['Завершён', 'В доставке', 'Собран', 'Подтверждён', 'Отменён', 'Возврат']) {
+    await expect(page.getByRole('option', { name: label })).toBeVisible();
+  }
+  await page.keyboard.press('Escape');
+
+  await page.getByRole('button', { name: /Каналы продаж/ }).click();
+  for (const label of ['Своя доставка', 'Wildberries', 'Яндекс.Маркет', 'Ozon', 'Другая служба']) {
+    await expect(page.getByRole('option', { name: label })).toBeVisible();
+  }
+});
+
+test('несколько статусов уходят одним набором', async ({ page }) => {
+  const seen = await bootOrders(page);
+  await page.getByRole('button', { name: /Статусы/ }).click();
+  await page.getByRole('option', { name: 'Отменён' }).click();
+  await page.getByRole('option', { name: 'Возврат' }).click();
+  await expect
+    .poll(() => seen.map((s) => new URLSearchParams(s).get('status')).some((v) => v === 'cancel,return'))
+    .toBe(true);
 });

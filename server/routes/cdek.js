@@ -449,6 +449,9 @@ function registerCdekRoutes({ app, express, requireAuth, db, audit, cdekImport }
         q: req.query.q,
         limit: req.query.limit,
       });
+      // Незнакомый ключ статуса или канала — ОТКАЗ, а не пустая лента: «заказов не нашлось»
+      // неотличимо от «фильтр написан с опечаткой» (тот же приём, что у каналов метрик).
+      if (data.unknown) return res.status(400).json({ error: 'Неизвестный статус или канал продаж' });
       res.json({
         window: { days: ctx.period.days, from: ctx.period.from, to: ctx.period.to, all: ctx.period.all },
         total: data.total,

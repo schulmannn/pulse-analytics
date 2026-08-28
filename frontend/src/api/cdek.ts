@@ -401,8 +401,9 @@ const CdekHourlySchema = z
 export type CdekOrder = z.infer<typeof CdekOrderSchema>;
 
 export interface CdekOrderFilters {
-  status?: string;
-  channel?: string;
+  /** НАБОРЫ, а не одиночный выбор: лента говорит тем же языком, что метрики того же склада. */
+  status?: readonly string[];
+  channel?: readonly string[];
   q?: string;
 }
 
@@ -410,16 +411,25 @@ export function useCdekOrders(period: MsPeriod, filters: CdekOrderFilters = {}, 
   const { channelId } = useSelectedChannel();
   const query = new URLSearchParams(msPeriodQuery(period));
   query.set('include', include);
-  if (filters.status) query.set('status', filters.status);
+  if (filters.status?.length) query.set('status', [...filters.status].sort().join(','));
   // ИМЕННО `sales_channel`: `channel` — это канал арендатора (склад), и сервер разбирает его
   // раньше фильтра. Пока имена совпадали, выбор «ЯМ» уводил запрос на чужой канал и лента
   // отвечала «Не удалось получить заказы».
-  if (filters.channel) query.set('sales_channel', filters.channel);
+  if (filters.channel?.length) query.set('sales_channel', [...filters.channel].sort().join(','));
   if (filters.q) query.set('q', filters.q);
   const serialized = query.toString();
   return useQuery({
     enabled: channelId != null,
-    queryKey: qk.cdekOrders.window(channelId, period, include, filters.status ?? '', filters.channel ?? '', filters.q ?? ''),
+    // Ключ несёт СОРТИРОВАННЫЕ наборы: тот же выбор, набранный в другом порядке, обязан лечь в
+    // ту же ячейку кэша, иначе один ответ разложился бы по нескольким ключам.
+    queryKey: qk.cdekOrders.window(
+      channelId,
+      period,
+      include,
+      [...(filters.status ?? [])].sort().join(','),
+      [...(filters.channel ?? [])].sort().join(','),
+      filters.q ?? '',
+    ),
     retry: false,
     queryFn: ({ signal }) => apiGet(`/api/cdek/orders?${serialized}`, CdekOrdersSchema, { signal, channelId }),
   });

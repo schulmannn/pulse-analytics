@@ -273,3 +273,47 @@ test('без фильтра канал не сужается — парамет�
   await repo.getCdekSummaryForActor(5, { uid: 1 }, { from: '2026-03-01', to: '2026-03-31' });
   assert.equal(queries[0].params[queries[0].params.length - 1], null);
 });
+
+// ── Лента заказов: фильтры НАБОРАМИ ────────────────────────────────────────────────────────────
+// Лента жила своим языком: одиночный статус и одиночный канал, тогда как метрики того же склада
+// давно фильтровались наборами. Здесь проверяется и форма запроса (массив, а не скаляр), и то,
+// что «выбраны все» honestly значит «фильтра нет», и отказ на незнакомом ключе.
+
+test('лента фильтруется НАБОРАМИ: массив в параметрах, ANY в условии', async () => {
+  const { repo, queries } = repoWith({ accessible: true });
+  await repo.getCdekOrdersForActor(5, { id: 1 }, { days: 30, status: 'cancel,return', channel: 'other' });
+  const q = find(queries, /FROM cdek_orders/);
+  assert.match(q.sql, /o\.status = ANY\(\$8\)/, 'статус сверяется с набором');
+  assert.match(q.sql, /COALESCE\(o\.channel, ''\) = ANY\(\$9\)/, 'канал сверяется с набором');
+  assert.deepEqual(q.params[7], ['cancel', 'return'], 'набор отсортирован и разобран');
+  assert.deepEqual(q.params[8], ['other']);
+});
+
+test('выбраны ВСЕ значения — это «фильтра нет», а не длинный список', async () => {
+  // Короче строка, устойчивее кэш — тот же приём, что у каналов метрик.
+  const { repo, queries } = repoWith({ accessible: true });
+  await repo.getCdekOrdersForActor(5, { id: 1 }, {
+    days: 30,
+    status: 'complete,delivery,assembled,confirmed,cancel,return',
+  });
+  const q = find(queries, /FROM cdek_orders/);
+  assert.equal(q.params[7], null, 'полный набор статусов = фильтра нет');
+});
+
+test('незнакомый ключ — ОТКАЗ, а не пустая лента', async () => {
+  // «Заказов не нашлось» неотличимо от «фильтр написан с опечаткой»: молчать здесь нельзя.
+  const { repo, queries } = repoWith({ accessible: true });
+  const out = await repo.getCdekOrdersForActor(5, { id: 1 }, { days: 30, status: 'complete,опечатка' });
+  assert.equal(out.unknown, true);
+  assert.equal(out.rows.length, 0);
+  assert.equal(find(queries, /FROM cdek_orders/), undefined, 'до базы такой запрос не доходит');
+});
+
+test('плейсхолдеры ленты не разъезжаются с параметрами', async () => {
+  // Сдвиг индекса $N до базы ничем себя не выдаёт — сверяем арность, как у чтений выше.
+  const { repo, queries } = repoWith({ accessible: true });
+  await repo.getCdekOrdersForActor(5, { id: 1 }, { days: 30, status: 'cancel', channel: 'own', q: 'A-1' });
+  const q = find(queries, /FROM cdek_orders/);
+  const maxPlaceholder = Math.max(...[...q.sql.matchAll(/\$(\d+)/g)].map((m) => Number(m[1])));
+  assert.equal(maxPlaceholder, q.params.length, 'максимальный $N равен длине params');
+});

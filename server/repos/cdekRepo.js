@@ -118,6 +118,22 @@ function normalizeCdekChannels(raw) {
   return picked.length === SALES_CHANNEL_KEYS.length ? null : picked;
 }
 
+/**
+ * Наборы фильтров ЛЕНТЫ заказов. Отличие от метрик одно: лента показывает СТРОКИ, а не считает
+ * число, поэтому «выбраны все» здесь тоже честно значит «фильтра нет», а незнакомый ключ —
+ * отказ, как и везде (пустая лента, неотличимая от «заказов не было», — худший из ответов).
+ */
+function normalizeKeySet(raw, known) {
+  const list = Array.isArray(raw) ? raw : typeof raw === 'string' && raw ? raw.split(',') : [];
+  const picked = [...new Set(list.map((v) => String(v).trim()).filter(Boolean))].sort();
+  if (picked.length === 0) return null;
+  if (picked.some((key) => !known.includes(key))) return { unknown: true };
+  return picked.length === known.length ? null : picked;
+}
+
+const normalizeOrderStatuses = (raw) => normalizeKeySet(raw, ORDER_STATUSES);
+const normalizeOrderChannels = (raw) => normalizeKeySet(raw, SALES_CHANNEL_KEYS);
+
 /** Ограничение набора товаров: столько влезает в осмысленный выбор, дальше это уже «все». */
 const PRODUCT_FILTER_MAX = 50;
 
@@ -608,8 +624,12 @@ function createCdekRepo({ pool, enabled, transaction, ensureExternalSource, getA
   async function getCdekOrdersForActor(channelId, actor, opts = {}) {
     if (!enabled || !(await allowed(channelId, actor))) return { rows: [], total: 0 };
     const limit = Math.min(Math.max(parseInt(opts.limit, 10) || 200, 1), ORDERS_MAX_ROWS);
-    const status = typeof opts.status === 'string' && opts.status ? opts.status : null;
-    const channel = typeof opts.channel === 'string' && opts.channel ? opts.channel : null;
+    // Лента фильтруется НАБОРАМИ, как и метрики: одиночный выбор давал ей свой, отдельный от
+    // остального источника язык — «завершён ИЛИ ничего», тогда как метрика того же склада уже
+    // умела «завершён + в доставке».
+    const status = normalizeOrderStatuses(opts.status);
+    const channel = normalizeOrderChannels(opts.channel);
+    if (status?.unknown || channel?.unknown) return { unknown: true, rows: [], total: 0 };
     const q = typeof opts.q === 'string' && opts.q.trim() ? opts.q.trim().slice(0, 64) : null;
     const params = [...windowParams(channelId, opts), status, channel, q, limit];
     const { rows } = await pool.query(
@@ -618,8 +638,8 @@ function createCdekRepo({ pool, enabled, transaction, ensureExternalSource, getA
          SELECT o.*, ${WINDOW_CASE} AS win
            FROM cdek_orders o CROSS JOIN b
           WHERE o.channel_id = $1 AND o.kind = 'sale' AND ${REVENUE_FILTER}
-            AND ($8::text IS NULL OR o.status = $8)
-            AND ($9::text IS NULL OR COALESCE(o.channel, '') = $9)
+            AND ($8::text[] IS NULL OR o.status = ANY($8))
+            AND ($9::text[] IS NULL OR COALESCE(o.channel, '') = ANY($9))
             AND ($10::text IS NULL OR o.order_id ILIKE '%' || $10 || '%'
                  OR COALESCE(o.external_order_id, '') ILIKE '%' || $10 || '%'
                  OR COALESCE(o.track_number, '') ILIKE '%' || $10 || '%')
