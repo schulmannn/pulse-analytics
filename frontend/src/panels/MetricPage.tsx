@@ -42,6 +42,9 @@ import { CHART_MAX_POINTS, pickIndexes } from '@/lib/msSeries';
 import { useExplorerChartHeight } from '@/lib/useExplorerChartHeight';
 import { splitDailyWindows } from '@/lib/delta';
 import { MediaThumb } from '@/components/MediaThumb';
+
+import { MetricRailToggle } from '@/components/metric/shared';
+import { useMetricRailHidden } from '@/lib/metricRail';
 import { ComparisonDeltaRow, MetricBackLink, MetricDescriptor, RailSection } from '@/components/metric/shared';
 
 /** Короткий день недели для тултипов дневной гранулы («чт, 2 июл») — артефакт v2. */
@@ -250,6 +253,9 @@ function bucketedSubsSeries(
  */
 export function MetricPage() {
   const { key: rawKey } = useParams();
+  // ДО ранних возвратов: ниже страница уходит в скелетон и в ошибку, и хук после них дал бы
+  // «Rendered more hooks than during the previous render» — известная грабля этого репо.
+  const railHidden = useMetricRailHidden();
   const { days, setDays, range, setRange, inRange } = usePeriod();
   // «Свой диапазон» calendar popover (the DateRangePicker → global period `range`, URL-persisted).
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -752,11 +758,14 @@ export function MetricPage() {
   const pinnedPrevVal = pinnedValid != null && pinnedValid > 0 ? series.values[pinnedValid - 1] : null;
   const pinnedDiff = pinnedCur != null && pinnedPrevVal != null ? pinnedCur - pinnedPrevVal : null;
 
+
   return (
     <div className="space-y-4">
       {/* Breadcrumb + страничные действия (артефакт v2): «Закрепить» кладёт метрику на Главную. */}
       <div className="flex items-center justify-between gap-3">
         <MetricBackLink to="/">Обзор</MetricBackLink>
+        {/* Переключатель колонки — тот же, что на остальных источниках (см. MetricRailToggle):
+            здесь шапка своя, со «Закрепить», поэтому он встаёт рядом с ней. */}
         <button
           type="button"
           onClick={pinMetricToHome}
@@ -765,6 +774,7 @@ export function MetricPage() {
         >
           {pinnedToHome ? '✓ На Главной' : 'Закрепить на Главной'}
         </button>
+        <MetricRailToggle />
       </div>
 
       {/* Headline v2 (артефакт владельца): страница ведёт ИМЕНЕМ метрики — тихая шапка, только
@@ -786,8 +796,15 @@ export function MetricPage() {
       </div>
 
       {/* relative + InspectorHandle: тянущаяся ширина инспектора (см. components/InspectorHandle). */}
-      <div className="relative grid grid-cols-1 gap-6 xl:gap-7 lg:grid-cols-[minmax(0,1fr)_var(--inspector-w,280px)]">
-        <InspectorHandle defaultWidth={280} controlsId="tg-metric-inspector" />
+      <div
+        className={cn(
+          'relative grid grid-cols-1 gap-6 xl:gap-7',
+          // Свёрнутая колонка уходит ИЗ ПОТОКА: у инспектора СВОЯ тянущаяся ширина, поэтому общий
+          // MetricColumns здесь не подходит, а правило одно на все источники (см. metricRail).
+          !railHidden && 'lg:grid-cols-[minmax(0,1fr)_var(--inspector-w,280px)]',
+        )}
+      >
+        {!railHidden && <InspectorHandle defaultWidth={280} controlsId="tg-metric-inspector" />}
         {/* Main column — the big chart in four projections + contributing posts. */}
         <div className="min-w-0 space-y-6">
           {/* Chart card (артефакт: связная карточка) — заголовок + переключатель типа + меню одной
@@ -1213,6 +1230,7 @@ export function MetricPage() {
         {/* Composer rail (артефакт): аналитические карточки вместо волосяных секций у бордюра.
             «Сравнение» первым и с явной иерархией — итог окна доминирует, база и Δ вторичны;
             ниже — Разбивка и «О метрике» той же карточной иерархией. */}
+        {!railHidden && (
         <aside id="tg-metric-inspector" className="space-y-4">
           <RailSection title="Сравнение" mark="comparison" variant="card">
             {/* Итог окна — доминанта карточки (hero переехал сюда после тихой шапки). */}
@@ -1277,6 +1295,7 @@ export function MetricPage() {
             Открыть аналитику <span aria-hidden="true">→</span>
           </Link>
         </aside>
+        )}
       </div>
 
       {openPost && (

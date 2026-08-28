@@ -30,7 +30,7 @@ import {
   type YmBreakdownDef,
 } from '@/panels/metrika/ymBreakdowns';
 import { isYmMetricKey } from '@/panels/metrika/ymMetricKeys';
-import { ComparisonDeltaRow, MetricBackLink, MetricColumns, MetricDescriptor, WindowBarShell, RailSection } from '@/components/metric/shared';
+import { ComparisonDeltaRow, MetricColumns, MetricDescriptor, WindowBarShell, RailSection, MetricPageHeader} from '@/components/metric/shared';
 
 /**
  * Полностраничные метрики «Яндекс.Метрики» — `/metrics/ym-*`. Каждая карточка Обзора /metrika ведёт
@@ -87,7 +87,7 @@ function YmMetricShell({
 }) {
   return (
     <div className="space-y-5">
-      <MetricBackLink to={BACK.to}>{BACK.label}</MetricBackLink>
+      <MetricPageHeader back={BACK} />
 
       <div>
         <h1 className="text-2xl font-medium tracking-tight text-foreground">{term}</h1>
