@@ -418,11 +418,12 @@ function CdekSeriesPage({ def, metricKey }: { def: SeriesDef; metricKey: SeriesK
   // Сетка окна достраивается ЗДЕСЬ: сервер отдаёт только дни с продажами (см. densifyCdekDays).
   // Без неё ось врала о расстояниях между датами, а призрак прошлого окна расходился с рядом по
   // длине — и на столбцах сравнение молча пропадало.
-  const curPoints = densifyCdekDays(series.data?.current ?? [], series.data?.window.from, series.data?.window.to);
+  const curPoints = densifyCdekDays(series.data?.current ?? [], series.data?.window.from, series.data?.window.to, series.data?.grain);
   const prevPoints = densifyCdekDays(
     series.data?.previous ?? [],
     summary.data?.previous_window?.from,
     summary.data?.previous_window?.to,
+    series.data?.grain,
   );
   const raw = curPoints.map((p) => ({ day: p.day, value: def.pick(p) }));
   const shown = lttbDownsample(raw, 400, (r) => r.value ?? 0);

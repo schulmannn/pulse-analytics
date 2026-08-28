@@ -9,6 +9,16 @@ import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { ChartSkeleton, TableSkeleton } from '@/components/ui/dataSkeleton';
 import { useCdekBreakdown, useCdekSeries, type CdekBreakdownRow } from '@/api/cdek';
+import { useSelectedChannel } from '@/lib/channel-context';
+import { useSavedFilter } from '@/lib/widgetPrefsStore';
+import {
+  CDEK_CANON_STATUSES,
+  cdekChannelFilterKey,
+  cdekStatusFilterKey,
+  cdekStatusInclude,
+  normalizeCdekChannels,
+  normalizeCdekStatuses,
+} from '@/panels/cdek/cdekStatusFilter';
 import { lttbDownsample } from '@/lib/downsample';
 import { densifyCdekDays } from '@/lib/cdekSeries';
 import { CHART_MAX_POINTS } from '@/lib/msSeries';
@@ -46,15 +56,30 @@ export function CdekProducts() {
   const windowLabel = pp?.range ? 'за выбранный период' : days === 0 ? 'за всё время' : `за ${days} дн.`;
   const periodInLabel = useCardShowsPeriod() ? windowLabel : undefined;
 
-  const products = useCdekBreakdown(period, 'product', 'revenue', PRODUCT_LIMIT);
-  const series = useCdekSeries(period);
+  // СОХРАНЁННЫЙ ВЫБОР ДЕЙСТВУЕТ и здесь. Страница ходила мимо него совсем: соседние экраны одного
+  // источника отвечали на разные вопросы — «Обзор» считал отгруженное по выбранным каналам, а
+  // «Товары» весь оборот целиком, и числа не сходились без единой подсказки почему.
+  const { channelId } = useSelectedChannel();
+  const savedStatusRaw = useSavedFilter(cdekStatusFilterKey(channelId));
+  const savedStatuses = useMemo(() => normalizeCdekStatuses(savedStatusRaw), [savedStatusRaw]);
+  const include = cdekStatusInclude(savedStatuses.length > 0 ? savedStatuses : CDEK_CANON_STATUSES);
+  const savedChannelsRaw = useSavedFilter(cdekChannelFilterKey(channelId));
+  const salesChannels = useMemo(() => normalizeCdekChannels(savedChannelsRaw), [savedChannelsRaw]);
+
+  // Фильтр ПО ТОВАРАМ не применяется НИГДЕ на этой странице — ни к списку, ни к её графикам.
+  // Страница отвечает на вопрос «что у нас в ассортименте»: сузь её выбранными товарами, и она
+  // покажет ровно их (тот же довод, по которому кольцо каналов не сужается каналами), а ABC —
+  // «сколько первых товаров дают 80% выручки» — при трёх выбранных превратился бы в «три из трёх».
+  // Графики считают тот же набор, что и список: страница целиком отвечает на один вопрос.
+  const products = useCdekBreakdown(period, 'product', include, PRODUCT_LIMIT, undefined, salesChannels);
+  const series = useCdekSeries(period, include, undefined, undefined, salesChannels);
 
   const rows = products.data?.rows ?? [];
   const totalRevenue = products.data?.total.revenue ?? 0;
   // Календарная сетка окна — та же, что на странице метрики (densifyCdekDays): сервер отдаёт
   // ТОЛЬКО дни с продажами, и без уплотнения ось врёт о расстояниях между датами, а карточка
   // показывает не ту форму, что разворот того же числа.
-  const points = densifyCdekDays(series.data?.current ?? [], series.data?.window.from, series.data?.window.to);
+  const points = densifyCdekDays(series.data?.current ?? [], series.data?.window.from, series.data?.window.to, series.data?.grain);
 
   /** Сколько первых товаров дают 80% выручки — и правда ли ассортимент концентрирован. */
   const abc = useMemo(() => {
@@ -117,7 +142,7 @@ export function CdekProducts() {
         {series.isPending ? (
           <ChartSkeleton />
         ) : (
-          <UnitsBody points={points} periodInLabel={periodInLabel} grain={series.data?.grain} />
+          <UnitsBody points={points} periodInLabel={periodInLabel} />
         )}
       </ChartWidget>
 
@@ -145,18 +170,15 @@ export function CdekProducts() {
 function UnitsBody({
   points,
   periodInLabel,
-  grain,
 }: {
   points: Array<{ day: string; items: number }>;
   periodInLabel?: string;
-  grain?: string;
 }) {
   const model = useMemo(
     () => lttbDownsample(points.map((p) => ({ day: p.day, value: p.items })), CHART_MAX_POINTS, (r) => r.value),
     [points],
   );
   const total = points.reduce((s, p) => s + p.items, 0);
-  const grainWord = grain === 'month' ? 'по месяцам' : grain === 'week' ? 'по неделям' : 'по дням';
   if (model.length <= 1) {
     return (
       <ChartCardBody value={formatByRole(total, 'headline')} caption={periodInLabel}>
@@ -166,7 +188,7 @@ function UnitsBody({
   }
   const labels = model.map((r) => fmt.day(r.day));
   return (
-    <ChartCardBody value={formatByRole(total, 'headline')} caption={[periodInLabel, grainWord].filter(Boolean).join(' · ')}>
+    <ChartCardBody value={formatByRole(total, 'headline')} caption={periodInLabel}>
       {/* Флекс-колонка обязательна: ChartBand объявлен `flex-1`, и без неё ограничивать его нечем —
           полоса растёт под контент, столбцы берут высоту всего тела, тайл переполняется (та же
           болезнь, что чинил #487 у «Заказов»). */}
