@@ -10,6 +10,7 @@ import { ErrorState } from '@/components/ErrorState';
 import { ChartSkeleton, TableSkeleton } from '@/components/ui/dataSkeleton';
 import { useCdekBreakdown, useCdekSeries, type CdekBreakdownRow } from '@/api/cdek';
 import { lttbDownsample } from '@/lib/downsample';
+import { densifyCdekDays } from '@/lib/cdekSeries';
 import { CHART_MAX_POINTS } from '@/lib/msSeries';
 import { fmt, timeAxisFromDayKeys } from '@/lib/format';
 import { formatByRole, formatMoney } from '@/lib/metricNumber';
@@ -50,7 +51,10 @@ export function CdekProducts() {
 
   const rows = products.data?.rows ?? [];
   const totalRevenue = products.data?.total.revenue ?? 0;
-  const points = series.data?.current ?? [];
+  // Календарная сетка окна — та же, что на странице метрики (densifyCdekDays): сервер отдаёт
+  // ТОЛЬКО дни с продажами, и без уплотнения ось врёт о расстояниях между датами, а карточка
+  // показывает не ту форму, что разворот того же числа.
+  const points = densifyCdekDays(series.data?.current ?? [], series.data?.window.from, series.data?.window.to);
 
   /** Сколько первых товаров дают 80% выручки — и правда ли ассортимент концентрирован. */
   const abc = useMemo(() => {

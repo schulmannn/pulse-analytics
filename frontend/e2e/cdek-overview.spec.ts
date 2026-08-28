@@ -60,7 +60,7 @@ const fold = (rows: typeof CHANNELS) => ({
   groups: rows.length,
 });
 
-async function bootOverview(page: Page, opts: { all?: boolean; savedFilters?: string } = {}) {
+async function bootOverview(page: Page, opts: { all?: boolean; savedFilters?: string; sparse?: boolean } = {}) {
   const { all = false } = opts;
   const from = Date.now() - 30 * DAY;
   /** Каждый `include`, с которым уходил запрос окна — по нему видно, что фильтр реально доехал. */
@@ -108,7 +108,13 @@ async function bootOverview(page: Page, opts: { all?: boolean; savedFilters?: st
       });
     }
     if (path === '/api/cdek/series') {
-      return json(200, { window, grain: 'day', include: 'revenue', current: series(30, from), previous: all ? [] : series(30, from - 30 * DAY) });
+      // Дни ряда обязаны лежать ВНУТРИ объявленного окна: фронт достраивает календарную сетку по
+      // его границам (densifyCdekDays), и ряд «мимо окна» превратился бы в тридцать честных нулей.
+      // Прежний стаб брал дни от Date.now(), а окно объявлял июльским — расхождение никак себя не
+      // проявляло, пока сетку не строили.
+      const winStart = all ? from : Date.parse('2026-07-01');
+      const sparse = opts.sparse ? series(30, winStart).filter((_, i) => i % 6 !== 5) : series(30, winStart);
+      return json(200, { window, grain: 'day', include: 'revenue', current: sparse, previous: all ? [] : series(30, winStart - 30 * DAY) });
     }
     if (path === '/api/cdek/breakdown') {
       const dim = url.searchParams.get('dim');
@@ -388,4 +394,17 @@ test('пилюля значения снимается на месте и дое
   await expect(page.getByRole('button', { name: 'Убрать: В доставке' })).toHaveCount(0);
   await expect.poll(() => includes.length).toBeGreaterThan(before);
   await expect.poll(() => includes[includes.length - 1]).toBe('status:complete');
+});
+
+/**
+ * Карточки «Обзора» строят календарную сетку окна ТАК ЖЕ, как разворот: сервер отдаёт только дни
+ * с продажами, и без уплотнения ось врёт о расстояниях между датами, а карточка показывает не ту
+ * форму, что разворот того же числа. Проверяется числом столбцов: в окне 30 дней, в ответе 25.
+ */
+test('карточка достраивает дни без продаж, как и разворот', async ({ page }) => {
+  // В разреженном ответе выпадает КАЖДЫЙ ШЕСТОЙ день, включая последний день окна (30 июля).
+  // Без календарной сетки ось обрывалась бы на 29-м — и «последняя точка» врала бы о том, чем
+  // окно закончилось. Считать столбцы бесполезно: нулевой день рисуется пустым path.
+  await bootOverview(page, { sparse: true });
+  await expect(card(page, 'Заказы')).toContainText('30 июл.');
 });
