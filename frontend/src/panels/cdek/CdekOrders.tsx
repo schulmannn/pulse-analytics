@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
 import { EmptyState } from '@/components/EmptyState';
+import { SearchField } from '@/components/SearchField';
 import { ErrorState } from '@/components/ErrorState';
 import { TableSkeleton } from '@/components/ui/dataSkeleton';
 import { useCdekHourly, useCdekOrders, type CdekOrder } from '@/api/cdek';
@@ -18,6 +19,7 @@ import { fmt } from '@/lib/format';
 import { formatMoney } from '@/lib/metricNumber';
 import { useCardShowsPeriod, usePagePeriod } from '@/lib/period';
 import { useMsPagePeriod } from '@/lib/msPeriod';
+import { plural } from '@/lib/narrative';
 import { cn } from '@/lib/utils';
 
 /**
@@ -81,14 +83,22 @@ export function CdekOrders() {
 
       <ChartWidget id="cdek-orders-list" title={`Заказы ${periodInLabel ?? ''}`.trim()} fixedSize="full">
         <div className="mb-3 flex flex-wrap items-center gap-2">
-          <label htmlFor="cdek-order-search" className="sr-only">Поиск заказа</label>
-          <input
+          {/* ОБЩЕЕ ПОЛЕ ПОИСКА, а не восьмая рукописная копия: лупа, крестик очистки, Escape и
+              счётчик результатов для скринридера приходят из канона. Своя сборка из голого input
+              не имела ничего из этого — и на телефоне схлопывалась до 43 пикселей, потому что
+              делила строку с двумя кнопками фильтров: в поле помещался ровно курсор, а плейсхолдер
+              «Номер заказа, внешний номер или трек» не читался вовсе. Теперь на узком экране поле
+              занимает свою строку целиком. */}
+          <SearchField
             id="cdek-order-search"
-            type="search"
+            className="w-full sm:w-72"
             value={q}
-            onChange={(e) => setQ(e.target.value)}
+            onChange={setQ}
             placeholder="Номер заказа, внешний номер или трек"
-            className="h-9 min-w-0 flex-1 rounded border border-border bg-background px-3 text-sm text-foreground outline-hidden placeholder:text-muted-foreground focus:ring-1 focus:ring-primary sm:max-w-xs"
+            ariaLabel="Поиск заказа"
+            resultsLabel={
+              orders.data ? `${orders.data.total} ${plural(orders.data.total, 'заказ', 'заказа', 'заказов')}` : undefined
+            }
           />
           {/* Те же оси и те же значения, что в развороте метрики: набор, а не одиночный выбор, и
               список ВЫВОДИТСЯ из канона источника. Прежние сегменты жили своей жизнью — четыре

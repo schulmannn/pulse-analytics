@@ -25,6 +25,14 @@ describe('SearchField', () => {
     expect(html).not.toContain('Очистить поиск');
   });
 
+  it('keeps the 44px mobile touch height of the button canon', () => {
+    // Базовый Input — 36px: ниже минимальной цели касания. Поле поиска на телефоне часто первое,
+    // во что метят пальцем, поэтому оно держит тот же min-h-11 sm:min-h-0, что и Button.
+    const html = markup(<SearchField value="" onChange={() => {}} ariaLabel="Поиск" />);
+    expect(html).toContain('min-h-11');
+    expect(html).toContain('sm:min-h-0');
+  });
+
   it('shows a clear button with an explicit Russian accessible name once non-empty', () => {
     const html = markup(
       <SearchField value="куртка" onChange={() => {}} ariaLabel="Поиск" />,
