@@ -316,10 +316,18 @@ test('лента заказов ищет по номеру, внешнему н�
   const byExternal = await db.getCdekOrdersForActor(channelId, actor, { ...win, q: '369248' });
   assert.equal(byExternal.rows[0].order_id, '33905573');
 
-  const byStatus = await db.getCdekOrdersForActor(channelId, actor, { ...win, status: 'delivery' });
+  // Статусы ленты едут в `include` — своим параметром они ложились ПОВЕРХ канона и давали
+  // противоречивый предикат (см. REVENUE_FILTER): «Возврат» при include='revenue' — это «равен
+  // return И не равен return», то есть всегда пустая лента.
+  const byStatus = await db.getCdekOrdersForActor(channelId, actor, { ...win, include: 'status:delivery' });
   assert.equal(byStatus.rows.length, 1);
   assert.equal(Number(byStatus.rows[0].amount_kopecks), 878000, 'сумма заказа = цена × количество');
   assert.equal(Number(byStatus.rows[0].items), 2);
+
+  // ВНЕ канона: возврат в ленте не виден по умолчанию (он не отгрузка), но ПО ВЫБОРУ обязан
+  // находиться. Прежний отдельный параметр статуса давал здесь ноль строк при любом наборе.
+  const canon = await db.getCdekOrdersForActor(channelId, actor, { ...win });
+  assert.equal(canon.rows.length, 2, 'канон показывает обе отгрузки');
 
   const byChannel = await db.getCdekOrdersForActor(channelId, actor, { ...win, channel: 'own' });
   assert.equal(byChannel.rows.length, 1);
