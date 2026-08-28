@@ -23,6 +23,7 @@ import {
 } from '@/api/cdek';
 import { pctDelta, type MetricDelta } from '@/lib/delta';
 import { lttbDownsample } from '@/lib/downsample';
+import { densifyCdekDays } from '@/lib/cdekSeries';
 import { CHART_MAX_POINTS } from '@/lib/msSeries';
 import { fmt, timeAxisFromDayKeys } from '@/lib/format';
 import { useSelectedChannel } from '@/lib/channel-context';
@@ -192,7 +193,10 @@ export function CdekOverview() {
 
   const cur = summary.data?.current ?? null;
   const prev = summary.data?.previous ?? null;
-  const points = series.data?.current ?? [];
+  // Календарная сетка окна — та же, что на странице метрики (densifyCdekDays): сервер отдаёт
+  // ТОЛЬКО дни с продажами, и без уплотнения ось врёт о расстояниях между датами, а карточка
+  // показывает не ту форму, что разворот того же числа.
+  const points = densifyCdekDays(series.data?.current ?? [], series.data?.window.from, series.data?.window.to);
   // Подпись ряда честно называет ЕДИНИЦУ корзины: на длинном окне это уже не дни.
   const grainWord = series.data?.grain === 'month' ? 'по месяцам' : series.data?.grain === 'week' ? 'по неделям' : 'по дням';
 

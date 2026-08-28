@@ -206,9 +206,14 @@ function CdekMetricShell({
             {/* Порядок — как у Steep: сначала «из чего сложилось» и «что считаем», и только потом
                 «с чем сравниваем» и «чем рисуем». У нас он был буквально перевёрнут: сравнение
                 стояло первым, фильтры последними (замечено владельцем по кадру). */}
-              <RailSection title="Разбивка" variant="row" icon={SplitGlyph} action={splitAction}>
-                {split}
-              </RailSection>
+              {(split || splitAction) && (
+                // Только там, где разрез ЕСТЬ или его можно выбрать. На страницах-разрезов
+                // («Каналы продаж», «Статусы») раскладывать нечего — раздел был бы строкой без
+                // содержимого и без действия, тем же мёртвым контролом, что и пустые «Цели».
+                <RailSection title="Разбивка" variant="row" icon={SplitGlyph} action={splitAction}>
+                  {split}
+                </RailSection>
+              )}
               {filters && (
                 <RailSection
                   title="Фильтры"
@@ -779,19 +784,23 @@ function CdekBreakdownPage({ def }: { def: BreakdownDef }) {
   return (
     <CdekMetricShell term={def.term} back={def.back}>
       <div className="space-y-3">
-        <div className="flex justify-end">
-          <SegmentedControl
-            ariaLabel="Показатель разреза"
-            size="sm"
-            value={metric}
-            onChange={setMetric}
-            options={[
-              { value: 'revenue', content: 'Выручка' },
-              { value: 'orders', content: 'Заказы' },
-            ]}
-          />
+        {/* Разрез живёт НА ТОЙ ЖЕ поверхности, что и ряд: страницы одного источника не должны
+            отличаться подачей полотна только потому, что одна рисует линию, а другая — доли. */}
+        <div className="rounded-2xl border border-border bg-card p-4 shadow-xs dark:border-white/6 sm:p-5">
+          <div className="mb-3 flex justify-end">
+            <SegmentedControl
+              ariaLabel="Показатель разреза"
+              size="sm"
+              value={metric}
+              onChange={setMetric}
+              options={[
+                { value: 'revenue', content: 'Выручка' },
+                { value: 'orders', content: 'Заказы' },
+              ]}
+            />
+          </div>
+          {body()}
         </div>
-        {body()}
         <WindowBarShell>
           <PeriodChips ariaLabel="Окно" value={days} onChange={setDays} range={range} onRangeChange={setRange} />
         </WindowBarShell>
