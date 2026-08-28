@@ -34,11 +34,6 @@ import { ComparisonDeltaRow, MetricColumns, MetricDescriptor, WindowBarShell, Ra
 type ChartKind = 'line' | 'bar';
 type CompareMode = 'off' | 'prev';
 
-interface AboutDef {
-  formula: string;
-  included: string;
-  source: string;
-}
 
 /**
  * Dedicated graph pages for the Mentions surface. The daily timeline gets the full chart explorer
@@ -78,7 +73,6 @@ function MentionsMetricShell({
   backTo: string;
   term: string;
   descriptor: string;
-  about: AboutDef;
   comparison: ReactNode;
   children: ReactNode;
 }) {
@@ -196,13 +190,6 @@ function MentionsTimelinePage() {
           ? 'Динамика упоминаний выбранного канала-источника за выбранное окно'
           : 'Динамика упоминаний бренда по календарным дням за выбранное окно'
       }
-      about={{
-        formula:
-          'Число найденных публикаций с упоминанием бренда за каждый календарный день. Дни без публикаций честно показаны нулём.',
-        included:
-          'При выбранном источнике весь ряд сужается на сервере до этого канала. Пунктир — непосредственно предыдущее равное окно, выровненное по порядковому дню.',
-        source: 'Сохранённый архив поиска упоминаний Telegram.',
-      }}
       comparison={
         archive.isPending && !data ? (
           <Skeleton className="h-24 w-full" />
@@ -347,13 +334,6 @@ function MentionsSourcesPage() {
       backTo={backTo}
       term="Кто упоминает"
       descriptor="Каналы-источники, упорядоченные по числу упоминаний бренда за выбранное окно"
-      about={{
-        formula:
-          'Публикации с упоминанием группируются по каналу-источнику и ранжируются по числу найденных публикаций.',
-        included:
-          'Просмотры — сумма просмотров упомянувших публикаций, без дедупликации аудитории. Это потенциальные просмотры, а не охват.',
-        source: 'Сохранённый архив поиска упоминаний Telegram.',
-      }}
       comparison={
         <p className="text-xs leading-relaxed text-muted-foreground">
           Это распределение каналов за окно, а не одна метрика периода — сравнение с прошлым

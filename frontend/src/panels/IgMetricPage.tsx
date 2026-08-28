@@ -858,11 +858,6 @@ function IgErPage({
 // is its own 7×24 heatmap; Reels is per-post categorical (bars, no fabricated period comparison);
 // format-engagement + Reels follow the GLOBAL period through useIgData (window bar), the rest don't.
 
-interface IgAboutDef {
-  formula: string;
-  included?: string;
-  source: string;
-}
 
 /** Тихая шапка + две колонки (главный блок + rail «Сравнение»/«О метрике»), как у `/metrics/ig-reach`. */
 function IgChartShell({
@@ -878,7 +873,6 @@ function IgChartShell({
   handle: string | null;
   descriptor?: string;
   comparison: ReactNode;
-  about: IgAboutDef;
   children: ReactNode;
 }) {
   // Та же одна настройка на все источники — см. metricRail.
@@ -951,7 +945,6 @@ interface IgBreakdownPageDef {
   term: string;
   descriptor: string;
   cardTitle: string;
-  about: IgAboutDef;
   comparison: string;
   /** Post/timeframe-derived pages carry the GLOBAL period window bar; snapshots don't. */
   periodControl: boolean;
@@ -974,11 +967,6 @@ const IG_BREAKDOWN_DEFS: Record<string, IgBreakdownPageDef> = {
     term: 'Возраст',
     descriptor: 'Возрастные группы подписчиков — оценка Instagram по демографии базы',
     cardTitle: 'Возрастные группы',
-    about: {
-      formula: 'Подписчики группируются по возрастной корзине (follower_demographics · age) в фиксированном порядке 13–17 … 65+.',
-      included: 'Это снимок текущей базы подписчиков, а не срез за период. Instagram отдаёт демографию только для аккаунтов от 100 подписчиков и показывает лишь топ-сегменты.',
-      source: 'Instagram insights (follower_demographics, age).',
-    },
     comparison: DEMOGRAPHIC_COMPARISON,
     periodControl: false,
     query: (ig) => ig.queries.breakdowns,
@@ -1002,11 +990,6 @@ const IG_BREAKDOWN_DEFS: Record<string, IgBreakdownPageDef> = {
     term: 'Пол',
     descriptor: 'Пол подписчиков — оценка Instagram по демографии базы',
     cardTitle: 'По полу',
-    about: {
-      formula: 'Подписчики группируются по полу (follower_demographics · gender), ранжируются по величине.',
-      included: 'Снимок текущей базы, а не срез за период. Доступно только для аккаунтов от 100 подписчиков.',
-      source: 'Instagram insights (follower_demographics, gender).',
-    },
     comparison: DEMOGRAPHIC_COMPARISON,
     periodControl: false,
     query: (ig) => ig.queries.breakdowns,
@@ -1020,11 +1003,6 @@ const IG_BREAKDOWN_DEFS: Record<string, IgBreakdownPageDef> = {
     term: 'Топ стран',
     descriptor: 'География подписчиков по странам — полный список',
     cardTitle: 'Все страны',
-    about: {
-      formula: 'Подписчики группируются по стране (follower_demographics · country); коды стран локализуются. Полный ранжированный список (карточка показывает топ-8).',
-      included: 'Снимок текущей базы, а не срез за период. Доступно только для аккаунтов от 100 подписчиков.',
-      source: 'Instagram insights (follower_demographics, country).',
-    },
     comparison: DEMOGRAPHIC_COMPARISON,
     periodControl: false,
     query: (ig) => ig.queries.breakdowns,
@@ -1038,11 +1016,6 @@ const IG_BREAKDOWN_DEFS: Record<string, IgBreakdownPageDef> = {
     term: 'Топ городов',
     descriptor: 'География подписчиков по городам — полный список',
     cardTitle: 'Все города',
-    about: {
-      formula: 'Подписчики группируются по городу (follower_demographics · city); названия локализуются, регион отбрасывается. Полный ранжированный список (карточка показывает топ-8).',
-      included: 'Снимок текущей базы, а не срез за период. Доступно только для аккаунтов от 100 подписчиков.',
-      source: 'Instagram insights (follower_demographics, city).',
-    },
     comparison: DEMOGRAPHIC_COMPARISON,
     periodControl: false,
     query: (ig) => ig.queries.breakdowns,
@@ -1056,11 +1029,6 @@ const IG_BREAKDOWN_DEFS: Record<string, IgBreakdownPageDef> = {
     term: 'Вовлечённость по форматам',
     descriptor: 'Как распределяются взаимодействия аккаунта по формату за выбранное окно',
     cardTitle: 'Вовлечённость по форматам',
-    about: {
-      formula: 'Взаимодействия аккаунта (total_interactions) группируются по формату (Лента/Reels/Stories/Карусель), ранжируются по величине.',
-      included: 'Это разрез аккаунта за окно инсайтов Instagram, а не сумма по загруженным постам. Меняйте окно, чтобы пересобрать карточку.',
-      source: 'Instagram insights (total_interactions · media_product_type).',
-    },
     comparison:
       'Это разрез вовлечённости по форматам за окно, а не одна метрика периода — сравнение периодов не рассчитывается. Меняйте окно, чтобы пересобрать карточку.',
     periodControl: true,
@@ -1076,11 +1044,6 @@ const IG_BREAKDOWN_DEFS: Record<string, IgBreakdownPageDef> = {
     term: 'Навигация по историям',
     descriptor: 'Как зрители переходят между активными историями за 24-часовое окно',
     cardTitle: 'Навигация по историям',
-    about: {
-      formula: 'Суммарные действия навигации активных историй: «Вперёд» (tap_forward), «Назад» (tap_back), «Выход» (tap_exit), «Свайп к следующему» (swipe_forward).',
-      included: 'Истории живут 24 часа — это разрез активных историй, а не срез за выбранный период. Пустые действия скрыты.',
-      source: 'Instagram Stories insights (navigation).',
-    },
     comparison:
       'Навигация по активным историям за 24-часовое окно Instagram — не метрика периода; сравнение периодов не рассчитывается.',
     periodControl: false,
@@ -1148,7 +1111,6 @@ function IgBreakdownPage({
       handle={handle}
       descriptor={def.descriptor}
       comparison={<IgNoComparison text={def.comparison} />}
-      about={def.about}
     >
       <IgReportCard id={def.cardId} title={def.cardTitle}>
         {pending ? (
@@ -1203,13 +1165,6 @@ function IgReelsWatchTimePage({
       comparison={
         <IgNoComparison text="Показатели по каждому Reels за окно — это разрез по публикациям, а не метрика периода; сравнение с прошлым периодом не рассчитывается." />
       }
-      about={{
-        formula:
-          'Для каждого Reels окна — среднее время просмотра (ig_reels_avg_watch_time) в секундах, столбец на ролик. Сводка: число Reels, среднее по роликам и суммарно просмотренные часы.',
-        included:
-          'Только медиа-продукт REELS из загруженных публикаций окна; Reels без метрики удержания дают 0. Глубина ограничена ~24 последними публикациями (как в Контенте).',
-        source: 'Instagram insights по публикациям (ig_reels_avg_watch_time, ig_reels_video_view_total_time).',
-      }}
     >
       <IgReportCard id="ig-page-reels-watch-time" title="Ср. время просмотра по Reels">
         {pending ? (
@@ -1251,13 +1206,6 @@ function IgBestTimePage({ ig, handle }: { ig: IgData; handle: string | null }) {
       comparison={
         <IgNoComparison text="Тепловая карта онлайна аудитории — форма распределения, а не одна метрика периода; сравнение периодов не рассчитывается." />
       }
-      about={{
-        formula:
-          'Для каждого слота (день недели × час) — среднее число подписчиков онлайн из метрики online_followers; насыщенность нормирована на максимум, лучший слот отмечен рамкой.',
-        included:
-          'Часы — в UTC, как отдаёт Instagram. Метрика доступна не всегда и требует 100+ подписчиков — при пустом ответе показываем честное пустое состояние, а не выдуманный слот.',
-        source: 'Instagram insights (online_followers).',
-      }}
     >
       <IgReportCard id="ig-page-best-time" title="По дням недели и часам">
         {q.isPending ? (

@@ -54,11 +54,6 @@ import { MetricColumns, MetricDescriptor, WindowBarShell, RailSection, MetricPag
 
 type ChartKind = 'line' | 'bar';
 
-interface AboutDef {
-  formula: string;
-  included: string;
-  source: string;
-}
 
 /**
  * Dedicated visual explorers for `/campaigns/:id`. They intentionally reuse the campaign summary
@@ -189,7 +184,6 @@ function CampaignMetricShell({
   backTo: string;
   term: string;
   descriptor: string;
-  about: AboutDef;
   comparison: ReactNode;
   children: ReactNode;
 }) {
@@ -311,13 +305,6 @@ function CampaignTimelineMetric({
       backTo={backTo}
       term={active?.title ?? 'Динамика кампании'}
       descriptor={`${sourceDescriptor(source)} · значения сгруппированы по дате публикации`}
-      about={{
-        formula:
-          'Публикации группируются по календарной дате. В режиме TG суммируются просмотры Telegram, в режиме IG — охваты публикаций Instagram без дедупликации аудитории, в режиме публикаций — число материалов.',
-        included:
-          'TG-просмотры и IG-охват никогда не складываются в одну серию: это разные методологии. Переключатель показателя заменяет ряд целиком.',
-        source: 'Серверная сводка публикаций, добавленных в кампанию.',
-      }}
       comparison={
         <p className="text-xs leading-relaxed text-muted-foreground">
           {cmp
@@ -403,13 +390,6 @@ function CampaignSourcesMetric({
       backTo={backTo}
       term="Источники кампании"
       descriptor={`${sourceDescriptor(source)} · вклад считается только внутри методологии своей платформы`}
-      about={{
-        formula:
-          'Источники упорядочены по числу публикаций. Полоса показывает долю результата источника внутри своей платформы: TG — просмотры, IG — сумма охватов.',
-        included:
-          'Доли Telegram и Instagram нормируются раздельно и не сравниваются между собой. Число публикаций остаётся единственной общей величиной.',
-        source: 'Серверная разбивка кампании по источникам.',
-      }}
       comparison={
         <p className="text-xs leading-relaxed text-muted-foreground">
           Это распределение источников внутри кампании, а не одна метрика периода — сравнение с
@@ -443,13 +423,6 @@ function CampaignFormatsMetric({
       backTo={backTo}
       term="Форматы кампании"
       descriptor={`${sourceDescriptor(source)} · распределение публикаций по платформе и типу контента`}
-      about={{
-        formula:
-          'Каждый сектор — число публикаций одного формата внутри платформы. TG и IG разделены в подписях, а размер сектора использует сопоставимое число материалов.',
-        included:
-          'В подсказке дополнительно показана собственная метрика платформы: просмотры TG или сумма охватов IG. Они не складываются между сетями.',
-        source: 'Серверная разбивка кампании по форматам публикаций.',
-      }}
       comparison={
         <p className="text-xs leading-relaxed text-muted-foreground">
           Это состав кампании по форматам, а не временной ряд — сравнение периодов и переключатель

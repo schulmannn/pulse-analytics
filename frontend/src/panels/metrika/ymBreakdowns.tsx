@@ -250,11 +250,6 @@ export function YmReportBody<T>({
 
 // ── Таблица разрезов ───────────────────────────────────────────────────────────────────────────
 
-export interface AboutDef {
-  formula: string;
-  included?: string;
-  source: string;
-}
 
 /** Доска Обзора vs полностраничный отчёт: отличаются только высотой скелета и лимитом отчёта. */
 export type YmBreakdownSurface = 'board' | 'page';
@@ -274,7 +269,6 @@ export interface YmBreakdownDef {
   /** Тихая подпись под h1 полностраничного отчёта. */
   descriptor: string;
   /** Rail «О метрике». */
-  about: AboutDef;
   /** Заголовок карточки внутри полностраничного отчёта («Все источники»). */
   pageTitle: string;
   /** aria-label синхронного селектора цели; undefined — у разреза нет атрибуции. */
@@ -293,7 +287,6 @@ function defineYmBreakdown<T>(spec: {
   key: string;
   title: string;
   descriptor: string;
-  about: AboutDef;
   pageTitle: string;
   goalAria?: string;
   errorTitle: string;
@@ -307,7 +300,6 @@ function defineYmBreakdown<T>(spec: {
     key: spec.key,
     title: spec.title,
     descriptor: spec.descriptor,
-    about: spec.about,
     pageTitle: spec.pageTitle,
     goalAria: spec.goalAria,
     Body: function YmBreakdownBody({ period, goalId, surface }: YmBreakdownBodyProps) {
@@ -348,11 +340,6 @@ export const YM_BREAKDOWNS: YmBreakdownDef[] = [
     key: 'ym-sources',
     title: 'Источники трафика',
     descriptor: 'Откуда пришли визиты за выбранное окно',
-    about: {
-      formula: 'Группировка визитов по источнику трафика (поиск/прямые/соцсети/реклама/…). Строка — визиты и посетители источника.',
-      included: 'С выбранной целью строки дополняются достижениями и конверсией (CR) этой цели.',
-      source: 'Отчёт визитов Метрики (ym:s:<trafficSource>).',
-    },
     pageTitle: 'Все источники',
     goalAria: 'Цель для источников трафика',
     errorTitle: 'Не удалось получить источники трафика',
@@ -375,10 +362,6 @@ export const YM_BREAKDOWNS: YmBreakdownDef[] = [
     key: 'ym-referrers',
     title: 'Реферальные сайты',
     descriptor: 'Внешние домены, приводящие трафик по ссылкам',
-    about: {
-      formula: 'Группировка визитов по внешнему домену-источнику перехода. Строка — визиты и отказы домена.',
-      source: 'Отчёт визитов Метрики (ym:s:externalRefererDomain).',
-    },
     pageTitle: 'Все домены',
     errorTitle: 'Не удалось получить реферальные сайты',
     useData: useYmReferrers,
@@ -407,10 +390,6 @@ export const YM_BREAKDOWNS: YmBreakdownDef[] = [
     key: 'ym-social',
     title: 'Соцсети',
     descriptor: 'Конкретные соцсети, приводящие трафик',
-    about: {
-      formula: 'Группировка визитов из соцсетей по конкретной сети. Строка — визиты и отказы сети.',
-      source: 'Отчёт визитов Метрики (ym:s:lastsignSocialNetwork).',
-    },
     pageTitle: 'Все соцсети',
     errorTitle: 'Не удалось получить соцсети',
     useData: useYmSocial,
@@ -439,10 +418,6 @@ export const YM_BREAKDOWNS: YmBreakdownDef[] = [
     key: 'ym-messengers',
     title: 'Мессенджеры',
     descriptor: 'Telegram и другие мессенджеры — отдельная размерность, не внутри «Соцсетей»',
-    about: {
-      formula: 'Группировка визитов из мессенджеров по конкретному мессенджеру. Строка — визиты и отказы.',
-      source: 'Отчёт визитов Метрики (ym:s:<messenger>).',
-    },
     pageTitle: 'Все мессенджеры',
     errorTitle: 'Не удалось получить мессенджеры',
     useData: useYmMessengers,
@@ -471,11 +446,6 @@ export const YM_BREAKDOWNS: YmBreakdownDef[] = [
     key: 'ym-devices',
     title: 'Устройства',
     descriptor: 'Типы устройств посетителей за выбранное окно',
-    about: {
-      formula: 'Группировка визитов по типу устройства (десктоп/смартфон/планшет/ТВ). Строка — визиты и отказы.',
-      included: 'Тип локализуется по стабильному id категории; с выбранной целью строки дополняются достижениями и CR.',
-      source: 'Отчёт визитов Метрики (ym:s:deviceCategory).',
-    },
     pageTitle: 'Все устройства',
     goalAria: 'Цель для устройств',
     errorTitle: 'Не удалось получить устройства',
@@ -498,11 +468,6 @@ export const YM_BREAKDOWNS: YmBreakdownDef[] = [
     key: 'ym-countries',
     title: 'Страны',
     descriptor: 'География посетителей по странам за выбранное окно',
-    about: {
-      formula: 'Группировка визитов по стране визита. Строка — визиты и отказы страны.',
-      included: 'География определяется Метрикой по данным визита, а не по GPS.',
-      source: 'Отчёт визитов Метрики (ym:s:regionCountry, lang=ru).',
-    },
     pageTitle: 'Все страны',
     errorTitle: 'Не удалось получить страны',
     useData: useYmCountries,
@@ -525,11 +490,6 @@ export const YM_BREAKDOWNS: YmBreakdownDef[] = [
     key: 'ym-cities',
     title: 'Города',
     descriptor: 'География посетителей по городам за выбранное окно',
-    about: {
-      formula: 'Группировка визитов по городу визита — отдельная от страны размерность. Строка — визиты и отказы.',
-      included: 'География определяется Метрикой по данным визита, а не по GPS.',
-      source: 'Отчёт визитов Метрики (ym:s:regionCity, lang=ru).',
-    },
     pageTitle: 'Все города',
     errorTitle: 'Не удалось получить города',
     useData: useYmCities,
@@ -551,11 +511,6 @@ export const YM_BREAKDOWNS: YmBreakdownDef[] = [
     key: 'ym-age',
     title: 'Возраст',
     descriptor: 'Возрастные группы посетителей — оценка Метрики (Crypta)',
-    about: {
-      formula: 'Группировка визитов по возрастной группе посетителя. Строка — визиты и отказы группы.',
-      included: 'Значения — оценка Метрики по поведению аудитории, не анкета; при малой выборке часть данных скрыта.',
-      source: 'Отчёт визитов Метрики (ym:s:ageInterval).',
-    },
     pageTitle: 'Все возрастные группы',
     errorTitle: 'Не удалось получить возраст',
     useData: useYmAge,
@@ -579,11 +534,6 @@ export const YM_BREAKDOWNS: YmBreakdownDef[] = [
     key: 'ym-gender',
     title: 'Пол',
     descriptor: 'Пол посетителей — оценка Метрики (Crypta)',
-    about: {
-      formula: 'Группировка визитов по полу посетителя. Строка — визиты и отказы группы.',
-      included: 'Значения — оценка Метрики по поведению аудитории, не анкета; при малой выборке часть данных скрыта.',
-      source: 'Отчёт визитов Метрики (ym:s:gender).',
-    },
     pageTitle: 'По полу',
     errorTitle: 'Не удалось получить пол',
     useData: useYmGender,
@@ -607,10 +557,6 @@ export const YM_BREAKDOWNS: YmBreakdownDef[] = [
     key: 'ym-goals',
     title: 'Цели',
     descriptor: 'Достижения целей и конверсия за выбранное окно',
-    about: {
-      formula: 'Достижения (reaches) каждой цели за окно; конверсия (CR) — отдельная метрика Метрики, из reaches не выводится.',
-      source: 'Отчёт целей Метрики (goal reaches + conversionRate).',
-    },
     pageTitle: 'Все цели',
     errorTitle: 'Не удалось получить цели',
     useData: useYmGoals,
@@ -641,11 +587,6 @@ export const YM_BREAKDOWNS: YmBreakdownDef[] = [
     key: 'ym-utm',
     title: 'UTM-метки',
     descriptor: 'Размеченные визиты по utm_source за выбранное окно',
-    about: {
-      formula: 'Группировка размеченных визитов по utm_source. Неразмеченные визиты — честной сноской, не строкой.',
-      included: 'С выбранной целью строки дополняются достижениями и конверсией (CR) этой цели.',
-      source: 'Отчёт визитов Метрики (ym:s:<UTMSource>).',
-    },
     pageTitle: 'Все UTM-источники',
     goalAria: 'Цель для UTM-меток',
     errorTitle: 'Не удалось получить UTM-разметку',
@@ -679,10 +620,6 @@ export const YM_BREAKDOWNS: YmBreakdownDef[] = [
     key: 'ym-pages',
     title: 'Топ-страницы',
     descriptor: 'Самые просматриваемые страницы за выбранное окно',
-    about: {
-      formula: 'Группировка ПРОСМОТРОВ страниц по пути. Просмотры — hits-метрика, не визиты (другая единица).',
-      source: 'Отчёт просмотров Метрики (ym:pv:URLPath).',
-    },
     pageTitle: 'Все страницы',
     errorTitle: 'Не удалось получить страницы',
     useData: useYmPages,
@@ -704,11 +641,6 @@ export const YM_BREAKDOWNS: YmBreakdownDef[] = [
     key: 'ym-landings',
     title: 'Страницы входа',
     descriptor: 'Где визиты начинаются за выбранное окно',
-    about: {
-      formula: 'Группировка визитов по странице ВХОДА (startURLPath). Строка — визиты и отказы страницы.',
-      included: 'С выбранной целью строки дополняются достижениями и конверсией (CR) этой цели.',
-      source: 'Отчёт визитов Метрики (ym:s:startURLPath).',
-    },
     pageTitle: 'Все страницы входа',
     goalAria: 'Цель для страниц входа',
     errorTitle: 'Не удалось получить страницы входа',
@@ -738,10 +670,6 @@ export const YM_BREAKDOWNS: YmBreakdownDef[] = [
     key: 'ym-exits',
     title: 'Страницы выхода',
     descriptor: 'Где визиты заканчиваются за выбранное окно',
-    about: {
-      formula: 'Группировка визитов по странице ВЫХОДА (endURLPath) — зеркало входов. Строка — визиты и отказы.',
-      source: 'Отчёт визитов Метрики (ym:s:endURLPath).',
-    },
     pageTitle: 'Все страницы выхода',
     errorTitle: 'Не удалось получить страницы выхода',
     useData: useYmExits,

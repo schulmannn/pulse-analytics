@@ -228,16 +228,6 @@ export function WindowBarShell({ label = 'Окно', children }: { label?: strin
   );
 }
 
-/** Строка «О метрике»: термин + пояснение внутри `<dl>`. */
-export function AboutRow({ label, text }: { label: string; text: string }) {
-  return (
-    <div>
-      <dt className="text-2xs tracking-wide text-muted-foreground">{label}</dt>
-      <dd className="mt-0.5 text-sm leading-relaxed text-foreground">{text}</dd>
-    </div>
-  );
-}
-
 /** Строка «Изменение» comparison-rail'а — одна разметка на все вертикали (TG/IG/MS/Метрика/
     упоминания), чтобы копии не расходились по глифам, цветам и точности. `evaluative={false}` —
     для метрик без сентимента (объём упоминаний), см. {@link ComparisonDelta}. */
