@@ -326,6 +326,15 @@ export function BarChart({
       minLabelPx: expanded ? 40 : 56,
       maxLabels: expanded ? 20 : 8,
     });
+    // ПИК ПОДПИСЫВАЕТСЯ ВСЕГДА. Прореживание выше — позиционное, и оно ничего не знает про
+    // значения: на разрежённом ряде в стрид попадали дни со случайными единицами, а самый
+    // высокий столбец оставался немым. Подписи тогда метят шум и молчат про сигнал — это хуже,
+    // чем их отсутствие. Одна гарантированная подпись у максимума чинит это, не ломая
+    // «линейку» плотных рядов: у них пик и так обычно попадает в стрид.
+    const peakIdx = values.reduce(
+      (best, v, i) => (v > 0 && (best < 0 || v > values[best]) ? i : best),
+      -1,
+    );
 
     const barTop = (val: number) => graphHeight - (val / max) * usable;
     const barCenterX = (i: number) => offsetX + i * itemWidth + itemWidth / 2;
@@ -430,7 +439,7 @@ export function BarChart({
           // Ноль не подписываем: пустое место и так читается как «ничего», а «0» над невидимым
           // столбцом — чистый шум (и он же ставится на дни-пропуски, которые несут штриховку,
           // а не измеренный ноль). Отрицательные значения подписываются: там ноль осмыслен.
-          const showValue = expanded && !stacked && valueIndexes.has(i) && val !== 0;
+          const showValue = expanded && !stacked && val !== 0 && (valueIndexes.has(i) || i === peakIdx);
           if (!showLabel && !showValue) return null;
           const isLast = i === axisCurrentIdx;
           // Крайние ДАТЫ прижимаются к краям плота (start/end), а не центрируются под столбцом —
