@@ -1241,6 +1241,109 @@ function YmCounterRow({
   );
 }
 
+/**
+ * «Где взять токен» — инструкция ВНУТРИ панели, а не ссылка «читайте документацию». Раньше здесь
+ * стояла одна фраза «выпустить его можно на oauth.yandex.ru для своего приложения»: она называет
+ * место, но не говорит ни какое право отметить, ни какой Redirect URI вписать, ни где в итоге
+ * искать сам токен — а без любого из трёх шаг не проходится.
+ *
+ * Последний шаг собирает ссылку выдачи ЗА человека: адрес авторизации отличается от обычного
+ * только идентификатором приложения, и склеивать его руками в адресной строке — ровно то место,
+ * где инструкции обычно и рвутся.
+ */
+function YmTokenGuide({ open }: { open: boolean }) {
+  const [clientId, setClientId] = useState('');
+  const id = clientId.trim();
+  // ClientID Яндекса — 32 шестнадцатеричных знака. Проверяем форму, чтобы не звать человека по
+  // заведомо битой ссылке (Яндекс ответит «unknown client», и он решит, что ошибся правами).
+  const ready = /^[0-9a-fA-F]{32}$/.test(id);
+  const authUrl = `https://oauth.yandex.ru/authorize?response_type=token&client_id=${id}`;
+  return (
+    <details open={open} className="group rounded-lg border border-border bg-muted/30">
+      <summary
+        data-mobile-touch-target=""
+        className="flex min-h-11 cursor-pointer list-none items-center gap-2 px-3 py-2 text-sm font-medium text-foreground [&::-webkit-details-marker]:hidden sm:min-h-0"
+      >
+        <svg
+          viewBox="0 0 16 16"
+          className="size-3.5 shrink-0 text-muted-foreground transition-transform group-open:rotate-90"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          aria-hidden="true"
+        >
+          <path d="M6 4l4 4-4 4" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+        Где взять токен — три минуты
+      </summary>
+      <ol className="list-decimal space-y-3 py-1 pl-8 pr-3 text-sm leading-relaxed text-muted-foreground marker:font-medium marker:text-foreground">
+        <li>
+          <span className="font-medium text-foreground">Создайте приложение.</span> На Яндекс OAuth выберите
+          вариант «Для API-доступа или отладки». Название любое — оно нужно только вам.
+          <div className="mt-2">
+            <Button asChild variant="outline" size="sm">
+              <a href="https://oauth.yandex.ru/?dialog=create-client-entry" target="_blank" rel="noreferrer noopener">
+                Открыть Яндекс OAuth ↗
+              </a>
+            </Button>
+          </div>
+        </li>
+        <li>
+          <span className="font-medium text-foreground">Отметьте одно право:</span> <Code>metrika:read</Code> —
+          «Получение статистики, данных о параметрах своих счётчиков». Право на запись не нужно: Atlavue только
+          читает.
+        </li>
+        <li>
+          <span className="font-medium text-foreground">В поле «Redirect URI» вставьте этот адрес.</span> Он
+          служебный: на него Яндекс вернёт готовый токен.
+          <Snippet className="mt-2" value="https://oauth.yandex.ru/verification_code" />
+        </li>
+        <li>
+          <span className="font-medium text-foreground">Выпустите токен.</span> Скопируйте ClientID созданного
+          приложения сюда — соберём ссылку за вас:
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <label htmlFor="yandex-client-id" className="sr-only">ClientID приложения Яндекса</label>
+            <input
+              data-mobile-touch-target=""
+              id="yandex-client-id"
+              type="text"
+              value={clientId}
+              onChange={(e) => setClientId(e.target.value)}
+              placeholder="ClientID — 32 знака"
+              autoComplete="off"
+              spellCheck={false}
+              // На телефоне поле занимает СВОЮ строку, а кнопка переносится под него: рядом с
+              // широкой кнопкой на 430px в поле оставалось ~90px — в ClientID из 32 знаков виден
+              // огрызок, и проверить вставленное нечем.
+              className="h-11 w-full min-w-0 rounded border border-border bg-background px-3 font-mono text-xs text-foreground outline-hidden placeholder:font-sans placeholder:text-muted-foreground focus:ring-1 focus:ring-primary sm:h-9 sm:w-auto sm:flex-1"
+            />
+            {ready ? (
+              <Button asChild size="sm" className="shrink-0">
+                <a href={authUrl} target="_blank" rel="noreferrer noopener">
+                  Открыть страницу выдачи ↗
+                </a>
+              </Button>
+            ) : (
+              <Button size="sm" className="shrink-0" disabled>
+                Открыть страницу выдачи ↗
+              </Button>
+            )}
+          </div>
+          <p className="mt-2">
+            Открывайте под тем аккаунтом Яндекса, у которого есть доступ к счётчику. Нажмите «Разрешить» — токен
+            появится в адресной строке после <Code>#access_token=</Code>.
+          </p>
+        </li>
+        <li>
+          <span className="font-medium text-foreground">Вставьте токен в поле ниже</span> — и всё, счётчик
+          подключён. Токен живёт около года; когда истечёт, повторите четвёртый шаг и нажмите «Подключить снова» у
+          нужного счётчика — он вернётся в свой источник вместе с архивом.
+        </li>
+      </ol>
+    </details>
+  );
+}
+
 function MetrikaPanel({ channels }: { channels: Channel[] }) {
   const qc = useQueryClient();
   const [token, setToken] = useState('');
@@ -1332,10 +1435,9 @@ function MetrikaPanel({ channels }: { channels: Channel[] }) {
             ))}
           </ul>
         ) : (
-          <p className="text-sm text-muted-foreground">
-            Трафик сайта из Яндекс.Метрики — рядом с аналитикой каналов. Понадобится OAuth-токен Яндекса с
-            доступом к Метрике (право <b className="font-medium text-foreground">metrika:read</b>); выпустить его
-            можно на oauth.yandex.ru для своего приложения.
+          <p className="text-sm leading-relaxed text-muted-foreground">
+            Трафик сайта встанет рядом с аналитикой каналов: визиты, посетители, источники и цели — в тех же
+            карточках и за тот же период. Нужен один OAuth-токен Яндекса; ниже по шагам, как его выпустить.
           </p>
         )}
 
@@ -1348,12 +1450,13 @@ function MetrikaPanel({ channels }: { channels: Channel[] }) {
         {formOpen && (
           <div className="space-y-4">
             {connected && (
-              <p className="text-sm text-muted-foreground">
+              <p className="text-sm leading-relaxed text-muted-foreground">
                 {attachTo != null
                   ? 'Счётчик вернётся в этот же источник — вместе с уже загруженным дневным архивом.'
-                  : 'Второй счётчик встанет отдельным источником — его видно в переключателе рядом с первым. Токен можно взять тот же: если на нём несколько счётчиков, дальше спросим, какой подключить.'}
+                  : 'Второй счётчик встанет отдельным источником — его видно в переключателе рядом с первым. Токен подойдёт тот же, если счётчики на одном аккаунте Яндекса: дальше спросим, какой подключить. Если аккаунты разные — выпустите второй токен по шагам ниже.'}
               </p>
             )}
+            <YmTokenGuide open={!connected} />
             <form onSubmit={submit} className="flex items-center gap-2">
               <label htmlFor="yandex-metrika-token" className="sr-only">OAuth-токен Яндекса</label>
               <input
@@ -1415,8 +1518,9 @@ function MetrikaPanel({ channels }: { channels: Channel[] }) {
                 ))}
               </div>
             )}
-            <p id="yandex-metrika-token-help" className="text-2xs text-muted-foreground">
-              Токен хранится только на сервере в зашифрованном виде (AES-256-GCM) и не попадает в логи.
+            <p id="yandex-metrika-token-help" className="text-2xs leading-relaxed text-muted-foreground">
+              Токен уходит только на наш сервер: там он шифруется (AES-256-GCM), в логи и в браузер не попадает, а
+              в Яндекс за данными ходит сервер. Отозвать доступ можно в любой момент — кнопкой «Отключить».
             </p>
           </div>
         )}
