@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { z } from 'zod';
 import { apiGet } from '@/api/client';
+import { msPeriodQuery, type MsPeriod } from '@/lib/msPeriod';
 
 /**
  * Запросы источника «Rusender» — ОТДЕЛЬНЫМ модулем, а не в общем api/queries, по той же причине,
@@ -151,8 +152,12 @@ export const rusenderKeys = {
   /** Корень семьи — по нему инвалидируется ВЕСЬ источник разом (connect/disconnect меняют всё). */
   all: ['rusender'] as const,
   status: (channelId: number | null) => ['rusender', 'status', channelId] as const,
-  summary: (channelId: number | null, days: number) => ['rusender', 'summary', channelId, days] as const,
-  campaigns: (channelId: number | null, days: number) => ['rusender', 'campaigns', channelId, days] as const,
+  // Ключ несёт ПОЛНОЕ окно (days + явный диапазон): у страницы метрики текущее и предыдущее окна
+  // различаются только диапазоном, и ключ по одному `days` склеил бы их в один кэш.
+  summary: (channelId: number | null, windowQuery: string) =>
+    ['rusender', 'summary', channelId, windowQuery] as const,
+  campaigns: (channelId: number | null, windowQuery: string) =>
+    ['rusender', 'campaigns', channelId, windowQuery] as const,
 };
 
 /**
@@ -175,19 +180,30 @@ export function useRusenderStatus(channelId: number | null) {
 // завязан и на канал, и на флаг.
 const STALE_DATA = 5 * 60_000;
 
-export function useRusenderSummary(channelId: number | null, days: number, enabled = true) {
+/**
+ * Окно витрин — ТОТ ЖЕ `MsPeriod`, что у МойСклада, Метрики и СДЭКа, а не свой тип. Вместе с ним
+ * достаются готовые `msPeriodQuery` (сериализация) и `msPreviousPeriod` (предыдущее равное окно):
+ * заводить для Rusender собственную арифметику дат значило бы держать вторую правду о том, что
+ * такое «прошлый период».
+ */
+export function useRusenderSummary(channelId: number | null, period: MsPeriod, enabled = true) {
+  const q = msPeriodQuery(period);
   return useQuery({
-    queryKey: rusenderKeys.summary(channelId, days),
-    queryFn: () => apiGet(`/api/rusender/summary?days=${days}`, RusenderSummarySchema, { channelId }),
+    queryKey: rusenderKeys.summary(channelId, q),
+    queryFn: () => apiGet(`/api/rusender/summary?${q}`, RusenderSummarySchema, { channelId }),
     staleTime: STALE_DATA,
+    // ВАЖНО (грабли prev-периода): при выключенном запросе вызывающие обязаны читать `.data`
+    // только через проверку «предыдущее окно существует». Ключ здесь несёт полное окно, поэтому
+    // fallback на текущее окно отдал бы ТЕКУЩИЙ кэш и дельта вышла бы нулевой.
     enabled: enabled && channelId != null,
   });
 }
 
-export function useRusenderCampaigns(channelId: number | null, days: number, enabled = true) {
+export function useRusenderCampaigns(channelId: number | null, period: MsPeriod, enabled = true) {
+  const q = msPeriodQuery(period);
   return useQuery({
-    queryKey: rusenderKeys.campaigns(channelId, days),
-    queryFn: () => apiGet(`/api/rusender/campaigns?days=${days}`, RusenderCampaignsSchema, { channelId }),
+    queryKey: rusenderKeys.campaigns(channelId, q),
+    queryFn: () => apiGet(`/api/rusender/campaigns?${q}`, RusenderCampaignsSchema, { channelId }),
     staleTime: STALE_DATA,
     enabled: enabled && channelId != null,
   });

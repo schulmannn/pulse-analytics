@@ -33,6 +33,9 @@ const REQUIRED_SCOPES = Object.freeze([
 // записи ценой запросов. 0 = «Всё» (от границ архива). Не-enum → дефолт 30.
 const DAYS_ALLOWED = [0, 7, 30, 90];
 
+/** Строгий day-ключ. Кривая строка иначе уехала бы в SQL как ::date (канон dayOf). */
+const isDayKey = (v) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v);
+
 function registerRusenderRoutes({
   app, requireAuth, db, audit, rusenderCrypto, rusenderFetch, surfacesEnabled = false, log,
 }) {
@@ -244,6 +247,15 @@ function registerRusenderRoutes({
     const tz = 'Europe/Moscow';
     const now = new Date();
     const fmt = (d) => d.toISOString().slice(0, 10);
+    // ЯВНОЕ окно from/to старше days. Нужно странице метрики: сравнение с предыдущим равным
+    // окном делается ВТОРЫМ запросом (канон YmOverview/MsOverview — два запроса, а не один
+    // совмещённый ответ), и это окно клиент считает сам. Принимаем только строгие day-ключи и
+    // только from ≤ to: иначе кривой параметр уехал бы в SQL как ::date.
+    const rawFrom = typeof req.query.from === 'string' ? req.query.from : '';
+    const rawTo = typeof req.query.to === 'string' ? req.query.to : '';
+    if (isDayKey(rawFrom) && isDayKey(rawTo) && rawFrom <= rawTo) {
+      return { days, tz, from: rawFrom, to: rawTo };
+    }
     if (days === 0) {
       // «Всё» — от границ архива. Пустой архив (сбор ещё не проходил) честно отдаёт null-окно:
       // витрина покажет «данные собираются», а не диапазон, которого нет.
