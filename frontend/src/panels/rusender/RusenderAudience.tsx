@@ -71,7 +71,12 @@ export function RusenderAudience() {
 
   const labels = model.days.map((d) => fmt.day(d));
   const axisLabels = timeAxisFromDayKeys(model.days);
-  const enoughDays = model.days.length > 1;
+  // Считаем ДНИ СО СНИМКОМ, а не дни окна. Окно всегда плотное (90 точек), но снимок базы
+  // делается дневным проходом и существует только с момента подключения: на проде «Размер базы»
+  // рисовал ПУСТОЙ график — Sparkline получал 89 пропусков и одно значение, и линии не было,
+  // хотя условие «дней хватает» формально выполнялось.
+  const snapshotDays = model.total.filter((v) => v != null).length;
+  const enoughDays = snapshotDays > 1;
   const pending = summary.isPending;
 
   return (
@@ -99,7 +104,11 @@ export function RusenderAudience() {
                 formatValue={fmt.num}
               />
             ) : (
-              <EmptyState compact size="chart" title="Пока один снимок — линии ещё нет." />
+              <EmptyState
+                compact
+                size="chart"
+                title={snapshotDays ? 'Пока один снимок — линии ещё нет.' : 'Снимков ещё нет.'}
+              />
             )}
           </ChartCardBody>
         )}
@@ -115,7 +124,9 @@ export function RusenderAudience() {
             value={formatByRole(contacts?.contacts_active ?? 0, 'headline')}
             caption="Активных контактов на последний снимок."
           >
-            <dl className="grid gap-y-2 text-sm">
+            {/* Ширина ограничена: слот плота ~900px, и без потолка метка уезжала от значения
+                почти на всю карточку — строку приходилось читать «через поле». */}
+            <dl className="grid max-w-sm gap-y-2 text-sm">
               <MixRow label="Активные" value={contacts?.contacts_active ?? null} total={contacts?.contacts_total ?? null} />
               <MixRow label="Отписались" value={contacts?.contacts_unsubscribed ?? null} total={contacts?.contacts_total ?? null} />
               <MixRow label="Недоступны" value={contacts?.contacts_unavailable ?? null} total={contacts?.contacts_total ?? null} />
@@ -140,7 +151,11 @@ export function RusenderAudience() {
                 </ChartBand>
               </div>
             ) : (
-              <EmptyState compact size="chart" title="Пока один снимок — ряда ещё нет." />
+              <EmptyState
+                compact
+                size="chart"
+                title={snapshotDays ? 'Пока один снимок — ряда ещё нет.' : 'Снимков ещё нет.'}
+              />
             )}
           </ChartCardBody>
         )}
@@ -165,9 +180,14 @@ function MixRow({ label, value, total }: { label: string; value: number | null; 
   return (
     <div className="flex min-w-0 items-baseline justify-between gap-2">
       <dt className="truncate text-muted-foreground">{label}</dt>
+      {/* Разделитель ОБЯЗАТЕЛЕН: на проде «903» и «97.6%» стояли через margin и читались одним
+          числом «90397.6%». Точка-разделитель — тот же приём, что у «Мин · Макс» в леджере. */}
       <dd className="shrink-0 tabular-nums text-foreground">
         {value != null ? fmt.kpi(value) : '—'}
-        <span className="ml-1 text-xs text-muted-foreground">{share}</span>
+        <span className="ml-1.5 text-xs text-muted-foreground">
+          <span aria-hidden="true" className="mr-1.5">·</span>
+          {share}
+        </span>
       </dd>
     </div>
   );

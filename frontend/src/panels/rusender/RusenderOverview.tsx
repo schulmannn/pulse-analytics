@@ -228,7 +228,9 @@ export function RusenderOverview() {
             value={formatByRole(cm?.campaigns ?? 0, 'headline')}
             caption={`Запущено ${periodInLabel ?? ''}`.trim()}
           >
-            <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+            {/* Тот же потолок ширины, что у «Состава базы»: иначе метка и значение разъезжаются
+                на всю карточку. */}
+            <dl className="grid max-w-xl grid-cols-2 gap-x-6 gap-y-2 text-sm">
               <Row label="Отправлено" value={fmt.kpi(cm?.total ?? 0)} />
               <Row label="Доставлено" value={fmt.kpi(cm?.delivered ?? 0)} />
               <Row label="Открытий" value={fmt.kpi(cm?.opens ?? 0)} sub={openRate != null ? `${openRate.toFixed(1)}%` : undefined} />
@@ -265,7 +267,14 @@ function Row({ label, value, sub }: { label: string; value: string; sub?: string
       <dt className="truncate text-muted-foreground">{label}</dt>
       <dd className="shrink-0 tabular-nums text-foreground">
         {value}
-        {sub && <span className="ml-1 text-xs text-muted-foreground">{sub}</span>}
+        {/* Разделитель ОБЯЗАТЕЛЕН: на проде «134» и «14.9%» стояли через margin и читались
+            одним числом «13414.9%». */}
+        {sub && (
+          <span className="ml-1.5 text-xs text-muted-foreground">
+            <span aria-hidden="true" className="mr-1.5">·</span>
+            {sub}
+          </span>
+        )}
       </dd>
     </div>
   );
