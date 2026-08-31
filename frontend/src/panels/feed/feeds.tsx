@@ -219,10 +219,13 @@ function RusenderShellRoute() {
   );
 }
 
+const RusenderCampaigns = lazyFrom(() => import('@/panels/rusender/RusenderCampaigns'), 'RusenderCampaigns');
+const RusenderAudience = lazyFrom(() => import('@/panels/rusender/RusenderAudience'), 'RusenderAudience');
+
 const RUSENDER_PARTS: Record<string, SectionParts> = {
-  // Период у «Обзора» пока не показываем: страница отвечает на вопрос «источник жив?», и окно
-  // 7/30/90 дней этот вопрос сузило бы до бессмыслицы. Чипсы вернутся вместе с витринами.
-  '': { Body: RusenderOverview },
+  '': { Body: RusenderOverview, HeaderRight: TgPagePeriodControl },
+  campaigns: { Body: RusenderCampaigns, HeaderRight: TgPagePeriodControl },
+  audience: { Body: RusenderAudience, HeaderRight: TgPagePeriodControl },
 };
 
 /** Zip the network's nav (paths + labels — the single source of truth) with the body map. A nav

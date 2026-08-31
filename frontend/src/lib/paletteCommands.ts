@@ -8,7 +8,7 @@
  * не попадали вовсе) и фильтровала источники по одному `ig_connected`, из-за чего у любого канала
  * появлялись строки почти всех сетей — вплоть до «Метрики» у телеграм-канала (внешний аудит).
  */
-import { NETWORKS, type ChannelSourceLike } from '@/lib/networks';
+import { NETWORKS, type ChannelSourceLike, type NavLinkDef } from '@/lib/networks';
 import { ANALYTICS_TABS } from '@/lib/analyticsTabs';
 import { CAMPAIGNS_LIST } from '@/components/campaigns/routes';
 import type { IconName } from '@/components/nav-icons';
@@ -113,10 +113,22 @@ export function hasNetwork(channels: PaletteChannel[], key: string): boolean {
   return availableNetworks(channels).some((net) => net.key === key);
 }
 
-/** Команды «Разделы» для сетевых маршрутов — прямо из `NETWORKS[].nav`. */
-export function buildNetworkRouteCommands(channels: PaletteChannel[]): RouteCommandSpec[] {
+/**
+ * Команды «Разделы» для сетевых маршрутов — прямо из `NETWORKS[].nav`.
+ *
+ * `gates` — состояние фичефлагов разделов. Без него палитра предлагала бы переход в раздел,
+ * которого для этого пользователя ещё нет: гейт, закрытый только в наве, — это не гейт, а
+ * спрятанная дверь с работающей ручкой. Дефолт — всё выключено (консервативно: показать раздел
+ * позже безопаснее, чем предложить несуществующий).
+ */
+export function buildNetworkRouteCommands(
+  channels: PaletteChannel[],
+  gates: Partial<Record<NonNullable<NavLinkDef['gate']>, boolean>> = {},
+): RouteCommandSpec[] {
   return availableNetworks(channels).flatMap((net) =>
-    net.nav.map((link) => ({
+    // `as const` в реестре сужает записи до литералов, и у строк без `gate` свойства просто нет
+    // в выведенном типе — читаем нав через его же интерфейс.
+    (net.nav as readonly NavLinkDef[]).filter((link) => !link.gate || !!gates[link.gate]).map((link) => ({
       id: `route:${link.to}`,
       path: link.to,
       // Сеть по умолчанию (единственная беспрефиксная запись реестра) не подписывается —

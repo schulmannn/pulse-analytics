@@ -36,6 +36,10 @@ function createCollectionRecoveryRunner({
   // планировщиком/интервалом; внутри свой durable day-gate (реальная работа раз в день).
   // Optional (inert no-op) — pure-scheduler тесты и composition без ЯМ-вертикали не задеты.
   runYmCollectionPass = async () => ({ skipped: true }),
+  // Дневной сбор Rusender (jobs/rusenderCollectionJob) — независимый upstream, своя lane тем же
+  // планировщиком/интервалом; внутри свой durable day-gate (реальная работа раз в день).
+  // Optional (inert no-op) — pure-scheduler тесты и composition без Rusender-вертикали не задеты.
+  runRusenderCollectionPass = async () => ({ skipped: true }),
   igCap,
   tgCap,
   mediaCap,
@@ -69,7 +73,7 @@ function createCollectionRecoveryRunner({
         // пользовательский session не получает два одновременных MTProto fan-out, а repair не
         // превращается в лишнюю конкурентную pipeline. Каждая lane изолирует свой сбой и
         // наследует общий lifecycle/gating.
-        const [ig, tgLane, msLane, ym] = await Promise.all([
+        const [ig, tgLane, msLane, ym, rusender] = await Promise.all([
           runIgCollectionPass({ cap: igCap })
             .catch((e) => { log('error', 'recovery_ig_pass_failed', { error: e.message }); return null; }),
           (async () => {
@@ -91,10 +95,14 @@ function createCollectionRecoveryRunner({
           // Метрика — независимый upstream (свои квоты), одна джоба — своя параллельная lane.
           runYmCollectionPass()
             .catch((e) => { log('error', 'recovery_ym_pass_failed', { error: e.message }); return null; }),
+          // Rusender — тоже независимый upstream со своей квотой (гейт параллелизма живёт внутри
+          // клиента), поэтому своя параллельная lane, а не хвост чужой.
+          runRusenderCollectionPass()
+            .catch((e) => { log('error', 'recovery_rusender_pass_failed', { error: e.message }); return null; }),
         ]);
         const { tg, media } = tgLane;
         const { ms, msOrders } = msLane;
-        log('info', 'collection_recovery_pass_done', { ig, tg, media, ms, msOrders, ym });
+        log('info', 'collection_recovery_pass_done', { ig, tg, media, ms, msOrders, ym, rusender });
       }, { job: 'collection_recovery_pass' });
       if (result && result.accepted === false) return { skipped: true };
       return { skipped: false };

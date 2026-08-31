@@ -1,4 +1,5 @@
 import { useLocation } from 'react-router-dom';
+import { useMe } from '@/api/queries';
 import type { IconName } from '@/components/nav-icons';
 import { NETWORKS, networkByKey, type Network } from '@/lib/networks';
 import { useNetworkSelection } from '@/lib/networkStore';
@@ -8,6 +9,7 @@ export interface NavLinkDef {
   label: string;
   icon: IconName;
   end?: boolean;
+  gate?: 'rusenderSurfaces';
 }
 
 // Per-network feed sections live in the NETWORK REGISTRY (lib/networks) — the shell never
@@ -34,7 +36,21 @@ export function useActiveNetwork(): Network {
     sidebar's icon rail AND the mobile bottom bar (same routes, denser form). Both nets are 6 tabs
     wide today (MobileBottomNav's grid-cols follows nav.length). */
 export function useActiveNetworkNav(): NavLinkDef[] {
-  return [HOME_NAV, ...networkByKey(useActiveNetwork()).nav, ...AGNOSTIC_NAV];
+  const net = networkByKey(useActiveNetwork());
+  // Фичефлаги разделов приезжают тем же bootstrap-запросом /api/auth/me, что и гейт AI: тянуть
+  // ради одного булева ленивый модуль источника в оболочку нельзя (бюджет бандла шелла), а
+  // api/queries шелл и так статически импортирует (AccountMenu, SourceSwitcher).
+  // Пока флаг не приехал (первый рендер / ошибка), гейтованные строки СКРЫТЫ: показать раздел и
+  // тут же его убрать — хуже, чем показать чуть позже.
+  const surfaces = useGatedSurfaces();
+  const visible = net.nav.filter((link) => !link.gate || surfaces[link.gate]);
+  return [HOME_NAV, ...visible, ...AGNOSTIC_NAV];
+}
+
+/** Состояние фичефлагов разделов. Одна точка правды: и нав, и сами страницы читают её. */
+export function useGatedSurfaces(): Record<NonNullable<NavLinkDef['gate']>, boolean> {
+  const me = useMe();
+  return { rusenderSurfaces: !!me.data?.rusender_surfaces };
 }
 
 export const TITLES: Record<string, string> = {
