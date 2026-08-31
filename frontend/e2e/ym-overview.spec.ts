@@ -699,3 +699,44 @@ test('отключённый счётчик подключается обрат�
   expect(state.connectHeaders.at(-1)).toBe('12');
   await expect(page.getByRole('listitem').filter({ hasText: 'nōtem' })).toHaveCount(1);
 });
+
+/**
+ * ИНСТРУКЦИЯ ЖИВЁТ В ПАНЕЛИ. Раньше здесь стояла одна фраза «выпустить токен можно на
+ * oauth.yandex.ru для своего приложения»: она называет место, но не говорит ни какое право
+ * отметить, ни какой Redirect URI вписать, ни где потом искать сам токен — а без любого из трёх
+ * шаг не проходится.
+ */
+test('панель Метрики объясняет, где взять токен', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop-1440', 'Метрика — desktop-first поверхность');
+  await bootMetrika(page, '/connect?source=metrika', { connected: false });
+
+  // Пока счётчика нет, инструкция РАЗВЁРНУТА: это первый шаг подключения, прятать его не за чем.
+  const guide = page.locator('details', { hasText: 'Где взять токен' });
+  await expect(guide).toHaveAttribute('open', '');
+  await expect(guide.getByText('metrika:read')).toBeVisible();
+  await expect(guide.getByText('https://oauth.yandex.ru/verification_code')).toBeVisible();
+});
+
+/**
+ * ССЫЛКА ВЫДАЧИ СОБИРАЕТСЯ ЗА ЧЕЛОВЕКА. Адрес авторизации отличается от обычного только
+ * идентификатором приложения — склеивать его руками в адресной строке ровно то место, где
+ * инструкции и рвутся. До правильного ClientID кнопка неактивна: по битой ссылке Яндекс отвечает
+ * «unknown client», и человек решает, что ошибся правами.
+ */
+test('ссылка выдачи токена собирается из ClientID и не ведёт по битому адресу', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop-1440', 'Метрика — desktop-first поверхность');
+  await bootMetrika(page, '/connect?source=metrika', { connected: false });
+
+  const cta = page.getByRole('button', { name: /Открыть страницу выдачи/ });
+  await expect(cta).toBeDisabled();
+
+  await page.getByLabel('ClientID приложения Яндекса').fill('a1b2c3d4e5f60718293a4b5c6d7e8f90');
+  const link = page.getByRole('link', { name: /Открыть страницу выдачи/ });
+  await expect(link).toHaveAttribute(
+    'href',
+    'https://oauth.yandex.ru/authorize?response_type=token&client_id=a1b2c3d4e5f60718293a4b5c6d7e8f90',
+  );
+  // Внешние ссылки открываются новой вкладкой и без передачи referrer.
+  await expect(link).toHaveAttribute('target', '_blank');
+  await expect(link).toHaveAttribute('rel', /noreferrer/);
+});

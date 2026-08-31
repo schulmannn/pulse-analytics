@@ -36,10 +36,10 @@ describe('Connect phone touch-target source contract', () => {
       (input) => !input.includes('type="checkbox"') && !input.includes('type="radio"'),
     );
 
-    // Токен МойСклада, OAuth-токен Метрики, счётчик Метрики и имя источника СДЭК. Число здесь
-    // намеренно жёсткое: новое текстовое поле обязано осознанно пройти этот контракт, а не
-    // просочиться мимо него.
-    expect(textInputs).toHaveLength(4);
+    // Токен МойСклада, OAuth-токен Метрики, счётчик Метрики, ClientID приложения Яндекса (в
+    // инструкции «Где взять токен») и имя источника СДЭК. Число здесь намеренно жёсткое: новое
+    // текстовое поле обязано осознанно пройти этот контракт, а не просочиться мимо него.
+    expect(textInputs).toHaveLength(5);
     for (const input of textInputs) {
       expect(input, input).toContain('data-mobile-touch-target=""');
       expect(input, input).toMatch(/\b(?:h-11|min-h-11)\b/);
