@@ -285,7 +285,13 @@ function createRusenderCollectionJob({ db, rusenderFetch, fetchAllPages, rusende
         continue;
       }
       try {
-        const gateKey = `${acc.channel_id}:${acc.account_id || 'unknown'}:v1:${day}`;
+        // ВЕРСИЯ В КЛЮЧЕ — не украшение: без неё деплой исправленного сбора ждёт ЗАВТРА, если
+        // сегодняшний день уже помечен succeeded прежней (сломанной) версией. Ровно это и
+        // случилось с v1: первый проход отбросил весь ряд активности из-за формата дат, закрыл
+        // день, и починка не могла доехать до следующих суток. Правишь то, ЧТО собирается, —
+        // поднимай версию, у нового ключа свой claim и он соберёт сегодня же (урок ЯМ, `q2`).
+        //   v2 — разбор дат активности DD.MM.YYYY (#544).
+        const gateKey = `${acc.channel_id}:${acc.account_id || 'unknown'}:v2:${day}`;
         const res = await db.runJobOnce('rusender_collect', gateKey, () => collectRusenderForAccount(acc, apiKey));
         if (res.skipped) { out.skipped += 1; continue; }
         out.channels += 1;
