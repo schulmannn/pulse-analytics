@@ -45,6 +45,30 @@ function fmtDay(d) {
 
 const isDayKey = (v) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v);
 
+/**
+ * День точки активности → 'YYYY-MM-DD'.
+ *
+ * ТРЕТЬЕ РАСХОЖДЕНИЕ СО СПЕКОЙ, найденное на живых данных: в OpenAPI пример даты — ISO
+ * («2026-03-05»), а Rusender реально отдаёт РУССКИЙ формат «05.07.2026» (DD.MM.YYYY).
+ * Первый прод-проход из-за этого отбросил ВСЕ точки: archive_rows=0 при 134 открытиях у
+ * рассылки. Поэтому принимаем оба формата и продолжаем отбрасывать всё остальное (канон dayOf:
+ * одна кривая строка иначе доедет до day::date и уронит весь батч).
+ */
+function dayOfActivity(raw) {
+  if (typeof raw !== 'string' || !raw) return null;
+  const dotted = /^(\d{2})\.(\d{2})\.(\d{4})$/.exec(raw.trim());
+  if (dotted) {
+    const [, dd, mm, yyyy] = dotted;
+    const day = `${yyyy}-${mm}-${dd}`;
+    // Формат совпал, но 32.13.2026 днём не является — проверяем календарно.
+    const at = Date.parse(`${day}T12:00:00Z`);
+    if (!Number.isFinite(at)) return null;
+    return new Date(at).toISOString().slice(0, 10) === day ? day : null;
+  }
+  const iso = raw.slice(0, 10);
+  return isDayKey(iso) ? iso : null;
+}
+
 /** Целое или null: «поля нет» ≠ «ноль». Витрины отличают отсутствие статистики от нулевой. */
 function intOrNull(v) {
   if (v == null || v === '') return null;
@@ -156,13 +180,22 @@ function contactsRow(data, day) {
   };
 }
 
-/** Ответ /campaigns/{id}/activity → дневные точки. Кривой день отбрасываем (канон dayOf). */
+/**
+ * Ответ /campaigns/{id}/activity → дневные точки. Кривой день отбрасываем (канон dayOf).
+ *
+ * ВАЖНО ПРО ПОЛНОТУ РЯДА (замер на живых данных): ряд НЕ обязан сходиться с итогами рассылки.
+ * У рассылки 108243 сумма ряда — 128 открытий и 12 кликов, а итоги — 134 и 13: окно активности
+ * у Rusender ограничено (в замере ~11 дней от отправки), и длинный хвост открытий попадает
+ * только в кумулятивные итоги кампании. Это НЕ повод «дотягивать» ряд до итогов: ряд честно
+ * отвечает на вопрос «когда читали», итоги — «сколько всего прочитали». Ровно поэтому витрины
+ * держат их РАЗНЫМИ величинами и не складывают.
+ */
 function activityRows(data) {
   const items = data && Array.isArray(data.items) ? data.items : [];
   const out = [];
   for (const p of items) {
-    const day = p && typeof p.date === 'string' ? p.date.slice(0, 10) : '';
-    if (!isDayKey(day)) continue;
+    const day = dayOfActivity(p && p.date);
+    if (!day) continue;
     out.push({ day, opens: intOrNull(p.opens) || 0, clicks: intOrNull(p.clicks) || 0 });
   }
   return out;
@@ -283,5 +316,6 @@ module.exports = {
   campaignRowsFromLists,
   contactsRow,
   activityRows,
+  dayOfActivity,
   ACTIVITY_PER_PASS,
 };

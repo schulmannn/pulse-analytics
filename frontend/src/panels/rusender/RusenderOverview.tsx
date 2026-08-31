@@ -180,7 +180,7 @@ export function RusenderOverview() {
         ) : (
           <RusenderStory
             value={formatByRole(ev?.opens ?? 0, 'headline')}
-            caption={`Открытия ${periodInLabel ?? ''} — события окна: сюда входят открытия писем, отправленных раньше.`.trim()}
+            caption={`Открытия ${periodInLabel ?? ''} — события окна: входят открытия писем, отправленных раньше. Ряд Rusender покрывает ограниченное окно после отправки, поэтому длинный хвост открытий виден только в итогах рассылки.`.trim()}
             series={series.map((p) => ({ day: p.day, value: p.opens }))}
             viz="bar"
           />

@@ -18,6 +18,7 @@ const {
   campaignRowsFromLists,
   contactsRow,
   activityRows,
+  dayOfActivity,
 } = require('../server/jobs/rusenderCollectionJob');
 
 const ACC = { channel_id: 9, account_id: '18416', api_key_enc: 'enc-1' };
@@ -195,6 +196,42 @@ test('activityRows: кривой день отбрасывается, ISO-вре
     { day: '2026-06-01', opens: 10, clicks: 3 },
     { day: '2026-06-02', opens: 5, clicks: 1 },
   ]);
+});
+
+test('дата активности приходит РУССКИМ форматом DD.MM.YYYY — спека обещала ISO', () => {
+  // Прод-регресс: первый проход отбросил ВСЕ точки (activity_rows=0 при 134 открытиях), потому
+  // что парсер ждал ISO по примеру из OpenAPI, а Rusender отдаёт «05.07.2026».
+  assert.equal(dayOfActivity('05.07.2026'), '2026-07-05');
+  assert.equal(dayOfActivity('2026-07-05'), '2026-07-05', 'ISO продолжает приниматься');
+  assert.equal(dayOfActivity('2026-07-05T10:00:00.000Z'), '2026-07-05');
+  // Формат совпал, но дня такого нет — отбрасываем, иначе day::date уронит весь батч.
+  assert.equal(dayOfActivity('32.13.2026'), null);
+  assert.equal(dayOfActivity('не дата'), null);
+  assert.equal(dayOfActivity(null), null);
+});
+
+test('РЕАЛЬНЫЙ ответ активности (рассылка 108243, прод) разбирается целиком', () => {
+  // Снято с прода. Ряд НЕ обязан сходиться с итогами рассылки: здесь сумма 128 открытий против
+  // 134 в итогах — окно активности у Rusender ограничено (~11 дней), длинный хвост открытий
+  // попадает только в кумулятивные итоги. Именно поэтому витрины держат их разными величинами.
+  const rows = activityRows({ items: [
+    { date: '05.07.2026', opens: 90, clicks: 7 },
+    { date: '06.07.2026', opens: 25, clicks: 5 },
+    { date: '07.07.2026', opens: 3, clicks: 0 },
+    { date: '08.07.2026', opens: 3, clicks: 0 },
+    { date: '09.07.2026', opens: 4, clicks: 0 },
+    { date: '10.07.2026', opens: 1, clicks: 0 },
+    { date: '11.07.2026', opens: 0, clicks: 0 },
+    { date: '12.07.2026', opens: 1, clicks: 0 },
+    { date: '13.07.2026', opens: 1, clicks: 0 },
+    { date: '14.07.2026', opens: 0, clicks: 0 },
+    { date: '15.07.2026', opens: 0, clicks: 0 },
+  ] });
+  assert.equal(rows.length, 11, 'ни одна точка не потеряна');
+  assert.equal(rows[0].day, '2026-07-05');
+  assert.equal(rows[10].day, '2026-07-15');
+  assert.equal(rows.reduce((a, r) => a + r.opens, 0), 128);
+  assert.equal(rows.reduce((a, r) => a + r.clicks, 0), 12);
 });
 
 // ── Проход ────────────────────────────────────────────────────────────────────────────────────
