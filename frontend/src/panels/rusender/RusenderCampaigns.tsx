@@ -139,11 +139,17 @@ export function RusenderCampaigns() {
                   </td>
                   <td className="py-2 pr-3 text-right tabular-nums">
                     {c.opens != null ? fmt.kpi(c.opens) : '—'}
-                    <span className="ml-1 text-xs text-muted-foreground">{rate(c.opens, c.delivered)}</span>
+                    <span className="ml-1.5 text-xs text-muted-foreground">
+                      <span aria-hidden="true" className="mr-1.5">·</span>
+                      {rate(c.opens, c.delivered)}
+                    </span>
                   </td>
                   <td className="py-2 pr-3 text-right tabular-nums">
                     {c.clicks != null ? fmt.kpi(c.clicks) : '—'}
-                    <span className="ml-1 text-xs text-muted-foreground">{rate(c.clicks, c.delivered)}</span>
+                    <span className="ml-1.5 text-xs text-muted-foreground">
+                      <span aria-hidden="true" className="mr-1.5">·</span>
+                      {rate(c.clicks, c.delivered)}
+                    </span>
                   </td>
                   <td className="py-2 text-right tabular-nums">
                     {c.unsubscribes != null ? fmt.kpi(c.unsubscribes) : '—'}
