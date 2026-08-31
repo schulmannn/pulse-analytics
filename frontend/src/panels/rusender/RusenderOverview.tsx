@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
 import { ChartCardBody } from '@/components/chartWidget/ChartCardBody';
 import { BarChart } from '@/components/BarChart';
@@ -15,6 +16,7 @@ import { CHART_MAX_POINTS } from '@/lib/msSeries';
 import { fmt, timeAxisFromDayKeys } from '@/lib/format';
 import { formatByRole } from '@/lib/metricNumber';
 import { usePagePeriod, useCardShowsPeriod } from '@/lib/period';
+import { useMsPagePeriod } from '@/lib/msPeriod';
 
 /**
  * «Обзор» Rusender — email-рассылки рядом с аналитикой каналов.
@@ -47,12 +49,18 @@ function RusenderStory({
   caption,
   series,
   viz,
+  drillTo,
+  drillLabel,
 }: {
   value: string;
   caption?: string;
   series: Array<{ day: string; value: number | null }>;
   viz: 'line' | 'bar';
+  /** Полноэкранная метрика карточки: число кликабельно и ведёт туда же, что «Развернуть». */
+  drillTo: string;
+  drillLabel: string;
 }) {
+  const navigate = useNavigate();
   const model = useMemo(() => {
     // Даунсэмпл ПАРАМИ (день + значение): дели их порознь, подписи оси разъехались бы с рядом.
     const shown = lttbDownsample(series, CHART_MAX_POINTS, (r) => r.value ?? 0);
@@ -61,7 +69,12 @@ function RusenderStory({
 
   if (model.values.length <= 1) {
     return (
-      <ChartCardBody value={value} caption={caption}>
+      <ChartCardBody
+        value={value}
+        caption={caption}
+        onValueClick={() => navigate(drillTo)}
+        drillLabel={drillLabel}
+      >
         <EmptyState compact size="chart" title="Недостаточно дней для графика." />
       </ChartCardBody>
     );
@@ -71,7 +84,12 @@ function RusenderStory({
   const titles = model.values.map((v, i) => `${labels[i] ?? ''}: ${v == null ? 'данных нет' : fmt.num(v)}`);
 
   return (
-    <ChartCardBody value={value} caption={caption}>
+    <ChartCardBody
+      value={value}
+      caption={caption}
+      onValueClick={() => navigate(drillTo)}
+      drillLabel={drillLabel}
+    >
       {viz === 'bar' ? (
         // ChartBand без флекс-КОЛОНКИ-родителя не ограничен ничем и переполняет фикс-тайл
         // (урок карточек СДЭКа) — колонка во всю высоту слота даёт полосе честный остаток.
@@ -90,6 +108,9 @@ function RusenderStory({
           interactive
           caption=""
           formatValue={fmt.num}
+          // Тот же класс, что у искр МойСклада: без него полотно не берёт высоту слота и линия
+          // жмётся к низу карточки — источники выглядели бы по-разному.
+          className="h-full min-h-14 w-full"
         />
       )}
     </ChartCardBody>
@@ -102,7 +123,10 @@ export function RusenderOverview() {
   const status = useRusenderStatus(channelId);
   const pp = usePagePeriod();
   const days = pp ? pp.days : 30;
-  const summary = useRusenderSummary(channelId, days, rusenderSurfaces);
+  // Тот же сериализатор окна, что у МойСклада/Метрики/СДЭКа: пресеты 7/30/90/«Всё» и точный
+  // диапазон топбара приводятся к одному контракту, а не пересчитываются в каждом источнике.
+  const period = useMsPagePeriod();
+  const summary = useRusenderSummary(channelId, period, rusenderSurfaces);
 
   const connected = status.data?.connected ?? false;
   const missing = status.data?.missing_scopes ?? [];
@@ -177,7 +201,14 @@ export function RusenderOverview() {
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-6">
       {/* СОБЫТИЯ ПЕРИОДА — единственный настоящий временной ряд, поэтому только он с графиком.
           Столбцы, а не линия: открытия и клики — дискретные счётные события дня (канон bar). */}
-      <ChartWidget id="rusender-opens" title="Открытия" fixedSize="half" defaultColor={1} defaultTinted>
+      <ChartWidget
+        id="rusender-opens"
+        title="Открытия"
+        fixedSize="half"
+        defaultColor={1}
+        defaultTinted
+        drillTo="/metrics/rusender-opens"
+      >
         {pending ? (
           <ChartSkeleton />
         ) : (
@@ -186,11 +217,13 @@ export function RusenderOverview() {
             caption={`События окна ${periodInLabel ?? ''}`.trim()}
             series={series.map((p) => ({ day: p.day, value: p.opens }))}
             viz="bar"
+            drillTo="/metrics/rusender-opens"
+            drillLabel="Открытия"
           />
         )}
       </ChartWidget>
 
-      <ChartWidget id="rusender-clicks" title="Клики" fixedSize="half">
+      <ChartWidget id="rusender-clicks" title="Клики" fixedSize="half" drillTo="/metrics/rusender-clicks">
         {pending ? (
           <ChartSkeleton />
         ) : (
@@ -199,12 +232,20 @@ export function RusenderOverview() {
             caption={`События окна ${periodInLabel ?? ''}`.trim()}
             series={series.map((p) => ({ day: p.day, value: p.clicks }))}
             viz="bar"
+            drillTo="/metrics/rusender-clicks"
+            drillLabel="Клики"
           />
         )}
       </ChartWidget>
 
       {/* БАЗА КОНТАКТОВ — снимок, а не поток: линия, и с честным разрывом в днях без снимка. */}
-      <ChartWidget id="rusender-base" title="База контактов" fixedSize="half" noStretch>
+      <ChartWidget
+        id="rusender-base"
+        title="База контактов"
+        fixedSize="half"
+        noStretch
+        drillTo="/metrics/rusender-contacts"
+      >
         {pending ? (
           <ChartSkeleton />
         ) : (
@@ -213,6 +254,8 @@ export function RusenderOverview() {
             caption={contacts?.day ? `Снимок на ${fmt.date(contacts.day)}` : 'Снимок ещё не снят'}
             series={series.map((p) => ({ day: p.day, value: p.contacts_total }))}
             viz="line"
+            drillTo="/metrics/rusender-contacts"
+            drillLabel="Размер базы"
           />
         )}
       </ChartWidget>

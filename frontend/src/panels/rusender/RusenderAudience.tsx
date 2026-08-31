@@ -14,7 +14,7 @@ import { lttbDownsample } from '@/lib/downsample';
 import { CHART_MAX_POINTS } from '@/lib/msSeries';
 import { fmt, timeAxisFromDayKeys } from '@/lib/format';
 import { formatByRole } from '@/lib/metricNumber';
-import { usePagePeriod } from '@/lib/period';
+import { useMsPagePeriod } from '@/lib/msPeriod';
 
 /**
  * «База» — аудитория источника: размер базы контактов и её убыль.
@@ -29,9 +29,8 @@ import { usePagePeriod } from '@/lib/period';
 export function RusenderAudience() {
   const { channelId } = useSelectedChannel();
   const { rusenderSurfaces } = useGatedSurfaces();
-  const pp = usePagePeriod();
-  const days = pp ? pp.days : 30;
-  const summary = useRusenderSummary(channelId, days, rusenderSurfaces);
+  const period = useMsPagePeriod();
+  const summary = useRusenderSummary(channelId, period, rusenderSurfaces);
 
   const series = summary.data?.series ?? [];
   const model = useMemo(() => {
@@ -84,7 +83,14 @@ export function RusenderAudience() {
     // у блочного родителя нет колонок, и карточки идут одной колонкой во всю ширину.
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-6">
       {/* Размер базы — УРОВЕНЬ, а не поток: линия. Столбцы намекали бы, что дни складываются. */}
-      <ChartWidget id="rusender-base-total" title="Размер базы" fixedSize="half" defaultColor={1} defaultTinted>
+      <ChartWidget
+        id="rusender-base-total"
+        title="Размер базы"
+        fixedSize="half"
+        defaultColor={1}
+        defaultTinted
+        drillTo="/metrics/rusender-contacts"
+      >
         {pending ? (
           <ChartSkeleton />
         ) : (
@@ -102,6 +108,8 @@ export function RusenderAudience() {
                 interactive
                 caption=""
                 formatValue={fmt.num}
+                // Тот же класс, что у искр МойСклада — единая подача во всех источниках.
+                className="h-full min-h-14 w-full"
               />
             ) : (
               <EmptyState
@@ -136,7 +144,13 @@ export function RusenderAudience() {
       </ChartWidget>
 
       {/* Отписавшиеся — накопительный счётчик снимка, поэтому тоже уровень, а не поток. */}
-      <ChartWidget id="rusender-unsub" title="Отписавшиеся" fixedSize="half" noStretch>
+      <ChartWidget
+        id="rusender-unsub"
+        title="Отписавшиеся"
+        fixedSize="half"
+        noStretch
+        drillTo="/metrics/rusender-unsubscribed"
+      >
         {pending ? (
           <ChartSkeleton />
         ) : (

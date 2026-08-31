@@ -6,7 +6,7 @@ import { useRusenderCampaigns, type RusenderCampaign } from '@/api/rusender';
 import { useGatedSurfaces } from '@/components/layout/nav';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { fmt } from '@/lib/format';
-import { usePagePeriod } from '@/lib/period';
+import { useMsPagePeriod } from '@/lib/msPeriod';
 
 /**
  * «Рассылки» — контент-единицы источника (тот же слот, что «Контент» у TG/IG).
@@ -42,9 +42,8 @@ const STATUS_LABEL: Record<string, string> = {
 export function RusenderCampaigns() {
   const { channelId } = useSelectedChannel();
   const { rusenderSurfaces } = useGatedSurfaces();
-  const pp = usePagePeriod();
-  const days = pp ? pp.days : 30;
-  const query = useRusenderCampaigns(channelId, days, rusenderSurfaces);
+  const period = useMsPagePeriod();
+  const query = useRusenderCampaigns(channelId, period, rusenderSurfaces);
   const [q, setQ] = useState('');
 
   const rows = useMemo(() => {
