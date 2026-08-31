@@ -180,7 +180,7 @@ export function RusenderOverview() {
         ) : (
           <RusenderStory
             value={formatByRole(ev?.opens ?? 0, 'headline')}
-            caption={`Открытия ${periodInLabel ?? ''} — события окна: входят открытия писем, отправленных раньше. Rusender ведёт дневной ряд 11 дней от отправки, поэтому более поздние открытия видны только в итогах рассылки.`.trim()}
+            caption={`События окна ${periodInLabel ?? ''}`.trim()}
             series={series.map((p) => ({ day: p.day, value: p.opens }))}
             viz="bar"
           />
@@ -193,7 +193,7 @@ export function RusenderOverview() {
         ) : (
           <RusenderStory
             value={formatByRole(ev?.clicks ?? 0, 'headline')}
-            caption={`Клики ${periodInLabel ?? ''} — события окна, как и открытия.`.trim()}
+            caption={`События окна ${periodInLabel ?? ''}`.trim()}
             series={series.map((p) => ({ day: p.day, value: p.clicks }))}
             viz="bar"
           />
@@ -207,11 +207,7 @@ export function RusenderOverview() {
         ) : (
           <RusenderStory
             value={contacts?.contacts_total != null ? formatByRole(contacts.contacts_total, 'headline') : '—'}
-            caption={
-              contacts?.day
-                ? `Контактов в базе. Снимок на ${fmt.date(contacts.day)}; история копится с момента подключения — у Rusender её нет.`
-                : 'Снимок базы ещё не снят.'
-            }
+            caption={contacts?.day ? `Снимок на ${fmt.date(contacts.day)}` : 'Снимок ещё не снят'}
             series={series.map((p) => ({ day: p.day, value: p.contacts_total }))}
             viz="line"
           />
@@ -227,7 +223,7 @@ export function RusenderOverview() {
         ) : (
           <ChartCardBody
             value={formatByRole(cm?.campaigns ?? 0, 'headline')}
-            caption={`Запущено ${periodInLabel ?? ''} — итоги кумулятивные, по дням не раскладываются, поэтому без графика.`.trim()}
+            caption={`Запущено ${periodInLabel ?? ''}`.trim()}
           >
             <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
               <Row label="Отправлено" value={fmt.kpi(cm?.total ?? 0)} />
@@ -240,6 +236,21 @@ export function RusenderOverview() {
           </ChartCardBody>
         )}
       </ChartWidget>
+
+      {/* Объяснение живёт ПОД карточками, а не в их подписях. Колонка с числом у ChartCardBody —
+          `shrink-0`, а график `flex-1`: длинная подпись физически вытесняет плот в правый край
+          (поймано на проде — карточка «Открытия» с подписью в 210 символов рисовала столбцы
+          полоской у самого края). Подписи карточек поэтому короткие, а разница двух семей
+          величин — которую всё равно нужно проговорить словами — стоит здесь, где есть место. */}
+      {!pending && (
+        <p className="col-span-full text-xs text-muted-foreground">
+          «События окна» и «Рассылки периода» — <b className="font-medium text-foreground">разные величины</b> и
+          совпадать не обязаны. События считаются по дню, когда письмо открыли: сюда попадают открытия
+          писем, отправленных раньше. Итоги рассылок — кумулятивные и относятся к кампаниям, запущенным
+          в окне. При этом Rusender ведёт дневной ряд лишь 11 дней от отправки, поэтому более поздние
+          открытия видны только в итогах рассылки.
+        </p>
+      )}
     </>
   );
 }

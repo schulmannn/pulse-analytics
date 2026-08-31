@@ -83,11 +83,7 @@ export function RusenderAudience() {
         ) : (
           <ChartCardBody
             value={formatByRole(contacts?.contacts_total ?? 0, 'headline')}
-            caption={
-              contacts?.day
-                ? `Снимок на ${fmt.date(contacts.day)}. История копится с момента подключения — у Rusender API её нет, дорисовать прошлое нечем.`
-                : 'Снимок базы ещё не снят.'
-            }
+            caption={contacts?.day ? `Снимок на ${fmt.date(contacts.day)}` : 'Снимок ещё не снят'}
           >
             {enoughDays ? (
               <Sparkline
@@ -133,7 +129,7 @@ export function RusenderAudience() {
         ) : (
           <ChartCardBody
             value={formatByRole(contacts?.contacts_unsubscribed ?? 0, 'headline')}
-            caption="Накопленное число отписавшихся в базе на день снимка — это уровень, а не события дня."
+            caption="Накоплено в базе — уровень, не события дня"
           >
             {enoughDays ? (
               <div className="flex h-full min-h-0 flex-col">
@@ -147,6 +143,16 @@ export function RusenderAudience() {
           </ChartCardBody>
         )}
       </ChartWidget>
+
+      {/* Как и на «Обзоре», объяснение стоит ПОД карточками: длинная подпись у ChartCardBody
+          вытесняет график (колонка числа `shrink-0`, плот `flex-1`). */}
+      {!pending && (
+        <p className="col-span-full text-xs text-muted-foreground">
+          Истории размера базы у Rusender API нет — <b className="font-medium text-foreground">она копится
+          с момента подключения</b>, и дорисовать прошлое нечем. День без снимка показан разрывом линии,
+          а не нулём: это дыра в сборе, а не обнулившаяся база.
+        </p>
+      )}
     </>
   );
 }
