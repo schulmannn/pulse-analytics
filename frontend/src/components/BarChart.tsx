@@ -315,6 +315,18 @@ export function BarChart({
       ? new Set(values.map((_, i) => i))
       : axisLabelIndexSet(n, plotW, { minLabelPx: expanded ? 68 : 78, maxLabels: expanded ? 12 : 7 });
 
+    // ── Плотность ПОДПИСЕЙ-ЗНАЧЕНИЙ над столбцами (только в развороте) ──────────────────────
+    // Своя, отдельная от плотности оси. Раньше значение печаталось везде, где стоит тик оси, а у
+    // канонической оси (timeAxisFromDayKeys) массив ПОЛНОЙ длины — значит «тик» есть у каждого
+    // столбца, и подпись получал каждый: за 90-дневное окно вдоль оси выстраивался ряд из 90
+    // чисел. У плотных источников он читался как густая линейка, у разрежённых — как стена нулей.
+    // Ось это не задевало: её пустые строки отсеивает `showLabel`, а у значения такого фильтра
+    // не было.
+    const valueIndexes = axisLabelIndexSet(n, plotW, {
+      minLabelPx: expanded ? 40 : 56,
+      maxLabels: expanded ? 20 : 8,
+    });
+
     const barTop = (val: number) => graphHeight - (val / max) * usable;
     const barCenterX = (i: number) => offsetX + i * itemWidth + itemWidth / 2;
 
@@ -415,7 +427,10 @@ export function BarChart({
           const strideHit = labelIndexes.has(i);
           const axisText = letterAxis ? letterAxis[i] : labels?.[i];
           const showLabel = axisText && strideHit;
-          const showValue = expanded && strideHit && !stacked;
+          // Ноль не подписываем: пустое место и так читается как «ничего», а «0» над невидимым
+          // столбцом — чистый шум (и он же ставится на дни-пропуски, которые несут штриховку,
+          // а не измеренный ноль). Отрицательные значения подписываются: там ноль осмыслен.
+          const showValue = expanded && !stacked && valueIndexes.has(i) && val !== 0;
           if (!showLabel && !showValue) return null;
           const isLast = i === axisCurrentIdx;
           // Крайние ДАТЫ прижимаются к краям плота (start/end), а не центрируются под столбцом —
