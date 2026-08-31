@@ -75,7 +75,9 @@ export function RusenderAudience() {
   const pending = summary.isPending;
 
   return (
-    <>
+    // Сетка доски — та же, что у остальных Обзоров. Без неё `fixedSize="half"` не работает:
+    // у блочного родителя нет колонок, и карточки идут одной колонкой во всю ширину.
+    <div className="grid grid-cols-1 gap-6 lg:grid-cols-6">
       {/* Размер базы — УРОВЕНЬ, а не поток: линия. Столбцы намекали бы, что дни складываются. */}
       <ChartWidget id="rusender-base-total" title="Размер базы" fixedSize="half" defaultColor={1} defaultTinted>
         {pending ? (
@@ -153,7 +155,7 @@ export function RusenderAudience() {
           а не нулём: это дыра в сборе, а не обнулившаяся база.
         </p>
       )}
-    </>
+    </div>
   );
 }
 
