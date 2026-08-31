@@ -35,6 +35,21 @@ function captions(source: string): string[] {
   return out;
 }
 
+describe('Карточки Rusender лежат в сетке доски', () => {
+  for (const file of PANELS) {
+    it(`${file}: fixedSize="half" обёрнут в grid lg:grid-cols-6`, () => {
+      const source = readFileSync(fileURLToPath(new URL(`./${file}`, import.meta.url)), 'utf8');
+      // `fixedSize="half"` ставит карточке `lg:col-span-3`, но у блочного родителя нет колонок:
+      // на проде все карточки уехали в ОДНУ колонку во всю ширину, и половинной доски не было.
+      // Сетка — та же, что у Обзоров МойСклада/Метрики/СДЭКа; второй её формы в продукте нет.
+      if (!source.includes('fixedSize="half"')) return;
+      expect(source, 'карточки half без сетки доски встанут одной колонкой').toContain(
+        'grid grid-cols-1 gap-6 lg:grid-cols-6',
+      );
+    });
+  }
+});
+
 describe('Подписи карточек Rusender не вытесняют график', () => {
   for (const file of PANELS) {
     it(`${file}: каждая caption короче 80 символов`, () => {

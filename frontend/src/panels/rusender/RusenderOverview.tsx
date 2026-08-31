@@ -171,7 +171,10 @@ export function RusenderOverview() {
   const pending = summary.isPending;
 
   return (
-    <>
+    // Сетка доски — та же, что у Обзоров МойСклада/Метрики/СДЭКа. Без неё `fixedSize="half"`
+    // (он ставит карточке lg:col-span-3) ни на что не влияет: у блочного родителя нет колонок,
+    // и все карточки растягиваются на всю ширину в одну колонку.
+    <div className="grid grid-cols-1 gap-6 lg:grid-cols-6">
       {/* СОБЫТИЯ ПЕРИОДА — единственный настоящий временной ряд, поэтому только он с графиком.
           Столбцы, а не линия: открытия и клики — дискретные счётные события дня (канон bar). */}
       <ChartWidget id="rusender-opens" title="Открытия" fixedSize="half" defaultColor={1} defaultTinted>
@@ -251,7 +254,7 @@ export function RusenderOverview() {
           открытия видны только в итогах рассылки.
         </p>
       )}
-    </>
+    </div>
   );
 }
 
