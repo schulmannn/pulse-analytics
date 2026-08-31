@@ -304,8 +304,17 @@ function withGoalCtx<T extends { rows: readonly Record<string, unknown>[] }>(
   } as T;
 }
 
-async function bootMetrika(page: Page, path: string, { connected = true } = {}) {
-  const state = { connected, connectCalls: [] as Array<Record<string, unknown>> };
+async function bootMetrika(page: Page, path: string, { connected = true, orphan = false } = {}) {
+  // Счётчиков может быть НЕСКОЛЬКО: у каждого свой канал (сервер дедупит их по counter_id),
+  // поэтому стенд держит список, а /api/ym/status отвечает ПО КАНАЛУ из заголовка.
+  const state = {
+    connected,
+    connectCalls: [] as Array<Record<string, unknown>>,
+    connectHeaders: [] as Array<string | null>,
+    counters: connected ? [{ channelId: 9, id: '65383336', name: 'nōtem', site: 'notem.ru' }] : [],
+    // Канал БЕЗ учётки: остаётся после «Отключить» вместе с дневным архивом.
+    orphans: orphan ? [{ channelId: 12, title: 'старый счётчик' }] : [],
+  };
   await page.route(/^https?:\/\/[^/]+\/api\//, async (route) => {
     const request = route.request();
     const urlPath = new URL(request.url()).pathname;
@@ -316,14 +325,25 @@ async function bootMetrika(page: Page, path: string, { connected = true } = {}) 
     if (urlPath === '/api/channels' && request.method() === 'GET') {
       return json(200, {
         enabled: true,
-        channels: state.connected
-          ? [{ id: 9, username: null, title: 'nōtem', status: 'active', source: 'ym', ig_connected: false }]
+        channels: state.counters.length || state.orphans.length
+          ? [
+              ...state.counters.map((c) => ({
+                id: c.channelId, username: null, title: c.name, status: 'active', source: 'ym', ig_connected: false,
+              })),
+              ...state.orphans.map((o) => ({
+                id: o.channelId, username: null, title: o.title, status: 'active', source: 'ym', ig_connected: false,
+              })),
+            ]
           : [{ id: 7, username: 'demo_channel', title: 'Demo Channel', status: 'active', source: 'collector', ig_connected: false }],
       });
     }
     if (urlPath === '/api/ym/status') {
-      return json(200, state.connected
-        ? { connected: true, counter_name: 'nōtem', counter_id: '65383336', site: 'notem.ru' }
+      const scoped = request.headers()['x-channel-id'];
+      const counter = scoped
+        ? state.counters.find((c) => String(c.channelId) === scoped)
+        : state.counters[0];
+      return json(200, counter
+        ? { connected: true, counter_name: counter.name, counter_id: counter.id, site: counter.site }
         : { connected: false, counter_name: null, counter_id: null, site: null });
     }
     const goalId = new URL(request.url()).searchParams.get('goal_id');
@@ -347,6 +367,7 @@ async function bootMetrika(page: Page, path: string, { connected = true } = {}) 
     if (urlPath === '/api/ym/connect' && request.method() === 'POST') {
       const body = request.postDataJSON() as Record<string, unknown>;
       state.connectCalls.push(body);
+      state.connectHeaders.push(request.headers()['x-channel-id'] ?? null);
       // Первый шаг (без counter_id): на аккаунте два счётчика — сервер просит выбрать.
       if (!body.counter_id) {
         return json(200, {
@@ -359,7 +380,13 @@ async function bootMetrika(page: Page, path: string, { connected = true } = {}) 
         });
       }
       state.connected = true;
-      return json(200, { ok: true, channel_id: 9, counter_name: 'nōtem', site: 'notem.ru' });
+      const scopedTo = Number(request.headers()['x-channel-id'] ?? '') || null;
+      const picked = String(body.counter_id) === '111'
+        ? { channelId: scopedTo ?? 10, id: '111', name: 'второй проект', site: 'b.ru' }
+        : { channelId: scopedTo ?? 9, id: '65383336', name: 'nōtem', site: 'notem.ru' };
+      if (scopedTo) state.orphans = state.orphans.filter((o) => o.channelId !== scopedTo);
+      if (!state.counters.some((c) => c.id === picked.id)) state.counters.push(picked);
+      return json(200, { ok: true, channel_id: picked.channelId, counter_name: picked.name, site: picked.site });
     }
     if (urlPath === '/api/tg/qr/status') return json(200, { connected: false, server_ready: false });
     if (urlPath === '/api/ig/oauth/status') return json(200, { connected: false, server_ready: false, env_fallback: false });
@@ -606,13 +633,69 @@ test('Подключение Метрики: токен → выбор счёт�
   await expect(page.getByRole('button', { name: /второй проект/ })).toBeVisible();
   await page.getByRole('button', { name: /nōtem/ }).click();
 
-  // Мгновенный connected-отклик панели + ссылка в Обзор.
-  await expect(page.getByText(/Подключён счётчик/)).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Открыть Обзор Метрики →' })).toBeVisible();
+  // Счётчик встал строкой источника со своими действиями.
+  const counters = page.getByRole('listitem').filter({ hasText: 'nōtem' });
+  await expect(counters).toHaveCount(1);
+  await expect(counters.getByRole('button', { name: 'Открыть' })).toBeVisible();
+  await expect(counters.getByRole('button', { name: 'Отключить' })).toBeVisible();
 
   // Контракт connect-флоу: первый вызов без counter_id, второй — с выбранным; токен один и тот же.
   expect(state.connectCalls).toEqual([
     { token: 'y0_test_oauth_token' },
     { token: 'y0_test_oauth_token', counter_id: '65383336' },
   ]);
+});
+
+/**
+ * ВТОРОЙ СЧЁТЧИК. Панель приколачивалась к ПЕРВОМУ ym-каналу, и подключённый счётчик закрывал
+ * собой форму: добавить второй сайт было нечем, хотя сервер это умеет с самого начала (канал на
+ * счётчик, дедуп по counter_id). Форма подключения доступна и при подключённом источнике.
+ */
+test('второй счётчик Метрики добавляется отдельным источником', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop-1440', 'Метрика — desktop-first поверхность');
+  const state = await bootMetrika(page, '/connect?source=metrika', { connected: true });
+
+  await expect(page.getByRole('listitem').filter({ hasText: 'nōtem' })).toHaveCount(1);
+  await page.getByRole('button', { name: 'Добавить счётчик' }).click();
+
+  await page.getByLabel('OAuth-токен Яндекса').fill('y0_test_oauth_token');
+  await page.getByRole('button', { name: 'Подключить', exact: true }).click();
+  await page.getByRole('button', { name: /второй проект/ }).click();
+
+  // Оба счётчика — соседними строками, первый не подменён.
+  await expect(page.getByRole('listitem').filter({ hasText: 'второй проект' })).toHaveCount(1);
+  await expect(page.getByRole('listitem').filter({ hasText: 'nōtem' })).toHaveCount(1);
+
+  await page.setViewportSize({ width: 430, height: 900 });
+  // На телефоне карточки счётчиков не должны разъезжаться в горизонтальную прокрутку.
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow, 'горизонтальной прокрутки на 430px быть не должно').toBeLessThanOrEqual(1);
+  await page.setViewportSize({ width: 1440, height: 900 });
+
+  // Запрос НЕ несёт X-Channel-Id: иначе счётчик приклеился бы к каналу свитчера вместо своего.
+  expect(state.connectHeaders.every((h) => h == null)).toBe(true);
+  expect(state.connectCalls.at(-1)).toEqual({ token: 'y0_test_oauth_token', counter_id: '111' });
+});
+
+/**
+ * ВОЗВРАТ СЧЁТЧИКА В СВОЙ ИСТОЧНИК. «Отключить» щадит дневной архив и оставляет канал, но пока
+ * подключение всегда заводило НОВЫЙ канал, старый навсегда висел в переключателе пустым: архив
+ * есть, данных нет, и добраться до него нечем.
+ */
+test('отключённый счётчик подключается обратно в тот же источник', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop-1440', 'Метрика — desktop-first поверхность');
+  const state = await bootMetrika(page, '/connect?source=metrika', { connected: false, orphan: true });
+
+  const orphanRow = page.getByRole('listitem').filter({ hasText: 'Счётчик отключён' });
+  await expect(orphanRow).toHaveCount(1);
+  await orphanRow.getByRole('button', { name: 'Подключить снова' }).click();
+  await expect(page.getByText('вернётся в этот же источник')).toBeVisible();
+
+  await page.getByLabel('OAuth-токен Яндекса').fill('y0_test_oauth_token');
+  await page.getByRole('button', { name: 'Подключить', exact: true }).click();
+  await page.getByRole('button', { name: /nōtem/ }).click();
+
+  // Запрос адресован ИМЕННО этому каналу — сервер вернёт счётчик к его архиву.
+  expect(state.connectHeaders.at(-1)).toBe('12');
+  await expect(page.getByRole('listitem').filter({ hasText: 'nōtem' })).toHaveCount(1);
 });

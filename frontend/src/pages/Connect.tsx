@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { LoaderDots } from '@/components/ui/loader';
 import { useConfirm } from '@/components/ConfirmDialogProvider';
 import { toast } from 'sonner';
@@ -10,6 +10,7 @@ import { useChannels, useCollectorStatus, useConnectIg, useCreateKey, useDisconn
 import { useCdekStatus, useCreateCdekSource } from '@/api/cdek';
 import { ApiError, apiSend } from '@/api/client';
 import { qk } from '@/api/queryKeys';
+import type { Channel } from '@/api/schemas';
 import { orbitHealth, type OrbitNetworkHealth } from '@/lib/connectionHealth';
 import { fmt } from '@/lib/format';
 import { ChannelScope, useSelectedChannel } from '@/lib/channel-context';
@@ -141,7 +142,8 @@ export function Connect() {
   // источник правды. Статусы МС/Метрики берём теми же хуками, что и MoySkladPanel/MetrikaPanel
   // (ключи запросов общие — повторный вызов не даёт лишнего сетевого похода).
   const msChannelId = channels.find((channel) => channel.source === 'ms')?.id ?? null;
-  const ymChannelId = channels.find((channel) => channel.source === 'ym')?.id ?? null;
+  const ymChannels = channels.filter((channel) => channel.source === 'ym');
+  const ymChannelId = ymChannels[0]?.id ?? null;
   const msStatus = useMsStatus(msChannelId);
   const ymStatus = useYmStatus(ymChannelId);
   // У СДЭКа нет статуса подключения: источник существует ровно потому, что его завели. Наличие
@@ -172,6 +174,7 @@ export function Connect() {
     : false;
   const tgConnected = independentTelegram || managedTelegramConnected;
   const msConnected = msStatus.isSuccess ? !!msStatus.data?.connected : msChannelId != null;
+  // Пилюля источника — про источник целиком, а не про первый счётчик: подключён хотя бы один.
   const ymConnected = ymStatus.isSuccess ? !!ymStatus.data?.connected : ymChannelId != null;
   const networkHealth = orbitHealth({
     telegram: {
@@ -392,14 +395,11 @@ export function Connect() {
             ) : (
               <MoySkladPanel />
             ))}
-          {active.kind === 'metrika' &&
-            (ymChannelId != null ? (
-              <ChannelScope channelId={ymChannelId}>
-                <MetrikaPanel />
-              </ChannelScope>
-            ) : (
-              <MetrikaPanel />
-            ))}
+          {/* Метрика — источник со МНОЖЕСТВОМ счётчиков: у каждого свой канал (сервер заводит его
+              в /api/ym/connect и дедупит по counter_id). Приколачивать панель к ПЕРВОМУ ym-каналу
+              через ChannelScope нельзя: тогда подключённый счётчик закрывает собой форму, и второй
+              добавить нечем — панель сама держит список и адресует мутации поканально. */}
+          {active.kind === 'metrika' && <MetrikaPanel channels={ymChannels} />}
           {active.kind === 'cdek' &&
             (cdekChannelId != null ? (
               <ChannelScope channelId={cdekChannelId}>
@@ -881,24 +881,113 @@ function CdekPanel({ channelId }: { channelId: number | null }) {
   );
 }
 
-// ── Яндекс.Метрика: подключение по OAuth-токену (+ выбор счётчика при нескольких) ──
-function MetrikaPanel() {
+// ── Яндекс.Метрика: счётчики (+ выбор счётчика при нескольких на токене) ──
+// У Метрики МНОЖЕСТВО источников: один счётчик = один канал, сервер дедупит их по counter_id.
+// Поэтому панель — список, а форма подключения доступна ВСЕГДА, а не только пока пусто.
+
+/** Строка подключённого счётчика: имя из учётки, переход на его Обзор и отключение. */
+function YmCounterRow({
+  channelId,
+  title,
+  onChanged,
+  onReconnect,
+}: {
+  channelId: number;
+  title: string;
+  onChanged: () => Promise<unknown>;
+  /** Вернуть счётчик В ЭТОТ канал: у него остался дневной архив, ради которого «Отключить» его и щадит. */
+  onReconnect: (channelId: number) => void;
+}) {
   const confirm = useConfirm();
+  const navigate = useNavigate();
+  const { setChannelId } = useSelectedChannel();
+  const status = useYmStatus(channelId);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const connected = status.data?.connected ?? false;
+  const name = status.data?.counter_name ?? status.data?.site ?? title;
+
+  const disconnect = async () => {
+    if (busy) return;
+    const ok = await confirm({
+      title: `Отключить счётчик «${name}»?`,
+      reason: 'OAuth-доступ к этому счётчику будет отозван, сбор остановится. Уже загруженный дневной архив сохранится — источник останется в списке, и счётчик можно будет подключить в него заново.',
+      actionLabel: 'Отключить',
+    });
+    if (!ok) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await apiSend('DELETE', '/api/ym/account', undefined, MutationOkSchema, { channelId });
+      toast('Счётчик отключён');
+      await onChanged();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Не удалось отключить счётчик.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Переход обязан ПЕРЕКЛЮЧИТЬ источник, иначе «Открыть» у второго счётчика привело бы на обзор
+  // первого: страница читает канал из свитчера, а не из ссылки.
+  const open = () => {
+    setChannelId(channelId);
+    navigate('/metrika');
+  };
+
+  return (
+    <li className="flex min-h-11 flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-border px-3 py-2">
+      <span className="min-w-0 flex-1 truncate text-sm">
+        <span className="font-medium text-foreground">{name}</span>
+        {status.data?.site && status.data.site !== name && (
+          <span className="text-muted-foreground"> · {status.data.site}</span>
+        )}
+      </span>
+      {connected ? (
+        <span className="ml-auto flex shrink-0 items-center gap-1">
+          <Button type="button" variant="ghost" size="xs" onClick={open}>
+            Открыть
+          </Button>
+          <Button type="button" variant="ghost" size="xs" disabled={busy} onClick={() => void disconnect()}>
+            Отключить
+          </Button>
+        </span>
+      ) : (
+        <span className="ml-auto flex shrink-0 items-center gap-2">
+          <span className="text-xs text-muted-foreground">Счётчик отключён, архив сохранён</span>
+          {/* «Подключить СНОВА», а не «Подключить»: рядом на том же экране стоит кнопка формы с
+              этим словом, и два одинаковых действия читались бы как одно. */}
+          <Button type="button" variant="ghost" size="xs" onClick={() => onReconnect(channelId)}>
+            Подключить снова
+          </Button>
+        </span>
+      )}
+      {error && (
+        <p role="alert" className="w-full text-xs text-ember">
+          {error}
+        </p>
+      )}
+    </li>
+  );
+}
+
+function MetrikaPanel({ channels }: { channels: Channel[] }) {
   const qc = useQueryClient();
-  const status = useYmStatus();
-  // Канал панели (ChannelScope на /connect = канал источника) — мутации шлют его явно
-  // (apiSend без opts падает на глобальный стор свитчера).
-  const { channelId } = useSelectedChannel();
   const [token, setToken] = useState('');
   const [busy, setBusy] = useState(false);
-  const [freshName, setFreshName] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Форма второго счётчика открывается по кнопке: пока подключён хотя бы один, показывать поле
+  // токена постоянно значит предлагать работу там, где её обычно нет.
+  const [adding, setAdding] = useState(false);
+  // Куда подключаем: null — «заведи новый канал», число — вернуть счётчик в УЖЕ существующий
+  // источник (у него остался дневной архив от прошлого подключения).
+  const [attachTo, setAttachTo] = useState<number | null>(null);
   // Несколько счётчиков на аккаунте: сервер отвечает choice_required + список (id/имя/сайт —
   // не секреты), клиент повторяет connect с выбранным counter_id. Токен остаётся в памяти
   // формы между шагами и уходит только на НАШ бэкенд.
   const [counters, setCounters] = useState<Array<{ id: string; name: string | null; site: string | null }> | null>(null);
-  const connected = freshName != null || (status.data?.connected ?? false);
-  const counterName = freshName ?? status.data?.counter_name ?? status.data?.site ?? 'счётчик';
+  const connected = channels.length > 0;
+  const formOpen = !connected || adding;
 
   // ВСЕ семьи Метрики, а не три: разрезы кэшируются на 5 минут, и после смены счётчика
   // четырнадцать неинвалидированных карточек продолжали бы показывать данные ПРЕДЫДУЩЕГО
@@ -917,21 +1006,24 @@ function MetrikaPanel() {
     try {
       // Токен уходит только на НАШ бэкенд (шифруется AES-256-GCM до записи) — в браузере,
       // логах и git он не живёт; в Яндекс ходит сервер.
+      // channelId: null — «заведи новый канал под этот счётчик». Явный null, а не пропуск:
+      // без него apiSend подставит канал свитчера, и счётчик приклеился бы к чужому источнику.
       const res = await apiSend(
         'POST',
         '/api/ym/connect',
         counterId ? { token: value, counter_id: counterId } : { token: value },
         YmConnectSchema,
-        { channelId },
+        { channelId: attachTo },
       );
       if (res?.choice_required) {
         setCounters(Array.isArray(res.counters) ? res.counters : []);
         return;
       }
-      setFreshName(res?.counter_name || res?.site || 'счётчик');
       setToken('');
       setCounters(null);
-      toast('Метрика подключена');
+      setAdding(false);
+      setAttachTo(null);
+      toast(`Счётчик «${res?.counter_name || res?.site || 'Метрика'}» подключён`);
       await invalidateYm();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Не удалось подключить Яндекс.Метрику.');
@@ -945,28 +1037,6 @@ function MetrikaPanel() {
     void connect();
   };
 
-  const disconnect = async () => {
-    if (busy) return;
-    const ok = await confirm({
-      title: 'Отключить Яндекс.Метрику?',
-      reason: 'OAuth-доступ к счётчику будет отозван, сбор остановится. Уже загруженный дневной архив сохранится, но для возобновления понадобится заново пройти авторизацию.',
-      actionLabel: 'Отключить',
-    });
-    if (!ok) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await apiSend('DELETE', '/api/ym/account', undefined, MutationOkSchema, { channelId });
-      setFreshName(null);
-      toast('Метрика отключена');
-      await invalidateYm();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Не удалось отключить источник.');
-    } finally {
-      setBusy(false);
-    }
-  };
-
   return (
     <div className="rounded-xl border border-border bg-card p-5 sm:p-6">
       <PanelHead
@@ -974,84 +1044,114 @@ function MetrikaPanel() {
         name="Яндекс.Метрика"
         pill={connected ? { label: 'Подключена', tone: 'ok' } : { label: 'Доступна', tone: 'go' }}
       />
-      {connected ? (
-        <div className="mt-4 space-y-4">
-          <p className="text-sm text-muted-foreground">
-            Подключён счётчик <b className="font-medium text-foreground">{counterName}</b>. Визиты, посетители и
-            источники трафика уже считаются; дневной архив (включая историю счётчика) пополняется автоматически.
-          </p>
-          <div className="flex flex-wrap items-center gap-3">
-            <Button asChild>
-              <Link to="/metrika">Открыть Обзор Метрики →</Link>
-            </Button>
-            <button
-              type="button"
-              data-mobile-touch-target=""
-              onClick={() => void disconnect()}
-              disabled={busy}
-              className="btn-pill inline-flex min-h-11 items-center border border-border px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-destructive disabled:opacity-50 sm:min-h-0"
-            >
-              Отключить
-            </button>
-          </div>
-          {error && <p role="alert" className="text-xs text-ember">{error}</p>}
-        </div>
-      ) : (
-        <div className="mt-4 space-y-4">
+      <div className="mt-4 space-y-4">
+        {connected ? (
+          <ul className="space-y-2">
+            {channels.map((channel) => (
+              <YmCounterRow
+                key={channel.id}
+                channelId={channel.id}
+                title={channel.title ?? 'Счётчик'}
+                onChanged={invalidateYm}
+                onReconnect={(id) => {
+                  setAttachTo(id);
+                  setAdding(true);
+                  setError(null);
+                }}
+              />
+            ))}
+          </ul>
+        ) : (
           <p className="text-sm text-muted-foreground">
             Трафик сайта из Яндекс.Метрики — рядом с аналитикой каналов. Понадобится OAuth-токен Яндекса с
             доступом к Метрике (право <b className="font-medium text-foreground">metrika:read</b>); выпустить его
             можно на oauth.yandex.ru для своего приложения.
           </p>
-          <form onSubmit={submit} className="flex items-center gap-2">
-            <label htmlFor="yandex-metrika-token" className="sr-only">OAuth-токен Яндекса</label>
-            <input
-              data-mobile-touch-target=""
-              id="yandex-metrika-token"
-              type="password"
-              value={token}
-              onChange={(e) => {
-                setToken(e.target.value);
-                setCounters(null);
-              }}
-              placeholder="OAuth-токен Яндекса"
-              autoComplete="off"
-              aria-invalid={error ? true : undefined}
-              aria-describedby={error ? 'yandex-metrika-token-help yandex-metrika-token-error' : 'yandex-metrika-token-help'}
-              className="h-11 min-w-0 flex-1 rounded border border-border bg-background px-3 text-sm text-foreground outline-hidden placeholder:text-muted-foreground focus:ring-1 focus:ring-primary sm:h-9"
-            />
-            <Button type="submit" disabled={!token.trim() || busy} className="shrink-0">
-              {busy ? 'Проверяем…' : 'Подключить'}
-            </Button>
-          </form>
-          {counters && (
-            <div className="space-y-2">
-              <p className="text-xs text-muted-foreground">
-                {counters.length
-                  ? 'На аккаунте несколько счётчиков — выберите, какой подключить:'
-                  : 'На аккаунте не нашлось счётчиков Метрики.'}
+        )}
+
+        {connected && !formOpen && (
+          <Button type="button" variant="outline" size="sm" onClick={() => setAdding(true)}>
+            Добавить счётчик
+          </Button>
+        )}
+
+        {formOpen && (
+          <div className="space-y-4">
+            {connected && (
+              <p className="text-sm text-muted-foreground">
+                {attachTo != null
+                  ? 'Счётчик вернётся в этот же источник — вместе с уже загруженным дневным архивом.'
+                  : 'Второй счётчик встанет отдельным источником — его видно в переключателе рядом с первым. Токен можно взять тот же: если на нём несколько счётчиков, дальше спросим, какой подключить.'}
               </p>
-              {counters.map((c) => (
-                <button
-                  key={c.id}
+            )}
+            <form onSubmit={submit} className="flex items-center gap-2">
+              <label htmlFor="yandex-metrika-token" className="sr-only">OAuth-токен Яндекса</label>
+              <input
+                data-mobile-touch-target=""
+                id="yandex-metrika-token"
+                type="password"
+                value={token}
+                onChange={(e) => {
+                  setToken(e.target.value);
+                  setCounters(null);
+                }}
+                placeholder="OAuth-токен Яндекса"
+                autoComplete="off"
+                aria-invalid={error ? true : undefined}
+                aria-describedby={error ? 'yandex-metrika-token-help yandex-metrika-token-error' : 'yandex-metrika-token-help'}
+                className="h-11 min-w-0 flex-1 rounded border border-border bg-background px-3 text-sm text-foreground outline-hidden placeholder:text-muted-foreground focus:ring-1 focus:ring-primary sm:h-9"
+              />
+              <Button type="submit" disabled={!token.trim() || busy} className="shrink-0">
+                {busy ? 'Проверяем…' : 'Подключить'}
+              </Button>
+              {connected && (
+                <Button
                   type="button"
-                  data-mobile-touch-target=""
+                  variant="ghost"
+                  size="sm"
+                  className="shrink-0"
                   disabled={busy}
-                  onClick={() => void connect(c.id)}
-                  className="flex min-h-11 w-full items-center justify-between gap-3 rounded-lg border border-border px-3 py-2 text-left text-sm transition-colors hover:border-primary/60 hover:bg-muted disabled:pointer-events-none disabled:opacity-50 sm:min-h-0 sm:items-baseline"
+                  onClick={() => {
+                    setAdding(false);
+                    setAttachTo(null);
+                    setToken('');
+                    setCounters(null);
+                    setError(null);
+                  }}
                 >
-                  <span className="min-w-0 truncate font-medium text-foreground">{c.name ?? c.site ?? `Счётчик ${c.id}`}</span>
-                  <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{c.site ?? c.id}</span>
-                </button>
-              ))}
-            </div>
-          )}
-          {error && <p id="yandex-metrika-token-error" role="alert" className="text-xs text-ember">{error}</p>}
-          <p id="yandex-metrika-token-help" className="text-2xs text-muted-foreground">
-            Токен хранится только на сервере в зашифрованном виде (AES-256-GCM) и не попадает в логи.
-          </p>
-        </div>
-      )}
+                  Отмена
+                </Button>
+              )}
+            </form>
+            {counters && (
+              <div className="space-y-2">
+                <p className="text-xs text-muted-foreground">
+                  {counters.length
+                    ? 'На аккаунте несколько счётчиков — выберите, какой подключить:'
+                    : 'На аккаунте не нашлось счётчиков Метрики.'}
+                </p>
+                {counters.map((c) => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    data-mobile-touch-target=""
+                    disabled={busy}
+                    onClick={() => void connect(c.id)}
+                    className="flex min-h-11 w-full items-center justify-between gap-3 rounded-lg border border-border px-3 py-2 text-left text-sm transition-colors hover:border-primary/60 hover:bg-muted disabled:pointer-events-none disabled:opacity-50 sm:min-h-0 sm:items-baseline"
+                  >
+                    <span className="min-w-0 truncate font-medium text-foreground">{c.name ?? c.site ?? `Счётчик ${c.id}`}</span>
+                    <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{c.site ?? c.id}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            <p id="yandex-metrika-token-help" className="text-2xs text-muted-foreground">
+              Токен хранится только на сервере в зашифрованном виде (AES-256-GCM) и не попадает в логи.
+            </p>
+          </div>
+        )}
+        {error && <p id="yandex-metrika-token-error" role="alert" className="text-xs text-ember">{error}</p>}
+      </div>
     </div>
   );
 }
