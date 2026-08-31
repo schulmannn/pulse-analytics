@@ -71,7 +71,12 @@ function RusenderStory({
     return { values: shown.map((r) => r.value), days: shown.map((r) => r.day) };
   }, [series]);
 
-  if (model.values.length <= 1) {
+  // Считаем ДНИ С НАБЛЮДЕНИЕМ, а не длину окна. Окно всегда плотное (90 точек), но снимок базы
+  // существует только с момента подключения: на проде карточка «База контактов» показывала
+  // ПУСТОЕ место вместо графика — Sparkline получал 89 пропусков и одно значение, линии не
+  // выходило, а место под неё занималось. Тот же случай я уже чинил в «Базе», а здесь пропустил.
+  const observed = model.values.filter((v) => v != null).length;
+  if (observed <= 1) {
     return (
       <ChartCardBody
         value={value}
@@ -80,7 +85,11 @@ function RusenderStory({
         onValueClick={() => navigate(drillTo)}
         drillLabel={drillLabel}
       >
-        <EmptyState compact size="chart" title="Недостаточно дней для графика." />
+        <EmptyState
+          compact
+          size="chart"
+          title={observed ? 'Пока одна точка — графика ещё нет.' : 'За период данных нет.'}
+        />
       </ChartCardBody>
     );
   }
