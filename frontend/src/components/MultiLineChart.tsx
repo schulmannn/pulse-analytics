@@ -122,11 +122,16 @@ export function MultiLineChart({
         {legend && <span className="text-2xs text-muted-foreground">· {legend}</span>}
       </div>
       <div className={expanded ? 'relative pl-12' : undefined}>
+        {/* КРАЙНИЕ ПОДПИСИ ЛИНЕЙКИ — ВНУТРИ полотна, а не по центру его границы. Центрирование
+            вешало половину строки (≈8px) НАД верхом и ПОД низом графика, и это держалось лишь
+            потому, что снизу обычно стояла строка дат: она и прятала свес. Стоило оси исчезнуть
+            (одна засечка на длинной грануляции) — и подпись «0» вылезала из карточки, а гейт
+            переполнений ловил ровно её. Средняя остаётся по центру: там свеса нет. */}
         {expanded && (
           <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 left-0 w-11 text-right text-2xs text-muted-foreground">
-            <span className="absolute right-2 top-0 -translate-y-1/2">{format(max)}</span>
+            <span className="absolute right-2 top-0">{format(max)}</span>
             <span className="absolute right-2 top-1/2 -translate-y-1/2">{format(max / 2)}</span>
-            <span className="absolute bottom-0 right-2 translate-y-1/2">{format(0)}</span>
+            <span className="absolute bottom-0 right-2">{format(0)}</span>
           </div>
         )}
         <div

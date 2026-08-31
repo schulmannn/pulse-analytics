@@ -501,6 +501,26 @@ function registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cach
       const site = siteOf(counter);
       let channelId = await db.findYmChannelByCounter(req.user.uid, counterId);
       if (!channelId) {
+        // ПОДКЛЮЧИТЬ В УКАЗАННЫЙ КАНАЛ, если запрос пришёл с его id, это ym-канал этого
+        // воркспейса и счётчика на нём сейчас нет. Такой канал остаётся после «Отключить»
+        // (учётку удаляем, дневной архив НЕТ — так и обещает текст подтверждения), и без этой
+        // ветки повторное подключение того же счётчика заводило НОВЫЙ канал, а старый навсегда
+        // висел в переключателе пустым источником.
+        const wanted = tenantChannelId(req);
+        if (wanted) {
+          const channel = await db.getChannelOrDefault(wanted, req.user).catch(() => null);
+          if (
+            channel &&
+            channel.id === wanted &&
+            channel.source === 'ym' &&
+            hasWorkspaceRole(channel, req.user, 'admin')
+          ) {
+            const existing = await db.getYmAccount(channel.id).catch(() => null);
+            if (!existing || !existing.access_token_enc) channelId = channel.id;
+          }
+        }
+      }
+      if (!channelId) {
         const created = await db.createYmChannel({ owner_uid: req.user.uid, name: counterName || site });
         if (!created) return res.status(503).json({ error: 'Не удалось создать канал' });
         channelId = created.id;

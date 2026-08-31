@@ -1393,3 +1393,72 @@ test('hourly/exits: 401 после connect → ym_token_revoked (reconnect-CTA)'
     assert.equal(res.body.code, 'ym_token_revoked', `${route}: reconnect-код`);
   }
 });
+
+test('connect: счётчик возвращается В УКАЗАННЫЙ пустой ym-канал, а не в новый', async () => {
+  // «Отключить» удаляет учётку, но НЕ канал: дневной архив остаётся, так и обещает подтверждение.
+  // Без этой ветки повторное подключение того же счётчика заводило второй канал, а первый навсегда
+  // висел в переключателе пустым источником.
+  const saved = [];
+  let created = 0;
+  const { routes } = buildYm({
+    ymFetch: async () => ({ counters: [COUNTER] }),
+    db: {
+      findYmChannelByCounter: async () => null,
+      getChannelOrDefault: async (id) => (id === 5 ? { id: 5, owner_uid: 7, source: 'ym' } : null),
+      getYmAccount: async () => null,
+      createYmChannel: async () => { created += 1; return { id: 99 }; },
+      saveYmAccount: async (channelId, fields) => { saved.push({ channelId, fields }); return true; },
+    },
+  });
+  const res = await invoke(routes, 'POST /api/ym/connect', {
+    body: { token: 'oauth-secret' },
+    headers: { 'x-channel-id': '5' },
+  });
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.channel_id, 5, 'счётчик встал в существующий канал');
+  assert.equal(created, 0, 'новый канал не заводится');
+  assert.equal(saved[0].channelId, 5);
+});
+
+test('connect: чужой/не-ym канал в заголовке игнорируется — счётчику заводится свой', async () => {
+  // Заголовок — это ПОДСКАЗКА, а не команда: подставив id телеграм-канала (или чужого), никто не
+  // должен превратить его в источник Метрики.
+  let created = 0;
+  const { routes } = buildYm({
+    ymFetch: async () => ({ counters: [COUNTER] }),
+    db: {
+      findYmChannelByCounter: async () => null,
+      getChannelOrDefault: async (id) => (id === 5 ? { id: 5, owner_uid: 7, source: 'collector' } : null),
+      getYmAccount: async () => null,
+      createYmChannel: async () => { created += 1; return { id: 77 }; },
+      saveYmAccount: async () => true,
+    },
+  });
+  const res = await invoke(routes, 'POST /api/ym/connect', {
+    body: { token: 'oauth-secret' },
+    headers: { 'x-channel-id': '5' },
+  });
+  assert.equal(res.body.channel_id, 77);
+  assert.equal(created, 1);
+});
+
+test('connect: занятый ym-канал не перехватывается — у счётчика свой', async () => {
+  // На канале уже живёт ДРУГОЙ счётчик: подключение поверх стёрло бы его историю подменой учётки.
+  let created = 0;
+  const { routes } = buildYm({
+    ymFetch: async () => ({ counters: [COUNTER] }),
+    db: {
+      findYmChannelByCounter: async () => null,
+      getChannelOrDefault: async (id) => (id === 5 ? { id: 5, owner_uid: 7, source: 'ym' } : null),
+      getYmAccount: async () => ({ channel_id: 5, counter_id: 'other', access_token_enc: 'enc' }),
+      createYmChannel: async () => { created += 1; return { id: 88 }; },
+      saveYmAccount: async () => true,
+    },
+  });
+  const res = await invoke(routes, 'POST /api/ym/connect', {
+    body: { token: 'oauth-secret' },
+    headers: { 'x-channel-id': '5' },
+  });
+  assert.equal(res.body.channel_id, 88);
+  assert.equal(created, 1);
+});

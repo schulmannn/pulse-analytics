@@ -40,7 +40,39 @@ function buildHistory() {
   }
   return rows;
 }
-const HISTORY_ROWS = buildHistory();
+
+/**
+ * ЗАПАС ГЛУБИНЫ ПЕРЕД АРХИВОМ. Спек tg-top-posts выбирает окно «13 месяцев назад, 5–15 число» —
+ * и расстояние до его НАЧАЛА гуляет вместе с сегодняшним числом: от ~395 дней (если сегодня 1-е)
+ * до ~426 (если сегодня 31-е). Ровно 420 дней архива хватало не всегда, и в конце длинного месяца
+ * окно уезжало за край: карточка честно пустела, а спек падал — не из-за правки, а из-за календаря.
+ * Дни ДОБАВЛЯЮТСЯ НАЗАД от самой старой строки, поэтому ни одно существующее число не меняется:
+ * уровень подписчиков, сегодняшний итог и все производные ряды остаются прежними.
+ */
+function withDeeperPast(rows: Array<Record<string, number | string>>, extraDays: number) {
+  const oldest = rows[0];
+  const head: Array<Record<string, number | string>> = [];
+  let subs = Number(oldest.subscribers);
+  const oldestOffset = rows.length - 1;
+  for (let i = 1; i <= extraDays; i++) {
+    const joins = 38 + Math.abs(wobble(i, 9, 7));
+    const leaves = 24 + Math.abs(wobble(i, 6, 5));
+    subs -= joins - leaves; // идём в прошлое: чем дальше, тем меньше подписчиков
+    const views = 3000 + wobble(i, 600, 9);
+    head.unshift({
+      day: day(oldestOffset + i),
+      subscribers: subs,
+      joins,
+      leaves,
+      views,
+      forwards: Math.round(views * 0.012),
+      reactions: Math.round(views * 0.052),
+    });
+  }
+  return [...head, ...rows];
+}
+
+const HISTORY_ROWS = withDeeperPast(buildHistory(), 60);
 const CURRENT_SUBS = Number(HISTORY_ROWS[HISTORY_ROWS.length - 1].subscribers);
 
 // ── Recent posts ──

@@ -114,7 +114,11 @@ describe('demo fixtures', () => {
     const history = HistorySchema.parse(demoFixture('/api/history/channel'));
     // Архив подписчиков глубже годового ряда просмотров (см. buildHistory): демо обязано
     // показывать честную пустоту графика постов там, где уровень подписчиков ещё известен.
-    expect(history.rows.length).toBe(420);
+    // Глубина с запасом: окно «13 месяцев назад, 5–15 число» отстоит от сегодня на 395…426 дней
+    // (зависит от сегодняшнего числа), и ровно 420 переставало покрывать его в конце длинного
+    // месяца — спек tg-top-posts падал по календарю, а не по правке.
+    expect(history.rows.length).toBe(480);
+    expect(history.rows.length, 'окно 13 месяцев назад обязано попадать в архив').toBeGreaterThan(430);
     // subscribers should be monotonic-ish upward (a believable growth story)
     const first = Number(history.rows[0].subscribers);
     const last = Number(history.rows[history.rows.length - 1].subscribers);
