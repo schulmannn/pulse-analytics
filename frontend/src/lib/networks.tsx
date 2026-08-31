@@ -55,11 +55,16 @@ export const NETWORKS = [
       { to: '/posts', label: 'Контент', icon: 'posts' },
       { to: '/mentions', label: 'Упоминания', icon: 'mentions' },
     ],
-    // Standalone Instagram/МойСклад/Метрика/СДЭК sources have no Telegram side. Список исключений,
+    // Standalone Instagram/МойСклад/Метрика/СДЭК/Rusender sources have no Telegram side. Список исключений,
     // а не белый список: канал коллектора приезжает с разными source ('qr', 'collector', 'central'),
     // и все они — Telegram. Зато каждый НОВЫЙ не-телеграмный источник обязан попасть сюда, иначе
     // он молча притворится телеграм-каналом с пустыми данными.
-    hasChannel: (c) => c.source !== 'ig' && c.source !== 'ms' && c.source !== 'ym' && c.source !== 'cdek',
+    hasChannel: (c) =>
+      c.source !== 'ig'
+      && c.source !== 'ms'
+      && c.source !== 'ym'
+      && c.source !== 'cdek'
+      && c.source !== 'rusender',
   },
   {
     key: 'ig',
@@ -127,6 +132,25 @@ export const NETWORKS = [
     // Отдельный канал source='cdek', создаётся кнопкой на /connect.
     hasChannel: (c) => c.source === 'cdek',
   },
+  {
+    // «Rusender» — email-рассылки. Величины СВОИ: доставлено/открытия/клики по письмам не
+    // смешиваются ни с просмотрами TG, ни с охватом IG, ни с визитами Метрики — тот же канон,
+    // что «TG-просмотры ≠ IG-охват». Считаем ТОЛЬКО рассылки (решение владельца): вторая семья
+    // Rusender — транзакционные письма — сюда сознательно не заводится.
+    key: 'rusender',
+    name: 'Rusender',
+    color: '#2B6BE4',
+    home: '/rusender',
+    prefix: '/rusender',
+    // Пока одна секция — слой подключения. «Рассылки» (контент-единицы источника) и «База»
+    // (контакты/списки) добавятся вместе со своими витринами: нав-строка без поверхности —
+    // это обещание, которого приложение не выполняет.
+    nav: [
+      { to: '/rusender', label: 'Обзор', icon: 'overview', end: true },
+    ],
+    // Отдельный канал source='rusender', создаётся при подключении API-ключа.
+    hasChannel: (c) => c.source === 'rusender',
+  },
 ] as const satisfies readonly NetworkDef[];
 
 /** Network key union — extends automatically when a registry entry is added. */
@@ -158,10 +182,12 @@ export function networkForPath(pathname: string): Network {
  *   /instagram, /instagram/*         → ig
  *   exact /, /analytics, /posts, /mentions → tg
  *   /metrics/ig-* → ig; /metrics/ms-* → ms; /metrics/ym-* → ym; /metrics/cdek-* → cdek;
+ *   /metrics/rusender-* → rusender;
  *   other /metrics/*  → tg
  *   everything else                  → null (agnostic — the store decides)
  */
 export function routeNetworkOwner(pathname: string): Network | null {
+  if (pathname === '/rusender' || pathname.startsWith('/rusender/')) return 'rusender';
   if (pathname === '/cdek' || pathname.startsWith('/cdek/')) return 'cdek';
   if (pathname === '/sklad' || pathname.startsWith('/sklad/')) return 'ms';
   if (pathname === '/metrika' || pathname.startsWith('/metrika/')) return 'ym';
@@ -175,6 +201,7 @@ export function routeNetworkOwner(pathname: string): Network | null {
     if (key.startsWith('ms-')) return 'ms';
     if (key.startsWith('ym-')) return 'ym';
     if (key.startsWith('cdek-')) return 'cdek';
+    if (key.startsWith('rusender-')) return 'rusender';
     return 'tg';
   }
   return null;
@@ -229,6 +256,16 @@ export function NetworkGlyph({ k, className }: { k: string; className?: string }
         <path d="M9 17.5h6" strokeLinecap="round" />
         <circle cx="7" cy="17.5" r="1.9" />
         <circle cx="17" cy="17.5" r="1.9" />
+      </svg>
+    );
+  }
+  if (k === 'rusender') {
+    // «Rusender» — конверт с приподнятым клапаном: единственный источник, чья единица контента
+    // это письмо. Ни один соседний глиф не занят конвертом, спутать не с чем.
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={className} aria-hidden="true">
+        <rect x="2.5" y="5" width="19" height="14" rx="2" />
+        <path d="m3.5 7 8.5 6 8.5-6" strokeLinejoin="round" />
       </svg>
     );
   }

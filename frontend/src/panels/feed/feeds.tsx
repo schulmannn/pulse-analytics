@@ -207,6 +207,24 @@ const CDEK_PARTS: Record<string, SectionParts> = {
   imports: { Body: CdekImports },
 };
 
+// «Rusender» — свой lazy-чанк (bundle-гейт: TG/IG-пользователь его не платит).
+const RusenderOverview = lazyFrom(() => import('@/panels/rusender/RusenderOverview'), 'RusenderOverview');
+
+/** Минимальный shell «Rusender»: page-period провайдер + секционный Outlet (у сети одна секция). */
+function RusenderShellRoute() {
+  return (
+    <PagePeriodProvider>
+      <Outlet />
+    </PagePeriodProvider>
+  );
+}
+
+const RUSENDER_PARTS: Record<string, SectionParts> = {
+  // Период у «Обзора» пока не показываем: страница отвечает на вопрос «источник жив?», и окно
+  // 7/30/90 дней этот вопрос сузило бы до бессмыслицы. Чипсы вернутся вместе с витринами.
+  '': { Body: RusenderOverview },
+};
+
 /** Zip the network's nav (paths + labels — the single source of truth) with the body map. A nav
     row without a body is skipped defensively rather than crashing the whole feed. */
 function buildSections(net: Network, parts: Record<string, SectionParts>): FeedSectionDef[] {
@@ -224,6 +242,7 @@ export const FEEDS: Record<Network, NetworkFeedDef> = {
   ms: { Shell: MsShellRoute, sections: buildSections('ms', MS_PARTS) },
   ym: { Shell: YmShellRoute, sections: buildSections('ym', YM_PARTS) },
   cdek: { Shell: CdekShellRoute, sections: buildSections('cdek', CDEK_PARTS) },
+  rusender: { Shell: RusenderShellRoute, sections: buildSections('rusender', RUSENDER_PARTS) },
 };
 
 /**

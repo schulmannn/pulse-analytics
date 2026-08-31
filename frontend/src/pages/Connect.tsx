@@ -8,6 +8,7 @@ import QRCode from 'qrcode';
 import { useQueryClient } from '@tanstack/react-query';
 import { useChannels, useCollectorStatus, useConnectIg, useCreateKey, useDisconnectIg, useIgOauthStatus, useMsBackfillStatus, useMsStatus, useTgQrStatus, useYmStatus } from '@/api/queries';
 import { useCdekStatus, useCreateCdekSource } from '@/api/cdek';
+import { RusenderConnectSchema, rusenderKeys, useRusenderStatus } from '@/api/rusender';
 import { ApiError, apiSend } from '@/api/client';
 import { qk } from '@/api/queryKeys';
 import type { Channel } from '@/api/schemas';
@@ -60,8 +61,8 @@ const YmConnectSchema = z
   })
   .passthrough();
 
-type ServiceId = 'telegram' | 'instagram' | 'moysklad' | 'metrika' | 'cdek' | 'threads' | 'youtube' | 'tiktok' | 'x' | 'vk' | 'facebook';
-type ServiceKind = 'telegram' | 'instagram' | 'moysklad' | 'metrika' | 'cdek' | 'soon';
+type ServiceId = 'telegram' | 'instagram' | 'moysklad' | 'metrika' | 'cdek' | 'rusender' | 'threads' | 'youtube' | 'tiktok' | 'x' | 'vk' | 'facebook';
+type ServiceKind = 'telegram' | 'instagram' | 'moysklad' | 'metrika' | 'cdek' | 'rusender' | 'soon';
 
 interface Service {
   id: ServiceId;
@@ -81,6 +82,8 @@ const SERVICES: Service[] = [
   { id: 'metrika', name: 'Яндекс.Метрика', kind: 'metrika' },
   // «СДЭК Fulfillment» — первый источник БЕЗ API: заказы приезжают выгрузкой Excel вручную.
   { id: 'cdek', name: 'СДЭК', kind: 'cdek' },
+  // «Rusender» — email-рассылки: рассылки, открытия/клики и база контактов по API-ключу.
+  { id: 'rusender', name: 'Rusender', kind: 'rusender' },
   { id: 'threads', name: 'Threads', kind: 'soon', soon: 'Threads-метрики отдаёт тот же токен Instagram — ближайший кандидат после IG.' },
   { id: 'youtube', name: 'YouTube', kind: 'soon', soon: 'Аналитика каналов и видео через YouTube Data API + вход Google.' },
   { id: 'tiktok', name: 'TikTok', kind: 'soon', soon: 'Статистика аккаунта через TikTok for Developers (нужна проверка приложения).' },
@@ -97,6 +100,8 @@ const GLYPHS: Record<ServiceId, ReactNode> = {
   metrika: (<path d="M5 20v-6M12 20V9M19 20V4" />),
   // Фура: короб уже занят «МойСкладом», два коробка в одной орбите читались бы как один источник.
   cdek: (<><path d="M14 17.5V7a1.5 1.5 0 0 0-1.5-1.5h-8A1.5 1.5 0 0 0 3 7v9.5a1 1 0 0 0 1 1h1" /><path d="M14 9h3.2a1 1 0 0 1 .8.4l2.8 3.6a1 1 0 0 1 .2.6v3a1 1 0 0 1-1 1h-1" /><path d="M9 17.5h6" /><circle cx="7" cy="17.5" r="1.9" /><circle cx="17" cy="17.5" r="1.9" /></>),
+  // Конверт: единственный источник, чья единица контента — письмо.
+  rusender: (<><rect x="3" y="5.5" width="18" height="13" rx="2" /><path d="m3.8 7.2 8.2 5.8 8.2-5.8" /></>),
   threads: (<path d="M16 8c-1.5-2-6-2.5-8 0-2.5 3-1 9 3 9 3 0 4-2 4-4s-1.5-3-3.5-3-3 2-1.5 3" />),
   youtube: (<><rect x="2.5" y="6" width="19" height="12" rx="4" /><path d="m10 9.5 5 2.5-5 2.5z" /></>),
   tiktok: (<><path d="M10 8v6.5a3 3 0 1 1-3-3" /><path d="M10 8c.5 2 2 3.5 5 3.5" /></>),
@@ -149,6 +154,11 @@ export function Connect() {
   // У СДЭКа нет статуса подключения: источник существует ровно потому, что его завели. Наличие
   // канала — и есть весь признак, отдельный запрос сюда ничего бы не добавил.
   const cdekChannelId = channels.find((channel) => channel.source === 'cdek')?.id ?? null;
+  // Rusender — как у Метрики, источник МОЖЕТ быть не один (свой аккаунт = свой канал), поэтому
+  // панель держит список каналов и адресует мутации поканально.
+  const rusenderChannels = channels.filter((channel) => channel.source === 'rusender');
+  const rusenderChannelId = rusenderChannels[0]?.id ?? null;
+  const rusenderStatus = useRusenderStatus(rusenderChannelId);
 
   // IG counts as connected when a per-channel OAuth account is linked OR the global env account is
   // serving data (env_fallback) — both mean real Instagram numbers are flowing.
@@ -176,6 +186,10 @@ export function Connect() {
   const msConnected = msStatus.isSuccess ? !!msStatus.data?.connected : msChannelId != null;
   // Пилюля источника — про источник целиком, а не про первый счётчик: подключён хотя бы один.
   const ymConnected = ymStatus.isSuccess ? !!ymStatus.data?.connected : ymChannelId != null;
+  // Пилюля источника — про источник целиком, а не про первый аккаунт: подключён хотя бы один.
+  const rusenderConnected = rusenderStatus.isSuccess
+    ? !!rusenderStatus.data?.connected
+    : rusenderChannelId != null;
   const networkHealth = orbitHealth({
     telegram: {
       managed: managedTelegram,
@@ -195,6 +209,7 @@ export function Connect() {
     if (s.kind === 'moysklad') return msConnected ? 'connected' : 'available';
     if (s.kind === 'metrika') return ymConnected ? 'connected' : 'available';
     if (s.kind === 'cdek') return cdekChannelId != null ? 'connected' : 'available';
+    if (s.kind === 'rusender') return rusenderConnected ? 'connected' : 'available';
     return tgConnected ? 'connected' : 'available';
   };
   const healthOf = (service: Service): OrbitNetworkHealth => {
@@ -408,6 +423,10 @@ export function Connect() {
             ) : (
               <CdekPanel channelId={null} />
             ))}
+          {/* Rusender — как Метрика, источник со МНОЖЕСТВОМ аккаунтов: у каждого свой канал
+              (сервер заводит его в /api/rusender/connect и дедупит по accountId). Панель сама
+              держит список и адресует мутации поканально, а не через ChannelScope. */}
+          {active.kind === 'rusender' && <RusenderPanel channels={rusenderChannels} />}
           {active.kind === 'soon' && <SoonPanel name={active.name} glyph={active.id} note={active.soon ?? ''} />}
         </div>
       </div>
@@ -877,6 +896,257 @@ function CdekPanel({ channelId }: { channelId: number | null }) {
           {error && <p id="cdek-source-error" role="alert" className="text-xs text-ember">{error}</p>}
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Rusender: аккаунты email-рассылок (подключение по API-ключу) ──
+// Устройство как у Метрики: один аккаунт = один канал, сервер дедупит их по accountId, поэтому
+// панель — СПИСОК, а форма подключения доступна всегда, а не только пока пусто.
+
+/** Строка подключённого аккаунта: email из учётки, переход на его Обзор и отключение. */
+function RusenderAccountRow({
+  channelId,
+  title,
+  onChanged,
+  onReconnect,
+}: {
+  channelId: number;
+  title: string;
+  onChanged: () => Promise<unknown>;
+  /** Вернуть аккаунт В ЭТОТ канал: у него остался архив, ради которого «Отключить» его и щадит. */
+  onReconnect: (channelId: number) => void;
+}) {
+  const confirm = useConfirm();
+  const navigate = useNavigate();
+  const { setChannelId } = useSelectedChannel();
+  const status = useRusenderStatus(channelId);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const connected = status.data?.connected ?? false;
+  const name = status.data?.account_email ?? title;
+  const missing = status.data?.missing_scopes ?? [];
+
+  const disconnect = async () => {
+    if (busy) return;
+    const ok = await confirm({
+      title: `Отключить аккаунт «${name}»?`,
+      reason:
+        'Ключ будет удалён, сбор остановится. Уже загруженный архив рассылок и базы сохранится — источник останется в списке, и аккаунт можно будет подключить в него заново.',
+      actionLabel: 'Отключить',
+    });
+    if (!ok) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await apiSend('DELETE', '/api/rusender/account', undefined, MutationOkSchema, { channelId });
+      toast('Аккаунт отключён');
+      await onChanged();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Не удалось отключить аккаунт.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Переход обязан ПЕРЕКЛЮЧИТЬ источник, иначе «Открыть» у второго аккаунта привело бы на обзор
+  // первого: страница читает канал из свитчера, а не из ссылки (урок #539).
+  const open = () => {
+    setChannelId(channelId);
+    navigate('/rusender');
+  };
+
+  return (
+    <li className="flex min-h-11 flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-border px-3 py-2">
+      <span className="min-w-0 flex-1 truncate text-sm">
+        <span className="font-medium text-foreground">{name}</span>
+      </span>
+      {connected ? (
+        <span className="ml-auto flex shrink-0 items-center gap-1">
+          <Button type="button" variant="ghost" size="xs" onClick={open}>
+            Открыть
+          </Button>
+          <Button type="button" variant="ghost" size="xs" disabled={busy} onClick={() => void disconnect()}>
+            Отключить
+          </Button>
+        </span>
+      ) : (
+        <span className="ml-auto flex shrink-0 items-center gap-2">
+          <span className="text-xs text-muted-foreground">Аккаунт отключён, архив сохранён</span>
+          {/* «Подключить СНОВА», а не «Подключить»: рядом стоит кнопка формы с этим словом. */}
+          <Button type="button" variant="ghost" size="xs" onClick={() => onReconnect(channelId)}>
+            Подключить снова
+          </Button>
+        </span>
+      )}
+      {/* Разрешения могли отозвать уже ПОСЛЕ подключения — источник жив, но собирать ему нечем.
+          Молчать об этом значит оставить владельца наедине с пустеющим обзором. */}
+      {connected && missing.length > 0 && (
+        <p role="alert" className="w-full text-xs text-status-warn">
+          Ключу не хватает разрешений: {missing.join(', ')} — сбор не наполняется.
+        </p>
+      )}
+      {error && (
+        <p role="alert" className="w-full text-xs text-ember">
+          {error}
+        </p>
+      )}
+    </li>
+  );
+}
+
+function RusenderPanel({ channels }: { channels: Channel[] }) {
+  const qc = useQueryClient();
+  const [apiKey, setApiKey] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // Форма второго аккаунта открывается по кнопке: пока подключён хотя бы один, показывать поле
+  // ключа постоянно значит предлагать работу там, где её обычно нет.
+  const [adding, setAdding] = useState(false);
+  // Куда подключаем: null — «заведи новый канал», число — вернуть аккаунт в УЖЕ существующий
+  // источник (у него остался архив от прошлого подключения).
+  const [attachTo, setAttachTo] = useState<number | null>(null);
+  const connected = channels.length > 0;
+  const formOpen = !connected || adding;
+
+  const invalidateRusender = () =>
+    Promise.all([
+      qc.invalidateQueries({ queryKey: qk.channels }),
+      qc.invalidateQueries({ queryKey: rusenderKeys.all }),
+    ]);
+
+  const connect = async () => {
+    const value = apiKey.trim();
+    if (!value || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      // Ключ уходит только на НАШ бэкенд (шифруется AES-256-GCM до записи) — в браузере, логах и
+      // git он не живёт; в Rusender ходит сервер.
+      // channelId: null — «заведи новый канал под этот аккаунт». Явный null, а не пропуск: без
+      // него apiSend подставит канал свитчера, и аккаунт приклеился бы к чужому источнику.
+      const res = await apiSend(
+        'POST',
+        '/api/rusender/connect',
+        { api_key: value },
+        RusenderConnectSchema,
+        { channelId: attachTo },
+      );
+      setApiKey('');
+      setAdding(false);
+      setAttachTo(null);
+      toast(`Аккаунт «${res?.account_email || 'Rusender'}» подключён`);
+      await invalidateRusender();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Не удалось подключить Rusender.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    void connect();
+  };
+
+  return (
+    <div className="rounded-xl border border-border bg-card p-5 sm:p-6">
+      <PanelHead
+        id="rusender"
+        name="Rusender"
+        pill={connected ? { label: 'Подключён', tone: 'ok' } : { label: 'Доступен', tone: 'go' }}
+      />
+      <div className="mt-4 space-y-4">
+        {connected ? (
+          <ul className="space-y-2">
+            {channels.map((channel) => (
+              <RusenderAccountRow
+                key={channel.id}
+                channelId={channel.id}
+                title={channel.title ?? 'Аккаунт'}
+                onChanged={invalidateRusender}
+                onReconnect={(id) => {
+                  setAttachTo(id);
+                  setAdding(true);
+                  setError(null);
+                }}
+              />
+            ))}
+          </ul>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Rusender — сервис email-рассылок. Подключите аккаунт по API-ключу, и сюда приедут рассылки с их
+            открытиями и кликами, а также размер базы контактов.
+          </p>
+        )}
+
+        {connected && !formOpen && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              setAttachTo(null);
+              setAdding(true);
+            }}
+          >
+            Добавить аккаунт
+          </Button>
+        )}
+
+        {formOpen && (
+          <div className="space-y-3">
+            <form onSubmit={submit} className="flex items-center gap-2">
+              <label htmlFor="rusender-api-key" className="sr-only">
+                API-ключ Rusender
+              </label>
+              <input
+                data-mobile-touch-target=""
+                id="rusender-api-key"
+                // type=password: ключ — секрет, и он не должен светиться на экране при демонстрации
+                // или скриншоте. autoComplete=off — менеджеру паролей тут не место.
+                type="password"
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                placeholder="rs_ck_v1_…"
+                autoComplete="off"
+                spellCheck={false}
+                aria-invalid={error ? true : undefined}
+                aria-describedby={error ? 'rusender-api-key-error' : 'rusender-api-key-help'}
+                className="h-11 min-w-0 flex-1 rounded border border-border bg-background px-3 font-mono text-sm text-foreground outline-hidden placeholder:font-sans placeholder:text-muted-foreground focus:ring-1 focus:ring-primary sm:h-9"
+              />
+              <Button type="submit" disabled={busy || !apiKey.trim()} className="shrink-0">
+                {busy ? 'Проверяем…' : 'Подключить'}
+              </Button>
+              {connected && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="shrink-0"
+                  onClick={() => {
+                    setAdding(false);
+                    setAttachTo(null);
+                    setError(null);
+                  }}
+                >
+                  Отмена
+                </Button>
+              )}
+            </form>
+            {error && (
+              <p id="rusender-api-key-error" role="alert" className="text-xs text-ember">
+                {error}
+              </p>
+            )}
+            <p id="rusender-api-key-help" className="text-2xs text-muted-foreground">
+              Ключ создаётся в кабинете Rusender. Ему нужны разрешения <code className="font-mono">campaigns.read</code>{' '}
+              и <code className="font-mono">contacts.read</code> — без них подключение не пройдёт. Ключ хранится только
+              на сервере в зашифрованном виде (AES-256-GCM) и не попадает в логи.
+            </p>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

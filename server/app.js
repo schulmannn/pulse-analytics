@@ -36,6 +36,7 @@ const { registerIgRoutes } = require('./routes/ig');
 const { registerMsRoutes } = require('./routes/moysklad');
 const { registerYmRoutes } = require('./routes/metrika');
 const { registerCdekRoutes } = require('./routes/cdek');
+const { registerRusenderRoutes } = require('./routes/rusender');
 const { registerAccountRoutes } = require('./routes/account');
 const { registerTeamRoutes } = require('./routes/team');
 const { registerHistoryRoutes } = require('./routes/history');
@@ -58,7 +59,7 @@ function createApp(deps) {
     appBase, sha256, newToken, VERIFY_TTL, RESET_TTL, INVITE_TTL,
     sendEmail, sendEmailDetailed, emailConfigured, emailShell, emailBtn, escHtml,
     igFetch, refreshIgIfNeeded, igConfigured, igCrypto, igMock, msCrypto, msFetch, msBackfill,
-    ymCrypto, ymFetch, cdekImport, nearestOf,
+    ymCrypto, ymFetch, rusenderCrypto, rusenderFetch, cdekImport, nearestOf,
     cacheGet, cacheSet, cache, IG_ACCOUNT, IG_TOKEN, IG_GRAPH, AUTH_SECRET,
     tgCrypto, collectQrChannelsNow, collectManagedPostStatsNow, TG_TOKEN, TG_CHANNEL,
     tgBot, tgBotWebhookSecret, runMentionNotifyTest,
@@ -253,6 +254,11 @@ function createApp(deps) {
   // одной идемпотентной транзакцией. express инъектируется ради собственного raw-парсера тела —
   // тот же приём, что у registerCollectorRoutes.
   registerCdekRoutes({ app, express, requireAuth, db, audit, cdekImport });
+
+  // Роуты Rusender (039) — источник email-рассылок. Пока это СЛОЙ ПОДКЛЮЧЕНИЯ (connect по
+  // API-ключу + status/disconnect): витрины приезжают следующим шагом, когда форма живых
+  // ответов Rusender подтверждена ключом владельца, а не одной лишь OpenAPI-спекой.
+  registerRusenderRoutes({ app, requireAuth, db, audit, rusenderCrypto, rusenderFetch, log });
 
   registerChannelsRoutes({ app, db, requireAuth, audit, getDbReady });
 

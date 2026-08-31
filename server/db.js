@@ -19,6 +19,7 @@ const { createIntegrationsRepo } = require('./repos/integrationsRepo');
 const { createMentionSettingsRepo } = require('./repos/mentionSettingsRepo');
 const { createMentionNotifyRepo } = require('./repos/mentionNotifyRepo');
 const { createCdekRepo } = require('./repos/cdekRepo');
+const { createRusenderRepo } = require('./repos/rusenderRepo');
 const { createAiChatsRepo } = require('./repos/aiChatsRepo');
 const { createAuditRepo } = require('./repos/auditRepo');
 const { createGdprService } = require('./services/gdprService');
@@ -256,6 +257,16 @@ function createDatabase(config, overrides = {}) {
     ensureExternalSource: sourcesRepo.ensureExternalSource,
     getAccessibleChannel: channelsRepo.getChannel,
   });
+  // Rusender (039): учётка источника email-рассылок, архив рассылок и дневная активность.
+  // Тот же набор инъекций, что у cdekRepo — ensureExternalSource (repos не импортят друг друга)
+  // и getAccessibleChannel для ForActor-ридеров. ПОСЛЕ channelsRepo (TDZ).
+  const rusenderRepo = createRusenderRepo({
+    pool,
+    enabled,
+    transaction,
+    ensureExternalSource: sourcesRepo.ensureExternalSource,
+    getAccessibleChannel: channelsRepo.getChannel,
+  });
   // Личные AI-диалоги (028): все методы uid-scoped; аналитика в чат попадает только через
   // ForActor-инструменты aiChatService, не через этот repo.
   const aiChatsRepo = createAiChatsRepo({ pool, enabled });
@@ -288,6 +299,7 @@ function createDatabase(config, overrides = {}) {
     reports: reportsRepo, // REPORT_SCHEDULES, listReports, getReport, createReport, updateReport, deleteReport, listDueReports, markReportSent, reserveReportDelivery, clearReportDelivery, listPostsWindow
     campaigns: campaignsRepo, // CAMPAIGN_*, listCampaigns, getCampaign, create/update/deleteCampaign, add/remove/listCampaignPosts, getCampaignSummary
     cdek: cdekRepo, // get/saveCdekSource, setCdekWarehouse, find/start/finish/failCdekImport, list/getCdekImport(File), applyCdekImport, getCdekWarehouseFromOrders, getCdek{Summary,Series,Breakdown,Coverage,Bounds}ForActor
+    rusender: rusenderRepo, // save/get/list/deleteRusenderAccount, upsertRusender{Daily,Campaigns,CampaignActivity}, listRusenderCampaignsForActivity, getRusender{Summary,Series,Campaigns,Campaign,Bounds}ForActor
     mentionSettings: mentionSettingsRepo, // getMentionSettingsInternal/ForActor, upsertMentionSettingsForActor
     mentionNotify: mentionNotifyRepo, // issueMentionNotifyLink, bindMentionNotifyByToken, get/deleteMentionNotifyBinding, unbindMentionNotifyChat, set/getMentionNotifySubscription*, listRunnableMentionNotifySubscriptions, markMentionNotifyRun, filterNewMentions
     aiChats: aiChatsRepo, // listAiChats, createAiChat, getAiChat, deleteAiChat, listAiChatMessages, appendAiChatMessage, getAiUsageToday, bumpAiUsage
