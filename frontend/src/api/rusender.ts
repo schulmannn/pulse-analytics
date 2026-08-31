@@ -44,10 +44,115 @@ export const RusenderConnectSchema = z
   })
   .passthrough();
 
+/** Метрика периода: абсолютное число (доли считаются на клиенте от одного знаменателя). */
+const CampaignTotalsSchema = z
+  .object({
+    campaigns: z.coerce.number().default(0),
+    total: z.coerce.number().default(0),
+    delivered: z.coerce.number().default(0),
+    opens: z.coerce.number().default(0),
+    clicks: z.coerce.number().default(0),
+    errors: z.coerce.number().default(0),
+    unsubscribes: z.coerce.number().default(0),
+    complaints: z.coerce.number().default(0),
+  })
+  .passthrough();
+
+/**
+ * Дневная точка. `opens/clicks` — СОБЫТИЯ дня (настоящий ряд). Контакты — снимок базы, и они
+ * NULLABLE осознанно: день без снимка это дыра в сборе, а не обнулившаяся база, поэтому линия
+ * в этом месте обязана разорваться, а не упасть в ноль.
+ */
+const RusenderPointSchema = z
+  .object({
+    day: z.string(),
+    opens: z.coerce.number().default(0),
+    clicks: z.coerce.number().default(0),
+    contacts_total: z.coerce.number().nullable().default(null),
+    contacts_active: z.coerce.number().nullable().default(null),
+    contacts_unsubscribed: z.coerce.number().nullable().default(null),
+  })
+  .passthrough();
+
+/**
+ * Ответ обзора. ДВЕ независимые группы величин, которые НЕЛЬЗЯ складывать:
+ *   events    — открытия/клики, СЛУЧИВШИЕСЯ в окне (включая открытия старых писем);
+ *   campaigns — итоги рассылок, ЗАПУЩЕННЫХ в окне (кумулятивные счётчики кампаний).
+ * Тот же канон, что «Просмотры канала» ≠ «Просмотры публикаций» у Telegram.
+ */
+export const RusenderSummarySchema = z
+  .object({
+    days: z.number(),
+    from: z.string().nullable(),
+    to: z.string().nullable(),
+    events: z.object({ opens: z.coerce.number().default(0), clicks: z.coerce.number().default(0) }).passthrough(),
+    campaigns: CampaignTotalsSchema,
+    contacts: z
+      .object({
+        day: z.string().nullable().default(null),
+        contacts_total: z.coerce.number().nullable().default(null),
+        contacts_active: z.coerce.number().nullable().default(null),
+        contacts_unsubscribed: z.coerce.number().nullable().default(null),
+        contacts_unavailable: z.coerce.number().nullable().default(null),
+      })
+      .passthrough()
+      .nullable(),
+    series: z.array(RusenderPointSchema).default([]),
+    bounds: z
+      .object({
+        first_day: z.string().nullable(),
+        last_day: z.string().nullable(),
+        campaigns: z.coerce.number().default(0),
+      })
+      .passthrough()
+      .nullable(),
+  })
+  .passthrough();
+
+export const RusenderCampaignSchema = z
+  .object({
+    campaign_id: z.coerce.number(),
+    name: z.string().nullable(),
+    subject: z.string().nullable(),
+    type: z.string().nullable(),
+    status: z.string().nullable(),
+    sender_email: z.string().nullable(),
+    list_names: z.array(z.string()).nullable().default(null),
+    is_archived: z.boolean().default(false),
+    started_at: z.string().nullable(),
+    finished_at: z.string().nullable(),
+    // Части семьи A/B: в ленте показывается только база, части — на развороте (миграция 040).
+    parts_count: z.coerce.number().default(0),
+    family_role: z.string().nullable().default(null),
+    total: z.coerce.number().nullable().default(null),
+    delivered: z.coerce.number().nullable().default(null),
+    opens: z.coerce.number().nullable().default(null),
+    clicks: z.coerce.number().nullable().default(null),
+    errors: z.coerce.number().nullable().default(null),
+    unsubscribes: z.coerce.number().nullable().default(null),
+    complaints: z.coerce.number().nullable().default(null),
+  })
+  .passthrough();
+
+export const RusenderCampaignsSchema = z
+  .object({
+    days: z.number(),
+    from: z.string().nullable(),
+    to: z.string().nullable(),
+    campaigns: z.array(RusenderCampaignSchema).default([]),
+  })
+  .passthrough();
+
+export type RusenderSummary = z.infer<typeof RusenderSummarySchema>;
+export type RusenderCampaign = z.infer<typeof RusenderCampaignSchema>;
+export type RusenderPoint = z.infer<typeof RusenderPointSchema>;
+
 export const rusenderKeys = {
   /** Корень семьи — по нему инвалидируется ВЕСЬ источник разом (connect/disconnect меняют всё). */
   all: ['rusender'] as const,
   status: (channelId: number | null) => ['rusender', 'status', channelId] as const,
+  summary: (channelId: number | null, days: number) => ['rusender', 'summary', channelId, days] as const,
+  campaigns: (channelId: number | null, days: number) => ['rusender', 'campaigns', channelId, days] as const,
 };
 
 /**
@@ -62,5 +167,28 @@ export function useRusenderStatus(channelId: number | null) {
     staleTime: STALE_STATUS,
     // Без канала спрашивать нечего: источник ещё не заведён, панель рисует пустое состояние.
     enabled: channelId != null,
+  });
+}
+
+// Витрины живут за фичефлагом: пока он выключен, роутов для клиента НЕ существует (404), и
+// спрашивать их — значит гарантированно ловить ошибку на каждом маунте. `enabled` поэтому
+// завязан и на канал, и на флаг.
+const STALE_DATA = 5 * 60_000;
+
+export function useRusenderSummary(channelId: number | null, days: number, enabled = true) {
+  return useQuery({
+    queryKey: rusenderKeys.summary(channelId, days),
+    queryFn: () => apiGet(`/api/rusender/summary?days=${days}`, RusenderSummarySchema, { channelId }),
+    staleTime: STALE_DATA,
+    enabled: enabled && channelId != null,
+  });
+}
+
+export function useRusenderCampaigns(channelId: number | null, days: number, enabled = true) {
+  return useQuery({
+    queryKey: rusenderKeys.campaigns(channelId, days),
+    queryFn: () => apiGet(`/api/rusender/campaigns?days=${days}`, RusenderCampaignsSchema, { channelId }),
+    staleTime: STALE_DATA,
+    enabled: enabled && channelId != null,
   });
 }

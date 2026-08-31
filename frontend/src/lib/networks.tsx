@@ -6,6 +6,13 @@ export interface NavLinkDef {
   label: string;
   icon: IconName;
   end?: boolean;
+  /**
+   * Раздел за фичефлагом: пока флаг выключен, строка НЕ показывается в наве (и её маршрут
+   * отвечает «раздел ещё не включён»). Нужен, чтобы витрины можно было довезти в прод и
+   * копить архив, не обещая пользователю поверхность, числа которой ещё не сверены.
+   * Сейчас единственный носитель — Rusender; см. `useActiveNetworkNav`.
+   */
+  gate?: 'rusenderSurfaces';
 }
 
 /** The channel fields network predicates read — structural, the API channel object satisfies it. */
@@ -142,11 +149,16 @@ export const NETWORKS = [
     color: '#2B6BE4',
     home: '/rusender',
     prefix: '/rusender',
-    // Пока одна секция — слой подключения. «Рассылки» (контент-единицы источника) и «База»
-    // (контакты/списки) добавятся вместе со своими витринами: нав-строка без поверхности —
-    // это обещание, которого приложение не выполняет.
+    // «Рассылки» и «База» — за фичефлагом (RUSENDER_SURFACES): архив уже копится, но числа
+    // Rusender ещё не сверены с живыми данными, и до сверки показывать их всему воркспейсу
+    // рано. «Обзор» остаётся всегда — у подключённого источника должна быть точка входа,
+    // которая честно говорит о состоянии сбора.
     nav: [
       { to: '/rusender', label: 'Обзор', icon: 'overview', end: true },
+      // «Рассылки» — контент-единицы источника (слот «Контент» в каноническом порядке).
+      { to: '/rusender/campaigns', label: 'Рассылки', icon: 'mail', gate: 'rusenderSurfaces' },
+      // «База» — контакты и списки: аудитория этого источника.
+      { to: '/rusender/audience', label: 'База', icon: 'audience', gate: 'rusenderSurfaces' },
     ],
     // Отдельный канал source='rusender', создаётся при подключении API-ключа.
     hasChannel: (c) => c.source === 'rusender',

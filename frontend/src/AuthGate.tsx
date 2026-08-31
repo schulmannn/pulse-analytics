@@ -92,12 +92,19 @@ export function parseMe(value: unknown): Me {
   ) {
     throw new AuthProbeError(0, 'Формат данных не совпадает с ожидаемым');
   }
+  if (value.rusender_surfaces !== undefined && typeof value.rusender_surfaces !== 'boolean') {
+    throw new AuthProbeError(0, 'Формат данных не совпадает с ожидаемым');
+  }
+  // ПРОЕКЦИЯ, А НЕ PASSTHROUGH: этот объект сеет кэш useMe (setQueryData ниже), поэтому поле,
+  // не перечисленное здесь, теряется на бутстрапе и «появляется» только после рефетча. Новый
+  // гейт-флаг обязан попасть и сюда, иначе раздел мигал бы при первой загрузке.
   return {
     uid: value.uid,
     email: value.email,
     role: value.role,
     avatar: value.avatar,
     ai: value.ai as Me['ai'],
+    rusender_surfaces: value.rusender_surfaces as Me['rusender_surfaces'],
   };
 }
 

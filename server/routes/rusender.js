@@ -29,7 +29,13 @@ const REQUIRED_SCOPES = Object.freeze([
   { scope: 'contacts.read', why: 'размер базы контактов' },
 ]);
 
-function registerRusenderRoutes({ app, requireAuth, db, audit, rusenderCrypto, rusenderFetch, log }) {
+// Узкий enum периодов ДО кэш-ключа (канон МС/ЯМ): произвольный days плодил бы per-value
+// записи ценой запросов. 0 = «Всё» (от границ архива). Не-enum → дефолт 30.
+const DAYS_ALLOWED = [0, 7, 30, 90];
+
+function registerRusenderRoutes({
+  app, requireAuth, db, audit, rusenderCrypto, rusenderFetch, surfacesEnabled = false, log,
+}) {
   /**
    * Канал + учётка Rusender для запроса. Порядок проверок — канон resolveYm/resolveMs:
    * БД → ключ шифрования → канал/учётка. `optional` — для status/disconnect, которым 404
@@ -180,6 +186,9 @@ function registerRusenderRoutes({ app, requireAuth, db, audit, rusenderCrypto, r
         channel_id: resolved.channel ? resolved.channel.id : null,
         account_email: acc ? acc.account_email || null : null,
         account_id: acc ? acc.account_id || null : null,
+        // Фичефлаг витрин эхом: экран источника рисует либо дашборд, либо честное «поверхности
+        // ещё выключены», а не пустые оси, которые читались бы как «рассылок нет».
+        surfaces: !!surfacesEnabled,
         scopes: acc && Array.isArray(acc.scopes) ? acc.scopes : [],
         // Разрешения могли отозвать уже ПОСЛЕ подключения — показываем это на экране источника,
         // а не оставляем пользователя гадать, почему обзор перестал наполняться.
@@ -217,6 +226,131 @@ function registerRusenderRoutes({ app, requireAuth, db, audit, rusenderCrypto, r
       next(e);
     }
   });
+
+  // ── Витрины (за фичефлагом RUSENDER_SURFACES) ─────────────────────────────────────────────
+  // Пока флаг выключен, роутов ДЛЯ КЛИЕНТА не существует: 404, а не 403 и не пустой ответ.
+  // Пустой ответ выключенной поверхности неотличим от «данных нет» и врал бы дважды —
+  // и пользователю, и нам самим при отладке.
+  function surfaceGate(res) {
+    if (surfacesEnabled) return true;
+    res.status(404).json({ error: 'Витрины Rusender ещё не включены' });
+    return false;
+  }
+
+  /** Окно периода: days из узкого enum → [from..to] в зоне источника. 0 = «Всё» (из архива). */
+  async function windowOf(req, channelId, actor) {
+    const n = parseInt(req.query.days, 10);
+    const days = DAYS_ALLOWED.includes(n) ? n : 30;
+    const tz = 'Europe/Moscow';
+    const now = new Date();
+    const fmt = (d) => d.toISOString().slice(0, 10);
+    if (days === 0) {
+      // «Всё» — от границ архива. Пустой архив (сбор ещё не проходил) честно отдаёт null-окно:
+      // витрина покажет «данные собираются», а не диапазон, которого нет.
+      const bounds = await db.getRusenderBoundsForActor(channelId, actor, { tz }).catch(() => null);
+      return { days, tz, from: (bounds && bounds.first_day) || null, to: (bounds && bounds.last_day) || fmt(now) };
+    }
+    const from = new Date(now.getTime() - (days - 1) * 86400000);
+    return { days, tz, from: fmt(from), to: fmt(now) };
+  }
+
+  /**
+   * GET /api/rusender/summary?days=30 — итоги окна ДВУМЯ независимыми группами + дневные серии.
+   *
+   * `events` (открытия/клики, СЛУЧИВШИЕСЯ в окне) и `campaigns` (итоги рассылок, ЗАПУЩЕННЫХ в
+   * окне) — РАЗНЫЕ величины, и они не обязаны совпадать: открытия письма месячной давности
+   * попадают в первое и не попадают во второе. Отдаём их отдельными полями и НИКОГДА не
+   * складываем — тот же канон, что «Просмотры канала» ≠ «Просмотры публикаций» у Telegram.
+   */
+  app.get('/api/rusender/summary', requireAuth, async (req, res, next) => {
+    try {
+      if (!surfaceGate(res)) return;
+      const resolved = await resolveRusenderChannel(req, res);
+      if (!resolved) return;
+      const channelId = resolved.channel.id;
+      const win = await windowOf(req, channelId, req.user);
+      const [summary, series, bounds] = await Promise.all([
+        db.getRusenderSummaryForActor(channelId, req.user, { from: win.from, to: win.to, tz: win.tz }),
+        win.from
+          ? db.getRusenderSeriesForActor(channelId, req.user, { from: win.from, to: win.to })
+          : Promise.resolve([]),
+        db.getRusenderBoundsForActor(channelId, req.user, { tz: win.tz }),
+      ]);
+      res.json({ days: win.days, from: win.from, to: win.to, ...(summary || {}), series, bounds });
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  /** GET /api/rusender/campaigns — лента рассылок окна (по умолчанию только базовые, см. 040). */
+  app.get('/api/rusender/campaigns', requireAuth, async (req, res, next) => {
+    try {
+      if (!surfaceGate(res)) return;
+      const resolved = await resolveRusenderChannel(req, res);
+      if (!resolved) return;
+      const channelId = resolved.channel.id;
+      const win = await windowOf(req, channelId, req.user);
+      const status = typeof req.query.status === 'string' && req.query.status
+        ? req.query.status.split(',').map((s) => s.trim()).filter(Boolean).slice(0, 10)
+        : null;
+      const campaigns = await db.getRusenderCampaignsForActor(channelId, req.user, {
+        from: win.from,
+        to: win.to,
+        tz: win.tz,
+        status,
+        q: typeof req.query.q === 'string' ? req.query.q.slice(0, 120) : null,
+        includeArchived: req.query.archived === '1',
+        basesOnly: req.query.parts !== '1',
+      });
+      res.json({ days: win.days, from: win.from, to: win.to, campaigns });
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  /** GET /api/rusender/campaign/:id — одна рассылка: итоги, дневная кривая и части семьи. */
+  app.get('/api/rusender/campaign/:id', requireAuth, async (req, res, next) => {
+    try {
+      if (!surfaceGate(res)) return;
+      const resolved = await resolveRusenderChannel(req, res);
+      if (!resolved) return;
+      const id = Number.parseInt(req.params.id, 10);
+      if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'Некорректный id рассылки' });
+      const out = await db.getRusenderCampaignForActor(resolved.channel.id, req.user, id);
+      if (!out) return res.status(404).json({ error: 'Рассылка не найдена' });
+      res.json(out);
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  /**
+   * GET /api/rusender/diagnostics — СВЕРКА ФОРМЫ ДАННЫХ по тому, что реально приехало.
+   *
+   * Существует ровно затем, чтобы включать витрины по замеру, а не по вере в спеку. Отвечает
+   * на три вопроса: приезжают ли составные рассылки отдельными строками (двойной счёт),
+   * сходится ли сумма дневного ряда с итогами рассылки (можно ли вообще сворачивать ряд в
+   * дневной поток) и сколько всего доехало (косвенно — добрала ли пагинация).
+   *
+   * НЕ за фичефлагом витрин — и это осознанно: именно этим ответом решают, ВКЛЮЧАТЬ ли флаг.
+   * Спрятать диагностику за тем самым флагом, который она помогает открыть, значит замкнуть круг.
+   * Гейт здесь другой и достаточный: admin воркспейса, потому что это отладочная поверхность,
+   * а не продуктовая. Уедет, когда числа сверены.
+   */
+  app.get('/api/rusender/diagnostics', requireAuth, async (req, res, next) => {
+    try {
+      const resolved = await resolveRusenderChannel(req, res);
+      if (!resolved) return;
+      if (!hasWorkspaceRole(resolved.channel, req.user, 'admin')) {
+        return res.status(403).json({ error: 'Недостаточно прав в этом воркспейсе' });
+      }
+      const out = await db.getRusenderDiagnosticsForActor(resolved.channel.id, req.user);
+      if (!out) return res.status(404).json({ error: 'Нет данных' });
+      res.json(out);
+    } catch (e) {
+      next(e);
+    }
+  });
 }
 
-module.exports = { registerRusenderRoutes, REQUIRED_SCOPES };
+module.exports = { registerRusenderRoutes, REQUIRED_SCOPES, DAYS_ALLOWED };

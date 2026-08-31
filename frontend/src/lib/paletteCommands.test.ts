@@ -81,6 +81,16 @@ describe('buildNetworkRouteCommands', () => {
     expect(buildNetworkRouteCommands([YM]).map((c) => c.path)).toEqual(['/metrika']);
   });
 
+  it('разделы за фичефлагом не предлагаются, пока флаг выключен', () => {
+    // Гейт, закрытый только в наве, — это спрятанная дверь с работающей ручкой: палитра увела бы
+    // пользователя в раздел, которого для него ещё нет.
+    const RUSENDER = { id: 30, source: 'rusender' } as PaletteChannel;
+    const off = buildNetworkRouteCommands([RUSENDER]).map((c) => c.path);
+    expect(off).toEqual(['/rusender']);
+    const on = buildNetworkRouteCommands([RUSENDER], { rusenderSurfaces: true }).map((c) => c.path);
+    expect(on).toEqual(['/rusender', '/rusender/campaigns', '/rusender/audience']);
+  });
+
   it('каналы ещё не доехали — показываем все сети, палитра не пустеет', () => {
     expect(availableNetworks([]).map((n) => n.key)).toEqual(['tg', 'ig', 'ms', 'ym', 'cdek', 'rusender']);
     expect(buildNetworkRouteCommands([]).map((c) => c.path)).toContain('/instagram');

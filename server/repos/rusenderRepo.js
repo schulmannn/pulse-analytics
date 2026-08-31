@@ -176,21 +176,24 @@ function createRusenderRepo({ pool, enabled, transaction, ensureExternalSource, 
         (channel_id, campaign_id, name, subject, preview_title, type, status,
          sender_email, sender_name, list_names, is_archived,
          scheduled_at, started_at, finished_at, remote_created_at,
-         total, sending, delivered, opens, clicks, errors, unsubscribes, complaints, updated_at)
+         total, sending, delivered, opens, clicks, errors, unsubscribes, complaints,
+         parent_id, family_role, updated_at)
       SELECT $1, x.campaign_id, x.name, x.subject, x.preview_title, x.type, x.status,
              x.sender_email, x.sender_name,
              CASE WHEN x.list_names IS NULL THEN NULL
                   ELSE ARRAY(SELECT jsonb_array_elements_text(x.list_names)) END,
              COALESCE(x.is_archived, false),
              x.scheduled_at, x.started_at, x.finished_at, x.remote_created_at,
-             x.total, x.sending, x.delivered, x.opens, x.clicks, x.errors, x.unsubscribes, x.complaints, now()
+             x.total, x.sending, x.delivered, x.opens, x.clicks, x.errors, x.unsubscribes, x.complaints,
+             x.parent_id, x.family_role, now()
         FROM jsonb_to_recordset($2::jsonb) AS x(
           campaign_id bigint, name text, subject text, preview_title text, type text, status text,
           sender_email text, sender_name text, list_names jsonb, is_archived boolean,
           scheduled_at timestamptz, started_at timestamptz, finished_at timestamptz,
           remote_created_at timestamptz,
           total bigint, sending bigint, delivered bigint, opens bigint, clicks bigint,
-          errors bigint, unsubscribes bigint, complaints bigint
+          errors bigint, unsubscribes bigint, complaints bigint,
+          parent_id bigint, family_role text
         )
       ON CONFLICT (channel_id, campaign_id) DO UPDATE SET
         name=EXCLUDED.name, subject=EXCLUDED.subject, preview_title=EXCLUDED.preview_title,
@@ -202,6 +205,13 @@ function createRusenderRepo({ pool, enabled, transaction, ensureExternalSource, 
         total=EXCLUDED.total, sending=EXCLUDED.sending, delivered=EXCLUDED.delivered,
         opens=EXCLUDED.opens, clicks=EXCLUDED.clicks, errors=EXCLUDED.errors,
         unsubscribes=EXCLUDED.unsubscribes, complaints=EXCLUDED.complaints,
+        -- Принадлежность семье пишется ТОЛЬКО когда проход её знает: строка варианта могла
+        -- приехать раньше своей базы (порядок страниц не гарантирован), и второй проход,
+        -- увидевший базу с parts[], обязан её проставить. Обратно в NULL не сбрасываем —
+        -- иначе вариант, встреченный отдельной строкой, «сбежал» бы из семьи и вернулся в
+        -- итоги, воскресив двойной счёт.
+        parent_id=COALESCE(EXCLUDED.parent_id, rusender_campaigns.parent_id),
+        family_role=COALESCE(EXCLUDED.family_role, rusender_campaigns.family_role),
         updated_at=now()`;
     await executor.query(sql, [channelId, JSON.stringify(clean)]);
     return clean.length;
@@ -282,11 +292,17 @@ function createRusenderRepo({ pool, enabled, transaction, ensureExternalSource, 
   async function getRusenderSummaryInternal(channelId, { from = null, to = null, tz = 'Europe/Moscow' } = {}) {
     const { rows } = await pool.query(
       `WITH ev AS (
-         SELECT COALESCE(SUM(opens), 0)::bigint AS opens, COALESCE(SUM(clicks), 0)::bigint AS clicks
-           FROM rusender_campaign_activity
-          WHERE channel_id=$1
-            AND ($2::date IS NULL OR day >= $2::date)
-            AND ($3::date IS NULL OR day <= $3::date)
+         -- Только БАЗОВЫЕ рассылки: у составной активность базы — агрегат по семье, и сложить
+         -- её с активностью вариантов значит посчитать открытия дважды (см. миграцию 040).
+         -- Части остаются в архиве и читаются на развороте, но в поток источника не входят.
+         SELECT COALESCE(SUM(a.opens), 0)::bigint AS opens, COALESCE(SUM(a.clicks), 0)::bigint AS clicks
+           FROM rusender_campaign_activity a
+           JOIN rusender_campaigns c
+             ON c.channel_id = a.channel_id AND c.campaign_id = a.campaign_id
+          WHERE a.channel_id=$1
+            AND c.parent_id IS NULL
+            AND ($2::date IS NULL OR a.day >= $2::date)
+            AND ($3::date IS NULL OR a.day <= $3::date)
        ), cm AS (
          SELECT COUNT(*)::bigint                       AS campaigns,
                 COALESCE(SUM(total), 0)::bigint        AS total,
@@ -299,6 +315,9 @@ function createRusenderRepo({ pool, enabled, transaction, ensureExternalSource, 
            FROM rusender_campaigns
           WHERE channel_id=$1
             AND started_at IS NOT NULL
+            -- Та же защита, что у ev: итоги считаются по базовым рассылкам, потому что stats
+            -- базовой — агрегат по семье. Части посчитались бы вторым разом (миграция 040).
+            AND parent_id IS NULL
             AND ($2::date IS NULL OR (started_at AT TIME ZONE $4)::date >= $2::date)
             AND ($3::date IS NULL OR (started_at AT TIME ZONE $4)::date <= $3::date)
        ), ct AS (
@@ -342,10 +361,15 @@ function createRusenderRepo({ pool, enabled, transaction, ensureExternalSource, 
               rd.contacts_total, rd.contacts_active, rd.contacts_unsubscribed
          FROM generate_series($2::date, $3::date, '1 day') AS d(day)
          LEFT JOIN (
-              SELECT day, SUM(opens) AS opens, SUM(clicks) AS clicks
-                FROM rusender_campaign_activity
-               WHERE channel_id=$1 AND day >= $2::date AND day <= $3::date
-               GROUP BY day
+              -- Свёртка дневного потока — по БАЗОВЫМ рассылкам (миграция 040): активность базы
+              -- составной рассылки уже включает её части, складывать их снова нельзя.
+              SELECT a.day, SUM(a.opens) AS opens, SUM(a.clicks) AS clicks
+                FROM rusender_campaign_activity a
+                JOIN rusender_campaigns c
+                  ON c.channel_id = a.channel_id AND c.campaign_id = a.campaign_id
+               WHERE a.channel_id=$1 AND c.parent_id IS NULL
+                 AND a.day >= $2::date AND a.day <= $3::date
+               GROUP BY a.day
          ) a ON a.day = d.day
          LEFT JOIN rusender_daily rd ON rd.channel_id=$1 AND rd.day = d.day
         ORDER BY d.day ASC`,
@@ -354,10 +378,16 @@ function createRusenderRepo({ pool, enabled, transaction, ensureExternalSource, 
     return rows;
   }
 
-  /** Лента рассылок окна, свежие сверху. status/q — необязательные фильтры ленты. */
+  /**
+   * Лента рассылок окна, свежие сверху. status/q — необязательные фильтры ленты.
+   *
+   * По умолчанию лента показывает только БАЗОВЫЕ рассылки (`basesOnly`): семья A/B — это одна
+   * рассылка с вариантами, и три строки подряд с почти одинаковым именем читаются как «мы
+   * отправили три рассылки», чего не было. Части достаются разворотом базовой.
+   */
   async function getRusenderCampaignsInternal(channelId, {
     from = null, to = null, tz = 'Europe/Moscow', status = null, q = null,
-    includeArchived = false, limit = CAMPAIGNS_MAX_ROWS,
+    includeArchived = false, basesOnly = true, limit = CAMPAIGNS_MAX_ROWS,
   } = {}) {
     const cap = Math.max(1, Math.min(CAMPAIGNS_MAX_ROWS, Number(limit) || CAMPAIGNS_MAX_ROWS));
     const statusList = Array.isArray(status) && status.length ? status.map(String) : null;
@@ -365,12 +395,17 @@ function createRusenderRepo({ pool, enabled, transaction, ensureExternalSource, 
     const { rows } = await pool.query(
       `SELECT campaign_id, name, subject, preview_title, type, status,
               sender_email, sender_name, list_names, is_archived,
+              parent_id, family_role,
               to_char(started_at AT TIME ZONE $4, 'YYYY-MM-DD"T"HH24:MI:SS')  AS started_at,
               to_char(finished_at AT TIME ZONE $4, 'YYYY-MM-DD"T"HH24:MI:SS') AS finished_at,
               to_char(scheduled_at AT TIME ZONE $4, 'YYYY-MM-DD"T"HH24:MI:SS') AS scheduled_at,
-              total, sending, delivered, opens, clicks, errors, unsubscribes, complaints
+              total, sending, delivered, opens, clicks, errors, unsubscribes, complaints,
+              (SELECT COUNT(*) FROM rusender_campaigns p
+                WHERE p.channel_id = rusender_campaigns.channel_id
+                  AND p.parent_id = rusender_campaigns.campaign_id)::int AS parts_count
          FROM rusender_campaigns
         WHERE channel_id=$1
+          AND ($9::boolean IS FALSE OR parent_id IS NULL)
           AND ($7::boolean IS TRUE OR is_archived = false)
           AND ($2::date IS NULL OR started_at IS NULL
                OR (started_at AT TIME ZONE $4)::date >= $2::date)
@@ -381,7 +416,7 @@ function createRusenderRepo({ pool, enabled, transaction, ensureExternalSource, 
                                 OR lower(COALESCE(subject, '')) LIKE $6::text)
         ORDER BY started_at DESC NULLS LAST, campaign_id DESC
         LIMIT $8`,
-      [channelId, from, to, tz, statusList, search, !!includeArchived, cap],
+      [channelId, from, to, tz, statusList, search, !!includeArchived, cap, !!basesOnly],
     );
     return rows;
   }
@@ -411,7 +446,86 @@ function createRusenderRepo({ pool, enabled, transaction, ensureExternalSource, 
         ORDER BY day ASC`,
       [channelId, id],
     );
-    return { campaign, activity };
+    // Части семьи (варианты A/B, досыл) — они не входят в итоги источника, но именно здесь их и
+    // хотят видеть: «вариант A против варианта B» — вопрос разворота, а не ленты.
+    const { rows: parts } = await pool.query(
+      `SELECT campaign_id, name, subject, status, family_role,
+              total, delivered, opens, clicks, unsubscribes, complaints
+         FROM rusender_campaigns
+        WHERE channel_id=$1 AND parent_id=$2
+        ORDER BY campaign_id ASC`,
+      [channelId, id],
+    );
+    return { campaign, activity, parts };
+  }
+
+  /**
+   * ДИАГНОСТИКА ФОРМЫ ДАННЫХ — отвечает на три вопроса, на которых стоит вся схема витрин и
+   * которые OpenAPI-спека Rusender не закрывает. Читается ИЗ АРХИВА (то есть по тому, что
+   * реально приехало), а не из живого API.
+   *
+   *   1. families    — приходят ли составные рассылки и приезжают ли их части ОТДЕЛЬНЫМИ
+   *                    строками списка. Если да, защита `parent_id IS NULL` спасла нас от
+   *                    двойного счёта; если семей нет вовсе — проверять было не на чем.
+   *   2. activityFit — сходится ли СУММА дневного ряда с ИТОГАМИ рассылки. Это главный вопрос:
+   *                    если не сходится, сворачивать ряд в дневной поток источника нельзя, и
+   *                    «события периода» придётся строить иначе.
+   *   3. coverage    — сколько рассылок вообще доехало и у скольких есть ряд активности
+   *                    (косвенно показывает, добрала ли пагинация всё).
+   */
+  async function getRusenderDiagnosticsInternal(channelId) {
+    const { rows: fam } = await pool.query(
+      `SELECT COUNT(*) FILTER (WHERE parent_id IS NULL)::int      AS bases,
+              COUNT(*) FILTER (WHERE parent_id IS NOT NULL)::int  AS parts,
+              COUNT(*)::int                                       AS total_rows,
+              COUNT(*) FILTER (WHERE is_archived)::int            AS archived,
+              COUNT(*) FILTER (WHERE started_at IS NOT NULL)::int AS started
+         FROM rusender_campaigns WHERE channel_id=$1`,
+      [channelId],
+    );
+    // Сравниваем ряд и итоги только там, где ОБА известны: рассылка запущена, статистика
+    // приехала и хотя бы одна точка ряда есть. Иначе «расхождение» было бы про пустоту.
+    const { rows: fit } = await pool.query(
+      `WITH s AS (
+         SELECT c.campaign_id, c.name, c.opens AS total_opens, c.clicks AS total_clicks,
+                COALESCE(SUM(a.opens), 0)::bigint  AS series_opens,
+                COALESCE(SUM(a.clicks), 0)::bigint AS series_clicks,
+                COUNT(a.day)::int                  AS points
+           FROM rusender_campaigns c
+           LEFT JOIN rusender_campaign_activity a
+             ON a.channel_id = c.channel_id AND a.campaign_id = c.campaign_id
+          WHERE c.channel_id=$1 AND c.started_at IS NOT NULL
+            AND c.opens IS NOT NULL AND c.activity_synced_at IS NOT NULL
+          GROUP BY c.campaign_id, c.name, c.opens, c.clicks
+       )
+       SELECT campaign_id, name, total_opens, series_opens, total_clicks, series_clicks, points,
+              (total_opens = series_opens) AS opens_match,
+              (total_clicks = series_clicks) AS clicks_match
+         FROM s ORDER BY points DESC, campaign_id DESC LIMIT 25`,
+      [channelId],
+    );
+    const { rows: cov } = await pool.query(
+      `SELECT COUNT(*)::int AS campaigns,
+              COUNT(*) FILTER (WHERE activity_synced_at IS NOT NULL)::int AS activity_synced,
+              to_char(MIN(started_at), 'YYYY-MM-DD') AS first_started,
+              to_char(MAX(started_at), 'YYYY-MM-DD') AS last_started,
+              (SELECT COUNT(*) FROM rusender_campaign_activity WHERE channel_id=$1)::int AS activity_rows,
+              (SELECT COUNT(*) FROM rusender_daily WHERE channel_id=$1)::int AS daily_rows
+         FROM rusender_campaigns WHERE channel_id=$1`,
+      [channelId],
+    );
+    const { rows: statuses } = await pool.query(
+      `SELECT type, status, COUNT(*)::int AS n
+         FROM rusender_campaigns WHERE channel_id=$1
+        GROUP BY type, status ORDER BY n DESC LIMIT 20`,
+      [channelId],
+    );
+    return {
+      families: fam[0] || null,
+      activityFit: fit,
+      coverage: cov[0] || null,
+      statuses,
+    };
   }
 
   /**
@@ -451,6 +565,9 @@ function createRusenderRepo({ pool, enabled, transaction, ensureExternalSource, 
   async function getRusenderBoundsForActor(channelId, actor, opts = {}) {
     return (await allowed(channelId, actor)) ? getRusenderBoundsInternal(channelId, opts) : null;
   }
+  async function getRusenderDiagnosticsForActor(channelId, actor) {
+    return (await allowed(channelId, actor)) ? getRusenderDiagnosticsInternal(channelId) : null;
+  }
 
   return {
     saveRusenderAccount,
@@ -466,6 +583,7 @@ function createRusenderRepo({ pool, enabled, transaction, ensureExternalSource, 
     getRusenderCampaignsForActor,
     getRusenderCampaignForActor,
     getRusenderBoundsForActor,
+    getRusenderDiagnosticsForActor,
     RUSENDER_CAMPAIGNS_MAX_ROWS: CAMPAIGNS_MAX_ROWS,
     RUSENDER_ACTIVITY_REFRESH_CAP: ACTIVITY_REFRESH_CAP,
   };

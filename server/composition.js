@@ -39,6 +39,7 @@ const {
 const { createMsCollectionJob } = require('./jobs/msCollectionJob');
 const { createMsBackfillEngine } = require('./jobs/msBackfillJob');
 const { createYmCollectionJob } = require('./jobs/ymCollectionJob');
+const { createRusenderCollectionJob } = require('./jobs/rusenderCollectionJob');
 const { createMemoryCache } = require('./infrastructure/memoryCache');
 const { createPersistenceJob } = require('./jobs/persistenceJob');
 const { createTgQrCollectionJob } = require('./jobs/tgQrCollectionJob');
@@ -106,6 +107,7 @@ function createComposition(config, overrides = {}) {
   const rusenderClient =
     overrides.rusenderClient || createRusenderClient({ fetchImpl: fetchWithTimeout, log });
   const rusenderFetch = rusenderClient.rusenderFetch;
+  const rusenderFetchAllPages = rusenderClient.fetchAllPages;
   const tgCrypto =
     overrides.tgCrypto ||
     createTgCrypto(config.telegram.sessionKey, config.telegram.previousSessionKeys);
@@ -324,6 +326,20 @@ function createComposition(config, overrides = {}) {
     db: backgroundDb,
     ymFetch,
     ymCrypto,
+    log,
+  });
+
+  // Дневной сбор Rusender в архив (снимок базы + рассылки + ограниченная пачка дневной
+  // активности) — jobs/rusenderCollectionJob, durable per-day гейты. Бэкфилла у источника нет
+  // и быть не может: истории размера базы Rusender не отдаёт. Пишет через backgroundDb;
+  // rusenderFetch/rusenderCrypto — те же синглтоны, что у живых роутов. Проход едет в
+  // collection recovery runner ниже. Сбор НЕ гейтится фичефлагом витрин: архив копится с
+  // момента подключения, иначе включение экранов застало бы пустую историю.
+  const rusenderCollectionJob = createRusenderCollectionJob({
+    db: backgroundDb,
+    rusenderFetch,
+    fetchAllPages: rusenderFetchAllPages,
+    rusenderCrypto,
     log,
   });
 
@@ -557,6 +573,7 @@ function createComposition(config, overrides = {}) {
       ymFetch,
       rusenderCrypto,
       rusenderFetch,
+      rusenderSurfaces: config.rusender.surfaces,
       nearestOf,
       cacheGet,
       cacheSet,
@@ -603,6 +620,7 @@ function createComposition(config, overrides = {}) {
       runMsCollectionPass: msCollectionJob.runMsCollectionPass,
       runMsOrdersPass: msBackfillEngine.runMsOrdersPass,
       runYmCollectionPass: ymCollectionJob.runYmCollectionPass,
+      runRusenderCollectionPass: rusenderCollectionJob.runRusenderCollectionPass,
       igCap: config.runtime.igAccountsPerPass,
       tgCap: config.runtime.tgQrChannelsPerPass,
       mediaCap: config.runtime.tgMediaRepairPerPass,
