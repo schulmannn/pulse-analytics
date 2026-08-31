@@ -16,6 +16,8 @@ const { createMsCrypto } = require('./lib/ms_crypto');
 const { createMsClient } = require('./lib/msClient');
 const { createYmCrypto } = require('./lib/ym_crypto');
 const { createYmClient } = require('./lib/ymClient');
+const { createRusenderCrypto } = require('./lib/rusender_crypto');
+const { createRusenderClient } = require('./lib/rusenderClient');
 const { createTgCrypto } = require('./lib/tg_crypto');
 const { createNotionCrashClient } = require('./lib/notion_crash');
 const { log: defaultLog } = require('./lib/observability');
@@ -96,6 +98,14 @@ function createComposition(config, overrides = {}) {
   const ymClient =
     overrides.ymClient || createYmClient({ fetchImpl: fetchWithTimeout, log });
   const ymFetch = ymClient.ymFetch;
+  // Rusender: свой ключ шифрования API-ключей (RUSENDER_KEY) + единый исходящий GET-клиент
+  // (lib/rusenderClient — заголовок Bearer, гейт параллелизма, один ретрай на 429). Тот же
+  // fetchWithTimeout; ключи живут только в заголовке запроса, в логи не попадают.
+  const rusenderCrypto =
+    overrides.rusenderCrypto || createRusenderCrypto(config.rusender.tokenKey);
+  const rusenderClient =
+    overrides.rusenderClient || createRusenderClient({ fetchImpl: fetchWithTimeout, log });
+  const rusenderFetch = rusenderClient.rusenderFetch;
   const tgCrypto =
     overrides.tgCrypto ||
     createTgCrypto(config.telegram.sessionKey, config.telegram.previousSessionKeys);
@@ -545,6 +555,8 @@ function createComposition(config, overrides = {}) {
       msBackfill: msBackfillEngine,
       ymCrypto,
       ymFetch,
+      rusenderCrypto,
+      rusenderFetch,
       nearestOf,
       cacheGet,
       cacheSet,

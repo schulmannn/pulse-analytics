@@ -107,6 +107,11 @@ function loadConfig(env = process.env) {
       // moysklad.tokenKey: пусто = connect-флоу inert (/api/ym/connect отвечает 503).
       tokenKey: env.YM_TOKEN_KEY || '',
     }),
+    rusender: Object.freeze({
+      // Ключ шифрования API-ключей Rusender (AES-256-GCM, lib/rusender_crypto) — по образцу
+      // metrika.tokenKey: пусто = connect-флоу inert (/api/rusender/connect отвечает 503).
+      tokenKey: env.RUSENDER_KEY || '',
+    }),
     telegram: Object.freeze({
       botToken: env.TG_BOT_TOKEN || '',
       channel: env.TG_CHANNEL || '',

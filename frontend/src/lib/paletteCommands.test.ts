@@ -82,7 +82,7 @@ describe('buildNetworkRouteCommands', () => {
   });
 
   it('каналы ещё не доехали — показываем все сети, палитра не пустеет', () => {
-    expect(availableNetworks([]).map((n) => n.key)).toEqual(['tg', 'ig', 'ms', 'ym', 'cdek']);
+    expect(availableNetworks([]).map((n) => n.key)).toEqual(['tg', 'ig', 'ms', 'ym', 'cdek', 'rusender']);
     expect(buildNetworkRouteCommands([]).map((c) => c.path)).toContain('/instagram');
   });
 
