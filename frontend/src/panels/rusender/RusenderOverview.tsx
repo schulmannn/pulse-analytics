@@ -16,7 +16,8 @@ import { CHART_MAX_POINTS } from '@/lib/msSeries';
 import { fmt, timeAxisFromDayKeys } from '@/lib/format';
 import { formatByRole } from '@/lib/metricNumber';
 import { usePagePeriod, useCardShowsPeriod } from '@/lib/period';
-import { useMsPagePeriod } from '@/lib/msPeriod';
+import { msPreviousPeriod, useMsPagePeriod } from '@/lib/msPeriod';
+import { pctDelta, type MetricDelta } from '@/lib/delta';
 
 /**
  * «Обзор» Rusender — email-рассылки рядом с аналитикой каналов.
@@ -47,6 +48,7 @@ import { useMsPagePeriod } from '@/lib/msPeriod';
 function RusenderStory({
   value,
   caption,
+  delta,
   series,
   viz,
   drillTo,
@@ -54,6 +56,8 @@ function RusenderStory({
 }: {
   value: string;
   caption?: string;
+  /** Дельта к предыдущему равному окну — канон карточки-метрики (МойСклад/Метрика). */
+  delta?: MetricDelta | null;
   series: Array<{ day: string; value: number | null }>;
   viz: 'line' | 'bar';
   /** Полноэкранная метрика карточки: число кликабельно и ведёт туда же, что «Развернуть». */
@@ -72,6 +76,7 @@ function RusenderStory({
       <ChartCardBody
         value={value}
         caption={caption}
+        delta={delta}
         onValueClick={() => navigate(drillTo)}
         drillLabel={drillLabel}
       >
@@ -87,6 +92,7 @@ function RusenderStory({
     <ChartCardBody
       value={value}
       caption={caption}
+      delta={delta}
       onValueClick={() => navigate(drillTo)}
       drillLabel={drillLabel}
     >
@@ -127,6 +133,15 @@ export function RusenderOverview() {
   // диапазон топбара приводятся к одному контракту, а не пересчитываются в каждом источнике.
   const period = useMsPagePeriod();
   const summary = useRusenderSummary(channelId, period, rusenderSurfaces);
+  // Дельта к ПРЕДЫДУЩЕМУ равному окну — канон карточки-метрики (МойСклад/Метрика). Один prev-фетч
+  // кормит все карточки. У «Всё» предшественника нет: msPreviousPeriod отдаёт null, запрос не
+  // уходит, дельта не показывается.
+  const previousPeriod = useMemo(() => msPreviousPeriod(period), [period]);
+  const previous = useRusenderSummary(
+    channelId,
+    previousPeriod ?? period,
+    rusenderSurfaces && previousPeriod != null,
+  );
 
   const connected = status.data?.connected ?? false;
   const missing = status.data?.missing_scopes ?? [];
@@ -190,6 +205,17 @@ export function RusenderOverview() {
     );
   }
 
+  // ГРАБЛИ prev-периода: при выключенном запросе ключ совпал бы с текущим окном и `.data` отдал
+  // бы ТЕКУЩИЙ кэш — дельта вышла бы нулевой. Читаем только когда прошлое окно существует.
+  const prev = previousPeriod != null ? previous.data : undefined;
+  const opensDelta = prev ? pctDelta(ev?.opens ?? 0, prev.events.opens) : null;
+  const clicksDelta = prev ? pctDelta(ev?.clicks ?? 0, prev.events.clicks) : null;
+  // База — УРОВЕНЬ: сравниваем снимок с снимком прошлого окна, а не суммы.
+  const baseDelta = prev && prev.contacts?.contacts_total != null && contacts?.contacts_total != null
+    ? pctDelta(contacts.contacts_total, prev.contacts.contacts_total)
+    : null;
+  const campaignsDelta = prev ? pctDelta(cm?.campaigns ?? 0, prev.campaigns.campaigns) : null;
+
   const openRate = cm && cm.delivered > 0 ? (cm.opens / cm.delivered) * 100 : null;
   const clickRate = cm && cm.delivered > 0 ? (cm.clicks / cm.delivered) * 100 : null;
   const pending = summary.isPending;
@@ -219,6 +245,7 @@ export function RusenderOverview() {
             viz="bar"
             drillTo="/metrics/rusender-opens"
             drillLabel="Открытия"
+            delta={opensDelta}
           />
         )}
       </ChartWidget>
@@ -234,6 +261,7 @@ export function RusenderOverview() {
             viz="bar"
             drillTo="/metrics/rusender-clicks"
             drillLabel="Клики"
+            delta={clicksDelta}
           />
         )}
       </ChartWidget>
@@ -256,6 +284,7 @@ export function RusenderOverview() {
             viz="line"
             drillTo="/metrics/rusender-contacts"
             drillLabel="Размер базы"
+            delta={baseDelta}
           />
         )}
       </ChartWidget>
@@ -269,6 +298,7 @@ export function RusenderOverview() {
         ) : (
           <ChartCardBody
             value={formatByRole(cm?.campaigns ?? 0, 'headline')}
+            delta={campaignsDelta}
             caption={`Запущено ${periodInLabel ?? ''}`.trim()}
           >
             {/* Тот же потолок ширины, что у «Состава базы»: иначе метка и значение разъезжаются
