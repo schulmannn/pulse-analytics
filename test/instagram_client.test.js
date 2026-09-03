@@ -30,7 +30,7 @@ function networkFail() {
 }
 
 // responders — массив функций (url)=>Response|throw, по одной на вызов fetch (последняя повторяется).
-function makeClient(responders, { now, db, igCrypto } = {}) {
+function makeClient(responders, { now, db, igCrypto, events } = {}) {
   const calls = [];
   const sleeps = [];
   let i = 0;
@@ -42,7 +42,7 @@ function makeClient(responders, { now, db, igCrypto } = {}) {
   };
   const client = createInstagramClient({
     db: db || { updateIgToken: async () => {} },
-    log: () => {},
+    log: events ? (level, event, meta) => events.push({ level, event, meta }) : () => {},
     igCrypto: igCrypto || { encrypt: (t) => `enc(${t})` },
     defaultToken: 'DEFAULT_TOKEN',
     fetchImpl,
@@ -136,13 +136,16 @@ test('timeout/connection exhaustion → 503, 3 попытки, токен не �
   assert.doesNotMatch(err.message, /access_token|SECRET|graph\.instagram/);
 });
 
-// ── 4. Auth/permission Graph-ошибка НЕ ретраится, сохраняется как upstream 502 ────────────────────
-test('OAuthException не ретраится → 502, transient=false', async () => {
+// ── 4. Auth-ошибка НЕ ретраится; код 190 = «переподключите» (409), а не безымянный upstream 502 ────
+// Раньше эта ветка отдавала 502 с английским текстом Graph, и клиент ретраил её как временный сбой
+// апстрима — отсюда и скелетон вместо честного состояния. Метадата Graph сохраняется как была.
+test('OAuthException 190 не ретраится → 409 ig_reauth, transient=false', async () => {
   const { client, calls, sleeps } = makeClient([
     () => res({ status: 400, body: { error: { message: 'Invalid OAuth access token', code: 190, type: 'OAuthException', error_subcode: 463, is_transient: true } } }),
   ]);
   const err = await rejects(client.igFetch('/1'));
-  assert.equal(err.status, 502);
+  assert.equal(err.status, 409);
+  assert.equal(err.code, 'ig_reauth');
   assert.equal(err.transient, false);
   assert.equal(err.graph.code, 190);
   assert.equal(err.graph.subcode, 463);
@@ -150,7 +153,7 @@ test('OAuthException не ретраится → 502, transient=false', async ()
   assert.equal(err.igCode, 190);
   assert.equal(err.igSubcode, 463);
   assert.equal(err.igTransient, true);
-  assert.match(err.message, /Invalid OAuth access token/);
+  assert.equal(err.message, 'Токен Instagram истёк — переподключите');
   assert.equal(calls.length, 1);              // не ретраится
   assert.deepEqual(sleeps, []);
 });
@@ -244,6 +247,72 @@ test('refreshIgIfNeeded успешно обновляет и персистит 
   assert.equal(persisted.length, 1);
   assert.equal(persisted[0][0], 'chan-1');
   assert.equal(persisted[0][1], 'enc(NEW_TOKEN)');
+});
+
+// ── 8b. Наблюдаемость рефреша ─────────────────────────────────────────────────────────────────────
+// Молчащий отказ рефреша — то, из-за чего @bynotem доехал до истечения без единой строки в логах:
+// Graph отвечал 200 с телом БЕЗ access_token, и функция возвращала старый токен, ничего не сказав.
+test('refreshIgIfNeeded логирует отказ Graph (тело без access_token) с кодом, но без токена', async () => {
+  const nowMs = 1_000_000_000;
+  const expiresAt = new Date(nowMs + 5 * 24 * 60 * 60 * 1000).toISOString();
+  const events = [];
+  const { client } = makeClient([
+    () => res({ status: 400, body: { error: { code: 190, type: 'OAuthException', message: 'Session has expired' } } }),
+  ], { now: () => nowMs, events });
+  const token = await client.refreshIgIfNeeded('chan-1', 'OLD_TOKEN', expiresAt);
+  assert.equal(token, 'OLD_TOKEN');
+  const rejected = events.find((e) => e.event === 'ig_token_refresh_rejected');
+  assert.ok(rejected, 'ожидалось событие ig_token_refresh_rejected');
+  assert.equal(rejected.level, 'warn');
+  assert.deepEqual(rejected.meta, { channelId: 'chan-1', httpStatus: 400, graphCode: 190, graphType: 'OAuthException' });
+  // Ни токена, ни тела ответа в логе быть не должно.
+  assert.equal(JSON.stringify(events).includes('OLD_TOKEN'), false);
+});
+
+test('refreshIgIfNeeded логирует успешное продление с новым сроком', async () => {
+  const nowMs = 1_000_000_000;
+  const expiresAt = new Date(nowMs + 5 * 24 * 60 * 60 * 1000).toISOString();
+  const events = [];
+  const { client } = makeClient([
+    () => res({ status: 200, body: { access_token: 'NEW_TOKEN', expires_in: 5184000 } }),
+  ], { now: () => nowMs, events });
+  await client.refreshIgIfNeeded('chan-1', 'OLD_TOKEN', expiresAt);
+  const refreshed = events.find((e) => e.event === 'ig_token_refreshed');
+  assert.ok(refreshed, 'ожидалось событие ig_token_refreshed');
+  assert.equal(refreshed.meta.channelId, 'chan-1');
+  assert.equal(refreshed.meta.expiresAt, new Date(nowMs + 5184000 * 1000).toISOString());
+  assert.equal(JSON.stringify(events).includes('NEW_TOKEN'), false);
+});
+
+// ── 8c. Истёкшая сессия — различимое состояние продукта, а не безымянный 502 ──────────────────────
+test('igFetch: OAuthException 190 → 409 ig_reauth с человеческим текстом', async () => {
+  const { client } = makeClient([
+    () => res({ status: 400, body: { error: { code: 190, type: 'OAuthException', message: 'Session has expired on Monday' } } }),
+  ]);
+  const err = await rejects(client.igFetch('/1', {}, 'TOKEN'));
+  assert.equal(err.status, 409);
+  assert.equal(err.code, 'ig_reauth');
+  assert.equal(err.message, 'Токен Instagram истёк — переподключите');
+  assert.equal(err.transient, false);
+  assert.equal(err.igCode, 190);
+});
+
+test('igFetch: OAuthException без кода, но с текстом истёкшей сессии → тоже ig_reauth', async () => {
+  const { client } = makeClient([
+    () => res({ status: 400, body: { error: { type: 'OAuthException', message: 'Session has been invalidated' } } }),
+  ]);
+  const err = await rejects(client.igFetch('/1', {}, 'TOKEN'));
+  assert.equal(err.status, 409);
+  assert.equal(err.code, 'ig_reauth');
+});
+
+test('igFetch: прочие OAuthException остаются 502 — «нет прав» это не «переподключите»', async () => {
+  const { client } = makeClient([
+    () => res({ status: 403, body: { error: { code: 10, type: 'OAuthException', message: 'Permission denied' } } }),
+  ]);
+  const err = await rejects(client.igFetch('/1', {}, 'TOKEN'));
+  assert.equal(err.status, 502);
+  assert.equal(err.code, undefined);
 });
 
 // ── 9. Общий app-level usage-gate: наблюдение заголовков + preflight-тормоз (paceOnUsage) ──────────

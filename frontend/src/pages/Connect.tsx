@@ -203,9 +203,13 @@ export function Connect() {
     moysklad: msStatus.data,
     metrika: ymStatus.data,
   });
-  const stateOf = (s: Service): 'connected' | 'available' | 'soon' => {
+  // Истёкший токен — не «подключён» и не «доступен»: строка в БД есть, данные не идут, и чинится
+  // это одним действием. Отдельное состояние, чтобы пилюля и подпись узла говорили именно о нём.
+  // Env-fallback у superuser токена не имеет — его смысл «подключён» сохраняется как был.
+  const igNeedsReconnect = igStatus.data?.token_state === 'expired';
+  const stateOf = (s: Service): 'connected' | 'reconnect' | 'available' | 'soon' => {
     if (s.kind === 'soon') return 'soon';
-    if (s.kind === 'instagram') return igConnected ? 'connected' : 'available';
+    if (s.kind === 'instagram') return igNeedsReconnect ? 'reconnect' : igConnected ? 'connected' : 'available';
     if (s.kind === 'moysklad') return msConnected ? 'connected' : 'available';
     if (s.kind === 'metrika') return ymConnected ? 'connected' : 'available';
     if (s.kind === 'cdek') return cdekChannelId != null ? 'connected' : 'available';
@@ -222,10 +226,16 @@ export function Connect() {
   const stateLabel = (service: Service, state = stateOf(service)) => {
     if (state === 'soon') return 'скоро';
     if (state === 'available') return 'доступен';
+    if (state === 'reconnect') return 'переподключить';
     const reason = healthOf(service).reason;
     return reason ? `подключён · ${reason}` : 'подключён';
   };
-  const connectedCount = SERVICES.filter((s) => stateOf(s) === 'connected').length;
+  // Источник с истёкшим токеном настроен — из счётчика он не выпадает; о том, что данные не идут,
+  // говорят подпись узла, красная точка орбиты и пилюля панели, а не скачущее число в шапке.
+  const connectedCount = SERVICES.filter((s) => {
+    const state = stateOf(s);
+    return state === 'connected' || state === 'reconnect';
+  }).length;
 
   // Native radios provide the expected arrow-key selection contract without a custom group handler.
   const ringRef = useRef<HTMLFieldSetElement>(null);
@@ -332,6 +342,9 @@ export function Connect() {
               const top = 50 - RADIUS * Math.cos(theta);
               const st = stateOf(s);
               const health = healthOf(s);
+              // Орбита рисуется по факту «источник заведён», а не по здоровью: про истёкший токен
+              // уже честно говорит красная точка ниже. Дизайн орбиты — под вето, не трогаем.
+              const isLinked = st === 'connected' || st === 'reconnect';
               const isSel = s.id === selected;
               return (
                 <label
@@ -365,14 +378,14 @@ export function Connect() {
                         // on every pointermove, so this transition exists to smooth THAT — `all`
                         // dragged size/layout properties into a per-frame tween for no reason.
                         'relative flex size-12 items-center justify-center rounded-full border bg-card transition-[transform,border-color,background-color,color,opacity] dur-track ease-house will-change-transform sm:size-14',
-                        st === 'connected' && 'border-primary/60 text-primary',
+                        isLinked && 'border-primary/60 text-primary',
                         st === 'available' && 'border-border text-muted-foreground hover:border-muted-foreground hover:text-foreground',
                         st === 'soon' && 'border-dashed border-border text-muted-foreground opacity-60 hover:opacity-100',
                         isSel && 'border-primary bg-primary/10 text-accent-foreground',
                       )}
                     >
                       <Glyph id={s.id} className="size-6" />
-                      {st === 'connected' && (
+                      {isLinked && (
                         <span
                           aria-hidden="true"
                           className={cn(
@@ -1544,13 +1557,24 @@ function InstagramPanel() {
   const serverReady = status.data?.server_ready ?? false;
   const notReady = status.isSuccess && !serverReady;
   const connectError = connect.error instanceof Error ? connect.error.message : null;
+  // Доступ Instagram живёт 60 дней. Пока пилюля смотрела только на наличие строки в БД, панель
+  // говорила «Подключён» об аккаунте, который уже неделю не отдаёт ни одного числа.
+  const needsReconnect = status.data?.token_state === 'expired';
 
   return (
     <div className="rounded-xl border border-border bg-card p-5 sm:p-6">
       <PanelHead
         id="instagram"
         name="Instagram"
-        pill={connected ? { label: 'Подключён', tone: 'ok' } : envAccount ? { label: 'Общий аккаунт', tone: 'ok' } : { label: 'Доступен', tone: 'go' }}
+        pill={
+          needsReconnect
+            ? { label: 'Переподключить', tone: 'warn' }
+            : connected
+              ? { label: 'Подключён', tone: 'ok' }
+              : envAccount
+                ? { label: 'Общий аккаунт', tone: 'ok' }
+                : { label: 'Доступен', tone: 'go' }
+        }
       />
 
       {channelId == null ? (
@@ -1558,13 +1582,33 @@ function InstagramPanel() {
       ) : connected ? (
         <div className="mt-4 space-y-4">
           <p className="text-sm text-muted-foreground">
-            Подключён бизнес-аккаунт <span className="font-mono text-foreground">@{status.data?.username}</span>. Реальные охваты,
-            аудитория и публикации этого канала идут из Instagram.
+            {needsReconnect ? (
+              <>
+                Доступ к бизнес-аккаунту <span className="font-mono text-foreground">@{status.data?.username}</span> истёк:
+                Instagram выдаёт его на 60 дней. Ранее собранные дни на месте, новые не приходят — переподключите аккаунт.
+              </>
+            ) : (
+              <>
+                Подключён бизнес-аккаунт <span className="font-mono text-foreground">@{status.data?.username}</span>. Реальные охваты,
+                аудитория и публикации этого канала идут из Instagram.
+              </>
+            )}
           </p>
           <div className="flex flex-wrap items-center gap-2">
+            {serverReady && needsReconnect && (
+              <Button
+                type="button"
+                onClick={() => connect.mutate()}
+                pending={connect.isPending}
+                disabled={connect.isPending}
+              >
+                {connect.isPending ? 'Открытие Instagram…' : 'Переподключить'}
+              </Button>
+            )}
             {serverReady && (
               <Button
                 type="button"
+                variant={needsReconnect ? 'secondary' : 'default'}
                 onClick={() => connect.mutate({ newSource: true })}
                 pending={connect.isPending}
                 disabled={connect.isPending}

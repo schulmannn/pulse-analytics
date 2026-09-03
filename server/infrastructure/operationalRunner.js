@@ -29,6 +29,10 @@ function createOperationalRunner({
   // Опциональная третья полоса: почасовой свип доставки упоминаний (mentionNotifyJob). Расписание
   // «в какой час/дни слать» живёт в самой подписке; свип лишь даёт тик чаще раза в день.
   processMentionNotify = null,
+  // Опциональная четвёртая полоса: проактивное продление токенов Instagram (igTokenRefreshJob).
+  // Раньше продление происходило только при чтении экрана — аккаунт, на который перестали смотреть,
+  // молча доезжал до истечения. Полоса идемпотентна: окно перепроверяется на каждом продлении.
+  processIgTokenRefresh = null,
   // Канонический публичный origin (config.http.publicUrl) — базой для ссылок в письмах отчётов;
   // request-объекта здесь нет, поэтому appBase(req) недоступен.
   publicUrl,
@@ -65,13 +69,18 @@ function createOperationalRunner({
           () => processReportSchedules(publicUrl),
           () => runDailyMaintenanceOnce(),
           ...(processMentionNotify ? [() => processMentionNotify()] : []),
+          ...(processIgTokenRefresh ? [() => processIgTokenRefresh()] : []),
         ];
-        const [rep, maint, mentions] = await boundedAllSettled(lanes, (fn) => fn(), 2);
+        const [rep, maint, ...rest] = await boundedAllSettled(lanes, (fn) => fn(), 2);
+        // Хвост позиционен ровно так же, как собран выше: опциональные полосы не сдвигают друг друга.
+        const mentions = processMentionNotify ? rest.shift() : null;
+        const igToken = processIgTokenRefresh ? rest.shift() : null;
         // Только безопасные статусы — ни result, ни user-данные в лог не попадают.
         log('info', 'operational_pass_done', {
           rep: rep.status,
           maint: maint.status,
           ...(mentions ? { mentions: mentions.status } : {}),
+          ...(igToken ? { igToken: igToken.status } : {}),
         });
       }, { job: 'operational_pass' });
       if (result && result.accepted === false) return { skipped: true };

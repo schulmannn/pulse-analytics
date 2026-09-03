@@ -3,6 +3,7 @@
 const crypto = require('crypto');
 const { hasWorkspaceRole, tenantChannelId } = require('../middleware/tenant');
 const { createAdmissionController } = require('../lib/admissionController');
+const { igTokenState } = require('../domain/igToken');
 
 // "Business Login for Instagram" (Instagram API with Instagram Login, no Facebook Page). These app
 // credentials + scopes are read once at load, exactly as index.js did.
@@ -352,6 +353,9 @@ function registerIgOauthRoutes({
       ig_user_id: acc ? acc.ig_user_id : null,
       connected_at: acc ? acc.connected_at : null,
       token_expires_at: acc ? acc.token_expires_at : null,
+      // Срок токена в машинном виде: экран Instagram и пилюля источника не должны сами
+      // разбирать дату, а `connected: true` при истёкшем токене — правда только про строку в БД.
+      token_state: acc ? igTokenState(acc.token_expires_at) : 'none',
     });
   }));
 }

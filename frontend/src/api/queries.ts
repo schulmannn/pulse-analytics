@@ -534,6 +534,9 @@ const IgOauthStatusSchema = z
     ig_user_id: z.string().nullable(),
     connected_at: z.string().nullable(),
     token_expires_at: z.string().nullable(),
+    // Срок токена в машинном виде. Дефолт 'ok' — совместимость со старым ответом сервера (кэш
+    // страницы переживает деплой): отсутствие поля не должно рисовать тревогу на живом аккаунте.
+    token_state: z.enum(['none', 'ok', 'expiring', 'expired']).default('ok'),
   })
   .passthrough();
 export type IgOauthStatus = z.infer<typeof IgOauthStatusSchema>;
