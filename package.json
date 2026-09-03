@@ -8,12 +8,12 @@
     "start": "node server/migrate.js && node server/index.js",
     "worker": "node server/migrate.js && node server/worker.js",
     "dev": "node server/migrate.js && node --watch server/index.js",
-    "test": "node --test test/*.test.js",
+    "test": "node scripts/run-tests.mjs",
     "lint": "biome lint --diagnostic-level=error",
     "check:syntax": "node scripts/check-server-syntax.mjs",
     "check:migrations": "node scripts/check-migrations.mjs",
     "check:boundaries": "node scripts/check-server-boundaries.mjs",
-    "check": "npm run check:syntax && npm run check:migrations && npm run check:boundaries && npm run lint && node --test test/*.test.js"
+    "check": "npm run check:syntax && npm run check:migrations && npm run check:boundaries && npm run lint && npm test"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.112.4",

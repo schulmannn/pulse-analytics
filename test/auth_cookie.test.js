@@ -311,6 +311,13 @@ test('sliding refresh rotates only Set-Cookie and preserves absolute maxExp', as
   assert.ok(parsed.exp > now + 6 * 24 * 60 * 60 * 1000);
 });
 
+/** Числовой Max-Age из строки Set-Cookie: сравнение диапазоном, а не совпадением цифр. */
+function maxAgeOf(cookie) {
+  const m = /(?:^|;\s*)Max-Age=(\d+)/i.exec(String(cookie || ''));
+  assert.ok(m, `в cookie нет Max-Age: ${cookie}`);
+  return Number(m[1]);
+}
+
 test('sliding refresh cannot move beyond the absolute deadline', async () => {
   const now = Date.now();
   const maxExp = now + 2 * 24 * 60 * 60 * 1000;
@@ -325,7 +332,12 @@ test('sliding refresh cannot move beyond the absolute deadline', async () => {
   const parsed = svc.parseToken(cookieToken(cookie));
   assert.equal(parsed.exp, maxExp);
   assert.equal(parsed.maxExp, maxExp);
-  assert.match(cookie, /Max-Age=1727\d\d/);
+  // Max-Age считается сервером как floor((exp - его Date.now()) / 1000). Если запрос попал в ТУ ЖЕ
+  // миллисекунду, что и Date.now() теста, получается ровно 172800 — и регулярка /1727\d\d/ не
+  // совпадала. Именно так упал push-прогон main для #552. Проверяем числом и диапазоном.
+  const maxAge = maxAgeOf(cookie);
+  assert.ok(maxAge > 172_700 && maxAge <= 172_800,
+    `Max-Age=${maxAge} вне окна абсолютного дедлайна (172700, 172800]`);
 });
 
 test('logout revokes sessions and clears the cookie', async () => {

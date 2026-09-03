@@ -182,10 +182,27 @@ test('deleteChannel: только владелец; central защищён', { s
   const ch = await db.createChannel({ owner_uid: O.id, username: `chd_${nonce}`, title: 'D' });
   assert.strictEqual(await db.deleteChannel(ch.id, S.id), false, 'посторонний не удаляет');
   const central = await db.createChannel({ owner_uid: O.id, username: `chc_${nonce}`, title: 'C' });
-  await pool.query(`UPDATE channels SET source='central' WHERE id=$1`, [central.id]);
-  assert.strictEqual(await db.deleteChannel(central.id, O.id), false, 'central-канал не удаляется владельцем');
-  assert.strictEqual(await db.deleteChannel(ch.id, O.id), true, 'владелец удаляет свой');
-  assert.strictEqual(await db.getChannelById(ch.id), null, 'канала больше нет');
+  /* channels_one_central — partial UNIQUE (001_baseline.sql:90-91): central во всей базе ровно
+     один. Это делало тест неидемпотентным сразу по двум причинам:
+       • он оставлял СВОЙ канал central'ом, и второй прогон падал на своём же следе;
+       • central заводит ещё и db.init() из OWNER_CHANNEL (db.js:73-99), а её зовёт соседний
+         файл суиты — то есть к моменту этого теста чужой central мог уже существовать.
+     Поэтому: временно снимаем чужой признак, проверяем защиту на своём канале и возвращаем
+     базу ровно в исходное состояние. Обёртка в транзакцию с ROLLBACK здесь не помогла бы —
+     репо ходит своим пулом, вне клиента теста. */
+  const prior = (await pool.query(`SELECT id FROM channels WHERE source='central' AND id <> $1 LIMIT 1`, [central.id])).rows[0];
+  if (prior) await pool.query(`UPDATE channels SET source='collector' WHERE id=$1`, [prior.id]);
+  try {
+    await pool.query(`UPDATE channels SET source='central' WHERE id=$1`, [central.id]);
+    assert.strictEqual(await db.deleteChannel(central.id, O.id), false, 'central-канал не удаляется владельцем');
+    assert.strictEqual(await db.deleteChannel(ch.id, O.id), true, 'владелец удаляет свой');
+    assert.strictEqual(await db.getChannelById(ch.id), null, 'канала больше нет');
+  } finally {
+    // Сначала убираем свой central, только потом возвращаем чужой — иначе на мгновение их два.
+    await pool.query(`UPDATE channels SET source='collector' WHERE id=$1`, [central.id]);
+    await pool.query(`DELETE FROM channels WHERE id=$1`, [central.id]);
+    if (prior) await pool.query(`UPDATE channels SET source='central' WHERE id=$1`, [prior.id]);
+  }
 });
 
 test('createTgChannel идемпотентен per (owner,tg); external_sources дедуплится, метадата fill-only', { skip }, async () => {
