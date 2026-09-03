@@ -3,12 +3,13 @@
 const rateLimit = require('express-rate-limit');
 const { hasWorkspaceRole, tenantChannelId } = require('../middleware/tenant');
 const { parseCdekPeriod } = require('../domain/cdekPeriod');
+// Из домена, а не из repos: роут не имеет права тянуть слой доступа к данным (гвард границ).
 const {
   normalizeCdekInclude,
   normalizeCdekProducts,
   normalizeCdekChannels,
   PRODUCT_FILTER_MAX,
-} = require('../repos/cdekRepo');
+} = require('../domain/cdekFilters');
 
 /**
  * Роуты СДЭК Fulfillment (/api/cdek/{sources,status,import,imports,imports/:id,
