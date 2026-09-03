@@ -44,6 +44,7 @@ const { createMemoryCache } = require('./infrastructure/memoryCache');
 const { createPersistenceJob } = require('./jobs/persistenceJob');
 const { createTgQrCollectionJob } = require('./jobs/tgQrCollectionJob');
 const { createMentionNotifyJob } = require('./jobs/mentionNotifyJob');
+const { createIgTokenRefreshJob } = require('./jobs/igTokenRefreshJob');
 const { createTgBot } = require('./lib/tgBot');
 const { webhookSecretOf } = require('./lib/tgNotifyText');
 const { createReportScheduleJob } = require('./jobs/reportScheduleJob');
@@ -306,6 +307,17 @@ function createComposition(config, overrides = {}) {
     refreshIgIfNeeded: collectionIgClient.refreshIgIfNeeded,
   });
   const collectIgForAccount = igCollectionJob.collectIgForAccount;
+
+  // Проактивное продление токенов IG — jobs/igTokenRefreshJob. До него продление жило только в
+  // хвосте чтения: аккаунт, который перестали открывать, молча доезжал до истечения (@bynotem,
+  // 1 сентября 2026). Полоса идёт в operational-бегунке и использует фоновый paced-клиент —
+  // квота продления не конкурирует с живыми запросами пользователя.
+  const { processIgTokenRefresh } = createIgTokenRefreshJob({
+    db: backgroundDb,
+    log,
+    igCrypto,
+    refreshIgIfNeeded: collectionIgClient.refreshIgIfNeeded,
+  });
 
   // Дневной сбор МойСклада в архив ms_daily — jobs/msCollectionJob (проход по всем подключённым
   // складам, durable per-day гейты). Пишет через backgroundDb, как IG-сбор; msFetch/msCrypto —
@@ -645,6 +657,9 @@ function createComposition(config, overrides = {}) {
       // Третья полоса: почасовой свип доставки упоминаний — подписка с send_hour получает свой
       // час МСК, а не время внешнего daily-крона; durable день-ключ не даёт второй отправки.
       processMentionNotify,
+      // Четвёртая полоса: продление токенов Instagram до входа в зону истечения — единственный
+      // путь, не зависящий от того, открывал ли кто-нибудь экран Instagram на этой неделе.
+      processIgTokenRefresh,
       publicUrl: config.http.publicUrl,
       initialDelayMs: config.runtime.operationalRunnerInitialDelayMs,
       intervalMs: config.runtime.operationalRunnerIntervalMs,

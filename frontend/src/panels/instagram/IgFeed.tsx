@@ -8,7 +8,7 @@ import { useSelectedChannel } from '@/lib/channel-context';
 import { useMediaQuery } from '@/lib/useMediaQuery';
 import { usePagePeriod } from '@/lib/period';
 import { PeriodChips } from '@/components/PeriodChips';
-import { IgConnectPanel } from '@/components/instagram/health';
+import { IgConnectPanel, IgReauthState } from '@/components/instagram/health';
 import { ErrorState } from '@/components/ErrorState';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
@@ -126,6 +126,11 @@ export function IgShell() {
     </div>
   ) : null;
 
+  // РАНЬШЕ скелетона: истёкший токен — известное состояние, и держать его под «загрузкой» на время
+  // ретраев 502 значит врать. Ждать данных, которые не придут без реконнекта, незачем.
+  if (ig.reauth) {
+    return <div className="space-y-6">{banner}<IgReauthState expiresAt={ig.tokenExpiresAt} /></div>;
+  }
   if (ig.loading) {
     return <div className="space-y-6">{banner}{onContentTable ? <IgContentPageSkeleton /> : <InstagramSkeleton />}</div>;
   }

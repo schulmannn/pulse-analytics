@@ -9,6 +9,9 @@ export class ApiError extends Error {
   retryAfter?: number;
   /** Запрос не дошёл до сервера (обрыв сети/DNS/офлайн) — ретраится как 5xx, см. main.tsx. */
   network?: boolean;
+  /** Машинный код ошибки от сервера (snake_case), когда ответ нужно РАЗЛИЧАТЬ, а не просто показать:
+   *  'ig_reauth' = токен Instagram истёк. Текст сообщения для этого негодный ключ. */
+  code?: string;
   constructor(status: number, message: string, retryAfter?: number) {
     super(message);
     this.name = 'ApiError';
@@ -53,10 +56,14 @@ function isMachineErrorCode(value: string): boolean {
 async function readApiError(res: Response): Promise<ApiError> {
   let message = humanHttpMessage(res.status);
   let retryAfter: number | undefined;
+  let code: string | undefined;
   try {
     const body = await res.json();
     // Машинный код оставляем серверу (логи/мониторинг), пользователю — фолбэк по статусу.
     if (body && typeof body.error === 'string' && !isMachineErrorCode(body.error)) message = body.error;
+    // Отдельное поле `code` — не текст для человека, а ключ состояния: по нему экран решает,
+    // показать «переподключите Instagram» или общий ErrorState.
+    if (body && typeof body.code === 'string' && isMachineErrorCode(body.code)) code = body.code;
     const rawRetry = body && body.retry_after;
     const parsedRetry = rawRetry === '' || rawRetry == null ? NaN : Number(rawRetry);
     if (Number.isFinite(parsedRetry) && parsedRetry >= 0) retryAfter = parsedRetry;
@@ -68,7 +75,9 @@ async function readApiError(res: Response): Promise<ApiError> {
     const header = rawHeader == null ? NaN : Number(rawHeader);
     if (Number.isFinite(header) && header >= 0) retryAfter = header;
   }
-  return new ApiError(res.status, message, retryAfter);
+  const error = new ApiError(res.status, message, retryAfter);
+  if (code) error.code = code;
+  return error;
 }
 
 /**

@@ -456,6 +456,14 @@ function createApp(deps) {
     const body = dbUnavailable
       ? { error: 'Сервис временно недоступен, попробуйте позже', request_id: req.requestId }
       : { error: responseStatus === 500 ? 'internal_error' : String((err && err.message) || 'error'), request_id: req.requestId };
+    // Машинный код известной ошибки проходит в тело рядом с человеческим текстом: клиенту нужно
+    // отличать «переподключите Instagram» от любого другого 409, а текст для этого — плохой ключ.
+    // Форма строго snake_case: коды Node и pg ('ECONNREFUSED', '23505') ей не удовлетворяют и не
+    // протекают. На 500 не отдаём ничего — там внутренности намеренно не раскрываются.
+    if (!dbUnavailable && responseStatus !== 500 && typeof (err && err.code) === 'string'
+      && /^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$/.test(err.code)) {
+      body.code = err.code;
+    }
     if (err && err.retryAfter != null) {
       res.set('Retry-After', String(err.retryAfter));
       body.retry_after = err.retryAfter;
