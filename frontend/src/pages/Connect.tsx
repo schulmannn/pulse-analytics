@@ -577,7 +577,9 @@ function MsBackfillBlock() {
     if (kick && s !== null && s !== kickBaseRef.current) setKick(false);
     // Финиш прогона: витрины склада (средний чек, статусы заказов, когорты) читают ms_orders — обновить.
     if (prevStatusRef.current === 'running' && s === 'done') {
-      qc.invalidateQueries({ predicate: (q) => String(q.queryKey[0]).startsWith('ms-') });
+      // Список префиксов вместо строкового predicate: он сравнивал первый элемент ключа как
+      // строку и не проверялся компилятором — новая витрина склада молча выпадала бы из сброса.
+      for (const family of qk.msAll) qc.invalidateQueries({ queryKey: family });
     }
     prevStatusRef.current = s;
   }, [st?.status, kick, qc]);

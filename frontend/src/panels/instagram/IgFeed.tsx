@@ -68,7 +68,9 @@ function useIgConnectNotice() {
         setChannelId(ch);
         qc.invalidateQueries({ queryKey: qk.channels });
       }
-      qc.invalidateQueries({ predicate: (q) => String(q.queryKey[0]).startsWith('ig-') });
+      // ВЕСЬ IG-кластер, а не текущий канал: setChannelId выше ещё не применён к этому рендеру,
+      // и аккаунт мог быть только что создан вместе со своим новым каналом.
+      qc.invalidateQueries({ queryKey: qk.ig.root });
     }
     // Strip the flag so a reload doesn't re-show it. setParams is stable, so this re-runs the effect
     // once with the flag already gone → early return, no loop. Keeping params in deps makes the
