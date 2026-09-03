@@ -447,7 +447,7 @@ test('Обзор Метрики: карточки метрик, источник
   // Слайс 2 — цели: имя + reaches + конверсия отдельной метрикой.
   await revealed('Цели');
   await expect(page.getByText('Оформление заказа')).toBeVisible();
-  await expect(page.getByText(/CR 2,4%/)).toBeVisible();
+  await expect(page.getByText(/CR 2\.4%/)).toBeVisible();
 
   // Слайс 2 — UTM: размеченные строки + честная сноска о визитах без метки.
   await revealed('UTM-метки');
@@ -469,7 +469,7 @@ test('Обзор Метрики: карточки метрик, источник
   // Соцсети: конкретные сети (lastsignSocialNetwork) + отказы вторичным контекстом.
   await revealed('Соцсети');
   await expect(page.getByText('ВКонтакте', { exact: true })).toBeVisible();
-  await expect(page.getByText(/35,4% отказов/)).toBeVisible();
+  await expect(page.getByText(/35\.4% отказов/)).toBeVisible();
 
   // Telegram у Метрики относится к отдельной размерности Messenger, а не SocialNetwork.
   await revealed('Мессенджеры');
@@ -483,12 +483,12 @@ test('Обзор Метрики: карточки метрик, источник
   // Слайс качества — полоса качества трафика: отказы/средний визит/глубина/новые/доля новых.
   await expect(page.getByRole('heading', { name: 'Качество трафика', exact: true })).toBeVisible();
   await expect(page.getByText('Отказы', { exact: true })).toBeVisible();
-  await expect(page.getByText('34,2%')).toBeVisible();
+  await expect(page.getByText('34.2%')).toBeVisible();
   await expect(page.getByText('Глубина', { exact: true })).toBeVisible();
-  await expect(page.getByText('2,77')).toBeVisible();
+  await expect(page.getByText('2.77')).toBeVisible();
   const qualityStrip = page.getByTestId('ym-quality-strip');
   await expect(qualityStrip.getByText('Роботы', { exact: true })).toBeVisible();
-  await expect(qualityStrip.getByText('6,9% · 10', { exact: true })).toBeVisible();
+  await expect(qualityStrip.getByText('6.9% · 10', { exact: true })).toBeVisible();
   await expect(qualityStrip.getByText(/не исключены автоматически/)).toBeVisible();
   await expect(qualityStrip.locator('svg[aria-hidden="true"]')).toHaveCount(6);
   await expect(page.getByText(/выборка 50%/)).toBeVisible();
@@ -509,7 +509,7 @@ test('Обзор Метрики: карточки метрик, источник
   await landingHeading.scrollIntoViewIfNeeded();
   await expect(landingHeading).toHaveCount(1);
   await expect(page.getByText('/lp/promo')).toBeVisible();
-  await expect(page.getByText(/22,5% отказов/)).toBeVisible();
+  await expect(page.getByText(/22\.5% отказов/)).toBeVisible();
   // Селектор цели виден, так как на счётчике есть цели.
   await expect(page.getByLabel('Цель для страниц входа')).toBeVisible();
 
@@ -518,7 +518,7 @@ test('Обзор Метрики: карточки метрик, источник
   await exitsHeading.scrollIntoViewIfNeeded();
   await expect(exitsHeading).toBeVisible();
   await expect(page.getByText('/checkout/success')).toBeVisible();
-  await expect(page.getByText(/12,5% отказов/)).toBeVisible();
+  await expect(page.getByText(/12\.5% отказов/)).toBeVisible();
   await expect(page.getByText('/faq')).toHaveCount(0);
   await expect(page.getByText(/Ещё 5 визитов из 140/)).toBeVisible();
 
@@ -604,16 +604,16 @@ test('Атрибуция цели: синхронные селекторы ис�
   await expect(landingsSel).toContainText('Оформление заказа');
 
   // Честный контекст цели по строке: конверсия (CR — уникальна на карточку) + число достижений.
-  await expect(page.getByText(/CR 3,1%/).first()).toBeVisible(); // источники
+  await expect(page.getByText(/CR 3\.1%/).first()).toBeVisible(); // источники
   await expect(page.getByText(/6 достиж\./).first()).toBeVisible();
   await devicesSel.scrollIntoViewIfNeeded();
-  await expect(page.getByText(/CR 4,2%/).first()).toBeVisible(); // устройства
+  await expect(page.getByText(/CR 4\.2%/).first()).toBeVisible(); // устройства
   await utmSel.scrollIntoViewIfNeeded();
-  await expect(page.getByText(/CR 5,3%/).first()).toBeVisible(); // UTM
+  await expect(page.getByText(/CR 5\.3%/).first()).toBeVisible(); // UTM
 
   // Страницы входа — последняя карточка (content-visibility): доскроллим и проверим CR/достижения.
   await page.getByRole('heading', { name: 'Страницы входа', exact: true }).scrollIntoViewIfNeeded();
-  await expect(page.getByText(/CR 6,4%/).first()).toBeVisible();
+  await expect(page.getByText(/CR 6\.4%/).first()).toBeVisible();
   await expect(page.getByText(/9 достиж\./).first()).toBeVisible();
 });
 

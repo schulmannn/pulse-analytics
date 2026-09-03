@@ -22,7 +22,7 @@ test('MoySklad RFM is an honest compact distribution with a canonical full page'
   await expect(page).toHaveURL(/\/metrics\/ms-rfm$/);
   await expect(page.getByRole('heading', { name: 'RFM-сегменты', level: 1 })).toBeVisible({ timeout: 20_000 });
   await expect(page.getByRole('heading', { name: 'Сегменты покупателей', exact: true })).toBeVisible();
-  await expect(page.getByText(/в среднем R 2 дн\. · F 4,2 заказа · M/)).toBeVisible();
+  await expect(page.getByText(/в среднем R 2 дн\. · F 4\.2 заказа · M/)).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Сравнение' })).toBeVisible();
   // «О метрике» убран со всех метрик-страниц (владелец, 2026-07-27).
   await expect(page.getByRole('heading', { name: 'О метрике' })).toHaveCount(0);

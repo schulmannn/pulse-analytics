@@ -165,7 +165,10 @@ export const fmt = {
   numFixed(n?: number | null, digits = 1): string {
     if (n == null || isNaN(n)) return '—';
     const d = Math.max(0, Math.min(6, Math.trunc(digits)));
-    const fixed = Math.abs(n).toFixed(d);
+    // Семантика `maximumFractionDigits`, а НЕ toFixed: хвостовые нули не печатаются. Это ровно то
+    // поведение, что было у заменённого toLocaleString — «R 2 дн.», а не «R 2.0 дн.»: здесь
+    // меняется только разделитель, а не то, сколько знаков видит человек.
+    const fixed = Math.abs(n).toFixed(d).replace(/\.?0+$/, '');
     const [whole, frac] = fixed.split('.');
     const grouped = Number(whole).toLocaleString('ru-RU').replace(/[,\u00a0\u202f ]/g, '\u202f');
     return `${n < 0 ? '−' : ''}${grouped}${frac ? `.${frac}` : ''}`;

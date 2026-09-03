@@ -306,7 +306,11 @@ describe('десятичный разделитель — точка везде'
     expect(fmt.numFixed(32.7, 1)).toBe('32.7');
     expect(fmt.numFixed(2.92, 2)).toBe('2.92');
     expect(fmt.numFixed(44.25, 1)).toBe('44.3');
-    expect(fmt.numFixed(0, 1)).toBe('0.0');
+    // Хвостовой ноль не печатается — семантика maximumFractionDigits, как у заменённого
+    // toLocaleString: «R 2 дн.», а не «R 2.0 дн.».
+    expect(fmt.numFixed(0, 1)).toBe('0');
+    expect(fmt.numFixed(2, 1)).toBe('2');
+    expect(fmt.numFixed(4.2, 1)).toBe('4.2');
   });
 
   it('разряды разделены неразрывным узким пробелом, а не запятой', () => {
