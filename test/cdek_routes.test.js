@@ -27,6 +27,8 @@ function build({ db = {}, cdekImport = {} } = {}) {
       listCdekImports: async () => [],
       getCdekImport: async () => null,
       createCdekChannel: async ({ name }) => ({ id: 12, title: name }),
+      // Кап источников (L-2) читает тот же список каналов, что и роут /api/channels.
+      listChannels: async () => [],
       saveCdekSource: async () => true,
       getCdekSummaryForActor: async () => ({ current: null, previous: null }),
       getCdekSeriesForActor: async () => ({ grain: 'day', current: [], previous: [] }),
@@ -509,4 +511,38 @@ test('неизвестный ?breakdown отвергается, а не подм
   const res = await call(routes, 'GET /api/cdek/series', { query: { days: '30', breakdown: 'warehouse' } });
   assert.equal(res.status, 400);
   assert.equal(res.body.error, 'unknown_breakdown');
+});
+
+// ── H-2 / L-2: цена импорта и потолок источников ──────────────────────────────────────────────────
+test('импорт и переигровка стоят за собственным лимитером, а не только за общим /api', () => {
+  // Разбор синхронный в единственной web-реплике: 600 запросов за 15 минут общего лимитера — это
+  // слишком щедрая цена для операции, которая занимает процесс. Проверяем структурно: в цепочке
+  // обоих роутов есть middleware express-rate-limit (у него есть resetKey/getKey).
+  const { routes } = build();
+  const hasLimiter = (key) =>
+    routes.get(key).some((h) => typeof h === 'function' && typeof h.resetKey === 'function');
+  assert.ok(hasLimiter('POST /api/cdek/import'), 'у загрузки нет собственного лимитера');
+  assert.ok(hasLimiter('POST /api/cdek/imports/:id/replay'), 'у переигровки нет собственного лимитера');
+});
+
+test('источники СДЭКа имеют тот же потолок, что и обычные каналы', async () => {
+  const twenty = Array.from({ length: 20 }, (_, i) => ({ id: i + 1, source: 'cdek' }));
+  let created = false;
+  const { routes } = build({
+    db: {
+      listChannels: async () => twenty,
+      createCdekChannel: async () => { created = true; return { id: 99, title: 'X' }; },
+    },
+  });
+  const res = await call(routes, 'POST /api/cdek/sources', { body: { name: 'ещё один' } });
+  assert.equal(res.status, 409);
+  assert.match(res.body.error, /лимит источников/i);
+  assert.equal(created, false, 'канал не заводится после отказа');
+});
+
+test('чужие источники в потолок не считаются', async () => {
+  const mixed = Array.from({ length: 25 }, (_, i) => ({ id: i + 1, source: i < 5 ? 'cdek' : 'ms' }));
+  const { routes } = build({ db: { listChannels: async () => mixed } });
+  const res = await call(routes, 'POST /api/cdek/sources', { body: { name: 'СДЭК-2' } });
+  assert.equal(res.status, 200);
 });

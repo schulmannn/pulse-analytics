@@ -28,7 +28,9 @@ import { cn } from '@/lib/utils';
  */
 
 const ACCEPT = '.xlsx,.csv';
-const MAX_BYTES = 10 * 1024 * 1024;
+// Тот же потолок, что у роута (server/routes/cdek.js): годовая выгрузка ~110 КБ, запас
+// двадцатикратный. Проверка здесь — вежливость (сказать до отправки), авторитет — на сервере.
+const MAX_BYTES = 2 * 1024 * 1024;
 
 const LEVEL_CLASS = [
   'bg-muted/40',
