@@ -79,11 +79,14 @@ function readZipEntries(buf) {
  * zip-бомба на 100 КБ разворачивается в гигабайты (`maxOutputLength` рвёт inflate на пороге,
  * а не после того, как память уже съедена).
  */
-function inflateEntry(buf, entry, budget) {
+function inflateEntry(buf, entry, budget, entryLimit = Infinity) {
   if (entry.compSize === ZIP64_MARK || entry.uncompSize === ZIP64_MARK) {
     throw new SheetReadError('Формат zip64 не поддерживается — сохраните файл заново');
   }
-  if (entry.uncompSize > budget.left) throw new SheetReadError('Файл слишком большой в распакованном виде');
+  // Потолок КОНКРЕТНОЙ записи, а не только общий остаток: один лист не должен съедать весь бюджет
+  // архива и оставлять разбору 12 МБ строки вместо ожидаемой сотни килобайт.
+  const limit = Math.min(budget.left, entryLimit);
+  if (entry.uncompSize > limit) throw new SheetReadError('Файл слишком большой в распакованном виде');
   const lo = entry.localOff;
   if (lo + 30 > buf.length || buf.readUInt32LE(lo) !== LOCAL_SIG) {
     throw new SheetReadError('Файл повреждён: не читается запись архива');
@@ -91,9 +94,17 @@ function inflateEntry(buf, entry, budget) {
   const start = lo + 30 + buf.readUInt16LE(lo + 26) + buf.readUInt16LE(lo + 28);
   const data = buf.subarray(start, start + entry.compSize);
   let out;
-  if (entry.method === 0) out = Buffer.from(data);
-  else if (entry.method === 8) out = zlib.inflateRawSync(data, { maxOutputLength: budget.left });
-  else throw new SheetReadError(`Файл сжат неизвестным способом (${entry.method})`);
+  try {
+    if (entry.method === 0) out = Buffer.from(data);
+    else if (entry.method === 8) out = zlib.inflateRawSync(data, { maxOutputLength: limit });
+    else throw new SheetReadError(`Файл сжат неизвестным способом (${entry.method})`);
+  } catch (e) {
+    // RangeError от maxOutputLength и ошибки zlib — это по-прежнему «плохой файл», а не сбой
+    // сервиса: без обёртки текст драйвера доезжал до cdek_imports.error и до пользователя (I-2).
+    if (e instanceof SheetReadError) throw e;
+    if (e instanceof RangeError) throw new SheetReadError('Файл слишком большой в распакованном виде');
+    throw new SheetReadError('Файл повреждён: не удалось распаковать архив');
+  }
   budget.left -= out.length;
   return out.toString('utf8');
 }
@@ -113,23 +124,122 @@ function decodeXml(s) {
   });
 }
 
+// ── Линейный токенизатор вместо ленивых регулярок ──────────────────────────────────────────────
+// ПОЧЕМУ. Регулярка вида /<row\b[^>]*>([\s\S]*?)<\/row>/ на КАЖДОМ незакрытом теге сканирует
+// остаток файла до конца и откатывается: на входе из повторяющихся оборванных тегов время растёт
+// квадратично. Замер аудита #554: ×4 на удвоение входа, 528 КБ занимали единственную web-реплику
+// на 1.7 с, и это доступно любому пользователю через импорт своего канала СДЭКа (H-2).
+// indexOf идёт вперёд и не откатывается — каждый символ читается фиксированное число раз.
+
+const BROKEN = 'Файл повреждён';
+
+/** Символы, продолжающие имя тега: без этой проверки `<row` нашёлся бы внутри `<rowBreaks`. */
+function isNameChar(code) {
+  return (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
+    || code === 45 || code === 46 || code === 58 || code === 95;   // - . : _
+}
+
+/** Позиция следующего открывающего тега `<name` с настоящей границей имени, или -1. */
+function findOpenTag(s, name, from) {
+  const needle = `<${name}`;
+  for (let i = s.indexOf(needle, from); i >= 0; i = s.indexOf(needle, i + 1)) {
+    // На конце строки charCodeAt даёт NaN — сравнения ложны, тег считается найденным, и
+    // отсутствие '>' ниже честно превращается в «Файл повреждён».
+    if (!isNameChar(s.charCodeAt(i + needle.length))) return i;
+  }
+  return -1;
+}
+
+/**
+ * Один элемент `<name …>…</name>` (или самозакрытый) начиная с `from`.
+ * Возвращает { attrs, inner, next } либо null, если тегов больше нет. Отсутствие закрывающего
+ * тега — ошибка, а НЕ повод просканировать файл до конца.
+ * Ни один из разбираемых элементов (row, c, si, t, v) не вкладывается сам в себя, поэтому первый
+ * встречный `</name>` и есть парный.
+ */
+function readElement(s, name, from) {
+  const open = findOpenTag(s, name, from);
+  if (open < 0) return null;
+  const gt = s.indexOf('>', open);
+  if (gt < 0) throw new SheetReadError(BROKEN);
+  const selfClosing = s.charCodeAt(gt - 1) === 47;   // '/'
+  const attrs = s.slice(open + name.length + 1, selfClosing ? gt - 1 : gt);
+  if (selfClosing) return { attrs, inner: '', next: gt + 1 };
+  const closeTag = `</${name}>`;
+  const close = s.indexOf(closeTag, gt + 1);
+  if (close < 0) throw new SheetReadError(BROKEN);
+  return { attrs, inner: s.slice(gt + 1, close), next: close + closeTag.length };
+}
+
+/** Линейный подсчёт открытий/самозакрытий/закрытий одного тега — один проход, без разбора. */
+function countTag(s, name) {
+  const closeTag = `</${name}>`;
+  let opens = 0;
+  let selfClosing = 0;
+  let closes = 0;
+  for (let i = findOpenTag(s, name, 0); i >= 0; ) {
+    opens++;
+    const gt = s.indexOf('>', i);
+    if (gt < 0) throw new SheetReadError(BROKEN);
+    if (s.charCodeAt(gt - 1) === 47) selfClosing++;
+    i = findOpenTag(s, name, gt + 1);
+  }
+  for (let i = s.indexOf(closeTag); i >= 0; i = s.indexOf(closeTag, i + closeTag.length)) closes++;
+  return { opens, selfClosing, closes };
+}
+
+/**
+ * Вторая линия обороны: до всякого разбора линейно считаем теги. Аномальный файл отвергается за
+ * миллисекунды и не доходит до аллокаций, а токенизатор ниже уже не встретит несходящихся тегов.
+ */
+function prescanSheet(body, { maxRows, maxCells }) {
+  const rows = countTag(body, 'row');
+  if (rows.opens - rows.selfClosing !== rows.closes) throw new SheetReadError(BROKEN);
+  // +1 — запас на строку заголовка: сам кап проверяется по номеру строки в parseSheet.
+  if (rows.opens > maxRows + 1) throw new SheetReadError(`В файле больше ${maxRows} строк`);
+  const cells = countTag(body, 'c');
+  if (cells.opens - cells.selfClosing !== cells.closes) throw new SheetReadError(BROKEN);
+  if (cells.opens > maxCells) throw new SheetReadError('В файле слишком много ячеек');
+}
+
 /** Склейка всех <t> внутри блока (rich-text разбит на <r><t>…</t></r> кусками). */
 function joinTexts(xml) {
   // <rPh> — фонетическая подсказка (японский), внутри тоже <t>: в текст ячейки не входит.
-  const body = xml.includes('<rPh') ? xml.replace(/<rPh[\s\S]*?<\/rPh>/g, '') : xml;
+  let body = xml;
+  if (body.includes('<rPh')) {
+    let stripped = '';
+    let pos = 0;
+    for (;;) {
+      const at = findOpenTag(body, 'rPh', pos);
+      if (at < 0) break;
+      stripped += body.slice(pos, at);
+      const el = readElement(body, 'rPh', at);
+      pos = el.next;
+    }
+    body = stripped + body.slice(pos);
+  }
   let text = '';
-  const re = /<t\b[^>]*>([\s\S]*?)<\/t>/g;
-  let m;
-  while ((m = re.exec(body))) text += decodeXml(m[1]);
-  return text;
+  let pos = 0;
+  for (;;) {
+    const el = readElement(body, 't', pos);
+    if (!el) return text;
+    text += decodeXml(el.inner);
+    pos = el.next;
+  }
 }
 
-function parseSharedStrings(xml) {
+function parseSharedStrings(xml, { maxCells = 4000000 } = {}) {
+  const counts = countTag(xml, 'si');
+  if (counts.opens - counts.selfClosing !== counts.closes) throw new SheetReadError(BROKEN);
+  if (counts.opens > maxCells) throw new SheetReadError('В файле слишком много ячеек');
   const out = [];
-  const re = /<si\b[^>]*>([\s\S]*?)<\/si>|<si\b[^>]*\/>/g;
-  let m;
-  while ((m = re.exec(xml))) out.push(m[1] ? joinTexts(m[1]) : '');
-  return out;
+  let pos = 0;
+  for (;;) {
+    const el = readElement(xml, 'si', pos);
+    if (!el) return out;
+    out.push(el.inner ? joinTexts(el.inner) : '');
+    pos = el.next;
+  }
 }
 
 /**
@@ -190,28 +300,42 @@ function serialToNaive(serial) {
     + ` ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`;
 }
 
-function parseSheet(xml, { shared, dateStyles, maxRows, maxCells }) {
+const PARSE_DEADLINE_MS = 3000;
+const DEADLINE_CHECK_EVERY = 500;
+
+function parseSheet(xml, { shared, dateStyles, maxRows, maxCells, deadlineMs = PARSE_DEADLINE_MS, now = Date.now }) {
   const start = xml.indexOf('<sheetData');
   const body = start < 0 ? '' : xml.slice(start);
+  prescanSheet(body, { maxRows, maxCells });
   const rows = [];
-  const rowRe = /<row\b([^>]*?)(?:\/>|>([\s\S]*?)<\/row>)/g;
   let cells = 0;
-  let m;
-  while ((m = rowRe.exec(body))) {
+  let pos = 0;
+  // Дедлайн — последний рубеж: даже линейный разбор гигантского законного листа не должен
+  // занимать единственную web-реплику дольше нескольких секунд.
+  const until = now() + deadlineMs;
+  for (;;) {
+    const el = readElement(body, 'row', pos);
+    if (!el) break;
+    pos = el.next;
+    if (rows.length % DEADLINE_CHECK_EVERY === 0 && now() > until) {
+      throw new SheetReadError('Файл слишком сложный — разбор занял бы слишком много времени');
+    }
     // Excel не пишет в XML пустые строки, но помнит их номер в атрибуте r. Держим индекс массива
     // равным номеру строки в самом Excel: по этому номеру пользователь ищет отвергнутую строку
     // в своём файле, и «12-я по счёту непустая» ему ничем не поможет.
-    const at = Number((m[1].match(/\br="(\d+)"/) || [])[1]);
+    const at = Number((el.attrs.match(/\br="(\d+)"/) || [])[1]);
     const target = Number.isFinite(at) && at > 0 ? at - 1 : rows.length;
     if (target >= maxRows) throw new SheetReadError(`В файле больше ${maxRows} строк`);
     while (rows.length < target) rows.push([]);
     const row = [];
-    const cellRe = /<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g;
-    let c;
-    while ((c = cellRe.exec(m[2] || ''))) {
+    let cellPos = 0;
+    for (;;) {
+      const c = readElement(el.inner, 'c', cellPos);
+      if (!c) break;
+      cellPos = c.next;
       if (++cells > maxCells) throw new SheetReadError('В файле слишком много ячеек');
-      const attrs = c[1] || '';
-      const inner = c[2] || '';
+      const attrs = c.attrs;
+      const inner = c.inner;
       const ref = attrs.match(/r="([A-Za-z]+)\d+"/);
       const idx = ref ? colIndex(ref[1]) : row.length;
       if (idx < 0) continue;
@@ -221,7 +345,8 @@ function parseSheet(xml, { shared, dateStyles, maxRows, maxCells }) {
       if (type === 'inlineStr') {
         value = joinTexts(inner);
       } else {
-        const raw = (inner.match(/<v\b[^>]*>([\s\S]*?)<\/v>/) || [])[1];
+        const v = readElement(inner, 'v', 0);
+        const raw = v ? v.inner : undefined;
         if (raw !== undefined) {
           if (type === 's') {
             const i = Number(raw);
@@ -265,20 +390,38 @@ function firstSheetPath(entries, workbookXml, relsXml) {
 }
 
 /**
- * Бюджет распаковки: настоящая выгрузка СДЭКа разворачивается в 7.8 раза (107 КБ zip → 0.81 МБ
- * XML, ~758 байт на строку), поэтому файл предельного размера, который принимает роут (10 МБ),
- * даёт около 80 МБ XML. 128 МБ — это ~13-кратное отношение: законному файлу с запасом хватает,
- * а классическая zip-бомба с отношением в сотни раз обрывается на пороге.
+ * Бюджет распаковки. Настоящая выгрузка СДЭКа разворачивается в 7.8 раза (107 КБ zip → 0.81 МБ
+ * XML, ~758 байт на строку); годовая выгрузка — это сотни килобайт. Прежние 128 МБ были снятой с
+ * потолка величиной «с запасом на всё» и в паре с ленивыми регулярками давали минуты работы
+ * единственной web-реплики (H-2). 16 МБ — это ~20 тысяч строк заказов, вдвое больше самого
+ * большого законного файла, который видел прод; отдельные потолки на лист и на строковую таблицу
+ * не дают одной записи выбрать весь бюджет.
  */
-function readXlsxRows(buffer, { maxRows = 100000, maxCells = 4000000, maxInflatedBytes = 128 * 1024 * 1024 } = {}) {
+const MAX_INFLATED_BYTES = 16 * 1024 * 1024;
+const MAX_SHEET_BYTES = 12 * 1024 * 1024;
+const MAX_SHARED_STRINGS_BYTES = 4 * 1024 * 1024;
+
+function readXlsxRows(buffer, {
+  maxRows = 100000,
+  maxCells = 4000000,
+  maxInflatedBytes = MAX_INFLATED_BYTES,
+  maxSheetBytes = MAX_SHEET_BYTES,
+  maxSharedStringsBytes = MAX_SHARED_STRINGS_BYTES,
+  deadlineMs,
+  now,
+} = {}) {
   const entries = readZipEntries(buffer);
   const budget = { left: maxInflatedBytes };
-  const get = (name) => (entries.has(name) ? inflateEntry(buffer, entries.get(name), budget) : '');
+  const get = (name, limit) => (entries.has(name) ? inflateEntry(buffer, entries.get(name), budget, limit) : '');
   const sheet = firstSheetPath(entries, get('xl/workbook.xml'), get('xl/_rels/workbook.xml.rels'));
-  const shared = entries.has('xl/sharedStrings.xml') ? parseSharedStrings(get('xl/sharedStrings.xml')) : [];
+  const shared = entries.has('xl/sharedStrings.xml')
+    ? parseSharedStrings(get('xl/sharedStrings.xml', maxSharedStringsBytes), { maxCells })
+    : [];
   const dateStyles = entries.has('xl/styles.xml') ? parseDateStyles(get('xl/styles.xml')) : [];
-  const rows = parseSheet(inflateEntry(buffer, entries.get(sheet.path), budget), {
+  const rows = parseSheet(inflateEntry(buffer, entries.get(sheet.path), budget, maxSheetBytes), {
     shared, dateStyles, maxRows, maxCells,
+    ...(deadlineMs !== undefined ? { deadlineMs } : {}),
+    ...(now !== undefined ? { now } : {}),
   });
   return { rows, sheetName: sheet.name || '' };
 }

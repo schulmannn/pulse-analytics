@@ -117,6 +117,45 @@ const ARCHIVE_SPECS = {
     keys: [{ col: 'day', cast: 'date' }, { col: 'media_id', cast: 'text' }],
     order: 'day ASC, media_id ASC',
   },
+  // ── СДЭК (миграция 038) ────────────────────────────────────────────────────────────────────
+  // Экспорт обещает «все архивы», а знал только четыре источника из шести: выгрузки СДЭКа и
+  // рассылки Rusender в файл не попадали вовсе (аудит #554, L-5).
+  cdekImports: {
+    from: 'cdek_imports', chanCol: 'channel_id',
+    // file_bytes — СЫРОЙ загруженный файл (десятки мегабайт на канал). В экспорт не идёт: он и
+    // так весь разложен по строкам ниже, а тащить бинарь в JSON — это не «данные о человеке».
+    cols: `id, uploaded_by, filename, file_sha256, status, rows_total, rows_inserted,
+           rows_updated, rows_rejected, rows_deleted, orders_total, period_from, period_to,
+           rejected, warnings, error, created_at, finished_at`,
+    keys: [{ col: 'id', cast: 'integer' }], order: 'id ASC',
+  },
+  cdekOrders: {
+    from: 'cdek_orders', cols: '*', chanCol: 'channel_id',
+    keys: [{ col: 'order_id', cast: 'text' }], order: 'order_id ASC',
+  },
+  cdekOrderItems: {
+    from: 'cdek_order_items', cols: '*', chanCol: 'channel_id',
+    keys: [{ col: 'order_id', cast: 'text' }, { col: 'product_id', cast: 'text' }],
+    order: 'order_id ASC, product_id ASC',
+  },
+  cdekProducts: {
+    from: 'cdek_products', cols: '*', chanCol: 'channel_id',
+    keys: [{ col: 'product_id', cast: 'text' }], order: 'product_id ASC',
+  },
+  // ── Rusender (миграции 039, 040) ───────────────────────────────────────────────────────────
+  rusenderDaily: {
+    from: 'rusender_daily', cols: '*', chanCol: 'channel_id',
+    keys: [{ col: 'day', cast: 'date' }], order: 'day ASC',
+  },
+  rusenderCampaigns: {
+    from: 'rusender_campaigns', cols: '*', chanCol: 'channel_id',
+    keys: [{ col: 'campaign_id', cast: 'bigint' }], order: 'campaign_id ASC',
+  },
+  rusenderCampaignActivity: {
+    from: 'rusender_campaign_activity', cols: '*', chanCol: 'channel_id',
+    keys: [{ col: 'campaign_id', cast: 'bigint' }, { col: 'day', cast: 'date' }],
+    order: 'campaign_id ASC, day ASC',
+  },
 };
 
 // "Строка строго ПОСЛЕ курсора" в порядке `ASC NULLS LAST` лексикографически по ключам.
@@ -275,6 +314,13 @@ function createGdprService({ pool, enabled, transaction, exportPageSize }) {
             SET metadata = '{}'::jsonb, ip_hash = NULL, request_id = NULL
           WHERE uid = $1`,
         [uid]);
+      // Приглашения хранят email СТРОКОЙ и живут в ЧУЖИХ воркспейсах: каскад по users их не
+      // трогает, и после «стирания» адрес человека оставался в базе у всех, кто его звал.
+      // Читаем email до DELETE — после него строки users уже нет.
+      const { rows: victim } = await client.query('SELECT email FROM users WHERE id = $1', [uid]);
+      if (victim[0]) {
+        await client.query('DELETE FROM workspace_invites WHERE lower(email) = lower($1)', [victim[0].email]);
+      }
       const { rowCount } = await client.query('DELETE FROM users WHERE id = $1', [uid]);
       // Осиротевшие external_sources: для приватного канала username/title (часто имя человека)
       // не «shared identity» — если после каскада на источник не ссылается НИКТО, стираем и его.
@@ -291,7 +337,12 @@ function createGdprService({ pool, enabled, transaction, exportPageSize }) {
             AND NOT EXISTS (SELECT 1 FROM velocity_daily  t WHERE t.source_id = s.id)
             AND NOT EXISTS (SELECT 1 FROM mentions        t WHERE t.source_id = s.id)
             AND NOT EXISTS (SELECT 1 FROM ig_daily        t WHERE t.source_id = s.id)
-            AND NOT EXISTS (SELECT 1 FROM ig_media_daily  t WHERE t.source_id = s.id)`);
+            AND NOT EXISTS (SELECT 1 FROM ig_media_daily  t WHERE t.source_id = s.id)
+            -- Свип не знал про cdek_sources и rusender_accounts: их FK на external_sources идут
+            -- БЕЗ ON DELETE, поэтому стирание одного пользователя пыталось снести источник,
+            -- на который ссылается канал СОСЕДНЕГО tenant'а (аудит #554, L-5).
+            AND NOT EXISTS (SELECT 1 FROM cdek_sources      t WHERE t.source_id = s.id)
+            AND NOT EXISTS (SELECT 1 FROM rusender_accounts t WHERE t.source_id = s.id)`);
       return rowCount > 0;
     });
   }
@@ -683,6 +734,17 @@ function createGdprService({ pool, enabled, transaction, exportPageSize }) {
           // Сырые provider-снимки — самостоятельный переносимый архив, а не часть текущего
           // integration singleton. Скоуп только по owner-only channel_id.
           await w.write(',"raw_snapshots":'); await streamArchive(w, client, ARCHIVE_SPECS.rawSnapshots, ch.id, PAGE);
+          // СДЭК и Rusender — те же архивы канала, что и остальные четыре источника. До этой
+          // правки экспорт обещал «все архивы», а знал четыре из шести (аудит #554, L-5).
+          // Пишутся безусловно, как ms_*/ym_*: пустой массив у канала другого источника честнее
+          // отсутствующего ключа — читатель файла видит, что раздел есть и он пуст.
+          await w.write(',"cdek_imports":'); await streamArchive(w, client, ARCHIVE_SPECS.cdekImports, ch.id, PAGE);
+          await w.write(',"cdek_orders":'); await streamArchive(w, client, ARCHIVE_SPECS.cdekOrders, ch.id, PAGE);
+          await w.write(',"cdek_order_items":'); await streamArchive(w, client, ARCHIVE_SPECS.cdekOrderItems, ch.id, PAGE);
+          await w.write(',"cdek_products":'); await streamArchive(w, client, ARCHIVE_SPECS.cdekProducts, ch.id, PAGE);
+          await w.write(',"rusender_daily":'); await streamArchive(w, client, ARCHIVE_SPECS.rusenderDaily, ch.id, PAGE);
+          await w.write(',"rusender_campaigns":'); await streamArchive(w, client, ARCHIVE_SPECS.rusenderCampaigns, ch.id, PAGE);
+          await w.write(',"rusender_campaign_activity":'); await streamArchive(w, client, ARCHIVE_SPECS.rusenderCampaignActivity, ch.id, PAGE);
           await w.write('}'); // /archive
 
           // Текущий collector snapshot содержит тяжёлую data: URL фотографии канала. Фото уже

@@ -41,6 +41,11 @@ const db = {
     user.token_version += 1;
     return { ...user };
   },
+  clearUserCreatedVia: async (id) => {
+    if (!user || id !== user.id || user.created_via == null) return false;
+    user.created_via = null;
+    return true;
+  },
 };
 
 const svc = createAuthService({
@@ -122,7 +127,7 @@ const googleLogin = () =>
 const sessionCookie = (res) =>
   res.headers.getSetCookie().find((c) => c.startsWith(`${SESSION_COOKIE}=`)) || null;
 
-const seed = async (status) => {
+const seed = async (status, extra = {}) => {
   created = null;
   user = {
     id: 7,
@@ -131,6 +136,8 @@ const seed = async (status) => {
     status,
     token_version: 3,
     pass_hash: await hashPassword('pre-seeded password'),
+    created_via: null,
+    ...extra,
   };
 };
 
@@ -185,4 +192,29 @@ test('google: новый email создаёт active-аккаунт с непр�
   assert.ok(created, 'аккаунт создан');
   assert.strictEqual(created.status, 'active');
   assert.strictEqual(await verifyPassword('пусто', created.pass_hash), false);
+});
+
+// ── H-1: аккаунт, заведённый публичным /claim по ссылке приглашения ───────────────────────────────
+// До правки такой аккаунт выпускался сразу ACTIVE с паролем, который выбрал ОТКРЫВШИЙ ссылку — а её
+// сервер отдавал приглашающему. Вход настоящего владельца через Google обязан обезвредить чужой
+// доступ: пароль на случайный, все прежние сессии отозваны. Пометка снимается — защита нужна раз.
+test('google: active-аккаунт из invite_claim обезвреживается при первом входе владельца', async () => {
+  await seed('active', { created_via: 'invite_claim' });
+  const preHash = user.pass_hash;
+  const res = await googleLogin();
+  assert.strictEqual(res.status, 200);
+  assert.ok(sessionCookie(res), 'владелец входит');
+  assert.notStrictEqual(user.pass_hash, preHash, 'пароль открывшего ссылку нейтрализован');
+  assert.ok(user.token_version > 3, 'cookie атакующего отозвана');
+  assert.strictEqual(user.created_via, null, 'пометка снята — повторный вход пароль уже не трогает');
+  assert.strictEqual(user.status, 'active');
+});
+
+test('google: повторный вход после обезвреживания ничего не трогает', async () => {
+  await seed('active', { created_via: null });
+  const preHash = user.pass_hash;
+  const res = await googleLogin();
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(user.pass_hash, preHash);
+  assert.strictEqual(user.token_version, 3);
 });

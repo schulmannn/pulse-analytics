@@ -1,5 +1,6 @@
 'use strict';
 
+const rateLimit = require('express-rate-limit');
 const { hasWorkspaceRole, tenantChannelId } = require('../middleware/tenant');
 const { parseCdekPeriod } = require('../domain/cdekPeriod');
 // Из домена, а не из repos: роут не имеет права тянуть слой доступа к данным (гвард границ).
@@ -29,10 +30,26 @@ const {
  * общий архив, и это не операция уровня «посмотреть».
  */
 function registerCdekRoutes({ app, express, requireAuth, db, audit, cdekImport }) {
-  // 10 МБ на файл: годовая выгрузка весит ~110 КБ, то есть запас стократный. Кап нужен не
-  // против больших складов, а против того, чтобы БД не приняла произвольный блоб.
-  const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+  // 2 МБ на файл: годовая выгрузка весит ~110 КБ, запас двадцатикратный. Прежние 10 МБ были
+  // «на всякий случай» и в паре с разбором на request-path давали дорогой вход (H-2): у файла
+  // предельного размера нет законного сценария, зато есть незаконный.
+  const MAX_UPLOAD_BYTES = 2 * 1024 * 1024;
   const rawBody = express.raw({ type: () => true, limit: MAX_UPLOAD_BYTES });
+
+  // Разбор идёт синхронно в единственной web-реплике (ADR-002), поэтому импорт — не обычное
+  // чтение: даже честный файл занимает процесс на десятки миллисекунд, а специально собранный
+  // пытался занимать его на минуты. Общий лимитер /api (600/15 мин) для этого слишком щедр.
+  // Ключ по uid: requireAuth стоит ПЕРЕД лимитером, поэтому req.user всегда есть.
+  const cdekImportLimiter = rateLimit({
+    windowMs: 60 * 60 * 1000,
+    limit: 10,
+    keyGenerator: (req) => `cdek-import:u${req.user.uid}`,
+    message: { error: 'Слишком много импортов подряд. Попробуйте через час.' },
+  });
+
+  // Источников СДЭКа у одного владельца не больше, чем обычных каналов (L-2): у каждого свой
+  // архив, и заводить их без счёта — тот же расход, только через другой роут.
+  const MAX_CDEK_SOURCES = 20;
 
   /** Старое имя фильтра по каналу продаж — принимается только нечисловым (см. tenantChannelId). */
   const legacySalesChannel = (raw) =>
@@ -85,6 +102,10 @@ function registerCdekRoutes({ app, express, requireAuth, db, audit, cdekImport }
       } catch {
         return res.status(400).json({ error: 'Неизвестный часовой пояс' });
       }
+      const mine = await db.listChannels(req.user).catch(() => []);
+      if (mine.filter((c) => c.source === 'cdek').length >= MAX_CDEK_SOURCES) {
+        return res.status(409).json({ error: 'Достигнут лимит источников СДЭК' });
+      }
       const created = await db.createCdekChannel({ owner_uid: req.user.uid, name: name || 'СДЭК' });
       if (!created) return res.status(503).json({ error: 'Не удалось создать источник' });
       await db.saveCdekSource(created.id, { tz, title: created.title });
@@ -117,7 +138,7 @@ function registerCdekRoutes({ app, express, requireAuth, db, audit, cdekImport }
   });
 
   // POST /api/cdek/import — загрузка выгрузки. Тело — сырые байты файла.
-  app.post('/api/cdek/import', requireAuth, rawBody, async (req, res, next) => {
+  app.post('/api/cdek/import', requireAuth, cdekImportLimiter, rawBody, async (req, res, next) => {
     try {
       const channel = await resolveCdekChannel(req, res, { role: 'admin' });
       if (!channel) return;
@@ -515,7 +536,7 @@ function registerCdekRoutes({ app, express, requireAuth, db, audit, cdekImport }
   });
 
   // POST /api/cdek/imports/:id/replay — пересобрать архив из сохранённого файла.
-  app.post('/api/cdek/imports/:id/replay', requireAuth, async (req, res, next) => {
+  app.post('/api/cdek/imports/:id/replay', requireAuth, cdekImportLimiter, async (req, res, next) => {
     try {
       const channel = await resolveCdekChannel(req, res, { role: 'admin' });
       if (!channel) return;

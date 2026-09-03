@@ -60,8 +60,13 @@ managed-first. Живой поиск упоминаний также работ�
   backpressure (`drain`) и тихим прерыванием на обрыве клиента; аудит `account.exported` пишется
   **только на полностью дописанном** ответе. Буферизуются лишь singleton-строки
   account/prefs/integration identity/tg-session и bounded current snapshot. Пиковая память ответа =
-  одна страница, а не весь архив. История IG/MS/YM и raw snapshots экспортируются независимо от
-  наличия текущего integration-account; `channel_photo` вырезается из current snapshot.
+  одна страница, а не весь архив. Архив канала покрывает **все шесть источников**: TG (`channel_daily`,
+  `channel_monthly`, `posts`, `velocity_daily`, `mentions`), IG (`ig_daily`, `ig_media_daily`),
+  МойСклад (`ms_daily`, `ms_orders`, `ms_returns`), Метрику (`ym_daily`), СДЭК (`cdek_imports` без
+  `file_bytes`, `cdek_orders`, `cdek_order_items`, `cdek_products`) и Rusender (`rusender_daily`,
+  `rusender_campaigns`, `rusender_campaign_activity`). История IG/MS/YM и raw snapshots
+  экспортируются независимо от наличия текущего integration-account; `channel_photo` вырезается из
+  current snapshot.
 - Portability-проекции не являются DB dump: encrypted sessions/tokens, password/email/API-key
   hashes, request/IP identifiers, чужой roster и copied content shared-кампаний не экспортируются.
   User-created campaigns требуют текущего workspace access, campaign-post export содержит только
@@ -69,7 +74,10 @@ managed-first. Живой поиск упоминаний также работ�
   `collector_status`, backfill states, jobs), public media cache, global legacy `ig_tags` и
   непривязанные к uid bug/crash telemetry осознанно исключены. При erasure audit metadata,
   `ip_hash` и `request_id` обнуляются до `users` DELETE, а orphan-source sweep учитывает все FK,
-  включая живые MS/YM connections соседних tenants. Перед переводом foreign-owned канала из
+  включая живые MS/YM/СДЭК/Rusender connections соседних tenants (у `cdek_sources.source_id` и
+  `rusender_accounts.source_id` FK идут БЕЗ `ON DELETE`, поэтому пропуск в свипе валил бы весь
+  erasure). В той же транзакции удаляются `workspace_invites` с email стираемого: они лежат в
+  ЧУЖИХ воркспейсах и каскадом по `users` не затрагиваются. Перед переводом foreign-owned канала из
   удаляемого workspace в legacy `workspace_id=NULL` узко удаляются его campaign memberships этого
   же dying workspace; иначе composite FK `campaign_posts(channel_id, workspace_id)` с NO ACTION
   блокирует весь erasure. Все эти шаги живут в одной транзакции.

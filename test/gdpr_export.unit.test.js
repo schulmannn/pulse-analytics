@@ -689,3 +689,45 @@ test('стрим: сбой ДО первого байта → throw (роут у
   assert.strictEqual(res.chunks.length, 0);
   assert.strictEqual(pool.released, 1);
 });
+
+// ── L-5: экспорт знает все шесть источников ───────────────────────────────────────────────────────
+// «Все архивы» в инварианте памяти было обещанием, а не фактом: ARCHIVE_SPECS знали ms, ym, ig и tg,
+// а выгрузки СДЭКа и рассылки Rusender в файл не попадали вовсе.
+test('ARCHIVE_SPECS покрывают СДЭК и Rusender', () => {
+  for (const key of ['cdekImports', 'cdekOrders', 'cdekOrderItems', 'cdekProducts',
+                     'rusenderDaily', 'rusenderCampaigns', 'rusenderCampaignActivity']) {
+    assert.ok(ARCHIVE_SPECS[key], `нет спеки ${key}`);
+    assert.equal(ARCHIVE_SPECS[key].chanCol, 'channel_id');
+    assert.ok(ARCHIVE_SPECS[key].keys.length >= 1, `${key}: пустой keyset`);
+  }
+});
+
+test('каждая спека имеет keyset, уникальный по своему PK', () => {
+  // Неуникальный keyset — это не «медленно», а «страница теряет или дублирует строки».
+  const expected = {
+    cdekImports: ['id'],
+    cdekOrders: ['order_id'],
+    cdekOrderItems: ['order_id', 'product_id'],
+    cdekProducts: ['product_id'],
+    rusenderDaily: ['day'],
+    rusenderCampaigns: ['campaign_id'],
+    rusenderCampaignActivity: ['campaign_id', 'day'],
+  };
+  for (const [key, cols] of Object.entries(expected)) {
+    assert.deepEqual(ARCHIVE_SPECS[key].keys.map((k) => k.col), cols, `${key}: keyset не по PK`);
+    // Порядок обязан совпадать с keyset — иначе курсор указывает не туда, куда сортирует ORDER BY.
+    assert.equal(ARCHIVE_SPECS[key].order, cols.map((c) => `${c} ASC`).join(', '), `${key}: order ≠ keyset`);
+  }
+});
+
+test('сырой файл импорта в экспорт не попадает', () => {
+  // file_bytes — десятки мегабайт бинаря на канал, и он весь уже разложен по cdek_orders/items.
+  assert.equal(/\bfile_bytes\b/.test(ARCHIVE_SPECS.cdekImports.cols), false);
+});
+
+test('ни одна спека не тянет секреты источника', () => {
+  for (const [key, spec] of Object.entries(ARCHIVE_SPECS)) {
+    assert.equal(/api_key_enc|access_token_enc|token_enc|pass_hash|session/.test(spec.cols || '*'), false,
+      `${key}: в экспорт просочился секрет`);
+  }
+});

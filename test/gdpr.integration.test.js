@@ -674,3 +674,90 @@ test('erasure: deleting one user twice is a clean false, not an error', { skip }
   assert.strictEqual(await db.deleteUserAccount(uid), true);
   assert.strictEqual(await db.deleteUserAccount(uid), false, 'second delete reports nothing to erase');
 });
+
+// ── L-5: экспорт и стирание знают все шесть источников ────────────────────────────────────────────
+test('export: архивы СДЭКа и Rusender попадают в файл', { skip }, async () => {
+  const uid = await mkUser('cdekexp');
+  const ws = await mkWorkspace(uid, `ws-cdekexp-${nonce}`);
+  const cdekSrc = await mkNetworkSource('cdek', `${nonce}-cdek`, { title: 'Склад' });
+  const ch = await mkChannel(uid, ws, cdekSrc, `chan_${nonce}_cdek`);
+  await pool.query(`INSERT INTO cdek_sources (channel_id, warehouse_code, tz, source_id) VALUES ($1,'19821','Europe/Moscow',$2)`, [ch, cdekSrc]);
+  const { rows: [imp] } = await pool.query(
+    `INSERT INTO cdek_imports (channel_id, uploaded_by, filename, file_sha256, file_bytes, status, rows_total, orders_total)
+     VALUES ($1,$2,'выгрузка.xlsx','deadbeef', decode('504b0304','hex'), 'done', 2, 2) RETURNING id`, [ch, uid]);
+  for (const [orderId, ts] of [['O-1', '2026-08-01T10:00:00Z'], ['O-2', '2026-08-02T10:00:00Z']]) {
+    await pool.query(
+      `INSERT INTO cdek_orders (channel_id, order_id, created_ts, status, kind, import_id) VALUES ($1,$2,$3,'complete','sale',$4)`,
+      [ch, orderId, ts, imp.id]);
+    await pool.query(
+      `INSERT INTO cdek_order_items (channel_id, order_id, product_id, unit_price_kopecks, qty, import_id) VALUES ($1,$2,$3,375000,1,$4)`,
+      [ch, orderId, `P-${orderId}`, imp.id]);
+  }
+  for (const pid of ['P-O-1', 'P-O-2']) {
+    await pool.query(`INSERT INTO cdek_products (channel_id, product_id, title) VALUES ($1,$2,$3)`, [ch, pid, `Товар ${pid}`]);
+  }
+
+  const ruSrc = await mkNetworkSource('rusender', `${nonce}-ru`, { title: 'Рассылки' });
+  const ruCh = await mkChannel(uid, ws, ruSrc, `chan_${nonce}_ru`);
+  await pool.query(`INSERT INTO rusender_accounts (channel_id, account_id, api_key_enc, source_id) VALUES ($1, 777, 'iv:tag:SECRET_RUSENDER_KEY', $2)`, [ruCh, ruSrc]);
+  for (const day of ['2026-08-01', '2026-08-02']) {
+    await pool.query(`INSERT INTO rusender_daily (channel_id, day, contacts_total) VALUES ($1,$2,1000)`, [ruCh, day]);
+  }
+  for (const id of [11, 22]) {
+    await pool.query(`INSERT INTO rusender_campaigns (channel_id, campaign_id, name, delivered) VALUES ($1,$2,$3,500)`, [ruCh, id, `Рассылка ${id}`]);
+    await pool.query(`INSERT INTO rusender_campaign_activity (channel_id, campaign_id, day, opens, clicks) VALUES ($1,$2,'2026-08-01',10,2)`, [ruCh, id]);
+  }
+
+  // Страница нарочно меньше числа строк — заодно проверяем, что новые keyset'ы тайлят без потерь.
+  const { outcome, json } = await runExport(uid, { pageSize: 1 });
+  assert.strictEqual(outcome, 'ok');
+  const byId = Object.fromEntries(json.channels.map((c) => [c.id, c]));
+  const cdek = byId[ch].archive;
+  assert.strictEqual(cdek.cdek_imports.length, 1);
+  assert.strictEqual(cdek.cdek_orders.length, 2);
+  assert.strictEqual(cdek.cdek_order_items.length, 2);
+  assert.strictEqual(cdek.cdek_products.length, 2);
+  assert.deepStrictEqual(cdek.cdek_orders.map((o) => o.order_id), ['O-1', 'O-2'], 'страницы склеены по порядку, без дублей');
+  const ru = byId[ruCh].archive;
+  assert.strictEqual(ru.rusender_daily.length, 2);
+  assert.strictEqual(ru.rusender_campaigns.length, 2);
+  assert.strictEqual(ru.rusender_campaign_activity.length, 2);
+
+  const body = JSON.stringify(json);
+  assert.ok(!body.includes('SECRET_RUSENDER_KEY'), 'ключ Rusender не покидает сервер');
+  assert.ok(!body.includes('file_bytes'), 'сырой файл импорта в экспорт не идёт');
+
+  // Повторный вызов стабилен (экспорт — чистое чтение).
+  const again = await runExport(uid, { pageSize: 1 });
+  assert.deepStrictEqual(again.json.channels.map((c) => c.id).sort(), json.channels.map((c) => c.id).sort());
+});
+
+test('erasure: свип не сносит источник соседа и убирает приглашения со стёртым email', { skip }, async () => {
+  const victim = await mkUser('erasecdek');
+  const neighbour = await mkUser('neighcdek');
+  const vWs = await mkWorkspace(victim, `ws-erasecdek-${nonce}`);
+  const nWs = await mkWorkspace(neighbour, `ws-neighcdek-${nonce}`);
+
+  // ОДИН external_sources на двоих: у обоих каналов свой cdek_sources с тем же source_id.
+  const shared = await mkNetworkSource('cdek', `${nonce}-shared-cdek`, { title: 'Общий склад' });
+  const vCh = await mkChannel(victim, vWs, shared, `chan_${nonce}_vcdek`);
+  const nCh = await mkChannel(neighbour, nWs, shared, `chan_${nonce}_ncdek`);
+  await pool.query(`INSERT INTO cdek_sources (channel_id, tz, source_id) VALUES ($1,'Europe/Moscow',$2)`, [vCh, shared]);
+  await pool.query(`INSERT INTO cdek_sources (channel_id, tz, source_id) VALUES ($1,'Europe/Moscow',$2)`, [nCh, shared]);
+
+  // Приглашение стираемого лежит в ЧУЖОМ воркспейсе: каскад по users его не трогает.
+  const { rows: [vRow] } = await pool.query(`SELECT email FROM users WHERE id=$1`, [victim]);
+  await pool.query(
+    `INSERT INTO workspace_invites (workspace_id, email, role, token_hash, invited_by, expires_at)
+     VALUES ($1, $2, 'member', $3, $4, now() + interval '7 days')`,
+    [nWs, vRow.email.toUpperCase(), `${nonce}-invite-hash`, neighbour]);
+
+  assert.strictEqual(await db.deleteUserAccount(victim), true);
+
+  const survives = await pool.query(`SELECT 1 FROM external_sources WHERE id=$1`, [shared]);
+  assert.strictEqual(survives.rowCount, 1, 'источник соседа пережил стирание (FK у cdek_sources без ON DELETE)');
+  const neighbourSource = await pool.query(`SELECT 1 FROM cdek_sources WHERE channel_id=$1`, [nCh]);
+  assert.strictEqual(neighbourSource.rowCount, 1, 'строка источника соседа на месте');
+  const invites = await pool.query(`SELECT 1 FROM workspace_invites WHERE lower(email)=lower($1)`, [vRow.email]);
+  assert.strictEqual(invites.rowCount, 0, 'приглашение с адресом стёртого пользователя удалено');
+});

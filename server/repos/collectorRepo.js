@@ -807,9 +807,14 @@ function createCollectorRepo({ pool, enabled, transaction, setChannelTgId }) {
   // points instead of scanning up to 730 daily rows per channel. Bounded to recent months so the
   // nightly recompute stays cheap. INERT until wired: nothing reads channel_monthly yet — the reader
   // (getChannelHistoryMonthly) lands with the frontend range-picker change (see CAPACITY doc §rollups).
-  async function rollupChannelMonthly(months = 3) {
+  // `channelId` — необязательный скоуп ДЛЯ ТЕСТОВ. Прод зовёт без него и сворачивает всю базу;
+  // тест, свернувший всю базу, ловил каскадное удаление канала из СОСЕДНЕГО файла между SELECT и
+  // INSERT — FK на channel_monthly падал на несуществующем channel_id. Скоуп по своему каналу
+  // делает тест независимым от того, что параллельно делают соседи.
+  async function rollupChannelMonthly(months = 3, { channelId = null } = {}) {
     if (!enabled) return 0;
     const m = Number.isFinite(+months) ? Math.max(1, Math.round(+months)) : 3;
+    const scoped = Number.isFinite(+channelId) ? Math.trunc(+channelId) : null;
     const { rowCount } = await pool.query(
       `INSERT INTO channel_monthly
          (channel_id, source_id, month, subscribers_end,
@@ -821,6 +826,7 @@ function createCollectorRepo({ pool, enabled, transaction, setChannelTgId }) {
          FROM channel_daily d
          JOIN channels c ON c.id = d.channel_id
         WHERE d.day >= date_trunc('month', CURRENT_DATE) - make_interval(months => $1)
+          AND ($2::int IS NULL OR d.channel_id = $2)
         GROUP BY d.channel_id, date_trunc('month', d.day)
        ON CONFLICT (channel_id, month) DO UPDATE SET
          source_id       = COALESCE(EXCLUDED.source_id, channel_monthly.source_id),
@@ -832,7 +838,7 @@ function createCollectorRepo({ pool, enabled, transaction, setChannelTgId }) {
          reactions_sum   = EXCLUDED.reactions_sum,
          days_count      = EXCLUDED.days_count,
          computed_at     = now()`,
-      [m]);
+      [m, scoped]);
     return rowCount;
   }
 
