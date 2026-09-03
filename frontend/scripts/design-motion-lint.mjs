@@ -128,6 +128,29 @@ const rules = [
       rel.endsWith('.test.tsx'),
   },
   {
+    id: 'money-sign-appended',
+    hint: 'formatMoney already carries ₽ — never append it (see formatMoneyDelta for signed values)',
+    // На /sklad печаталось «61.9k ₽₽» и «↑+99.3k ₽₽»: знак валюты дописывался ШАБЛОННОЙ СТРОКОЙ
+    // поверх готовой строки formatMoney, а правило выше ловило только fmt.num/short/kpi.
+    // Аргумент может сам содержать скобки (`formatMoney(Math.abs(v), 'axis')`), поэтому не
+    // пытаемся разобрать вызов — достаточно факта: в строке есть formatMoney и «₽» сразу после
+    // закрывающей скобки или интерполяции.
+    test: (line) => /formatMoney\s*\(/.test(line) && /[)}]\s*₽/.test(line),
+    exempt: (rel) => rel.endsWith('lib/metricNumber.ts') || rel.endsWith('.test.ts') || rel.endsWith('.test.tsx'),
+  },
+  {
+    id: 'locale-number-outside-format',
+    hint: 'format numbers through lib/format (fmt.num / fmt.numFixed / fmt.pctFixed)',
+    // toLocaleString('ru-RU') даёт ЗАПЯТУЮ, и на одном экране оказывались «32,7%» и «↑5.8%» —
+    // две системы записи одного и того же (аудит #554, D5). Канон DESIGN_TOKENS — точка.
+    test: (line) => /toLocaleString\s*\(\s*['"]ru-RU['"]/.test(line),
+    exempt: (rel) =>
+      rel.endsWith('lib/format.ts') ||
+      rel.endsWith('components/KpiNumber.tsx') ||
+      rel.endsWith('.test.ts') ||
+      rel.endsWith('.test.tsx'),
+  },
+  {
     id: 'arbitrary-motion-util',
     hint: 'use the duration scale / --motion-* tokens',
     test: (line) => /\b(?:duration|ease|delay)-\[/.test(line),

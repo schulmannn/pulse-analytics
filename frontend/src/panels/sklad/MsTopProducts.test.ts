@@ -12,8 +12,8 @@ const mover = (over: Partial<{ name: string; current: number; previous: number; 
 
 describe('MoySklad assortment dynamics presentation', () => {
   it('formats value in the metric natural unit', () => {
-    expect(fmtChangeValue(1000, 'rub')).toBe('1k ₽');
-    expect(fmtChangeValue(600, 'rub')).toBe('600 ₽');
+    expect(fmtChangeValue(1000, 'rub')).toBe('1k ₽');
+    expect(fmtChangeValue(600, 'rub')).toBe('600 ₽');
     expect(fmtChangeValue(6, 'count')).toBe('6 шт.');
   });
 
@@ -24,9 +24,9 @@ describe('MoySklad assortment dynamics presentation', () => {
 
   it('falls back to the absolute shift when percent is unavailable (previous base was zero)', () => {
     // deltaPct === null must never be rendered as a fabricated ±100%.
-    expect(changeLabel(mover({ current: 500, previous: 0, delta: 500, deltaPct: null }), 'gain', 'rub')).toBe('▲ 500 ₽');
+    expect(changeLabel(mover({ current: 500, previous: 0, delta: 500, deltaPct: null }), 'gain', 'rub')).toBe('▲ 500 ₽');
     expect(changeLabel(mover({ current: 4, previous: 0, delta: 4, deltaPct: null }), 'gain', 'count')).toBe('▲ 4 шт.');
-    expect(changeLabel(mover({ current: 500, previous: -200, delta: 700, deltaPct: null }), 'gain', 'rub')).toBe('▲ 700 ₽');
+    expect(changeLabel(mover({ current: 500, previous: -200, delta: 700, deltaPct: null }), 'gain', 'rub')).toBe('▲ 700 ₽');
   });
 
   it('labels presence-only buckets honestly, not as added/removed catalog items', () => {

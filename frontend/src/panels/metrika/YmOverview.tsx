@@ -385,9 +385,9 @@ function YmHourlyCard({
 
 /** Форматтеры качества: nullable-aware, русская локаль. «—» — «нет данных», не «0». */
 const fmtQualityPct = (v: number | null | undefined): string =>
-  v == null ? '—' : `${v.toLocaleString('ru-RU', { maximumFractionDigits: 1 })}%`;
+  v == null ? '—' : fmt.pctFixed(v, 1);
 const fmtQualityNum = (v: number | null | undefined, digits = 2): string =>
-  v == null ? '—' : v.toLocaleString('ru-RU', { maximumFractionDigits: digits });
+  v == null ? '—' : fmt.numFixed(v, digits);
 /** Секунды → «м:сс» (или «с» под минутой). null → «—». */
 const fmtDuration = (v: number | null | undefined): string => {
   if (v == null) return '—';

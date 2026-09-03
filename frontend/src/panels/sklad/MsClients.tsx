@@ -454,7 +454,7 @@ export function MsRfmBody({
                   <span className="font-medium text-foreground">
                     {mode === 'customers' ? fmt.num(value) : `${formatMoney(value, 'axis')}`}
                   </span>{' '}
-                  · {share.toLocaleString('ru-RU', { maximumFractionDigits: 1 })}%
+                  · {fmt.pctFixed(share, 1)}
                 </span>
               </div>
               <div className="mt-1 flex" aria-hidden="true">
@@ -462,7 +462,7 @@ export function MsRfmBody({
               </div>
               {(detailed || expanded) && segment.customers > 0 && (
                 <p className="mt-1 text-2xs text-muted-foreground">
-                  {meta.action}; в среднем R {segment.average_recency_days == null ? '—' : segment.average_recency_days.toLocaleString('ru-RU', { maximumFractionDigits: 1 })} дн. · F {segment.average_frequency == null ? '—' : segment.average_frequency.toLocaleString('ru-RU', { maximumFractionDigits: 1 })} заказа · M {segment.average_monetary == null ? '—' : `${formatMoney(segment.average_monetary, 'axis')}`}.
+                  {meta.action}; в среднем R {fmt.numFixed(segment.average_recency_days, 1)} дн. · F {fmt.numFixed(segment.average_frequency, 1)} заказа · M {segment.average_monetary == null ? '—' : `${formatMoney(segment.average_monetary, 'axis')}`}.
                 </p>
               )}
             </>

@@ -2231,7 +2231,7 @@ function TgConnected({ username, channels, onDisconnect, busy }: { username: str
                     <span className="min-w-0 flex-1 truncate">
                       {c.title || '(без названия)'}
                       {c.username ? <span className="font-mono text-muted-foreground"> · @{c.username}</span> : null}
-                      {typeof c.participants === 'number' ? <span className="text-muted-foreground"> · {c.participants.toLocaleString('ru-RU')}</span> : null}
+                      {typeof c.participants === 'number' ? <span className="text-muted-foreground"> · {fmt.num(c.participants)}</span> : null}
                     </span>
                     {added ? <span className="shrink-0 text-2xs text-verdant">в дашборде</span>
                       : !eligible ? <span className="shrink-0 text-2xs text-muted-foreground">группа</span> : null}
