@@ -151,3 +151,104 @@ test('сжатие фикстуры действительно deflate, а не 
   assert.equal(buf.readUInt16LE(entryStart + 8), 8);
   assert.ok(zlib.inflateRawSync !== undefined);
 });
+
+// ── H-2: линейное время и жёсткие бюджеты ─────────────────────────────────────────────────────────
+// Ленивые регулярки (/<row\b[^>]*>([\s\S]*?)<\/row>/) на каждом НЕЗАКРЫТОМ теге сканировали остаток
+// файла и откатывались: замер аудита #554 — ×4 на удвоение входа, 906 КБ занимали единственную
+// web-реплику на 9.9 с, и это было доступно любому пользователю через импорт своего канала.
+
+/** Книга с произвольным XML листа — фикстуры buildXlsx умеют только корректный лист. */
+function bookWithSheet(sheetXml) {
+  const { buildZip } = require('./cdekFixtures');
+  return buildZip([
+    { name: 'xl/workbook.xml', data: Buffer.from('<workbook xmlns:r="r"><sheets><sheet name="s" sheetId="1" r:id="rId1"/></sheets></workbook>', 'utf8') },
+    { name: 'xl/_rels/workbook.xml.rels', data: Buffer.from('<Relationships><Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>', 'utf8') },
+    { name: 'xl/worksheets/sheet1.xml', data: Buffer.from(sheetXml, 'utf8') },
+  ]);
+}
+
+const unclosedSheet = (repeats) =>
+  '<?xml version="1.0"?><worksheet><sheetData>'
+  + '<row r="1"><c r="A1"><v>1</v>'.repeat(repeats)
+  + '</sheetData></worksheet>';
+
+test('xlsx: патологический лист с оборванными тегами отвергается за миллисекунды', () => {
+  // 1 МБ повторов незакрытых <row>/<c>: до правки этот вход разбирался почти 10 секунд.
+  const buf = bookWithSheet(unclosedSheet(36000));
+  const t0 = performance.now();
+  assert.throws(() => readXlsxRows(buf), (e) => {
+    assert.ok(e instanceof SheetReadError);
+    assert.match(e.userMessage, /повреждён/i);
+    return true;
+  });
+  const ms = performance.now() - t0;
+  assert.ok(ms < 500, `разбор занял ${ms.toFixed(0)} мс — порог 500 мс (запас против флаков)`);
+});
+
+test('xlsx: время растёт линейно — удвоение входа не даёт ×4', () => {
+  const measure = (repeats) => {
+    const buf = bookWithSheet(unclosedSheet(repeats));
+    const t0 = performance.now();
+    try { readXlsxRows(buf); } catch { /* ожидаемо отвергается */ }
+    return performance.now() - t0;
+  };
+  measure(4000);                                  // прогрев JIT
+  const small = Math.max(measure(8000), 0.5);     // пол против нулевых замеров на быстрой машине
+  const large = measure(16000);
+  assert.ok(large / small < 2.5,
+    `удвоение входа дало ×${(large / small).toFixed(2)} (${small.toFixed(1)} → ${large.toFixed(1)} мс), ожидалось < 2.5`);
+});
+
+test('xlsx: несходящиеся теги ловятся пре-сканом до всякого разбора', () => {
+  // Лишний </row> без пары — файл повреждён, и это видно счётом, а не разбором.
+  const buf = bookWithSheet('<?xml version="1.0"?><worksheet><sheetData><row r="1"><c r="A1"><v>1</v></c></row></row></sheetData></worksheet>');
+  assert.throws(() => readXlsxRows(buf), /повреждён/i);
+});
+
+test('xlsx: `<row` не путается с `<rowBreaks` за пределами sheetData', () => {
+  const buf = bookWithSheet(
+    '<?xml version="1.0"?><worksheet><sheetData><row r="1"><c r="A1"><v>7</v></c></row></sheetData>'
+    + '<rowBreaks count="1"><brk id="1"/></rowBreaks></worksheet>');
+  assert.deepEqual(readXlsxRows(buf).rows[0], [7]);
+});
+
+test('xlsx: дедлайн разбора — последний рубеж даже для линейного пути', () => {
+  const rows = Array.from({ length: 2000 }, (_, i) => [i, `строка ${i}`]);
+  const buf = buildXlsx(rows);
+  // Часы двигаются сами на каждый вызов: любой реальный лист гарантированно «просрочен».
+  let ticks = 0;
+  const now = () => { ticks += 10_000; return ticks; };
+  assert.throws(() => readXlsxRows(buf, { deadlineMs: 1, now }), /слишком сложный/i);
+  // С нормальными часами тот же файл читается целиком.
+  assert.equal(readXlsxRows(buf).rows.length, 2000);
+});
+
+test('xlsx: отдельный потолок на лист — одна запись не выбирает бюджет архива', () => {
+  const buf = buildXlsx([['ID'], [1]]);
+  assert.throws(() => readXlsxRows(buf, { maxSheetBytes: 16 }), /слишком большой/i);
+  assert.throws(() => readXlsxRows(buf, { maxSharedStringsBytes: 4 }), /слишком большой/i);
+});
+
+test('xlsx: ошибка распаковки приходит пользовательским текстом, а не текстом драйвера', () => {
+  // Бьём хвост данных записи: inflate падает изнутри zlib.
+  const buf = buildXlsx([['ID'], [1]]);
+  const broken = Buffer.from(buf);
+  for (let i = 40; i < Math.min(80, broken.length); i++) broken[i] = 0xff;
+  assert.throws(() => readXlsxRows(broken), (e) => {
+    assert.ok(e instanceof SheetReadError, 'сырой RangeError/zlib-ошибка не должна доезжать до cdek_imports.error');
+    return true;
+  });
+});
+
+test('xlsx: строковая таблица с оборванным <si> тоже отвергается, а не сканируется до конца', () => {
+  const { buildZip } = require('./cdekFixtures');
+  const buf = buildZip([
+    { name: 'xl/workbook.xml', data: Buffer.from('<workbook xmlns:r="r"><sheets><sheet name="s" sheetId="1" r:id="rId1"/></sheets></workbook>', 'utf8') },
+    { name: 'xl/_rels/workbook.xml.rels', data: Buffer.from('<Relationships><Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>', 'utf8') },
+    { name: 'xl/sharedStrings.xml', data: Buffer.from('<sst>' + '<si><t>x</t>'.repeat(20000) + '</sst>', 'utf8') },
+    { name: 'xl/worksheets/sheet1.xml', data: Buffer.from('<worksheet><sheetData><row r="1"><c r="A1" t="s"><v>0</v></c></row></sheetData></worksheet>', 'utf8') },
+  ]);
+  const t0 = performance.now();
+  assert.throws(() => readXlsxRows(buf), /повреждён/i);
+  assert.ok(performance.now() - t0 < 500);
+});
