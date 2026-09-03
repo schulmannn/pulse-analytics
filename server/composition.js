@@ -23,6 +23,9 @@ const { createNotionCrashClient } = require('./lib/notion_crash');
 const { log: defaultLog } = require('./lib/observability');
 const { makeResolveChannel, hasWorkspaceRole } = require('./middleware/tenant');
 const { createApp } = require('./app');
+// GDPR — сервис над пулом; собирается ЗДЕСЬ и инъектируется в фасад данных: db.js не имеет права
+// тянуть слой сервисов (гвард границ), а composition и так собирает все сервисы.
+const { createGdprService } = require('./services/gdprService');
 const { createAuthService } = require('./services/authService');
 const { createAiProvider } = require('./infrastructure/aiProvider');
 const { createAiChatService } = require('./services/aiChatService');
@@ -59,7 +62,9 @@ const {
 
 function createComposition(config, overrides = {}) {
   const log = overrides.log || defaultLog;
-  const db = overrides.db || createDatabase(config, overrides.databaseOptions);
+  // databaseOptions несёт фабрики, которые фасад не собирает сам (см. createGdprService выше).
+  const databaseOptions = { createGdprService, ...(overrides.databaseOptions || {}) };
+  const db = overrides.db || createDatabase(config, databaseOptions);
   // Отдельный МАЛЫЙ пул для фонового сбора/отчётов/maintenance — тяжёлый хвост не должен занимать
   // коннекты у live HTTP/auth/tenant-путей (они держат основной `db`). Те же конечные DB-deadlines,
   // только `max` меньше (config.database.backgroundPoolMax, дефолт 2).
@@ -73,7 +78,9 @@ function createComposition(config, overrides = {}) {
       ? db
       : createDatabase(
           { ...config, database: { ...config.database, poolMax: config.database.backgroundPoolMax } },
-          overrides.backgroundDatabaseOptions || overrides.databaseOptions,
+          overrides.backgroundDatabaseOptions
+            ? { createGdprService, ...overrides.backgroundDatabaseOptions }
+            : databaseOptions,
         ));
   const mtprotoClient =
     overrides.mtprotoClient ||

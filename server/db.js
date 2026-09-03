@@ -22,7 +22,7 @@ const { createCdekRepo } = require('./repos/cdekRepo');
 const { createRusenderRepo } = require('./repos/rusenderRepo');
 const { createAiChatsRepo } = require('./repos/aiChatsRepo');
 const { createAuditRepo } = require('./repos/auditRepo');
-const { createGdprService } = require('./services/gdprService');
+
 // DB core (P2 db/core): пул / Railway-SSL / enabled / ping / close + классификация недоступности
 // живут в server/db/*. db.js их импортирует и ре-экспортит — публичный `db.*` API не меняется.
 const { createPool } = require('./db/pool');
@@ -228,9 +228,16 @@ function createDatabase(config, overrides = {}) {
   // GDPR — сервис над пулом+transaction (кросс-доменные erasure/export; спека: GDPR=service).
   // pageSize — размер keyset-страницы стриминг-экспорта (из config: services читают только
   // внедрённые deps, не окружение — check:boundaries).
-  const gdprService = createGdprService({
-    pool, enabled, transaction, exportPageSize: config.database.gdprExportPageSize,
-  });
+  /* Фабрика приходит СНАРУЖИ: фасад данных не имеет права тянуть слой сервисов (гвард границ).
+     Направление db → services было единственным местом, где нижний слой знал о верхнем, и
+     composition.js — естественное место для сборки, он и так собирает все сервисы.
+     Без фабрики (server/migrate.js: ему нужна только схема) секция gdpr в фасаде просто
+     отсутствует — это честнее заглушки, которая молча ничего не стирает. */
+  const gdprService = overrides.createGdprService
+    ? overrides.createGdprService({
+        pool, enabled, transaction, exportPageSize: config.database.gdprExportPageSize,
+      })
+    : null;
   // Campaign membership performs an atomic lock/count/insert through the shared transaction helper.
   const campaignsRepo = createCampaignsRepo({
     pool,
@@ -305,7 +312,7 @@ function createDatabase(config, overrides = {}) {
     aiChats: aiChatsRepo, // listAiChats, createAiChat, getAiChat, deleteAiChat, listAiChatMessages, appendAiChatMessage, getAiUsageToday, bumpAiUsage
     jobs: jobsRepo, // claimJob, completeJob, failJob, getJob, runJobOnce, pruneTerminalJobs
     audit: auditRepo, // recordAuditEvent, pruneAuditEvents
-    gdpr: gdprService, // deleteUserAccount, streamUserExport (сервис, не repo)
+    ...(gdprService ? { gdpr: gdprService } : {}), // deleteUserAccount, streamUserExport (сервис, не repo)
   });
 }
 
