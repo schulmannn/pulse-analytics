@@ -1310,7 +1310,11 @@ export function useMsRfmSegmentCustomers(period: MsPeriod, segment: string | nul
     enabled: channelId != null && segment != null,
     queryKey: qk.msRfmCustomers.window(channelId, period, segment, offset),
     staleTime: STALE_LIVE,
-    placeholderData: keepPreviousForChannel(channelId),
+    // placeholderData здесь НАМЕРЕННО нет, хотя ключ и оконный. Это ПОСТРАНИЧНЫЙ запрос: ключ
+    // меняет не только период, но и offset («Показать ещё»), а страницы копятся в состоянии
+    // хоста. Отдать при смене offset данные ПРЕДЫДУЩЕЙ страницы значит подсунуть накопителю ту
+    // же страницу второй раз — список перестаёт расти и не доходит до порога виртуализации
+    // (поймано e2e virtual-tables). Морф периода этой таблице и не нужен: она не график.
     queryFn: ({ signal }) =>
       apiGet(
         `/api/ms/rfm-customers?${msPeriodQuery(period)}&segment=${encodeURIComponent(segment ?? '')}&limit=${msRfmCustomersLimit(offset)}&offset=${offset}`,
