@@ -286,3 +286,50 @@ test('смена роли и исключение участника; listForeig
   assert.strictEqual((await db.listWorkspaceMembers(ws.id)).length, 1);
   assert.strictEqual((await db.listForeignMemberships(guest.id)).length, 0, 'доступ пропал вместе со строкой членства');
 });
+
+// ── H-1: штамп раскрытия ссылки (миграция 041) ────────────────────────────────────────────────────
+test('markInviteLinkExposed идемпотентен и скоупится воркспейсом', { skip }, async () => {
+  const owner = await mkUser('o8');
+  const ws = await db.ensureTeamWorkspace(owner.id);
+  const inv = await invite(ws.id, mail('exposed'), 'member', { by: owner.id });
+
+  const fresh = await db.getWorkspaceInviteByToken(sha256(inv.raw));
+  assert.strictEqual(fresh.link_exposed, false, 'выпущенное приглашение ещё никому не показывали');
+
+  assert.strictEqual(await db.markInviteLinkExposed(ws.id, inv.result.invite.id), true);
+  assert.strictEqual((await db.getWorkspaceInviteByToken(sha256(inv.raw))).link_exposed, true);
+  // Повтор ничего не двигает: важен факт, а не последняя дата.
+  assert.strictEqual(await db.markInviteLinkExposed(ws.id, inv.result.invite.id), false,
+    'второй вызов не перезаписывает первую отметку');
+
+  // Чужой воркспейс по id не помечает.
+  const stranger = await mkUser('o9');
+  const otherWs = await db.ensureTeamWorkspace(stranger.id);
+  const other = await invite(otherWs.id, mail('other'), 'member', { by: stranger.id });
+  assert.strictEqual(await db.markInviteLinkExposed(ws.id, other.result.invite.id), false);
+  assert.strictEqual((await db.getWorkspaceInviteByToken(sha256(other.raw))).link_exposed, false);
+});
+
+test('перевыпуск ссылки штампует раскрытие тем же UPDATE — окна без отметки нет', { skip }, async () => {
+  const owner = await mkUser('o10');
+  const ws = await db.ensureTeamWorkspace(owner.id);
+  const inv = await invite(ws.id, mail('reissue'), 'viewer', { by: owner.id });
+  assert.strictEqual((await db.getWorkspaceInviteByToken(sha256(inv.raw))).link_exposed, false);
+
+  const raw2 = `${nonce}-reissued`;
+  const reissued = await db.reissueWorkspaceInviteToken(ws.id, inv.result.invite.id, sha256(raw2), inHours(24));
+  assert.ok(reissued, 'живое приглашение перевыпускается');
+  assert.strictEqual((await db.getWorkspaceInviteByToken(sha256(inv.raw))), null, 'прежний токен мёртв');
+  assert.strictEqual((await db.getWorkspaceInviteByToken(sha256(raw2))).link_exposed, true);
+});
+
+test('created_via пишется только известным значением', { skip }, async () => {
+  const claimed = await db.createUser({ email: mail('claimed'), pass_hash: 'x', role: 'user', status: 'unverified', created_via: 'invite_claim' });
+  assert.strictEqual((await db.getUserById(claimed.id)).created_via, 'invite_claim');
+  assert.strictEqual(await db.clearUserCreatedVia(claimed.id), true);
+  assert.strictEqual((await db.getUserById(claimed.id)).created_via, null);
+  assert.strictEqual(await db.clearUserCreatedVia(claimed.id), false, 'повторное снятие — no-op');
+
+  const junk = await db.createUser({ email: mail('junk'), pass_hash: 'x', role: 'user', status: 'active', created_via: 'какая-то строка' });
+  assert.strictEqual((await db.getUserById(junk.id)).created_via, null, 'свободный текст в признак безопасности не попадает');
+});

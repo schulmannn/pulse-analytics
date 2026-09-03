@@ -1,5 +1,8 @@
 'use strict';
 
+const crypto = require('crypto');
+const { createVerifyEmail } = require('../lib/verifyEmail');
+
 /* ── Команда: приглашения в воркспейс и участники ────────────────────────────────────────────────
    Раздел «Команда» в /settings до этого был витриной без бэкенда (ростер в localStorage, письма не
    уходили, доступ не выдавался). Здесь — недостающее звено: выпуск приглашения со ссылкой в письме,
@@ -15,10 +18,14 @@
 
 function registerTeamRoutes({
   app, db, requireAuth, authLimiter, audit, log,
-  appBase, sha256, newToken, INVITE_TTL,
-  sendEmailDetailed, emailConfigured, escHtml,
+  appBase, sha256, newToken, INVITE_TTL, VERIFY_TTL,
+  sendEmail, sendEmailDetailed, emailConfigured, emailShell, emailBtn, escHtml,
   hashPassword, signSession, SESSION_TTL, SESSION_ABSOLUTE_TTL, setSessionCookie,
 }) {
+  // Письмо подтверждения — тот же шаблон, что у обычной регистрации (lib/verifyEmail).
+  const verifyEmailHtml = createVerifyEmail({ emailShell, emailBtn });
+  // Пароль, который сервер не собирается использовать: для claim по раскрытой ссылке.
+  const unusablePassword = () => hashPassword(crypto.randomBytes(32).toString('hex'));
   const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
   const normalizeEmail = (value) => String(value || '').toLowerCase().trim();
   const dbOff = (res) => res.status(503).json({ error: 'БД не подключена' });
@@ -231,15 +238,20 @@ function registerTeamRoutes({
           provider_error: sent.name || sent.reason || null,
         });
       }
+      /* Сырая ссылка уходит инициатору ТОЛЬКО когда письмо не доехало — ровно то, ради чего она
+         здесь и была («передать мессенджером, если почта подвела»). Раньше она возвращалась ВСЕГДА,
+         и это ломало саму посылку приглашения: доставка письма переставала что-либо доказывать,
+         потому что ссылка была и у приглашающего. Теперь удачная доставка оставляет токен только в
+         ящике получателя, а любое раскрытие штампуется — /claim по такому приглашению больше не
+         активирует аккаунт, а требует подтверждения почты (H-1). */
+      if (!delivered) await db.markInviteLinkExposed(workspace.id, result.invite.id);
       const state = await teamState(req.user.uid);
       res.json({
         ok: true,
         delivered,
         // Причина отказа — для человека у формы: сервер знает её, и молчать о ней нечестно.
         delivery: delivered ? null : { outcome: sent.outcome, status: sent.status || null, error: sent.name || sent.reason || null },
-        // Ссылка отдаётся ТОЛЬКО в момент выпуска (сырой токен больше нигде не живёт — в БД
-        // только sha256). Владелец сможет передать её мессенджером, если почта подвела.
-        invite_link: link,
+        ...(delivered ? {} : { invite_link: link }),
         invite: result.invite,
         ...state,
       });
@@ -263,6 +275,8 @@ function registerTeamRoutes({
       const invite = await db.reissueWorkspaceInviteToken(
         workspace.id, id, sha256(raw), new Date(Date.now() + INVITE_TTL));
       if (!invite) return res.status(404).json({ error: 'Приглашение не найдено' });
+      // reissueWorkspaceInviteToken штампует link_exposed_at тем же UPDATE — между выдачей сырого
+      // токена и пометкой нет окна, в которое ссылка уже ушла, а приглашение считается «чистым».
       audit(req, 'team.invite_link_reissued', { workspace_id: workspace.id, invite_id: id }).catch(() => {});
       res.json({
         ok: true,
@@ -341,6 +355,9 @@ function registerTeamRoutes({
         // Заводить пароль на этой странице можно, только когда аккаунта ещё нет (или он так и не
         // подтверждён) — иначе ссылка стала бы обходным сбросом пароля живого аккаунта.
         needs_account: invite.invitee_status == null || invite.invitee_status === 'unverified',
+        // Ссылку показывали приглашающему → аккаунт по ней активируется только письмом на сам
+        // ящик, и пароль здесь не спрашивается: сервер его всё равно не сохранит (H-1).
+        verify_required: invite.link_exposed === true,
       });
     } catch (e) { next(e); }
   });
@@ -371,25 +388,41 @@ function registerTeamRoutes({
     } catch (e) { next(e); }
   });
 
-  /* ── Приём приглашения БЕЗ аккаунта (создать и сразу войти) ───────────────────────────────────
-     Доставка письма доказывает владение ящиком — ровно то же основание, по которому verified-email
-     от Google активирует аккаунт без нашего письма-подтверждения (routes/auth.js). Поэтому здесь
-     создаётся сразу 'active' аккаунт, без второго круга «зарегистрируйтесь → подтвердите почту».
+  /* ── Приём приглашения БЕЗ аккаунта ───────────────────────────────────────────────────────────
+     Доставка письма доказывает владение ящиком — то же основание, по которому verified-email от
+     Google активирует аккаунт без нашего подтверждения (routes/auth.js). Но доказывает она это
+     ТОЛЬКО пока сырая ссылка никому, кроме получателя, не показывалась.
 
-     Граница: путь работает ТОЛЬКО когда аккаунта нет либо он 'unverified'. Живой 'active' аккаунт
-     не трогаем (иначе ссылка была бы обходным сбросом пароля) — просим войти и открыть ссылку
-     снова. Для 'unverified' пароль ПЕРЕЗАПИСЫВАЕТСЯ выбранным сейчас: строка могла быть заранее
-     засеяна атакующим с известным ему паролем, и без перезаписи приглашение подарило бы ему
-     активный аккаунт на чужой ящик (тот же разбор, что в google-ветке auth.js). */
+     H-1 (аудит #554). Раньше ссылка возвращалась приглашающему всегда, и владелец воркспейса мог
+     сам открыть её, выбрать пароль и получить живой ACTIVE-аккаунт на ЧУЖОЙ email вместе с cookie
+     на 30 дней; последующий вход настоящего владельца через Google этот аккаунт не сбрасывал.
+     Теперь раскрытие ссылки штампуется (link_exposed_at), и по такому приглашению:
+       • аккаунт создаётся 'unverified' и активируется только письмом на сам ящик;
+       • пароль открывшего ссылку НЕ сохраняется — вместо него случайный неиспользуемый; свой
+         пароль владелец задаёт через «Забыли пароль» после подтверждения. Иначе подтверждение
+         почты настоящим владельцем активировало бы аккаунт с паролем атакующего;
+       • cookie не выдаётся.
+     Приглашение при этом принимается сразу: членство безопасно, пока аккаунт не активен, зато
+     ссылка гасится и второй раз не сработает.
+
+     Граница (обе ветки): путь работает ТОЛЬКО когда аккаунта нет либо он 'unverified'. Живой
+     'active' аккаунт не трогаем (иначе ссылка была бы обходным сбросом пароля) — просим войти и
+     открыть ссылку снова. Для 'unverified' на НЕраскрытой ссылке пароль перезаписывается выбранным
+     сейчас: строку мог заранее засеять атакующий с известным ему паролем, и без перезаписи
+     приглашение подарило бы ему активный аккаунт (тот же разбор, что в google-ветке auth.js). */
   app.post('/api/team/invite/:token/claim', authLimiter, async (req, res, next) => {
     if (!db.enabled) return dbOff(res);
     const password = String((req.body && req.body.password) || '');
-    if (password.length < 8) return res.status(400).json({ error: 'Пароль минимум 8 символов' });
     const tokenHash = sha256(String(req.params.token || ''));
     try {
       const invite = await db.getWorkspaceInviteByToken(tokenHash);
       if (!invite) return acceptError(res, 'invalid');
       if (invite.status !== 'live') return acceptError(res, invite.status);
+      // Пароль обязателен ровно там, где он будет СОХРАНЁН. На раскрытой ссылке сервер его не
+      // принимает (ниже вместо него случайный), и требовать его было бы враньём перед формой.
+      if (invite.link_exposed !== true && password.length < 8) {
+        return res.status(400).json({ error: 'Пароль минимум 8 символов' });
+      }
 
       const existing = await db.getUserByEmail(invite.email);
       if (existing && existing.status === 'active') {
@@ -399,15 +432,29 @@ function registerTeamRoutes({
         return res.status(403).json({ error: 'Аккаунт неактивен — обратитесь к администратору' });
       }
 
-      const passHash = await hashPassword(password);
+      // Ссылку видел не только получатель письма → доставка больше ничего не доказывает.
+      const verifyRequired = invite.link_exposed === true;
+      const passHash = verifyRequired ? await unusablePassword() : await hashPassword(password);
       let user;
       if (existing) {
-        await db.setUserPassword(existing.id, passHash);
-        await db.setUserStatus(existing.id, 'active');
+        // На раскрытой ссылке пароль засеянной строки НЕ трогаем: перезаписать его мог бы ровно
+        // тот, кто ссылку и раскрыл. Строка остаётся 'unverified' до письма.
+        if (!verifyRequired) {
+          await db.setUserPassword(existing.id, passHash);
+          await db.setUserStatus(existing.id, 'active');
+        }
         user = await db.getUserById(existing.id);
       } else {
         try {
-          user = await db.createUser({ email: invite.email, pass_hash: passHash, role: 'user', status: 'active' });
+          user = await db.createUser({
+            email: invite.email,
+            pass_hash: passHash,
+            role: 'user',
+            status: verifyRequired ? 'unverified' : 'active',
+            // Происхождение — вход для google-ветки auth.js: аккаунт, заведённый по ссылке
+            // приглашения, при первом входе настоящего владельца отзывает чужие сессии.
+            created_via: 'invite_claim',
+          });
         } catch (e) {
           // Гонка с параллельной регистрацией на тот же email — аккаунт появился между чтением и
           // вставкой. Ответ тот же, что для живого аккаунта: войти и открыть ссылку снова.
@@ -421,6 +468,28 @@ function registerTeamRoutes({
 
       const result = await db.acceptWorkspaceInvite({ tokenHash, uid: user.id, email: user.email });
       if (result.outcome !== 'accepted') return acceptError(res, result.outcome);
+
+      if (verifyRequired) {
+        // Письмо на САМ ящик — единственный путь к активации. Кулдаун createEmailToken (60 с на
+        // uid+kind) может вернуть null: письмо уже недавно уходило, второе не шлём, но ответ тот
+        // же — «проверьте почту», иначе форма рассказывала бы о состоянии чужого ящика.
+        const rawVerify = newToken();
+        const emailTokenId = await db.createEmailToken(
+          user.id, 'verify', sha256(rawVerify), new Date(Date.now() + VERIFY_TTL));
+        if (emailTokenId) {
+          const verifyLink = `${appBase(req)}/verify?token=${rawVerify}`;
+          await sendEmail(user.email, 'Подтверди email — Atlavue',
+            verifyEmailHtml(verifyLink, { passwordUnusable: true }), verifyLink).catch(() => {});
+        }
+        req.user = { uid: user.id, role: user.role, email: user.email };
+        audit(req, 'team.invite_claimed', {
+          workspace_id: result.workspace_id, role: result.role, verify_required: true,
+        }).catch(() => {});
+        log('info', 'invite_claim_verify_required', {
+          workspace_id: result.workspace_id, invite_id: invite.id,
+        });
+        return res.json({ ok: true, verify_required: true, workspace: result.workspace_name, role: result.role });
+      }
 
       const now = Date.now();
       const token = signSession({

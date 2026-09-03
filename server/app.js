@@ -206,8 +206,14 @@ function createApp(deps) {
     sha256,
     newToken,
     INVITE_TTL,
+    // Приём приглашения по РАСКРЫТОЙ ссылке идёт через подтверждение почты (H-1) — отсюда те же
+    // sendEmail/emailShell/emailBtn/VERIFY_TTL, что у обычной регистрации.
+    VERIFY_TTL,
+    sendEmail,
     sendEmailDetailed,
     emailConfigured,
+    emailShell,
+    emailBtn,
     escHtml,
     hashPassword,
     signSession,

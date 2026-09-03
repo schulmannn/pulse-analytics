@@ -28,22 +28,27 @@ function createUsersRepo({ pool, enabled, transaction }) {
     return rows[0].n;
   }
 
-  async function createUser({ email, pass_hash, role, status }) {
+  // `created_via` — происхождение аккаунта. Пишется только известными значениями (белый список):
+  // это признак безопасности, по которому Google-ветка решает отзывать сессии, а не свободный текст.
+  const CREATED_VIA = ['invite_claim'];
+
+  async function createUser({ email, pass_hash, role, status, created_via }) {
     if (!enabled) return null;
     const r = USER_ROLES.includes(role) ? role : 'user';
     const s = USER_STATUSES.includes(status) ? status : 'pending';
+    const via = CREATED_VIA.includes(created_via) ? created_via : null;
     const { rows } = await pool.query(
-      `INSERT INTO users (email, pass_hash, role, status) VALUES ($1,$2,$3,$4)
-       RETURNING id, email, role, status, token_version,
+      `INSERT INTO users (email, pass_hash, role, status, created_via) VALUES ($1,$2,$3,$4,$5)
+       RETURNING id, email, role, status, token_version, created_via,
          to_char(created_at,'YYYY-MM-DD"T"HH24:MI:SS') AS created_at`,
-      [String(email).toLowerCase().trim(), pass_hash, r, s]);
+      [String(email).toLowerCase().trim(), pass_hash, r, s, via]);
     return rows[0];
   }
 
   async function getUserByEmail(email) {
     if (!enabled) return null;
     const { rows } = await pool.query(
-      'SELECT id, email, pass_hash, role, status, token_version FROM users WHERE email=$1',
+      'SELECT id, email, pass_hash, role, status, token_version, created_via FROM users WHERE email=$1',
       [String(email).toLowerCase().trim()]);
     return rows[0] || null;
   }
@@ -51,7 +56,7 @@ function createUsersRepo({ pool, enabled, transaction }) {
   async function getUserById(id) {
     if (!enabled) return null;
     const { rows } = await pool.query(
-      'SELECT id, email, role, status, token_version FROM users WHERE id=$1', [id]);
+      'SELECT id, email, role, status, token_version, created_via FROM users WHERE id=$1', [id]);
     return rows[0] || null;
   }
 
@@ -94,6 +99,16 @@ function createUsersRepo({ pool, enabled, transaction }) {
       'UPDATE users SET pass_hash=$2, token_version=token_version+1 WHERE id=$1',
       [id, pass_hash]);
     return true;
+  }
+
+  /* Снимает пометку происхождения после того, как настоящий владелец ящика доказал владение и
+     аккаунт обезврежен (Google-ветка auth.js). Одноразовость важна: пока пометка стоит, каждый вход
+     заново обнуляет пароль и отзывает сессии — один раз это защита, каждый раз это шум. */
+  async function clearUserCreatedVia(id) {
+    if (!enabled || id == null) return false;
+    const { rowCount } = await pool.query(
+      'UPDATE users SET created_via = NULL WHERE id=$1 AND created_via IS NOT NULL', [id]);
+    return rowCount > 0;
   }
 
   async function revokeUserSessions(id) {
@@ -273,7 +288,7 @@ function createUsersRepo({ pool, enabled, transaction }) {
 
   return {
     USER_ROLES, USER_STATUSES,
-    countUsers, createUser, getUserByEmail, getUserById, getUserAvatar, setUserAvatar,
+    countUsers, createUser, clearUserCreatedVia, getUserByEmail, getUserById, getUserAvatar, setUserAvatar,
     listUsers, updateUser, setUserPassword, revokeUserSessions, setUserStatus,
     createEmailToken, useEmailToken, pruneEmailTokens, getPrefs, setPrefs,
     consumeResetTokenAndSetPassword, consumeVerifyTokenAndActivate,
