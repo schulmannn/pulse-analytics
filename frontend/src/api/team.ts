@@ -86,6 +86,8 @@ export const InvitePreviewSchema = z
     workspace: z.string(),
     invited_by: z.string().optional().nullable(),
     needs_account: z.boolean().optional().default(false),
+    /** Ссылку показывали приглашающему → активация только письмом, пароль здесь не спрашивается. */
+    verify_required: z.boolean().optional().default(false),
   })
   .passthrough();
 export type InvitePreview = z.infer<typeof InvitePreviewSchema>;
@@ -95,6 +97,8 @@ export const InviteAcceptSchema = z
     ok: z.literal(true),
     workspace: z.string().optional().nullable(),
     role: z.string().optional().nullable(),
+    /** Аккаунт заведён, но не активен: сессии нет, дальше — письмо на ящик (H-1). */
+    verify_required: z.boolean().optional().default(false),
   })
   .passthrough();
 
@@ -200,7 +204,7 @@ export function useAcceptInvite() {
 export function useClaimInvite() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: { token: string; password: string }) =>
+    mutationFn: (body: { token: string; password?: string }) =>
       apiSend(
         'POST',
         `/api/team/invite/${encodeURIComponent(body.token)}/claim`,

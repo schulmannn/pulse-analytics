@@ -169,6 +169,7 @@ function createTeamRepo({ pool, enabled, transaction, ensurePersonalWorkspace })
     const { rows } = await pool.query(
       `SELECT i.id, i.email, i.role, i.accepted_at, i.revoked_at,
               i.expires_at <= now() AS expired,
+              i.link_exposed_at IS NOT NULL AS link_exposed,
               w.name AS workspace_name,
               inviter.email AS invited_by_email,
               (SELECT u.status FROM users u WHERE lower(u.email) = i.email) AS invitee_status
@@ -188,6 +189,9 @@ function createTeamRepo({ pool, enabled, transaction, ensurePersonalWorkspace })
       role: row.role,
       workspace_name: row.workspace_name,
       invited_by_email: row.invited_by_email,
+      // Сырую ссылку хоть раз показывали инициатору → доставка письма больше не доказывает, что
+      // её открыл владелец ящика. Такой приём обязан идти через подтверждение почты (H-1).
+      link_exposed: row.link_exposed === true,
       // Есть ли уже аккаунт с этим email и в каком он статусе — страница по этому решает,
       // просить пароль (аккаунта нет) или отправить входить (аккаунт есть).
       invitee_status: row.invitee_status || null,
@@ -247,13 +251,25 @@ function createTeamRepo({ pool, enabled, transaction, ensurePersonalWorkspace })
     if (!enabled || !workspaceId || !inviteId) return null;
     const { rows } = await pool.query(
       `UPDATE workspace_invites
-          SET token_hash = $3, expires_at = $4
+          SET token_hash = $3, expires_at = $4, link_exposed_at = COALESCE(link_exposed_at, now())
         WHERE id = $1 AND workspace_id = $2 AND accepted_at IS NULL AND revoked_at IS NULL
         RETURNING id, email, role,
                   to_char(created_at,'YYYY-MM-DD"T"HH24:MI:SS') AS created_at,
                   to_char(expires_at,'YYYY-MM-DD"T"HH24:MI:SS') AS expires_at`,
       [inviteId, workspaceId, tokenHash, expiresAt]);
     return rows[0] || null;
+  }
+
+  /* Пометка «сырая ссылка ушла инициатору». Ставится ОДИН раз (первое раскрытие) и больше не
+     двигается: важна не последняя дата, а сам факт — приглашение уже нельзя считать доказательством
+     владения ящиком. Перевыпуск ссылки помечает себя сам, внутри своего UPDATE. */
+  async function markInviteLinkExposed(workspaceId, inviteId) {
+    if (!enabled || !workspaceId || !inviteId) return false;
+    const { rowCount } = await pool.query(
+      `UPDATE workspace_invites SET link_exposed_at = now()
+        WHERE id = $1 AND workspace_id = $2 AND link_exposed_at IS NULL`,
+      [inviteId, workspaceId]);
+    return rowCount > 0;
   }
 
   // Отзыв приглашения (ссылка из письма умирает немедленно). Скоупится воркспейсом — чужое
@@ -288,7 +304,8 @@ function createTeamRepo({ pool, enabled, transaction, ensurePersonalWorkspace })
     MAX_WORKSPACE_SEATS, INVITE_ROLES, INVITE_COOLDOWN_SECONDS, WORKSPACE_NAME_MAX,
     ensureTeamWorkspace, renameWorkspace, listWorkspaceMembers, listWorkspaceInvites, listForeignMemberships,
     countWorkspaceSeats, createWorkspaceInvite, getWorkspaceInviteByToken, acceptWorkspaceInvite,
-    reissueWorkspaceInviteToken, revokeWorkspaceInvite, setWorkspaceMemberRole, removeWorkspaceMember,
+    reissueWorkspaceInviteToken, markInviteLinkExposed, revokeWorkspaceInvite, setWorkspaceMemberRole,
+    removeWorkspaceMember,
   };
 }
 

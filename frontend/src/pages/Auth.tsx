@@ -404,11 +404,13 @@ export function ResetPage() {
 
 /**
  * Приём приглашения в команду (`/invite?token=…`). Публичная страница: ссылка приходит письмом,
- * сессии у получателя может ещё не быть. Три развилки, и все три честные:
+ * сессии у получателя может ещё не быть. Развилки, и все честные:
  *  • сессия есть и email совпал — одна кнопка «Принять»;
  *  • сессии нет и аккаунта тоже — пароль прямо здесь: доставка письма УЖЕ доказала владение
- *    ящиком (то же основание, что у verified-email от Google), поэтому второй круг
- *    «зарегистрируйтесь → подтвердите почту» не нужен, сервер заводит активный аккаунт;
+ *    ящиком (то же основание, что у verified-email от Google), сервер заводит активный аккаунт;
+ *  • то же, но ссылку показывали приглашающему (`verify_required`) — доставка больше ничего не
+ *    доказывает: пароль не спрашиваем (сервер его не сохранит), аккаунт заводится неактивным, и
+ *    дальше человек идёт по письму на СВОЙ ящик. H-1 из аудита #554;
  *  • аккаунт есть, но вошли не тем (или не вошли) — отправляем логиниться, ссылка подождёт.
  */
 export function InvitePage() {
@@ -527,10 +529,33 @@ export function InvitePage() {
     );
   }
 
-  // Аккаунта нет — заводим его прямо здесь и сразу впускаем.
+  // Ссылку видел не только получатель письма — аккаунт активируется письмом на его ящик.
+  const verifyRequired = invite.verify_required === true;
+
+  // Аккаунт заведён, сессии нет: единственный оставшийся шаг живёт в почте.
+  if (claimMutation.isSuccess && claimMutation.data?.verify_required) {
+    return (
+      <AuthShell title="Проверьте почту" subtitle={subtitle}>
+        <p className="text-sm text-ink2">
+          Мы отправили письмо на <b className="text-foreground">{invite.email}</b>. Откройте его и
+          подтвердите адрес — после этого задайте пароль через «Забыли пароль» на странице входа.
+        </p>
+        <p className="mt-3 text-sm text-ink2">
+          Доступ к пространству <b className="text-foreground">{invite.workspace}</b> уже закреплён
+          за этим адресом и появится сразу после подтверждения.
+        </p>
+        <InviteFooter />
+      </AuthShell>
+    );
+  }
+
+  // Аккаунта нет — заводим его прямо здесь.
   const handleClaim = (event: FormEvent) => {
     event.preventDefault();
-    claimMutation.mutate({ token, password }, { onSuccess: goToApp });
+    claimMutation.mutate(
+      verifyRequired ? { token } : { token, password },
+      { onSuccess: (data) => { if (!data.verify_required) goToApp(); } },
+    );
   };
 
   return (
@@ -545,21 +570,28 @@ export function InvitePage() {
           readOnly
           disabled
         />
-        <div className="mt-4">
-          <AuthField
-            id="invite-password"
-            label="Придумайте пароль"
-            icon="lock"
-            type="password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            placeholder="минимум 8 символов"
-            autoComplete="new-password"
-            minLength={8}
-            required
-            disabled={claimMutation.isPending}
-          />
-        </div>
+        {verifyRequired ? (
+          <p className="mt-4 text-sm text-ink2">
+            Эту ссылку мог видеть не только владелец адреса, поэтому аккаунт активируется
+            подтверждением почты: мы отправим письмо на <b className="text-foreground">{invite.email}</b>.
+          </p>
+        ) : (
+          <div className="mt-4">
+            <AuthField
+              id="invite-password"
+              label="Придумайте пароль"
+              icon="lock"
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              placeholder="минимум 8 символов"
+              autoComplete="new-password"
+              minLength={8}
+              required
+              disabled={claimMutation.isPending}
+            />
+          </div>
+        )}
         <Button
           type="submit"
           size="lg"
@@ -567,7 +599,9 @@ export function InvitePage() {
           pending={claimMutation.isPending}
           disabled={claimMutation.isPending}
         >
-          {claimMutation.isPending ? 'Создаём аккаунт…' : 'Принять и войти'}
+          {claimMutation.isPending
+            ? (verifyRequired ? 'Отправляем письмо…' : 'Создаём аккаунт…')
+            : (verifyRequired ? 'Отправить подтверждение' : 'Принять и войти')}
         </Button>
         {claimMutation.isError && (
           <p role="alert" className="mt-3 text-sm text-destructive">{errorMessage(claimMutation.error)}</p>

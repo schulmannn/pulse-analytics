@@ -1,6 +1,7 @@
 'use strict';
 
 const crypto = require('crypto');
+const { createVerifyEmail } = require('../lib/verifyEmail');
 
 function registerAuthRoutes({
   app, express, db, requireAuth, authLimiter, asyncHandler,
@@ -16,8 +17,8 @@ function registerAuthRoutes({
   // мог оборвать создание пользователя/токена уже после обещания «проверьте почту» (аудит P1).
   const trackTail = (job, task) =>
     jobTracker ? jobTracker.run(task, { job }) : Promise.resolve().then(task).catch(() => {});
-  const verifyEmailHtml = (link) => emailShell('Подтверди email',
-    `<p>Активируй аккаунт в Atlavue:</p>${emailBtn(link, 'Подтвердить email')}<p style="color:#64748d;font-size:13px">Ссылка действует 24 часа. Если это были не вы — проигнорируйте письмо.</p>`);
+  // Шаблон общий с routes/team.js (claim по раскрытой ссылке) — см. lib/verifyEmail.
+  const verifyEmailHtml = createVerifyEmail({ emailShell, emailBtn });
   const resetEmailHtml = (link) => emailShell('Сброс пароля',
     `<p>Задай новый пароль:</p>${emailBtn(link, 'Сбросить пароль')}<p style="color:#64748d;font-size:13px">Ссылка действует 1 час. Если это были не вы — проигнорируйте, пароль не изменится.</p>`);
   const existsEmailHtml = (base) => emailShell('Аккаунт уже существует',
@@ -138,6 +139,16 @@ function registerAuthRoutes({
       } else if (u.status !== 'active') {
         // Неизвестный/будущий не-active статус НЕ активируется молча — политика по умолчанию строгая.
         return res.status(403).json({ error: 'Аккаунт неактивен' });
+      } else if (u.created_via === 'invite_claim') {
+        // Аккаунт создан публичным /claim по ссылке приглашения (H-1). До правки такой аккаунт
+        // выпускался сразу ACTIVE с паролем, который выбрал ОТКРЫВШИЙ ссылку, — а её сервер отдавал
+        // приглашающему. Google только что доказал, что ящиком владеет текущий пользователь: гасим
+        // чужой пароль на случайный, отзываем все прежние сессии (setUserPassword бампает
+        // token_version) и снимаем пометку — защита нужна ровно один раз.
+        await db.setUserPassword(u.id, await hashPassword(crypto.randomBytes(32).toString('hex')));
+        await db.clearUserCreatedVia(u.id);
+        log('warn', 'invite_claim_account_reclaimed', { uid: u.id });
+        u = await db.getUserById(u.id);
       }
       const now = Date.now();
       const expires = now + SESSION_TTL;
