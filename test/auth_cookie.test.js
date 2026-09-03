@@ -225,53 +225,17 @@ test('ordinary API is cookie-only and ignores X-Session-Token', async () => {
   assert.deepEqual(await res.json(), { uid: user.id });
 });
 
-test('migrate-cookie is the narrow same-origin legacy bridge', async () => {
-  const token = legacyToken();
-  let res = await fetch(`${baseUrl}/api/auth/migrate-cookie`, {
-    method: 'POST',
-    headers: { 'X-Session-Token': token },
-  });
-  assert.equal(res.status, 403, 'missing same-origin proof fails closed');
-
-  const started = Date.now();
-  res = await fetch(`${baseUrl}/api/auth/migrate-cookie`, {
-    method: 'POST',
-    headers: {
-      Origin: baseUrl,
-      'X-Session-Token': token,
-    },
-  });
-  assert.equal(res.status, 200);
-  assert.deepEqual(await res.json(), { ok: true });
-  assert.equal(res.headers.get('cache-control'), 'no-store');
-  const cookie = sessionSetCookie(res);
-  const parsed = svc.parseToken(cookieToken(cookie));
-  assert.equal(parsed.legacyAbsolute, false);
-  assert.ok(parsed.exp >= started + svc.SESSION_TTL - 1000);
-  assert.ok(parsed.maxExp <= Date.now() + svc.SESSION_TTL);
-  assert.equal(parsed.exp, parsed.maxExp, 'legacy bridge receives one bounded full idle window');
-
-  res = await fetch(`${baseUrl}/api/auth/migrate-cookie`, {
-    method: 'POST',
-    headers: {
-      Origin: baseUrl,
-      'Sec-Fetch-Site': 'cross-site',
-      'X-Session-Token': legacyToken(),
-    },
-  });
-  assert.equal(res.status, 403);
-});
-
-test('migration validates current token_version and active user', async () => {
+test('маршрута обмена заголовочного токена на cookie больше нет', async () => {
+  /* Мост существовал ОДИН релиз: пользователь, вошедший до перехода на HttpOnly-cookie,
+     обменивал свой localStorage-токен на cookie. Критерий удаления — «семь дней после первого
+     деплоя» — наступил в июле, а маршрут прожил до сентября (аудит #554). Теперь любой запрос к
+     нему — обычный несуществующий путь, а не 403/401 живого эндпоинта. */
   const res = await fetch(`${baseUrl}/api/auth/migrate-cookie`, {
     method: 'POST',
-    headers: {
-      Origin: baseUrl,
-      'X-Session-Token': legacyToken({ ver: user.token_version - 1 }),
-    },
+    headers: { Origin: baseUrl, 'X-Session-Token': legacyToken() },
   });
-  assert.equal(res.status, 401);
-  assert.equal(sessionSetCookie(res), null);
+  assert.equal(res.status, 404);
+  assert.equal(sessionSetCookie(res), null, 'мёртвый маршрут не выдаёт сессию');
 });
 
 test('cookie mutation requires same-origin Origin or Referer', async () => {

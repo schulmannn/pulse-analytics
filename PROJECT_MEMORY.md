@@ -27,8 +27,8 @@ managed-first. Живой поиск упоминаний также работ�
 ## Текущая архитектура
 
 - `frontend/` — React 19, Vite, TypeScript strict, TanStack Query, Zod и Tailwind. Сборка
-  `frontend/dist` отдаётся Express на `/`; прежний интерфейс доступен только как временный
-  fallback на `/legacy`.
+  `frontend/dist` отдаётся Express на `/` и является ЕДИНСТВЕННОЙ HTML-поверхностью приложения:
+  прежняя nonce-оболочка `/legacy` вместе со своим CSP-контуром удалена.
 - `server/` — Node.js/Express. Путь запуска: `config.js` -> `app.js` -> `composition.js` ->
   `main.js`, тонкий entrypoint — `index.js`. Доменные зависимости идут через
   `routes/` -> `services/` -> `repos/` -> `db/`; фоновые задачи находятся в `jobs/`.
@@ -555,13 +555,13 @@ Google OAuth origins, Railway-service для recovery worker.
   изменением схемы обязателен проверенный native dump; последний pre-025 custom dump сохранён в persistent
   Postgres volume. Восстановление описано в `ops/BACKUP_RESTORE.md`.
 - Frontend bundle ограничен CI-гейтом: новые зависимости добавляются только при доказанной пользе.
-- Cookie-auth migration bridge имеет явный критерий удаления: через **7 дней после первого
-  production deploy этой версии** (максимальный TTL старого browser token) удалить
-  `/api/auth/migrate-cookie`, localStorage reader/purge и единственный `X-Session-Token` header из
-  `frontend/src/lib/session.ts` и legacy shell. В том же изменении обновить
-  `test/auth_transport_static.test.js`: grep/static-инвариант должен требовать уже ноль consumer-ов,
-  а не разрешать migration-only исключение. Календарную дату фиксировать только после фактического
-  deploy.
+- Cookie-auth migration bridge **удалён** (аудит #554, ТЗ-6): критерий «7 дней после первого
+  production deploy» наступил в июле, а мост прожил до сентября. Снесены `/api/auth/migrate-cookie`,
+  `migrateSessionCookie`, приём заголовочного токена, nonce-оболочка `public/index.html` со своим
+  `legacyCspHeader` и CI-шаг разбора её инлайновых скриптов. `test/auth_transport_static.test.js`
+  ИНВЕРТИРОВАН: требует ноль consumer-ов заголовочного транспорта. В `session.ts` осталась одна
+  синхронная уборка ключей `pulse_token`/`pulse_token_exp` из localStorage с датой удаления
+  2026-12-01 в комментарии — без работающего моста это уже не мост, а лежащий в браузере секрет.
 - Active/selected chips на `bg-primary/10` используют `text-accent-foreground`: светлая тема даёт
   4.53:1, а composite-пара и запрет старого `text-primary` recipe гейтятся design-token scripts.
   Светлая тема ПРОВЕРЕНА сплошным прогоном по 14 маршрутам в обеих темах (`e2e/contrast-rendered`):

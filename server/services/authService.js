@@ -156,43 +156,6 @@ function createAuthService({ config, db }) {
   // localStorage. This is the sole X-Session-Token consumer. It requires explicit
   // same-origin proof, validates current account/token_version, mints a NEW
   // bounded cookie, and returns no token to JavaScript.
-  async function migrateSessionCookie(req, res, next) {
-    if (!isCsrfSafe({
-      origin: req.headers.origin,
-      referer: req.headers.referer,
-      requestOrigin: `${req.protocol}://${req.get('host')}`,
-    }) || req.headers['sec-fetch-site'] === 'cross-site') {
-      return res.status(403).json({ error: 'csrf' });
-    }
-    const sess = parseToken(req.headers['x-session-token']);
-    if (!sess) return res.status(401).json({ error: 'Сессия истекла, войди снова' });
-    try {
-      const u = await db.getUserById(sess.uid);
-      if (!u || u.status !== 'active' || sess.tokenVersion !== u.token_version) {
-        return res.status(401).json({ error: 'Сессия истекла, войди снова' });
-      }
-      const now = Date.now();
-      // Rollout-era tokens have no max: give them one fresh 7-day bounded
-      // window. A max-aware token can never widen its existing deadline.
-      const maxExp = sess.legacyAbsolute
-        ? now + SESSION_TTL
-        : Math.min(sess.maxExp, now + SESSION_ABSOLUTE_TTL);
-      const exp = Math.min(now + SESSION_TTL, maxExp);
-      if (exp <= now) return res.status(401).json({ error: 'Сессия истекла, войди снова' });
-      const fresh = signSession({
-        uid: u.id,
-        role: u.role,
-        exp,
-        maxExp,
-        tokenVersion: u.token_version,
-      });
-      setSessionCookie(req, res, fresh, exp - now);
-      res.set('Cache-Control', 'no-store');
-      return res.json({ ok: true });
-    } catch (e) {
-      return next(e);
-    }
-  }
 
   function requireSuper(req, res, next) {
     if (!req.user || req.user.role !== 'superuser') return res.status(403).json({ error: 'Доступ только для администратора' });
@@ -204,8 +167,7 @@ function createAuthService({ config, db }) {
     signSession, parseToken,
     VERIFY_TTL, RESET_TTL, INVITE_TTL, sha256, newToken, DUMMY_HASH,
     bootstrapAdmin, claimOwnerChannel,
-    requireAuth, requireSuper, migrateSessionCookie,
-    setSessionCookie, clearSessionCookie,
+    requireAuth, requireSuper, setSessionCookie, clearSessionCookie,
   };
 }
 

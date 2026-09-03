@@ -20,7 +20,7 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const { requestContext } = require('./lib/observability');
-const { legacyCspHeader, setAppHeaders, setHtmlSecurityHeaders } = require('./lib/securityHeaders');
+const { setAppHeaders } = require('./lib/securityHeaders');
 const { assetCacheControl } = require('./lib/staticAssets');
 const { registerCollectorRoutes } = require('./routes/collector');
 const { registerAuthRoutes } = require('./routes/auth');
@@ -51,7 +51,7 @@ function createApp(deps) {
   const {
     config, db, log,
     fetchWithTimeout,
-    requireAuth, requireSuper, migrateSessionCookie, setSessionCookie, clearSessionCookie,
+    requireAuth, requireSuper, setSessionCookie, clearSessionCookie,
     resolveChannel, audit, getDbReady, getDraining,
     limiter, authLimiter, mediaLimiter,
     hashPassword, verifyPassword, DUMMY_HASH, signSession, SESSION_TTL,
@@ -105,31 +105,9 @@ function createApp(deps) {
       || /\/screenshot$/.test(req.path)) return next();
     jsonSmall(req, res, next);
   });
-  // ── App shell + strict nonce-CSP ──────────────────────────────────
-  // index.html is the only HTML surface that renders collector-snapshot data.
-  // A per-request nonce on its inline <script> tags + `script-src 'nonce-…'`
-  // (no 'unsafe-inline') means an injected <script> or inline event handler can't
-  // execute — closes the snapshot self-XSS class (defence-in-depth on top of the
-  // server-side escape/Number coercion). Inline styles stay allowed (style
-  // injection isn't code execution); the legacy shell has no external font/style dependency.
-  const APP_HTML_PATH = path.join(__dirname, '../public/index.html');
-  let APP_HTML = '';
-  try { APP_HTML = fs.readFileSync(APP_HTML_PATH, 'utf8'); }
-  catch (e) { console.error('[csp] index.html read failed:', e.message); }
-  function sendApp(req, res) {
-    const nonce = crypto.randomBytes(16).toString('base64');
-    let src = APP_HTML;
-    if (!src) { try { src = fs.readFileSync(APP_HTML_PATH, 'utf8'); } catch { return res.status(500).end(); } }
-    const html = src.split('<script>').join(`<script nonce="${nonce}">`);
-    setHtmlSecurityHeaders(req, res, legacyCspHeader(nonce))
-       .set('Content-Type', 'text/html; charset=utf-8')
-       .send(html);
-  }
-  // 3F-3 catover: '/' now serves the new Vite/React SPA (wired in the tail below). The
-  // legacy nonce-shell is reachable at /legacy as a reversible escape hatch until B2
-  // cleanup. Only its /js asset is still served from public/ (public/index.html is no
-  // longer routed — the SPA fallback owns '/').
-  app.use('/js', express.static(path.join(__dirname, '../public/js')));
+  // Единственная HTML-поверхность — SPA (ниже в хвосте). Прежняя nonce-оболочка с собственным
+  // CSP-контуром жила на /legacy как обратимый аварийный выход катовера 3F-3; критерий её
+  // удаления наступил в июле, и второй контур заголовков ушёл вместе с ней (аудит #554).
   // Картинки для писем (маскот в приглашении). Отдаются с ТОГО ЖЕ origin, что и ссылки в письмах
   // (appBase, защищённый от Host-header poisoning) — стороннего хостинга у нас нет. Почтовые
   // клиенты тянут их без сессии, поэтому директория держит только публичную статику.
@@ -172,7 +150,6 @@ function createApp(deps) {
     aiEnabledFor: (user) => aiChatService.enabledFor(user),
     // Тем же ответом едет фичефлаг витрин Rusender (см. комментарий в routes/auth.js).
     rusenderSurfaces,
-    migrateSessionCookie,
     setSessionCookie,
     clearSessionCookie,
     // Анти-enumeration хвосты (register/forgot/resend) регистрируются здесь — shutdown их дожидается.
@@ -403,11 +380,10 @@ function createApp(deps) {
     log,
   });
 
-  // ── Sprint 3F-3 catover: new Vite/React SPA is the primary dashboard, served at '/' ──
-  // The dist/ bundle is produced by the Dockerfile.web build stage. CSP is stricter than
-  // the legacy shell: the new app has NO inline scripts (JSX auto-escapes), so script-src
-  // is plain 'self' — no nonce. The legacy nonce-shell stays at /legacy as a reversible
-  // escape hatch until the B2 cleanup (then this becomes the only HTML surface).
+  // ── Vite/React SPA — единственная HTML-поверхность, отдаётся с '/' ──
+  // Бандл dist/ собирается стадией Dockerfile.web. Инлайновых скриптов в приложении НЕТ
+  // (JSX экранирует), поэтому script-src — простой 'self' без nonce: одного контура
+  // заголовков теперь достаточно на всё приложение.
   const APP_DIST = path.join(__dirname, '../frontend/dist');
   // Hashed SPA assets at root (/assets/*). Security headers set per response; content-hashed
   // /assets/** get a 1-year immutable cache, unhashed files (index.html, favicon) stay
@@ -425,9 +401,6 @@ function createApp(deps) {
     // Same-origin only: '//host' (and '/\host') is protocol-relative → open redirect.
     res.redirect(302, /^\/(?!\/|\\)/.test(local) ? local : '/');
   });
-
-  // Legacy nonce-shell — reversible escape hatch, removed in 3F-3 B2 cleanup.
-  app.get('/legacy', sendApp);
 
   // Unknown /api/* → JSON 404. Without this the SPA fallback served index.html with a
   // 200 for any mistyped API path — clients parsed HTML, monitoring saw success.

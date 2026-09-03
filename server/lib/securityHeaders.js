@@ -28,15 +28,6 @@ const baseCspDirectives = [
   "frame-ancestors 'none'",
 ];
 
-const legacyCspHeader = (nonce) => [
-  ...baseCspDirectives,
-  `script-src 'self' 'nonce-${nonce}'`,
-  "style-src 'self' 'unsafe-inline'",
-  `font-src ${APP_ALLOWED_DOMAINS.font.join(' ')}`,
-  "img-src 'self' data: https:",
-  "connect-src 'self'",
-].join('; ');
-
 const appCspHeader = [
   ...baseCspDirectives,
   `script-src 'self' ${APP_ALLOWED_DOMAINS.script.join(' ')}`,
@@ -72,7 +63,6 @@ function setAppHeaders(req, res) {
 module.exports = {
   APP_ALLOWED_DOMAINS,
   appCspHeader,
-  legacyCspHeader,
   permissionsPolicy,
   setAppHeaders,
   setHtmlSecurityHeaders,

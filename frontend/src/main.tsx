@@ -9,7 +9,7 @@ import {
 import { BrowserRouter } from 'react-router-dom';
 import App from '@/App';
 import { redirectBrowserOnUnauthorized } from '@/lib/authRedirect';
-import { migrateLegacySession } from '@/lib/session';
+import { purgeLegacySession } from '@/lib/session';
 import { ThemeProvider } from '@/lib/theme';
 import { installGlobalErrorReporter } from '@/lib/crashReporting';
 import '@/index.css';
@@ -55,9 +55,10 @@ const queryClient = new QueryClient({
 // console. React error boundaries only catch throws during render; this covers the rest.
 installGlobalErrorReporter();
 
-async function bootstrap(): Promise<void> {
-  // Must finish before App mounts: its first protected query is /api/auth/me.
-  await migrateLegacySession();
+function bootstrap(): void {
+  // Мост до-cookie-сессии снят (его срок истёк в июле): осталась синхронная уборка ключей из
+  // localStorage — ждать её нечего, сети она не трогает.
+  purgeLegacySession();
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
       <QueryClientProvider client={queryClient}>
@@ -71,4 +72,4 @@ async function bootstrap(): Promise<void> {
   );
 }
 
-void bootstrap();
+bootstrap();

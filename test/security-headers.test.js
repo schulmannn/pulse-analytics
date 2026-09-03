@@ -5,7 +5,6 @@ const path = require('node:path');
 const {
   APP_ALLOWED_DOMAINS,
   appCspHeader,
-  legacyCspHeader,
   permissionsPolicy,
   setAppHeaders,
   setHtmlSecurityHeaders,
@@ -99,32 +98,14 @@ test('HSTS is emitted only when the request is effectively HTTPS', () => {
   assert.strictEqual(res.get('strict-transport-security'), 'max-age=31536000; includeSubDomains');
 });
 
-test('legacy nonce shell keeps inline scripts nonce-bound under the same security envelope', () => {
-  const csp = legacyCspHeader('test-nonce');
-  const parsed = directives(csp);
-  const res = responseRecorder();
-  setHtmlSecurityHeaders(request({ 'x-forwarded-proto': 'https' }), res, csp);
-
-  assert.strictEqual(parsed.get('script-src'), "'self' 'nonce-test-nonce'");
-  assert.strictEqual(parsed.get('style-src'), "'self' 'unsafe-inline'");
-  assert.strictEqual(parsed.get('font-src'), "'self'");
-  assert.strictEqual(parsed.get('frame-ancestors'), "'none'");
-  assert.doesNotMatch(parsed.get('script-src'), /'unsafe-inline'|'unsafe-eval'/);
-  assert.strictEqual(res.get('content-security-policy'), csp);
-  assert.strictEqual(res.get('x-frame-options'), 'DENY');
-  assert.strictEqual(res.get('permissions-policy'), permissionsPolicy);
-  assert.strictEqual(res.get('strict-transport-security'), 'max-age=31536000; includeSubDomains');
-});
-
-test('modern and legacy HTML have no external font dependency', () => {
+test('HTML приложения не тянет внешних шрифтов', () => {
+  // Прежде проверялись ДВЕ страницы — приложения и nonce-оболочки. Оболочка удалена вместе со
+  // своим CSP-контуром, HTML-поверхность осталась одна (аудит #554, ТЗ-6).
   const root = path.join(__dirname, '..');
   const modernHtml = fs.readFileSync(path.join(root, 'frontend/index.html'), 'utf8');
-  const legacyHtml = fs.readFileSync(path.join(root, 'public/index.html'), 'utf8');
   const modernStyles = fs.readFileSync(path.join(root, 'frontend/src/index.css'), 'utf8');
 
-  for (const html of [modernHtml, legacyHtml]) {
-    assert.doesNotMatch(html, /fonts\.googleapis\.com|fonts\.gstatic\.com/);
-  }
+  assert.doesNotMatch(modernHtml, /fonts\.googleapis\.com|fonts\.gstatic\.com/);
   assert.match(modernStyles, /geist-cyrillic-wght-normal\.woff2/);
   assert.match(modernStyles, /geist-latin-wght-normal\.woff2/);
   assert.doesNotMatch(modernStyles, /geist-(?:cyrillic-ext|latin-ext|vietnamese)-wght-normal\.woff2/);
