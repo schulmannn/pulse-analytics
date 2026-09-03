@@ -10,6 +10,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { createTestDatabase } = require('./testDatabase');
+const { anchor, dayKey } = require('./helpers/dates');
 
 const TEST_DB = process.env.TEST_DATABASE_URL;
 const skip = TEST_DB ? false : 'TEST_DATABASE_URL not set (integration suite runs on the local stand)';
@@ -22,7 +23,10 @@ const mail = (tag) => `${tag}.${seq++}.${nonce}@it.local`;
 let extSeq = 0;
 const usedExt = [];
 const extId = () => { const v = `991${(process.pid % 100000)}${extSeq++}`; usedExt.push(v); return v; };
-const today = new Date().toISOString().slice(0, 10);
+// Якорь прогона — один на файл (test/helpers/dates): «сегодня», посчитанное дважды по
+// разные стороны полуночи, давало бы два разных дня внутри одного теста.
+const T = anchor();
+const today = dayKey(T);
 
 const mkUser = (tag) => db.createUser({ email: mail(tag), pass_hash: 'x', role: 'user', status: 'active' });
 

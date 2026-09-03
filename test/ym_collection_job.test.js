@@ -17,6 +17,9 @@ const {
   YM_BACKFILL_ANCHOR_DAY,
   YM_DAILY_METRICS_ORDER,
 } = require('../server/jobs/ymCollectionJob');
+const { anchor, dayKey } = require('./helpers/dates');
+// Якорь прогона — один на файл: см. test/helpers/dates.
+const T = anchor();
 
 // Учётки БЕЗ маркера качества (quality_backfilled_at=null) → одноразовый полный бэкфилл.
 const ACC1 = {
@@ -188,7 +191,7 @@ test('окно после маркера: перекрытие, 10-метрич�
   assert.equal(db.upserts[0].channelId, 7);
   // Окно 8 дневных точек (сегодня−7 … сегодня) дозаполнено нулями.
   assert.equal(db.upserts[0].rows.length, 8);
-  const day = new Date().toISOString().slice(0, 10);
+  const day = dayKey(T);
   assert.deepEqual(db.jobKeys, [`ym_collect|7:cnt-1:q2:${day}`]);
   assert.equal(db.marks.length, 0, 'при окне маркер не передёргивается');
   assert.equal(fetches.length, 1);
@@ -269,7 +272,7 @@ test('сбой одного счётчика изолирован: у сбойн
 });
 
 test('day-gate skip: сегодня уже собрано → ни fetch\'а, ни upsert\'а, skipped++', async () => {
-  const day = new Date().toISOString().slice(0, 10);
+  const day = dayKey(T);
   const db = makeDb({ accounts: [ACC1], skipKeys: [`7:cnt-1:q2:${day}`] });
   const { job, fetches } = makeJob({ db, handlers: () => report([]) });
   const stats = await job.runYmCollectionPass();

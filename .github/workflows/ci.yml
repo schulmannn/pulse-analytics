@@ -60,6 +60,17 @@ jobs:
         env:
           DATABASE_URL: postgresql://postgres@localhost:5432/pulse
       - run: npm run check
+      # ВТОРОЙ прогон бэкенд-суиты на ТОЙ ЖЕ базе и в чужом часовом поясе. Гейтит два класса
+      # дефектов, которые прежде ловились только случайно и на проде:
+      #   • неидемпотентность — тест, оставивший след в базе, красит повтор (так жил central-канал
+      #     из channels_repo и partial unique index channels_one_central);
+      #   • полуночные расхождения — окно, посчитанное в локальной зоне рантайма, а не в UTC.
+      # Asia/Tokyo (UTC+9) выбран потому, что при нём «сегодня» в CI и «сегодня» в UTC расходятся
+      # почти весь рабочий день.
+      - name: Backend suite — second run, foreign timezone
+        run: npm test
+        env:
+          TZ: Asia/Tokyo
       - run: python -m py_compile mtproto/service.py collector/pulse_collector.py
       # Версия пиннится: новый релиз ruff с новыми правилами не должен внезапно красить CI.
       - name: Lint Python (ruff)
