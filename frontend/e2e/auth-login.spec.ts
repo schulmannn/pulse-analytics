@@ -8,7 +8,6 @@ type AuthRoutes = {
   login?: { status: number; body: unknown };
   forgot?: { status: number; body: unknown };
   me?: { status: number; body: unknown };
-  migrate?: { status: number; body: unknown };
   onRequest?: (pathname: string, headers: Record<string, string>) => void;
 };
 
@@ -16,10 +15,6 @@ async function mockAuth(page: Page, routes: AuthRoutes = {}): Promise<void> {
   await page.route(/^https?:\/\/[^/]+\/api\//, (r) => {
     const { pathname } = new URL(r.request().url());
     routes.onRequest?.(pathname, r.request().headers());
-    if (pathname === '/api/auth/migrate-cookie') {
-      const { status = 200, body = { ok: true } } = routes.migrate ?? {};
-      return r.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
-    }
     if (pathname === '/api/config') {
       return r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ google_client_id: null }) });
     }
@@ -101,25 +96,21 @@ test('logged-out root stays on the public Landing instead of redirecting to /log
   await expect(page).toHaveURL(/\/$/);
 });
 
-test('legacy token migrates before the first auth probe and is purged', async ({ page }) => {
-  const calls: Array<{ pathname: string; token?: string }> = [];
-  await mockAuth(page, {
-    onRequest: (pathname, headers) => {
-      calls.push({ pathname, token: headers['x-session-token'] });
-    },
-  });
+test('ключи старого транспорта вычищаются без единого запроса к мосту', async ({ page }) => {
+  /* Спек ПЕРЕПИСАН вместе со сносом моста (аудит #554, ТЗ-6). Раньше он проверял, что обмен
+     заголовочного токена на cookie происходит ДО первой проверки сессии. Маршрута больше нет:
+     осталась синхронная уборка, и проверять надо ровно два факта — ключи исчезли, а к мёртвому
+     маршруту никто не ходит. */
+  const calls: string[] = [];
+  await mockAuth(page, { onRequest: (pathname) => { calls.push(pathname); } });
   await page.addInitScript(() => {
     localStorage.setItem('pulse_token', 'legacy-e2e-token');
     localStorage.setItem('pulse_token_exp', String(Date.now() + 60_000));
   });
   await page.goto('/');
 
-  await expect.poll(() => calls.some((call) => call.pathname === '/api/auth/me')).toBe(true);
-  const migrateIndex = calls.findIndex((call) => call.pathname === '/api/auth/migrate-cookie');
-  const meIndex = calls.findIndex((call) => call.pathname === '/api/auth/me');
-  expect(migrateIndex).toBeGreaterThanOrEqual(0);
-  expect(migrateIndex).toBeLessThan(meIndex);
-  expect(calls[migrateIndex]?.token).toBe('legacy-e2e-token');
+  await expect.poll(() => calls.includes('/api/auth/me')).toBe(true);
+  expect(calls).not.toContain('/api/auth/migrate-cookie');
   await expect.poll(() => page.evaluate(() => ({
     token: localStorage.getItem('pulse_token'),
     exp: localStorage.getItem('pulse_token_exp'),
