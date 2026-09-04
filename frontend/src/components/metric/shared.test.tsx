@@ -24,8 +24,10 @@ describe('RailSection', () => {
         <p>тело</p>
       </RailSection>,
     );
-    expect(html).toContain('rounded-2xl border border-border bg-card p-4 shadow-xs dark:border-white/6 sm:p-5');
-    expect(html).toContain('<h3 class="text-xs font-medium tracking-wider text-muted-foreground">Сравнение</h3>');
+    // Тень и трекинг — те же, что у виджет-карточки (ChartSection): две карточные тени и два
+    // трекинга одинаковых подписей на одной странице читаются как две разные системы (аудит #554).
+    expect(html).toContain('rounded-2xl border border-border bg-card p-4 shadow-[0_12px_32px_-30px_rgba(0,0,0,0.9)] dark:border-white/6 sm:p-5');
+    expect(html).toContain('<h3 class="text-xs font-medium tracking-wide text-muted-foreground">Сравнение</h3>');
     expect(html).toContain('<div class="mt-3">');
     expect(html).not.toContain('h-px flex-1 bg-border');
   });

@@ -1,4 +1,5 @@
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { axisTextWidth } from '@/components/LineChart';
 import { columnIndex } from '@/lib/chartHover';
 import { axisLabelIndexSet } from '@/lib/chartLabels';
 import { seriesMotionKey } from '@/lib/chartMotion';
@@ -34,7 +35,6 @@ interface DivergingBarsProps {
 }
 
 // Approximate glyph width of the 11px tabular labels (канон BarChart/LineChart).
-const CHAR_W = 6.6;
 // Полоса подписей оси и посадка пилюли — общие с BarChart (там AXIS_PILL_PAD = 6).
 const AXIS_BAND_H = 24;
 const AXIS_PILL_GAP = 6.5;
@@ -203,7 +203,7 @@ export function DivergingBars({
           if (!show) return null;
           const isLast = i === axisCurrentIdx;
           const isFirst = i === 0;
-          const textW = String(axisText).length * CHAR_W;
+          const textW = axisTextWidth(String(axisText));
           /* Крайние подписи ПРИЖИМАЮТСЯ внутрь, а не центрируются под столбцом.
              Центрирование съедало половину текста за кромкой svg: на «Чистом приросте» в узкой
              карточке левая подпись показывала «авг.» вместо «5 авг.», а пилюля справа обрезалась
@@ -313,7 +313,7 @@ export function DivergingBars({
     return bars.map((b, i) => {
       const text = valueLabels[i];
       if (!text || !plot.valid[i]) return null;
-      if (text.length * CHAR_W + 4 > plot.step) return null;
+      if (axisTextWidth(text) + 4 > plot.step) return null;
       const x = b.x + b.w / 2;
       // Бокс числа — 14px вокруг базовой линии (11 вверх, 3 вниз), поэтому смещения не
       // симметричны: −6 над кромкой и +14 под ней дают одинаковые 3px просвета с обеих сторон.
