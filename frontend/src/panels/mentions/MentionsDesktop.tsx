@@ -22,6 +22,7 @@ import {
   type MentionsSort,
 } from '@/lib/mentionsFilters';
 import { fmt, timeAxisFromDayKeys } from '@/lib/format';
+import { TwoLineDate } from '@/components/TwoLineDate';
 import { cn } from '@/lib/utils';
 import { BarChart } from '@/components/BarChart';
 import { Button } from '@/components/ui/button';
@@ -784,17 +785,6 @@ function MentionsTable({
         </div>
       )}
     </div>
-  );
-}
-
-/** Дата максимум в две строки («20 июн.» / «06:01»): узкая колонка не должна ломать дату на три. */
-function TwoLineDate({ iso }: { iso: string }) {
-  const [day, time] = fmt.date(iso).split(', ');
-  return (
-    <span className="inline-flex flex-col items-end">
-      <span className="whitespace-nowrap">{day}</span>
-      {time && <span className="whitespace-nowrap">{time}</span>}
-    </span>
   );
 }
 

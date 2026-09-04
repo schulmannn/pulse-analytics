@@ -257,21 +257,31 @@ export const fmt = {
       return '';
     }
   },
-  /** Localized date + time ("5 июн., 14:30"). A bare day key has no instant — no time part. */
-  date(iso?: string | null): string {
-    if (!iso) return '';
-    if (parseDayKey(iso)) return fmt.day(iso);
+  /**
+   * Дата и время момента ПО ЧАСТЯМ: «5 июн.» + «14:30». Один разбор на всё приложение —
+   * `fmt.date` склеивает их запятой для строки, а таблицы ставят время отдельной строкой под днём
+   * (`TwoLineDate`). Раньше двухстрочный вариант резал уже собранную строку по `', '`, и колонка
+   * зависела от того, какой разделитель выбрал формат; теперь разделитель — деталь `fmt.date`.
+   * Голый дневной ключ («YYYY-MM-DD») не несёт момента, поэтому времени у него нет.
+   */
+  dateParts(iso?: string | null): { day: string; time: string } {
+    if (!iso) return { day: '', time: '' };
+    if (parseDayKey(iso)) return { day: fmt.day(iso), time: '' };
     try {
       const d = new Date(iso);
-      if (isNaN(d.getTime())) return '';
-      return (
-        d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' }) +
-        ', ' +
-        d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
-      );
+      if (isNaN(d.getTime())) return { day: '', time: '' };
+      return {
+        day: d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' }),
+        time: d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }),
+      };
     } catch {
-      return '';
+      return { day: '', time: '' };
     }
+  },
+  /** Localized date + time ("5 июн., 14:30"). A bare day key has no instant — no time part. */
+  date(iso?: string | null): string {
+    const { day, time } = fmt.dateParts(iso);
+    return time ? `${day}, ${time}` : day;
   },
   /** Time-of-day greeting. */
   greeting(): string {
