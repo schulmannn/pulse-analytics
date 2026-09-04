@@ -1,0 +1,19 @@
+{
+  "entryRaw": 20586,
+  "publicBootJs": 92713,
+  "publicBootCode": 122868,
+  "publicBootResources": 167403,
+  "landingCode": 128827,
+  "landingResources": 173362,
+  "authCode": 178354,
+  "protectedJs": 233404,
+  "protectedCode": 263559,
+  "overviewCode": 351971,
+  "metricDispatcherCode": 267137,
+  "genericMetricCode": 339841,
+  "instagramMetricCode": 346095,
+  "moySkladMetricCode": 368627,
+  "metrikaMetricCode": 336436,
+  "telegramMetricCode": 339710,
+  "mentionsMetricCode": 319362
+}
