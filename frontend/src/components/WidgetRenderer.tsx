@@ -360,7 +360,7 @@ function WidgetChart({ result, eff, onDrill, expanded = false }: { result: Widge
         markExtremes={expanded && c.values.length > 1}
         // Кольца-точки — деталь-поверхностей (метрик-страница/разворот); на карточке они были
         // единственным местом в продукте с точками на каждой дате (владелец: «нигде больше»).
-        showPoints={expanded && c.values.length > 1 && c.values.length <= 45}
+        showPoints={expanded && c.values.length > 1}
         onPointClick={onPointClick}
       />
     );

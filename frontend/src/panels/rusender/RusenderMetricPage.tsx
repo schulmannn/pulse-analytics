@@ -249,7 +249,7 @@ export function RusenderMetricPage({ metricKey }: { metricKey: RusenderMetricKey
                 titles={titles}
                 height={chartH}
                 markExtremes
-                showPoints={points.length <= 45}
+                showPoints
                 legendToggle={false}
                 yMin={0}
               />

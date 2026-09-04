@@ -249,7 +249,7 @@ function TimelineExplorer({
           const shown = capTimelineMode(active);
           const axisLetters = shown.days ? timeAxisFromDayKeys(shown.days) : undefined;
           return shown.kind === 'line' ? (
-            <LineChart values={shown.values} labels={shown.labels} axisLabels={axisLetters} titles={shown.titles} showPoints={shown.values.length <= 45} fullAxes />
+            <LineChart values={shown.values} labels={shown.labels} axisLabels={axisLetters} titles={shown.titles} showPoints fullAxes />
           ) : (
             <BarChart values={shown.values} labels={shown.labels} axisLabels={axisLetters} titles={shown.titles} />
           );
