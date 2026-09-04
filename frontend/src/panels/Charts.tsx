@@ -323,7 +323,7 @@ function HeatmapBody({ posts }: { posts: NonNullable<TgFull['posts']> }) {
         {bestSlot ? (
           <span>
             лучший слот:{' '}
-            <strong className="text-foreground">
+            <strong className="font-medium text-foreground">
               {TG_DAY_NAMES[bestSlot.weekday] ?? ''} {bestSlot.hour}:00
             </strong>{' '}
             · ERV {bestSlot.avgErv.toFixed(1)}%

@@ -581,7 +581,7 @@ const BREAKDOWN_DEFS: Record<BreakdownKey, TgBreakdownDef> = {
       if (baseAvg === null) return null;
       return (
         <div className="mt-3 text-xs font-medium text-muted-foreground">
-          база без тегов: <strong className="text-foreground">{baseAvg.toFixed(1)}%</strong> ERV
+          база без тегов: <strong className="font-medium text-foreground">{baseAvg.toFixed(1)}%</strong> ERV
         </div>
       );
     },
@@ -751,7 +751,7 @@ const CATEGORY_DEFS: Record<CategoryKey, TgCategoryDef> = {
       if (!bestWdLabel) return null;
       return (
         <div className="mt-3 text-xs font-medium text-muted-foreground">
-          лучший день: <strong className="text-foreground">{bestWdLabel}</strong>
+          лучший день: <strong className="font-medium text-foreground">{bestWdLabel}</strong>
         </div>
       );
     },

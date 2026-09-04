@@ -87,7 +87,7 @@ function HashtagsBase({ full, keep }: { full: TgFull | undefined; keep: Keep }) 
   if (baseAvg === null) return null;
   return (
     <div className="mt-3 text-xs font-medium text-muted-foreground">
-      база без тегов: <strong className="text-foreground">{baseAvg.toFixed(1)}%</strong> ERV
+      база без тегов: <strong className="font-medium text-foreground">{baseAvg.toFixed(1)}%</strong> ERV
     </div>
   );
 }
