@@ -123,6 +123,15 @@ npm run build --prefix frontend
 python -m py_compile mtproto/service.py collector/pulse_collector.py
 ```
 
+Бюджет бандла двухъярусный. `PRODUCT_BUDGETS` в `frontend/scripts/check-bundle-size.mjs` — это
+продуктовые потолки с запасом; их правят отдельным PR с обоснованием. `scripts/bundle-baseline.json`
+— последний замер: гейт краснеет на росте больше `max(3%, 5 КБ)` от него. Если рост осознанный,
+объясните его в описании PR и зафиксируйте новый вес:
+
+```bash
+npm run size-check:update --prefix frontend
+```
+
 Для локального Playwright smoke:
 
 ```bash
