@@ -13,7 +13,8 @@
     "check:syntax": "node scripts/check-server-syntax.mjs",
     "check:migrations": "node scripts/check-migrations.mjs",
     "check:boundaries": "node scripts/check-server-boundaries.mjs",
-    "check": "npm run check:syntax && npm run check:migrations && npm run check:boundaries && npm run lint && npm test"
+    "check": "npm run check:syntax && npm run check:migrations && npm run check:boundaries && npm run check:pypins && npm run lint && npm test",
+    "check:pypins": "node scripts/check-python-pins.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.122.0",

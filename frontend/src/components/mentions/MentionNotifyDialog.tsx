@@ -165,9 +165,9 @@ export function MentionNotifyDialog({ onClose }: { onClose: () => void }) {
                   )}
                   <p className="text-xs leading-5 text-muted-foreground">
                     {botUrl ? (
-                      <>Если чат не открылся сам — откройте ссылку выше и нажмите в боте <b>Start</b>. Ссылка действует 15 минут.</>
+                      <>Если чат не открылся сам — откройте ссылку выше и нажмите в боте <b className="font-medium text-foreground">Start</b>. Ссылка действует 15 минут.</>
                     ) : (
-                      <>Откроется чат с ботом — нажмите в нём <b>Start</b>. Ссылка действует 15 минут.</>
+                      <>Откроется чат с ботом — нажмите в нём <b className="font-medium text-foreground">Start</b>. Ссылка действует 15 минут.</>
                     )}
                     {linkOpened && ' Ждём подтверждение из Telegram…'}
                   </p>

@@ -75,6 +75,27 @@ function blockHasMarker({ lines, index }, marker) {
   return false;
 }
 
+/**
+ * Селекторы всех блоков, ВНУТРИ которых стоит строка — от ближайшего к внешнему.
+ *
+ * Скан назад со счётчиком: закрывающая скобка гасит свою открывающую, поэтому СОСЕДНИЙ закрытый
+ * блок с нужным селектором не выдаст индульгенцию тому, кто лежит после него. CSS здесь
+ * отформатирован Biome — одна скобка на строку, так что порядок скобок ВНУТРИ строки не важен.
+ */
+function enclosingSelectors({ lines, index }) {
+  const out = [];
+  let pending = 0;
+  for (let i = index - 1; i >= 0; i--) {
+    pending += (lines[i].match(/\}/g) ?? []).length;
+    let opens = (lines[i].match(/\{/g) ?? []).length;
+    while (opens-- > 0) {
+      if (pending > 0) pending -= 1;
+      else out.push(lines[i]);
+    }
+  }
+  return out;
+}
+
 const rules = [
   {
     id: 'house-easing-inlined',
@@ -206,6 +227,26 @@ const rules = [
     exempt: (rel) => rel === 'src/pages/Landing.tsx',
   },
   {
+    id: 'third-font-weight',
+    hint: 'канон — два начертания: 400 и 500 (font-medium). Иерархию даёт оттенок, а не вес',
+    // DOM-замер аудита #554 нашёл 27 текстовых узлов с весом 600 при каноне 400/500: заголовки,
+    // ранги и числа рейтингов набирались `font-semibold` по привычке. Вес — самый дорогой способ
+    // выделить: он ломает ритм страницы сильнее, чем разница оттенков, ради которой DESIGN_TOKENS
+    // и держит шкалу ink/ink2/ink3. Рендер сторожит e2e/type-weight-canon.spec.ts, но он видит
+    // только демо-маршруты — экраны логина, /connect и Radix-меню открываются лишь по действию.
+    test: (line) => /\bfont-(?:semibold|bold|extrabold|black)\b/.test(line),
+  },
+  {
+    id: 'emphasis-browser-bold',
+    hint: 'добавьте font-medium к <strong>/<b> — UA-правило font-weight: bolder даёт 700',
+    // Второй канал утечки того же дефекта, и он не виден в поиске по классам: у <strong>/<b>
+    // браузерное правило `font-weight: bolder` считается ОТ РОДИТЕЛЯ, и родитель с весом 500 даёт
+    // ровно 700 — самое тяжёлое начертание на экране появлялось там, где про вес никто не думал
+    // («лучший слот», «лучший день», «база без тегов», приглашение в команду). Образец — RichText.
+    test: (line) => /<(?:strong|b)(?=[\s>])/.test(line) && !line.includes('font-medium'),
+    exempt: (rel) => rel.endsWith('.test.ts') || rel.endsWith('.test.tsx'),
+  },
+  {
     id: 'primary-tint-ink',
     hint: 'use text-accent-foreground on bg-primary/10 (AA composite); reserve text-primary for neutral surfaces',
     // The safe hover recipe may keep a base `text-primary` while switching BOTH the hover
@@ -214,6 +255,33 @@ const rules = [
       line.includes('bg-primary/10') &&
       line.includes('text-primary') &&
       !line.includes('text-accent-foreground'),
+  },
+  {
+    id: 'css-third-font-weight',
+    hint: 'канон — два начертания: 400 и 500. В CSS это такой же третий вес, как font-semibold в классе',
+    // Второй канал того же дефекта, и он СИЛЬНЕЕ классового: правило в index.css перебивает
+    // утилитарный класс на элементе, и чистка по классам (#591, D18) его НЕ видит. Шапка таблицы
+    // контента Instagram так и стояла на 600, а классы её ряда (`text-2xs font-semibold
+    // tracking-wide`) вообще не доезжали — читающий разметку видел одно, браузер рисовал другое.
+    // Объявление с ДВУМЯ значениями (`font-weight: 100 900` в @font-face) — диапазон вариативного
+    // шрифта, а не выбор начертания, и под правило не попадает.
+    test: (line, ctx) => {
+      const m = /font-weight:\s*(?:(\d{3})|(bold|bolder))\s*;/.exec(line);
+      if (!m) return false;
+      if (m[1] && Number(m[1]) < 600) return false;
+      // `.report-rhea` — ЛЕКСИКОН отчёта (свой шрифт Geist и свой трекинг), такой же bespoke, как
+      // лендинг и Legal в BESPOKE_TYPE. Его веса живут по своим правилам и только внутри отчёта.
+      return !enclosingSelectors(ctx).some((sel) => sel.includes('report-rhea'));
+    },
+  },
+  {
+    id: 'disabled-cursor',
+    hint: 'канон #265 — disabled:pointer-events-none. Курсор «нельзя» не ставить никогда',
+    // Решение владельца (#265): выключенный элемент НЕ отвечает на указатель вовсе — он просто
+    // приглушён. Перечёркнутый круг — это упрёк в ответ на движение мыши, а не объяснение.
+    // Button живёт по канону с #265; семь примитивов в components/ui сохранили заводскую строку
+    // shadcn и разъехались с ним молча (аудит #554).
+    test: (line) => /\bcursor-not-allowed\b/.test(line),
   },
 ];
 

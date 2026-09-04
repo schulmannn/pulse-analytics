@@ -60,10 +60,30 @@ function setAppHeaders(req, res) {
   return setHtmlSecurityHeaders(req, res, appCspHeader);
 }
 
+/**
+ * Заголовки JSON-ответов /api/*. Отдельно от HTML-контура: у API нет документа, скриптов и
+ * шрифтов, поэтому CSP приложения ему не нужен — нужен запрет MIME-sniffing.
+ *
+ * ПОЧЕМУ ЭТО ОТДЕЛЬНАЯ ФУНКЦИЯ, А НЕ setAppHeaders НА ВСЁ. До этого nosniff доезжал ТОЛЬКО до
+ * тех /api-путей, которые проваливались сквозь роуты в статику (то есть до 404), — ни один
+ * реальный ответ API его не нёс, хотя тест на 404 и создавал впечатление, что контур закрыт
+ * (I-1, аудит #554). Sniffing на JSON — не теория: ответ с пользовательской строкой в первых
+ * байтах браузер может опознать как HTML и исполнить, если его удастся открыть как документ.
+ * X-Frame-Options и Referrer-Policy идут тем же скупым набором: обрамлять или реферить JSON
+ * незачем ни одному нашему сценарию.
+ */
+function setApiHeaders(_req, res) {
+  return res
+    .set('X-Content-Type-Options', 'nosniff')
+    .set('X-Frame-Options', 'DENY')
+    .set('Referrer-Policy', 'no-referrer');
+}
+
 module.exports = {
   APP_ALLOWED_DOMAINS,
   appCspHeader,
   permissionsPolicy,
+  setApiHeaders,
   setAppHeaders,
   setHtmlSecurityHeaders,
   shouldSendHsts,
