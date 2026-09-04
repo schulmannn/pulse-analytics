@@ -10,7 +10,7 @@ import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { TableSkeleton } from '@/components/ui/dataSkeleton';
 import { fmt } from '@/lib/format';
-import { formatMoney } from '@/lib/metricNumber';
+import { formatMoney, formatMoneyDelta } from '@/lib/metricNumber';
 import { cumulativeContribution, cumulativePointLabel } from '@/lib/msConcentration';
 import type { MsPeriod } from '@/lib/msPeriod';
 
@@ -386,7 +386,8 @@ function MsTopProductsList({ rows, metric, limit }: { rows: TopRow[]; metric: Ms
 }
 
 function formatProfit(value: number): string {
-  return `${value < 0 ? '−' : ''}${formatMoney(Math.abs(value), 'axis')}₽`;
+  // Тот же дефект, что в MsChannels: «₽» дописывался поверх строки, которая его уже несёт.
+  return formatMoneyDelta(value, { role: 'axis' });
 }
 
 function formatMargin(value: number | null): string {

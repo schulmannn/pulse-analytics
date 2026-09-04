@@ -80,7 +80,7 @@ export const demographicsFootnote = (data: {
 }): string | null => {
   const partial = data.coverage_percent != null && data.coverage_percent < 99.95;
   const coverage = partial
-    ? `Определено для ${data.coverage_percent!.toLocaleString('ru-RU', { maximumFractionDigits: 1 })}% визитов`
+    ? `Определено для ${fmt.pctFixed(data.coverage_percent!, 1)} визитов`
     : null;
   const redacted = data.contains_sensitive_data ? 'часть данных скрыта при малой выборке' : null;
   if (!coverage && !redacted) return null;
@@ -93,7 +93,7 @@ export const demographicsFootnote = (data: {
 export const breakdownNote = (users: number, bounceRate: number | null): string =>
   [
     `${fmt.num(users)} чел.`,
-    bounceRate != null ? `${bounceRate.toLocaleString('ru-RU', { maximumFractionDigits: 1 })}% отказов` : null,
+    bounceRate != null ? `${fmt.pctFixed(bounceRate, 1)} отказов` : null,
   ]
     .filter(Boolean)
     .join(' · ');
@@ -109,7 +109,7 @@ export const goalNote = (
   if (goalId == null) return null;
   return (
     [
-      conversion != null ? `CR ${conversion.toLocaleString('ru-RU', { maximumFractionDigits: 2 })}%` : null,
+      conversion != null ? `CR ${fmt.pctFixed(conversion, 2)}` : null,
       reaches != null ? `${fmt.num(reaches)} достиж.` : null,
     ]
       .filter(Boolean)
@@ -575,7 +575,7 @@ export const YM_BREAKDOWNS: YmBreakdownDef[] = [
         value: g.reaches,
         // Конверсия — не знаковая дельта (fmt.pct) и не целое (fmt.num): доли процента
         // значимы, локаль ru даёт запятую.
-        note: `CR ${g.conversion_rate.toLocaleString('ru-RU', { maximumFractionDigits: 2 })}%`,
+        note: `CR ${fmt.pctFixed(g.conversion_rate, 2)}`,
       })),
       tailWord: 'достижений',
       footnote: data.truncated ? 'Показаны первые 20 целей счётчика.' : null,
@@ -655,7 +655,7 @@ export const YM_BREAKDOWNS: YmBreakdownDef[] = [
         // Отказы всегда; конверсия/достижения цели — только когда цель выбрана и метрика пришла.
         note: joinNote(
           r.bounce_rate != null
-            ? `${r.bounce_rate.toLocaleString('ru-RU', { maximumFractionDigits: 1 })}% отказов`
+            ? `${fmt.pctFixed(r.bounce_rate, 1)} отказов`
             : null,
           goalNote(data.goal_id, r.goal_reaches, r.goal_conversion),
         ),

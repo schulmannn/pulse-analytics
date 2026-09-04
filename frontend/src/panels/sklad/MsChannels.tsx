@@ -474,11 +474,17 @@ export function MsChannelRows({
 
 // ── Вклад каналов: текущее окно против равного предыдущего ────────────────────────────────────
 
-function signedValue(delta: number, metric: MsChannelContributionMetric): string {
-  const sign = delta > 0 ? '+' : delta < 0 ? '−' : '';
+/**
+ * Величина вклада БЕЗ знака: направление в этой строке уже сказано стрелкой.
+ *
+ * Было «↑+99.3k ₽₽» — три ошибки в одной строке: стрелка и плюс говорили одно и то же, а знак
+ * валюты дописывался поверх строки, которая его уже несёт (аудит #554, D4). Знак валюты
+ * добавляет ТОЛЬКО formatMoney (см. lib/metricNumber).
+ */
+function unsignedValue(delta: number, metric: MsChannelContributionMetric): string {
   return metric === 'revenue'
-    ? `${sign}${formatMoney(Math.abs(delta), 'axis')}₽`
-    : `${sign}${fmt.num(Math.abs(delta))}`;
+    ? formatMoney(Math.abs(delta), 'axis')
+    : fmt.num(Math.abs(delta));
 }
 
 /**
@@ -564,7 +570,7 @@ export function MsChannelContribution({
                   <span className="font-medium text-foreground">
                     {metric === 'revenue' ? `${formatMoney(currentValue, 'axis')}` : fmt.num(currentValue)}
                   </span>{' '}
-                  · {share.toLocaleString('ru-RU', { maximumFractionDigits: 1 })}%
+                  · {fmt.pctFixed(share, 1)}
                 </span>
                 {/* Тихий регистр дельты (канон DeltaPill): направление — в знаке/стрелке, не в
                     оценочном цвете — «ничего не кричит». */}
@@ -573,8 +579,10 @@ export function MsChannelContribution({
                     className="inline-flex items-center gap-0.5 text-2xs text-muted-foreground"
                     title="Изменение против равного предыдущего окна"
                   >
+                    {/* Направление несёт СТРЕЛКА; знак «+/−» внутри значения был бы вторым
+                        голосом об одном и том же («↑+99.3k»). */}
                     <span aria-hidden="true">{delta > 0 ? '↑' : delta < 0 ? '↓' : '•'}</span>
-                    {signedValue(delta, metric)}
+                    {unsignedValue(delta, metric)}
                   </span>
                 )}
               </span>

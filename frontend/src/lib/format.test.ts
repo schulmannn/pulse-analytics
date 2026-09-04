@@ -297,3 +297,43 @@ describe('timeAxis — EN-месяцы длинного окна (владеле
     expect(timeAxisLabels(dailyKeys('2026-08-14', 30), 30)).toBeUndefined();
   });
 });
+
+// ── D5: одна система записи чисел на весь продукт ─────────────────────────────────────────────────
+describe('десятичный разделитель — точка везде', () => {
+  it('numFixed печатает точку, а не запятую', () => {
+    // toLocaleString('ru-RU') давал «32,7», и на одном экране с «↑5.8%» это читалось как две
+    // разные системы записи одной величины (аудит #554, D5).
+    expect(fmt.numFixed(32.7, 1)).toBe('32.7');
+    expect(fmt.numFixed(2.92, 2)).toBe('2.92');
+    expect(fmt.numFixed(44.25, 1)).toBe('44.3');
+    // Хвостовой ноль не печатается — семантика maximumFractionDigits, как у заменённого
+    // toLocaleString: «R 2 дн.», а не «R 2.0 дн.».
+    expect(fmt.numFixed(0, 1)).toBe('0');
+    expect(fmt.numFixed(2, 1)).toBe('2');
+    expect(fmt.numFixed(4.2, 1)).toBe('4.2');
+  });
+
+  it('разряды разделены неразрывным узким пробелом, а не запятой', () => {
+    const out = fmt.numFixed(1234.5, 1);
+    expect(out).toBe(`1${'\u202f'}234.5`);
+    expect(out).not.toContain(',');
+  });
+
+  it('отрицательные несут типографский минус', () => {
+    expect(fmt.numFixed(-2.5, 1)).toBe('−2.5');
+  });
+
+  it('pctFixed добавляет процент и сохраняет точность', () => {
+    expect(fmt.pctFixed(24.6, 1)).toBe('24.6%');
+    expect(fmt.pctFixed(2.345, 2)).toBe('2.35%');
+    expect(fmt.pctFixed(null)).toBe('—');
+  });
+
+  it('ни один форматтер не отдаёт запятую как десятичный разделитель', () => {
+    for (const v of [0.5, 12.34, 999.9, 1234.56, 1_000_000.5]) {
+      expect(fmt.numFixed(v, 2)).not.toMatch(/\d,\d/);
+      expect(fmt.pctFixed(v, 1)).not.toMatch(/\d,\d/);
+      expect(fmt.num(v)).not.toMatch(/\d,\d/);
+    }
+  });
+});

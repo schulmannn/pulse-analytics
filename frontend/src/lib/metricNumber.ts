@@ -45,7 +45,28 @@ export function formatByRole(n: number | null | undefined, role: NumberRole): st
  */
 export function formatMoney(n: number | null | undefined, role: NumberRole = 'headline'): string {
   if (n == null || Number.isNaN(n)) return '—';
-  return `${formatByRole(n, role)} ₽`;
+  // Узкий неразрывный пробел (U+202F): раньше здесь стоял обычный, а вызывающие дописывали «₽»
+  // вплотную — на одном экране жили «1.6M ₽» и «6 109₽». И перенос строки между числом и знаком
+  // валюты обычный пробел не запрещает.
+  return `${formatByRole(n, role)}\u202f₽`;
+}
+
+/**
+ * Знаковая денежная дельта: ЛИБО стрелка, ЛИБО плюс-минус — но не оба сразу.
+ *
+ * Аудит #554 (D4): на /sklad печаталось «↑+99.3k ₽₽» — знак валюты дописывался поверх уже
+ * готовой строки formatMoney, а стрелка ставилась поверх уже готового «+». Один форматтер
+ * закрывает обе ошибки разом, и оба варианта записи остаются доступны через `arrow`.
+ */
+export function formatMoneyDelta(
+  delta: number | null | undefined,
+  { role = 'axis', arrow = false }: { role?: NumberRole; arrow?: boolean } = {},
+): string {
+  if (delta == null || Number.isNaN(delta)) return '—';
+  const mark = arrow
+    ? (delta > 0 ? '↑' : delta < 0 ? '↓' : '•')
+    : (delta > 0 ? '+' : delta < 0 ? '−' : '');
+  return `${mark}${formatMoney(Math.abs(delta), role)}`;
 }
 
 /**

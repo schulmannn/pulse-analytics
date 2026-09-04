@@ -154,6 +154,30 @@ export const fmt = {
     if (n == null || isNaN(n)) return '—';
     return Math.round(n).toLocaleString('ru-RU').replace(/,/g, ' ');
   },
+  /**
+   * Дробное число с фиксированным числом знаков и разделителем разрядов: «1 234.5».
+   *
+   * Существует потому, что `toLocaleString('ru-RU')` даёт ЗАПЯТУЮ, и на одном экране рядом
+   * оказывались «32,7%» и «↑5.8%» — две системы записи одного и того же (аудит #554, D5).
+   * Канон DESIGN_TOKENS — точка, поэтому дробная часть собирается вручную, а разряды берутся
+   * у локали и приводятся к неразрывному узкому пробелу.
+   */
+  numFixed(n?: number | null, digits = 1): string {
+    if (n == null || isNaN(n)) return '—';
+    const d = Math.max(0, Math.min(6, Math.trunc(digits)));
+    // Семантика `maximumFractionDigits`, а НЕ toFixed: хвостовые нули не печатаются. Это ровно то
+    // поведение, что было у заменённого toLocaleString — «R 2 дн.», а не «R 2.0 дн.»: здесь
+    // меняется только разделитель, а не то, сколько знаков видит человек.
+    const fixed = Math.abs(n).toFixed(d).replace(/\.?0+$/, '');
+    const [whole, frac] = fixed.split('.');
+    const grouped = Number(whole).toLocaleString('ru-RU').replace(/[,\u00a0\u202f ]/g, '\u202f');
+    return `${n < 0 ? '−' : ''}${grouped}${frac ? `.${frac}` : ''}`;
+  },
+  /** Абсолютный процент с фиксированной точностью: «24.6%». Точка, а не запятая (см. numFixed). */
+  pctFixed(p?: number | null, digits = 1): string {
+    if (p == null || isNaN(p)) return '—';
+    return `${fmt.numFixed(p, digits)}%`;
+  },
   /** Compact number (1.2k / 3.4M). */
   short(n?: number | null): string {
     if (n == null || isNaN(n)) return '—';
