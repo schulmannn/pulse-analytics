@@ -103,6 +103,13 @@ jobs:
       # Красный CI по чужому сбою учит игнорировать красный CI, поэтому сетевой отказ
       # ретраится, а настоящая находка по-прежнему валит джоб с первой попытки
       # (npm audit отдаёт ненулевой код и без сети, и на уязвимости — различаем их по тексту).
+      # УСТАНОВКА ПЕРЕД АУДИТОМ — не прихоть. Без дерева зависимостей `npm audit` уходит на
+      # старый эндпоинт `/security/audits/quick`, который сам npm помечает как retiring и который
+      # отвечает то 503, то «400 Invalid package tree» (оба вида пойманы на одном прогоне 2026-09-04).
+      # С установленным деревом npm спрашивает поддерживаемый bulk-эндпоинт advisories.
+      # `--ignore-scripts`: аудиту нужен СПИСОК пакетов, а не их postinstall-код.
+      - name: Install server deps for a real audit tree
+        run: npm ci --ignore-scripts
       - name: Audit npm dependencies (server)
         run: |
           for attempt in 1 2 3; do
@@ -125,6 +132,9 @@ jobs:
       # Тот же ретрай, что у серверного шага выше: 2026-09-04 audit-ci провисел 12 минут и упал с
       # «code undefined» — реестр npm лежал, уязвимостей не было. Настоящая находка печатает
       # advisory и валит джоб с первой попытки; ретраится только отказ без находок.
+      - name: Install frontend deps for a real audit tree
+        working-directory: frontend
+        run: npm ci --ignore-scripts
       - name: Audit npm dependencies (frontend)
         working-directory: frontend
         run: |
