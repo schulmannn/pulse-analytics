@@ -174,3 +174,43 @@ test('keyboard: widget edit dialog traps Tab and restores focus to the ⋯ trigg
   // as opener and must restore it on close.
   await expect(menuButton).toBeFocused();
 });
+
+/**
+ * ЧЕТЫРЕ ТАБЛИЦЫ — ОДНО КОЛЬЦО ФОКУСА (аудит #554, «доступность»).
+ *
+ * Аудит записал строки таблиц с `onClick` как «без клавиатурного пути». Это НЕ ТАК: в ячейке
+ * публикации у всех четырёх стоит настоящая кнопка, и комментарий в Posts.tsx прямо объясняет
+ * зачем. Настоящее расхождение мельче и конкретнее: три таблицы (IgContentDesktop,
+ * CampaignPostsTable, MetricPage) несут один рецепт кольца, а таблица постов не несла ничего и
+ * доставалась браузерной обводке по умолчанию — фокус виден, но чужой.
+ *
+ * Гейт сравнивает ОТРЕНДЕРЕННОЕ кольцо двух таблиц между собой, а не с константой: «не none»
+ * прошло бы и без класса (Tailwind v4 держит на элементе цепочку прозрачных сегментов даже там,
+ * где тени нет — проверено снятием класса), а равенство с соседом — ровно то утверждение,
+ * которое здесь и делается.
+ */
+test('кольцо фокуса таблицы постов совпадает с таблицей контента Instagram', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop-1440', 'таблицы — desktop-раскладка');
+
+  /** Непрозрачные сегменты box-shadow сфокусированного триггера — это и есть кольцо. */
+  const ringOf = async (route: string, selector: string) => {
+    await bootDemo(page, route);
+    const trigger = page.locator(selector).first();
+    await expect(trigger).toBeVisible({ timeout: 20_000 });
+    await trigger.focus();
+    const shadow = await trigger.evaluate((el) => {
+      if (!el.matches(':focus-visible')) return null;
+      return getComputedStyle(el).boxShadow;
+    });
+    expect(shadow, `${selector} должен принимать :focus-visible`).not.toBeNull();
+    return (shadow ?? '')
+      .split(/,(?![^(]*\))/)
+      .map((seg) => seg.trim())
+      .filter((seg) => seg.length > 0 && !/^rgba\(0, 0, 0, 0\)( 0px)+$/.test(seg));
+  };
+
+  const posts = await ringOf('/posts', '[data-post-open-trigger]');
+  const igContent = await ringOf('/instagram/content', '[data-ig-content-open-trigger]');
+  expect(posts.length, `у таблицы постов не отрисовано кольцо: ${posts.join(' | ')}`).toBeGreaterThan(0);
+  expect(posts).toEqual(igContent);
+});
