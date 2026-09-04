@@ -431,7 +431,7 @@ function createComposition(config, overrides = {}) {
 
   // ── Telegram Bot API env — read here and injected into routes/tg.js (which owns the Bot-API
   // fetch helper and the /api/tg/* handlers). Наружу конфигурация больше не публикуется: блок
-  // `env` в /api/health убран (I-1), значения видны только в логах процесса. ──
+  // `env` в /api/health убран (I-1) — «настроен ли TG» больше нигде не отвечается по HTTP. ──
   const TG_TOKEN = config.telegram.botToken || undefined; // || undefined — как IG выше
   const TG_CHANNEL = config.telegram.channel || undefined;
 
