@@ -13,6 +13,7 @@ import { buildActivityCalendar, type ActivityCalendarDay } from '@/lib/activityC
 import { fmt } from '@/lib/format';
 import { formatMoney } from '@/lib/metricNumber';
 import { cn } from '@/lib/utils';
+import { WidgetGrid } from '@/components/widgets/WidgetGrid';
 
 /**
  * «Загрузки» СДЭКа — рабочая поверхность источника БЕЗ API.
@@ -84,7 +85,7 @@ export function CdekImports() {
   const lastImport = fresh?.report ?? status.data?.last_import ?? null;
 
   return (
-    <div className="grid grid-cols-1 gap-6 lg:grid-cols-6">
+    <WidgetGrid className="grid grid-cols-1 gap-6 lg:grid-cols-6">
       <ChartWidget id="cdek-upload" title="Выгрузка из СДЭКа" fixedSize="full">
         <SourceMeta
           warehouse={status.data?.warehouse_code ?? null}
@@ -144,7 +145,7 @@ export function CdekImports() {
       </ChartWidget>
 
       {lastImport?.warnings?.length ? <WarningsNote warnings={lastImport.warnings} /> : null}
-    </div>
+    </WidgetGrid>
   );
 }
 

@@ -131,7 +131,10 @@ async function bootOverview(page: Page, opts: { all?: boolean; savedFilters?: st
   }, opts.savedFilters ?? '');
   await page.goto('/cdek');
   await page.locator('main').waitFor({ state: 'visible', timeout: 25_000 });
-  await page.waitForTimeout(900);
+  // Ждём САМ ЗАПРОС окна, а не часы: под нагрузкой фиксированные 900 мс истекали раньше,
+  // чем карточки успевали сходить за данными, и наблюдатели возвращались пустыми — проверка падала на
+  // ОТСУТСТВИИ запроса, а не на его содержимом (аудит #554, флаки).
+  await expect.poll(() => includes.length, { timeout: 20_000 }).toBeGreaterThan(0);
   return { includes, productParams, channelParams };
 }
 
@@ -344,7 +347,7 @@ test('сохранённый фильтр доезжает до карточек
   const { includes } = await bootOverview(page, {
     savedFilters: JSON.stringify({ 'cdek:status:5': ['complete'] }),
   });
-  expect(includes.some((v) => v === 'status:complete')).toBe(true);
+  await expect.poll(() => includes.some((v) => v === 'status:complete')).toBe(true);
   await expect(card(page, 'Выручка')).not.toContainText(/только: завершён/i);
   await expect(card(page, 'Выручка')).not.toContainText(/считаются/i);
 });
@@ -360,7 +363,7 @@ test('сохранённый канал продаж режет метрику',
   const { channelParams } = await bootOverview(page, {
     savedFilters: JSON.stringify({ 'cdek:sales-channels:5': ['ozon', 'wildberries'] }),
   });
-  expect(channelParams.some((v) => v === 'ozon,wildberries')).toBe(true);
+  await expect.poll(() => channelParams.some((v) => v === 'ozon,wildberries')).toBe(true);
   await expect(card(page, 'Выручка')).not.toContainText(/только каналы/i);
 });
 

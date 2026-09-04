@@ -31,6 +31,7 @@ import {
 } from '@/lib/msCustomerSeries';
 import { CHART_MAX_POINTS, type Grain } from '@/lib/msSeries';
 import { cohortCellValue, isMoneyCohortMode, type MsCohortCell, type MsCohortMode } from '@/lib/msCohortMode';
+import { WidgetGrid } from '@/components/widgets/WidgetGrid';
 
 /**
  * «Клиенты» МойСклада — покупательская аналитика АРХИВА заказов (ms_orders, слайс 3).
@@ -77,13 +78,13 @@ export function MsClients() {
 
   if (customers.isPending) {
     return (
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-6">
+      <WidgetGrid className="grid grid-cols-1 gap-6 lg:grid-cols-6">
         {Array.from({ length: 2 }).map((_, i) => (
           <div key={i} className="h-[264px] rounded-2xl border border-border bg-card p-5 lg:col-span-3">
             <ChartSkeleton />
           </div>
         ))}
-      </div>
+      </WidgetGrid>
     );
   }
 
@@ -115,7 +116,7 @@ export function MsClients() {
   const repeatRevenueShare = repeatRevenueTotal > 0 ? (summary.sum_repeat / repeatRevenueTotal) * 100 : null;
 
   return (
-    <div className="grid grid-cols-1 gap-6 lg:grid-cols-6">
+    <WidgetGrid className="grid grid-cols-1 gap-6 lg:grid-cols-6">
       <ChartWidget
         id="ms-customers"
         title="Покупатели"
@@ -196,7 +197,7 @@ export function MsClients() {
       <MsTopCustomersCard state={topCustomers} windowLabel={windowLabel} />
 
       <MsCohortsCard state={cohorts} />
-    </div>
+    </WidgetGrid>
   );
 }
 

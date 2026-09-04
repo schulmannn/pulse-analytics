@@ -27,6 +27,7 @@ import { formatByRole, formatMoney } from '@/lib/metricNumber';
 import { useCardShowsPeriod, usePagePeriod } from '@/lib/period';
 import { useMsPagePeriod } from '@/lib/msPeriod';
 import { cn } from '@/lib/utils';
+import { WidgetGrid } from '@/components/widgets/WidgetGrid';
 
 /**
  * «Товары» СДЭКа — ассортимент за окно.
@@ -111,7 +112,7 @@ export function CdekProducts() {
   }
 
   return (
-    <div className="grid grid-cols-1 gap-6 lg:grid-cols-6">
+    <WidgetGrid className="grid grid-cols-1 gap-6 lg:grid-cols-6">
       <ChartWidget id="cdek-abc" drillTo="/metrics/cdek-products" title={`Концентрация ассортимента ${periodInLabel ?? ''}`.trim()} fixedSize="full">
         {products.isPending ? (
           <TableSkeleton rows={6} columns={3} />
@@ -163,7 +164,7 @@ export function CdekProducts() {
           <AssortmentTable rows={rows} total={totalRevenue} truncated={products.data?.truncated ?? false} />
         )}
       </ChartWidget>
-    </div>
+    </WidgetGrid>
   );
 }
 

@@ -1,4 +1,5 @@
 import { useContext, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { WidgetGrid } from '@/components/widgets/WidgetGrid';
 import { ShareTrack } from '@/components/ShareRows';
 import { ChartBand } from '@/components/ChartBand';
 import { Link, useNavigate } from 'react-router-dom';
@@ -143,13 +144,13 @@ export function MsOverview() {
 
   if (summary.isPending) {
     return (
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-6">
+      <WidgetGrid className="grid grid-cols-1 gap-6 lg:grid-cols-6">
         {Array.from({ length: 2 }).map((_, i) => (
           <div key={i} className="h-[264px] rounded-2xl border border-border bg-card p-5 lg:col-span-3">
             <ChartSkeleton />
           </div>
         ))}
-      </div>
+      </WidgetGrid>
     );
   }
 
@@ -224,7 +225,7 @@ export function MsOverview() {
   const avgStory = { label: periodInLabel, value: formatMoney(avgTotal), delta: avgDelta, caption: 'по дням с заказами', values: avgValues, labels: avgLabels, axisLabels: timeAxisFromDayKeys(avgSampled.map((p) => p.day)), formatValue: (v: number) => `${formatMoney(v, 'exact')}`, emptyTitle: 'Недостаточно дней с заказами для графика.', drillTo: '/metrics/ms-aov', drillLabel: 'Средний чек' };
 
   return (
-    <div className="grid grid-cols-1 gap-6 lg:grid-cols-6">
+    <WidgetGrid className="grid grid-cols-1 gap-6 lg:grid-cols-6">
       {/* Story-карточки — та же грамматика, что у Обзоров TG/IG/Метрики (steep story card):
           подпись окна, hero-число, дельта к прошлому периоду и area-спарклайн без осей. Полные
           оси и тултипы по датам живут на /metrics/ms-* (MsSummaryExplorer ниже в этом файле).
@@ -347,7 +348,7 @@ export function MsOverview() {
       <ChartWidget id="ms-stock" title="Остатки" fixedSize="half" drillTo="/metrics/ms-stock">
         <MsStockCard period={period} />
       </ChartWidget>
-    </div>
+    </WidgetGrid>
   );
 }
 

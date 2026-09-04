@@ -15,6 +15,7 @@ import { CHART_MAX_POINTS } from '@/lib/msSeries';
 import { fmt, timeAxisFromDayKeys } from '@/lib/format';
 import { formatByRole } from '@/lib/metricNumber';
 import { useMsPagePeriod } from '@/lib/msPeriod';
+import { WidgetGrid } from '@/components/widgets/WidgetGrid';
 
 /**
  * «База» — аудитория источника: размер базы контактов и её убыль.
@@ -81,7 +82,7 @@ export function RusenderAudience() {
   return (
     // Сетка доски — та же, что у остальных Обзоров. Без неё `fixedSize="half"` не работает:
     // у блочного родителя нет колонок, и карточки идут одной колонкой во всю ширину.
-    <div className="grid grid-cols-1 gap-6 lg:grid-cols-6">
+    <WidgetGrid className="grid grid-cols-1 gap-6 lg:grid-cols-6">
       {/* Размер базы — УРОВЕНЬ, а не поток: линия. Столбцы намекали бы, что дни складываются. */}
       <ChartWidget
         id="rusender-base-total"
@@ -184,7 +185,7 @@ export function RusenderAudience() {
           а не нулём: это дыра в сборе, а не обнулившаяся база.
         </p>
       )}
-    </div>
+    </WidgetGrid>
   );
 }
 
