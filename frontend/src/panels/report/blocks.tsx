@@ -222,7 +222,7 @@ export function ReportChart({
       height={200}
       fullAxes
       markExtremes={!rheaChart}
-      showPoints={!rheaChart && series.values.length <= 45}
+      showPoints={!rheaChart}
       yMin={zeroBase ? 0 : undefined}
       formatValue={valueFmt}
       primaryLabel={chartLabel}
@@ -288,7 +288,7 @@ export function ReportMetricCard({ title, total, trend, series, valueFmt, zeroBa
           height={rheaChart ? 200 : 170}
           fullAxes
           markExtremes={!rheaChart}
-          showPoints={!rheaChart && series.values.length > 1 && series.values.length <= 45}
+          showPoints={!rheaChart && series.values.length > 1}
           yMin={zeroBase && series.values.length > 1 ? 0 : undefined}
           formatValue={valueFmt}
           primaryLabel={chartLabel}

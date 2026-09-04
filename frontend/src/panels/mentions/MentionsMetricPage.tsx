@@ -291,7 +291,7 @@ function MentionsTimelinePage() {
             yMin={0}
             markAnomalies
             markExtremes
-            showPoints={chartTimeline.values.length <= 45}
+            showPoints
             ghost={showComparison ? chartTimeline.ghost : undefined}
             ghostLabel="Пред. период"
             legendToggle={false}

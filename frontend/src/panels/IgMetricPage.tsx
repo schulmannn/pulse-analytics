@@ -401,7 +401,7 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
                     titles={lvl.titles}
                     height={chartH}
                     markExtremes
-                    showPoints={lvl.values.length <= 45}
+                    showPoints
                     legendToggle={false}
                     onPointClick={(i) => setPinnedLvl((p) => (p === i ? null : i))}
                     pinnedIndex={pinnedLvl != null && pinnedLvl < lvl.values.length ? pinnedLvl : null}
@@ -468,7 +468,7 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
                     height={chartH}
                     markExtremes
                     markAnomalies
-                    showPoints={n <= 45}
+                    showPoints
                     ghost={ghostOk ? ghostVals : undefined}
                     ghostLabel={cmpLabel}
                     legendToggle={false}

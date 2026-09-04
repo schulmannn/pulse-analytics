@@ -388,7 +388,7 @@ function YmSeriesPage({ def }: { def: YmSeriesDef }) {
                 height={chartH}
                 markExtremes
                 markAnomalies
-                showPoints={m <= 45}
+                showPoints
                 ghost={ghostOk ? ghostVals : undefined}
                 ghostLabel={cmpLabel}
                 legendToggle={false}

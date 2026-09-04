@@ -345,7 +345,7 @@ function CampaignTimelineMetric({
                 axisLabels={axisLetters}
                 titles={shown.titles}
                 yMin={0}
-                showPoints={shown.values.length <= 45}
+                showPoints
                 fullAxes
                 markAnomalies
                 markExtremes
