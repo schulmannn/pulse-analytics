@@ -29,7 +29,7 @@ import {
   densifyCustomerDays,
   type MsCustomerMetric,
 } from '@/lib/msCustomerSeries';
-import { type Grain } from '@/lib/msSeries';
+import type { Grain } from '@/lib/msSeries';
 import { cohortCellValue, isMoneyCohortMode, type MsCohortCell, type MsCohortMode } from '@/lib/msCohortMode';
 import { WidgetGrid } from '@/components/widgets/WidgetGrid';
 
