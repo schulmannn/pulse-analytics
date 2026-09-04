@@ -37,7 +37,7 @@ const DAYS_ALLOWED = [0, 7, 30, 90];
 const isDayKey = (v) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v);
 
 function registerRusenderRoutes({
-  app, requireAuth, db, audit, rusenderCrypto, rusenderFetch, surfacesEnabled = false, log,
+  app, requireAuth, db, audit, rusenderCrypto, rusenderFetch, log,
 }) {
   /**
    * Канал + учётка Rusender для запроса. Порядок проверок — канон resolveYm/resolveMs:
@@ -189,9 +189,6 @@ function registerRusenderRoutes({
         channel_id: resolved.channel ? resolved.channel.id : null,
         account_email: acc ? acc.account_email || null : null,
         account_id: acc ? acc.account_id || null : null,
-        // Фичефлаг витрин эхом: экран источника рисует либо дашборд, либо честное «поверхности
-        // ещё выключены», а не пустые оси, которые читались бы как «рассылок нет».
-        surfaces: !!surfacesEnabled,
         scopes: acc && Array.isArray(acc.scopes) ? acc.scopes : [],
         // Разрешения могли отозвать уже ПОСЛЕ подключения — показываем это на экране источника,
         // а не оставляем пользователя гадать, почему обзор перестал наполняться.
@@ -230,16 +227,6 @@ function registerRusenderRoutes({
     }
   });
 
-  // ── Витрины (за фичефлагом RUSENDER_SURFACES) ─────────────────────────────────────────────
-  // Пока флаг выключен, роутов ДЛЯ КЛИЕНТА не существует: 404, а не 403 и не пустой ответ.
-  // Пустой ответ выключенной поверхности неотличим от «данных нет» и врал бы дважды —
-  // и пользователю, и нам самим при отладке.
-  function surfaceGate(res) {
-    if (surfacesEnabled) return true;
-    res.status(404).json({ error: 'Витрины Rusender ещё не включены' });
-    return false;
-  }
-
   /** Окно периода: days из узкого enum → [from..to] в зоне источника. 0 = «Всё» (из архива). */
   async function windowOf(req, channelId, actor) {
     const n = parseInt(req.query.days, 10);
@@ -276,7 +263,6 @@ function registerRusenderRoutes({
    */
   app.get('/api/rusender/summary', requireAuth, async (req, res, next) => {
     try {
-      if (!surfaceGate(res)) return;
       const resolved = await resolveRusenderChannel(req, res);
       if (!resolved) return;
       const channelId = resolved.channel.id;
@@ -297,7 +283,6 @@ function registerRusenderRoutes({
   /** GET /api/rusender/campaigns — лента рассылок окна (по умолчанию только базовые, см. 040). */
   app.get('/api/rusender/campaigns', requireAuth, async (req, res, next) => {
     try {
-      if (!surfaceGate(res)) return;
       const resolved = await resolveRusenderChannel(req, res);
       if (!resolved) return;
       const channelId = resolved.channel.id;
@@ -323,7 +308,6 @@ function registerRusenderRoutes({
   /** GET /api/rusender/campaign/:id — одна рассылка: итоги, дневная кривая и части семьи. */
   app.get('/api/rusender/campaign/:id', requireAuth, async (req, res, next) => {
     try {
-      if (!surfaceGate(res)) return;
       const resolved = await resolveRusenderChannel(req, res);
       if (!resolved) return;
       const id = Number.parseInt(req.params.id, 10);

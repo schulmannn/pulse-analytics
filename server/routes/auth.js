@@ -8,7 +8,7 @@ function registerAuthRoutes({
   hashPassword, verifyPassword, DUMMY_HASH, signSession, SESSION_TTL, SESSION_ABSOLUTE_TTL,
   GOOGLE_CLIENT_ID, fetchWithTimeout, log, audit, appBase, sha256, newToken,
   VERIFY_TTL, RESET_TTL, sendEmail, emailShell, emailBtn, escHtml,
-  aiEnabledFor, rusenderSurfaces = false, setSessionCookie, clearSessionCookie,
+  aiEnabledFor, setSessionCookie, clearSessionCookie,
   jobTracker,
 }) {
   // Анти-enumeration роуты (register/forgot/resend) отвечают ДО работы с БД/почтой — это осознанно
@@ -193,7 +193,6 @@ function registerAuthRoutes({
       // тянуть ради этого ленивый модуль источника в шелл нельзя (бюджет бандла оболочки).
       // Поле ПЛОСКОЕ, в отличие от `ai`: разбирающая его Zod-схема лежит в общем чанке, и
       // вложенный объект стоил бы полкилобайта каждому маршруту метрик (см. api/schemas.ts).
-      rusender_surfaces: !!rusenderSurfaces,
     });
   }));
 

@@ -7,8 +7,6 @@ import { expect, test, type Page } from '@playwright/test';
  *   • «События окна» и «Итоги рассылок» — ДВЕ независимые группы величин, которые нельзя
  *     складывать: открытия могут прийти на письма, отправленные до окна (тот же канон, что
  *     «Просмотры канала» ≠ «Просмотры публикаций» у Telegram);
- *   • «Рассылки» и «База» живут за фичефлагом RUSENDER_SURFACES — до сверки чисел с живыми
- *     данными их не видит никто, кроме включивших флаг.
  *
  * Boot БЕЗ pulse_demo: демо-фикстуры отдают ответы клиентски, до сети.
  */
@@ -73,7 +71,7 @@ const CAMPAIGNS = {
 async function bootRusender(
   page: Page,
   path: string,
-  { surfaces = true, connected = true, empty = false } = {},
+  { connected = true, empty = false } = {},
 ) {
   await page.route(/^https?:\/\/[^/]+\/api\//, async (route) => {
     const request = route.request();
@@ -81,7 +79,7 @@ async function bootRusender(
     const json = (body: unknown) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
 
     if (url.pathname === '/api/auth/me') {
-      return json({ uid: 42, email: 'owner@pulse.local', role: 'user', avatar: null, rusender_surfaces: surfaces });
+      return json({ uid: 42, email: 'owner@pulse.local', role: 'user', avatar: null });
     }
     if (url.pathname === '/api/channels' && request.method() === 'GET') {
       return json({ enabled: true, channels: [CHANNEL] });
@@ -150,15 +148,15 @@ test('Обзор: пустое окно говорит о пустоте, а н�
   await expect(page.getByText(/Не удалось|Ошибка/)).toHaveCount(0);
 });
 
-test('«Рассылки» и «База» скрыты без фичефлага и появляются с ним', async ({ page }) => {
-  await bootRusender(page, '/rusender', { surfaces: false });
+test('«Рассылки» и «База» стоят в наве источника — фичефлага больше нет', async ({ page }) => {
+  // Раньше здесь проверялись ОБА состояния флага. Флаг снят: сверка чисел закрыта замером (#546),
+  // а оговорку про 11-дневное окно активности экраны говорят сами. Остаётся то, что должно
+  // остаться навсегда: у источника три раздела, и они видны без переменной окружения.
+  await bootRusender(page, '/rusender');
   const nav = page.getByRole('navigation');
   await expect(nav.getByRole('link', { name: 'Обзор' }).first()).toBeVisible({ timeout: 15_000 });
-  await expect(nav.getByRole('link', { name: 'Рассылки' })).toHaveCount(0);
-  await expect(nav.getByRole('link', { name: 'База' })).toHaveCount(0);
-
-  await bootRusender(page, '/rusender', { surfaces: true });
-  await expect(page.getByRole('navigation').getByRole('link', { name: 'Рассылки' })).toBeVisible({ timeout: 15_000 });
+  await expect(nav.getByRole('link', { name: 'Рассылки' })).toBeVisible();
+  await expect(nav.getByRole('link', { name: 'База' })).toBeVisible();
 });
 
 test('«Рассылки»: список несёт имя, доставку и открытия каждой рассылки', async ({ page }) => {

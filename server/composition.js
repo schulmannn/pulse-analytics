@@ -589,7 +589,6 @@ function createComposition(config, overrides = {}) {
       ymFetch,
       rusenderCrypto,
       rusenderFetch,
-      rusenderSurfaces: config.rusender.surfaces,
       nearestOf,
       cacheGet,
       cacheSet,
