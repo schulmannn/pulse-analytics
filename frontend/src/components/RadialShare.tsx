@@ -249,17 +249,22 @@ export function RadialShare({
         {legendShown.map((a) => (
           <li
             key={a.key}
-            className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-x-1.5"
+            /* items-start, а не center: при переносе значения ячейка соседней колонки получала
+               пустую строку сверху и легенда разъезжалась по вертикали (аудит #554, D14). */
+            className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start gap-x-1.5"
           >
             <span
               aria-hidden="true"
-              className="h-2.5 w-2.5 shrink-0 rounded-[2px]"
+              className="mt-1 h-2.5 w-2.5 shrink-0 rounded-[2px]"
               style={{ backgroundColor: a.color }}
             />
             <span className="min-w-0 truncate text-muted-foreground" title={a.label}>{a.label}</span>
+            {/* Доля ПЕРВОЙ и склеена с абсолютным значением неразрывными пробелами вокруг «·».
+                Раньше точка-разделитель повисала в конце строки, а процент уезжал на следующую;
+                теперь перенос, если и случится, унесёт менее важное — абсолютное число. */}
             <span className="col-start-2 min-w-0 tabular-nums text-foreground">
-              <span className="font-medium">{format(a.value)} {unitWord}</span>
-              <span className="text-muted-foreground"> · {a.pct.toFixed(1)}%</span>
+              <span className="font-medium">{a.pct.toFixed(1)}%</span>
+              <span className="text-muted-foreground">{' · '}{format(a.value)} {unitWord}</span>
             </span>
           </li>
         ))}

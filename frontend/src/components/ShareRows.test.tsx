@@ -125,8 +125,8 @@ describe('RadialShare — accessible composition', () => {
     expect(html).toContain('Компьютеры — 20 визитов, 20.0%');
     expect(html).toContain('Не определено — 20 визитов, 20.0%');
     expect(html).toContain('aria-label="Легенда состава"');
-    expect(plain).toContain('60 визитов · 60.0%');
-    expect(plain).toContain('20 визитов · 20.0%');
+    expect(plain).toContain('60.0% · 60 визитов');
+    expect(plain).toContain('20.0% · 20 визитов');
   });
 
   it('keeps the passive visualization out of keyboard order while leaving all data as text', () => {
@@ -143,7 +143,7 @@ describe('RadialShare — accessible composition', () => {
     );
 
     expect(html).toContain('Малая группа');
-    expect(text(html)).toContain('1 визитов · 0.5%');
+    expect(text(html)).toContain('0.5% · 1 визитов');
     expect(html).toContain('focusable="false"');
     expect(html).not.toContain('tabindex=');
     expect(html).not.toContain('role="tooltip"');

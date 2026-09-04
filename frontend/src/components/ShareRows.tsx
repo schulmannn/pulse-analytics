@@ -212,20 +212,33 @@ export function ShareRows({
                 <ShareTrack pct={pct ?? 0} ariaLabel={null} />
               </div>
               {/* Значение и ТОЧНАЯ доля постоянно видны: hover больше не является единственным
-                  способом прочитать процент на touch, с клавиатуры или скринридером. */}
-              <span className="col-start-2 row-start-1 flex min-w-0 flex-wrap items-baseline justify-end gap-x-1 text-right text-xs tabular-nums sm:col-start-3">
-                <span className="font-medium text-foreground">{format(r.value)}</span>
-                {r.note != null && <span className="text-muted-foreground"> · {r.note}</span>}
-                <span role="img" className="text-muted-foreground" aria-label={`Доля ${pctText(pct)}`}>
-                  · {pctText(pct)}
+                  способом прочитать процент на touch, с клавиатуры или скринридером.
+
+                  ДВЕ строки, а не один переносимый ряд. Раньше значение, примечание и доля лежали
+                  в одном `flex-wrap`: в узкой карточке хвост переносился, «· 47.0%» оставался
+                  сиротой на второй строке, и высота росла ТОЛЬКО у тех строк, где случился
+                  перенос — столбик полосок терял ритм (аудит #554, D6). Теперь первая строка —
+                  число и доля, она не переносится никогда; длинное примечание («1 596 чел. ·
+                  24.6% отказов») уезжает во вторую, вторичным кеглем. */}
+              <span className="col-start-2 row-start-1 flex min-w-0 flex-col items-end text-right text-xs tabular-nums sm:col-start-3">
+                <span className="flex items-baseline gap-x-1 whitespace-nowrap">
+                  <span className="font-medium text-foreground">{format(r.value)}</span>
+                  <span role="img" className="text-muted-foreground" aria-label={`Доля ${pctText(pct)}`}>
+                    · {pctText(pct)}
+                  </span>
+                  {cumulative && pct != null && (
+                    <span
+                      role="img"
+                      className="text-2xs text-muted-foreground"
+                      aria-label={`Накопленная доля ${pctText(running)}`}
+                    >
+                      · Σ {pctText(running)}
+                    </span>
+                  )}
                 </span>
-                {cumulative && pct != null && (
-                  <span
-                    role="img"
-                    className="text-2xs text-muted-foreground"
-                    aria-label={`Накопленная доля ${pctText(running)}`}
-                  >
-                    · Σ {pctText(running)}
+                {r.note != null && (
+                  <span className="min-w-0 max-w-full truncate text-2xs text-muted-foreground">
+                    {r.note}
                   </span>
                 )}
               </span>
