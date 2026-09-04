@@ -244,7 +244,12 @@ function registerTgRoutes({
       const data = await mtprotoPost('/qr/poll', { params: { id } });
       if (data.status === 'ok') { _qrStarts.delete(id); return res.json(await tgQrFinish(req, data)); }
       if (data.status === 'expired' || data.status === 'error') _qrStarts.delete(id);
-      res.json({ status: data.status, error: data.error });   // pending | password | expired | error
+      const out = { status: data.status, error: data.error };   // pending | password | expired | error
+      // The login token rotates while the scan is pending — mtproto re-mints it every ~30s and the
+      // browser must re-render the fresh code, or the user scans a dead QR. Forward ONLY that url,
+      // never the rest of `data` (the ok-path payload carries the session and goes via tgQrFinish).
+      if (data.status === 'pending' && typeof data.url === 'string') out.url = data.url;
+      res.json(out);
     } catch (e) { next(e); }
   });
 

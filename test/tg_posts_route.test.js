@@ -308,6 +308,40 @@ test('successful QR reconnect immediately refreshes existing tracked QR channels
   // else — reconnect may only write channels owned by the session owner.
   assert.deepEqual(events[1], ['refreshed', session, [centralCh, tracked]]);
 });
+test('/api/tg/qr/poll forwards the rotated login url so the browser re-renders a live QR', async () => {
+  // Telegram's login token dies in ~30s; mtproto re-mints it and reports the fresh url on every
+  // pending poll. Dropping it left the user staring at a dead code until the login went 'expired'.
+  const polls = [
+    { status: 'pending', url: 'tg://login?token=new', session: 'must-not-leak' },
+    { status: 'password', url: 'tg://login?token=stale' },
+  ];
+  const routes = tgHandlers({
+    db: { enabled: true },
+    mtprotoFetch: async () => ({}),
+    mtprotoPost: async (path) => {
+      if (path === '/qr/start') return { id: 'login-1', url: 'tg://login?token=first', expires_in: 60 };
+      if (path === '/qr/poll') return polls.shift();
+      throw new Error(`unexpected ${path}`);
+    },
+    tgCrypto: { configured: () => true },
+  });
+  const poll = () => invokeRoute(routes.get('POST /api/tg/qr/poll').at(-1), { body: { id: 'login-1' } });
+
+  await invokeRoute(routes.get('POST /api/tg/qr/start').at(-1));
+
+  const pending = await poll();
+  assert.equal(pending.statusCode, 200);
+  assert.equal(pending.body.status, 'pending');
+  assert.equal(pending.body.url, 'tg://login?token=new');
+  // Exactly the rotated url is added — the response must not widen into the rest of the mtproto body.
+  assert.deepEqual(Object.keys(pending.body).filter((k) => !['status', 'error', 'url'].includes(k)), []);
+
+  // Past the scan there is nothing left to re-render: the mtproto watcher stops rotating once the
+  // login needs a 2FA password, so a stale url must not travel with the non-pending statuses.
+  const password = await poll();
+  assert.equal(password.body.status, 'password');
+  assert.equal(password.body.url, undefined);
+});
 test('/api/tg/qr/start allows a cold Telegram service to start without changing other POSTs', async () => {
   const calls = [];
   const statsTimeout = 61000;
