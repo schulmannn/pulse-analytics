@@ -96,6 +96,31 @@ interface Hover {
 
 // Approximate glyph width of the 11px tabular numerals used for axis/value labels.
 const CHAR_W = 6.6;
+// Кириллица шире табулярной цифры, прописная — заметно шире строчной.
+const CHAR_W_LOWER = 6.4;
+const CHAR_W_UPPER = 7.6;
+
+/**
+ * ОЦЕНКА ШИРИНЫ ПОДПИСИ ОСИ — одна на всю семью графиков (аудит #554).
+ *
+ * Было: три копии константы `6.6` (LineChart, BarChart, DivergingBars), и все три считали
+ * любой символ табулярной цифрой. На кириллице это даёт до ±20%: «Сентябрь» шире оценки,
+ * «5 авг.» — у́же. От этого числа зависят ширина y-гаттера, кламп крайних подписей и ширина
+ * пилюли текущей метки — то есть ошибка видна как обрезанный текст или как лишний воздух.
+ *
+ * Здесь нет измерения через getComputedTextLength намеренно: оно потребовало бы второго
+ * прохода раскладки на каждый рендер графика. Трёх классов хватает: оси несут цифры,
+ * точки, пробелы и короткие русские слова.
+ */
+export function axisTextWidth(text: string): number {
+  let w = 0;
+  for (const ch of text) {
+    if (ch >= '0' && ch <= '9') w += CHAR_W;
+    else if (ch.toLowerCase() !== ch.toUpperCase()) w += ch === ch.toLowerCase() ? CHAR_W_LOWER : CHAR_W_UPPER;
+    else w += CHAR_W;
+  }
+  return w;
+}
 // Высота строки подписи-экстремума (2xs, 11px + просвет). По ней решается, слиплись ли две
 // подписи одной серии и надо ли разводить их вверх/вниз — см. `extremes` ниже.
 const EXTREME_LINE_H = 13;
@@ -121,6 +146,9 @@ const EXTREME_LINE_H = 13;
 const RING_MAX_POINTS = 10;
 const RING_MIN_STEP = 14;
 
+/** Запас над максимумом, ниже которого шкала поднимается ещё на шаг (доля высоты плота). */
+const SCALE_HEADROOM = 0.08;
+
 /** Next step up the 1-2-5×10ⁿ ladder (20 → 50 → 100 → 200 …). */
 function nextStep(step: number): number {
   const mag = 10 ** Math.floor(Math.log10(step));
@@ -133,6 +161,15 @@ function nextStep(step: number): number {
  * values and never format into duplicate labels («4.9k / 4.9k / 4.8k»), capped at 5 ticks.
  */
 export function niceScale(minV: number, maxV: number): { lo: number; hi: number; step: number; ticks: number[] } {
+  // ПИК НЕ КАСАЕТСЯ ПОТОЛКА (аудит #554). Когда максимум кратен шагу, `ceil` ниже отдавал
+  // hi === maxV: вершина линии ложилась РОВНО на верхнюю линейку сетки и сливалась с ней (видно на
+  // /metrics/ig-follows): глазу нечем отличить «дошло до максимума окна» от «упёрлось в край графика».
+  //
+  // Запас добавляется К ВХОДУ, а не к готовому потолку: иначе лишний шаг ломает потолок числа
+  // делений (цикл «> 4.5 шагов» ниже), и вместо четырёх линеек сетки получается шесть. Округление
+  // вверх само подберёт честный потолок выше пика.
+  const pad = Math.abs(maxV - minV) || Math.abs(maxV) || 1;
+  maxV += pad * SCALE_HEADROOM;
   let span = maxV - minV;
   if (!Number.isFinite(span) || span <= 0) span = Math.abs(maxV) || 1;
   const mag0 = 10 ** Math.floor(Math.log10(Math.max(span / 2.5, 1e-9)));
@@ -365,7 +402,7 @@ export function LineChart({
     // on the line/area and the first label is never clipped by the container edge.
     // Axis-free mode keeps only a sliver so edge markers (rings) don't clip on the viewBox.
     const gutterW = showAxes && !rhea
-      ? Math.max(28, Math.round(Math.max(...yLabels.map((l) => l.length)) * CHAR_W) + 14)
+      ? Math.max(28, Math.round(Math.max(...yLabels.map(axisTextWidth))) + 14)
       : 6;
 
     const n = values.length;
@@ -450,7 +487,7 @@ export function LineChart({
             .map((i) => {
               const text = letterAxis ? letterAxis[i] : labels?.[i] ?? '';
               if (!text) return null;
-              const halfW = (text.length * CHAR_W) / 2;
+              const halfW = axisTextWidth(text) / 2;
               const x = Math.min(Math.max(points[i].x, gutterW + halfW), Math.max(W - padR - halfW, gutterW + halfW));
               return { i, px: points[i].x, x, text, halfW };
             })
@@ -485,7 +522,7 @@ export function LineChart({
         const px = points[e.i].x;
         const py = yFor(e.v);
         const text = fmt.short(e.v);
-        const halfW = (text.length * CHAR_W) / 2;
+        const halfW = axisTextWidth(text) / 2;
         // +6px воздуха справа: лейбл последней точки не прилипает к краю карточки.
         const x = Math.min(Math.max(px, gutterW + halfW), Math.max(W - padR - halfW - 6, gutterW + halfW));
         const fitsAbove = py - 18 >= 0;
@@ -650,7 +687,7 @@ export function LineChart({
           const isCurrent = t.i === axisCurrentIdx;
           const pill = isCurrent
             ? (() => {
-                const textW = t.text.length * CHAR_W;
+                const textW = axisTextWidth(t.text);
                 const pillH = 15;
                 const pillW = Math.max(textW + 12, pillH);
                 return { x: Math.max(1, Math.min(t.x - pillW / 2, W - pillW - 1)), w: pillW, h: pillH };
@@ -1030,7 +1067,7 @@ export function LineChart({
                 mono = timestamp по канону. Поверх прореженных тиков — как «axis tooltip». */}
             {hasXAxis && activeIdx != null && labels?.[activeIdx] && (() => {
               const text = labels[activeIdx];
-              const halfW = (text.length * CHAR_W) / 2 + 7;
+              const halfW = axisTextWidth(text) / 2 + 7;
               const cx = Math.min(Math.max(hovered.x, gutterW + halfW), W - halfW - 2);
               return (
                 <g data-chart-axis-plate className="pointer-events-none">
