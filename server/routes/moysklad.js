@@ -8,7 +8,7 @@ const {
   buildAssortmentComparison,
 } = require('../lib/msTopProducts');
 const { SEGMENT_ORDER } = require('../domain/msRfm');
-const { hasWorkspaceRole, tenantChannelId } = require('../middleware/tenant');
+const { hasWorkspaceRole } = require('../middleware/tenant');
 const { makeResolveSourceChannel } = require('./sourceRouteKit');
 
 /**
