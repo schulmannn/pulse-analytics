@@ -426,6 +426,162 @@ export function buildWeekNarrative(inp: NarrativeInput): WeekNarrative {
   return { paragraphs, quiet: false };
 }
 
+/* ────────────────────────────────────────────────────────────────────────────────────────────
+ * СВОДКА НЕДЕЛИ ОДНИМ ОБЪЕКТОМ (аудит #554, ТЗ-11).
+ *
+ * Виджет «Неделя канала» пересобран так, что число, ритм и ОДНА объясняющая мысль читаются за
+ * секунду, а факты стоят списком без дублей. Разметке для этого нужны не абзацы, а величины:
+ * `buildWeekNarrative` отдаёт готовый текст, из которого верхнюю строку карточки не собрать.
+ *
+ * Поэтому ЗДЕСЬ — вторая, чистая функция на тех же `last7`/`prev7`, а старый движок остаётся
+ * нетронутым: его едят IG-виджет и серверный дайджест (`server/lib/narrative.gen.cjs` собирается
+ * из этого файла через `build:shared`). Дублируется не логика, а точка входа: приоритет находок
+ * для `insight` тот же, что у абзаца «А» большого движка, и они обязаны совпадать — расхождение
+ * ловят юниты на общих фикстурах.
+ * ──────────────────────────────────────────────────────────────────────────────────────────── */
+
+export interface WeekSummary {
+  /** Сумма просмотров за 7 дней. */
+  curSum: number;
+  /** То же за предыдущие 7; 0, когда окна нет. */
+  prevSum: number;
+  /** Сдвиг недели в процентах; null — сравнивать не с чем (нет полного прошлого окна). */
+  pct: number | null;
+  /** Ровно 14 дневных значений (старые → новые) для полоски; короче, если истории меньше. */
+  days14: { day: string; v: number }[];
+  /** Пик ТЕКУЩЕЙ недели и его доля в сумме недели. */
+  peak: { day: string; v: number; share: number } | null;
+  /** Постов за неделю. */
+  posts: number;
+  subsNow: number | null;
+  subsD7: number | null;
+  /** Лучшая публикация недели по просмотрам (для леджера и чипа поста). */
+  best: { views: number; title: string; postIndex: number } | null;
+  /** Рекорд месяца — только если он СТАРШЕ обеих недель (тот же честный гейт, что в абзаце «А»). */
+  recordOfMonth: { day: string; v: number } | null;
+  /** Instagram за ту же неделю; null — не подключён или окна нет. */
+  ig: { reach: number; pct: number } | null;
+  /** Ровно один абзац-объяснение или null. Сегменты только text/number/delta/post — без искр. */
+  insight: NarrativeParagraph | null;
+}
+
+/**
+ * Одна мысль, которая объясняет число недели. Приоритет тот же, что у атрибуции в абзаце «А»
+ * большого движка: тишина → неповторённый пик → герой по ERV → рекорд месяца. Дальше первого
+ * сработавшего не идём: карточке нужна ОДНА причина, а не список версий.
+ */
+function buildInsight(
+  inp: NarrativeInput,
+  last7: { day: string; v: number }[],
+  prev7: { day: string; v: number }[],
+  pct: number | null,
+  record: { day: string; v: number } | null,
+): NarrativeParagraph | null {
+  if (inp.posts.length === 0 && sum(last7.map((p) => p.v)) === 0) {
+    return [t('Тихая неделя: постов не было, просмотры на нуле.')];
+  }
+
+  if (pct != null && prev7.length === 7) {
+    const prevSum = sum(prev7.map((p) => p.v));
+    const silentCur = last7.filter((x) => x.v === 0).length;
+    const silentPrev = prev7.filter((x) => x.v === 0).length;
+    if (pct < 0 && silentCur >= silentPrev + 2) {
+      return [
+        t(
+          `Главный вклад в разницу — тишина: ${silentCur} ${plural(silentCur, 'день', 'дня', 'дней')} без публикаций против ${silentPrev || 'нуля'} неделей раньше.`,
+        ),
+      ];
+    }
+    const peakPrev = prev7.reduce((a, b) => (b.v > a.v ? b : a));
+    const peakShare = prevSum > 0 ? Math.round((peakPrev.v / prevSum) * 100) : 0;
+    const peakUnmatched = pct < 0 && peakPrev.v > Math.max(...last7.map((x) => x.v));
+    if (peakUnmatched && peakShare >= 25) {
+      return [
+        t(`Разницу почти целиком объясняет один день: ${fmt.day(peakPrev.day)} прошлой недели дал `),
+        n(fmt.kpi(peakPrev.v), '/metrics/views'),
+        t(` — ${peakShare}% её суммы, и в этот раз такого пика не случилось.`),
+      ];
+    }
+  }
+
+  // Герой недели — тот же гейт, что у абзаца «B»: ≥3 постов и лифт ERV ≥ ×1.6 от нормы канала.
+  if (inp.posts.length >= 3 && inp.avgErv != null && inp.avgErv > 0) {
+    const idx = inp.posts.reduce((best, p, i) => (p.erv > inp.posts[best].erv ? i : best), 0);
+    const post = inp.posts[idx];
+    const ervLift = post.erv / inp.avgErv;
+    if (ervLift >= 1.6) {
+      return [
+        t('Герой недели — '),
+        { kind: 'post', text: `«${clip(post.title)}»`, postIndex: idx },
+        t(': вовлечённость '),
+        n(`${post.erv.toFixed(1)}%`, '/metrics/er'),
+        t(` на просмотр — в ${lift(ervLift)} ${liftWord(ervLift)} выше нормы канала.`),
+      ];
+    }
+  }
+
+  if (record) {
+    return [
+      t(`Рекорд месяца старше недели: ${fmt.day(record.day)}, `),
+      n(fmt.kpi(record.v), '/metrics/views'),
+      t(' за день.'),
+    ];
+  }
+  return null;
+}
+
+/** Рекорд месяца: максимум серии СТАРШЕ обеих недель и статистически выделяющийся (≥2.2σ). */
+function monthRecord(series: { day: string; v: number }[]): { day: string; v: number } | null {
+  if (series.length < 21) return null;
+  const anom = series.reduce((a, b) => (b.v > a.v ? b : a));
+  const anomIdx = series.findIndex((x) => x.day === anom.day);
+  const nz = series.filter((x) => x.v > 0).map((x) => x.v);
+  const mean = sum(nz) / Math.max(nz.length, 1);
+  const sd = Math.sqrt(sum(nz.map((v) => (v - mean) ** 2)) / Math.max(nz.length, 1));
+  if (anomIdx >= series.length - 14 || sd <= 0 || (anom.v - mean) / sd < 2.2) return null;
+  return { day: anom.day, v: anom.v };
+}
+
+export function buildWeekSummary(inp: NarrativeInput): WeekSummary {
+  const series = inp.viewsDaily;
+  const last7 = series.slice(-7);
+  const prev7 = series.slice(-14, -7);
+  const curSum = sum(last7.map((p) => p.v));
+  const prevSum = sum(prev7.map((p) => p.v));
+  // Сравнение живёт только при ОБОИХ полных окнах и ненулевой базе — иначе «+∞%».
+  const pct =
+    last7.length === 7 && prev7.length === 7 && prevSum > 0 ? ((curSum - prevSum) / prevSum) * 100 : null;
+
+  const peakDay = last7.length > 0 ? last7.reduce((a, b) => (b.v > a.v ? b : a)) : null;
+  const peak =
+    peakDay && peakDay.v > 0
+      ? { day: peakDay.day, v: peakDay.v, share: curSum > 0 ? (peakDay.v / curSum) * 100 : 0 }
+      : null;
+
+  const bestIdx =
+    inp.posts.length > 0 ? inp.posts.reduce((best, p, i) => (p.views > inp.posts[best].views ? i : best), 0) : -1;
+  const best =
+    bestIdx >= 0 ? { views: inp.posts[bestIdx].views, title: clip(inp.posts[bestIdx].title), postIndex: bestIdx } : null;
+
+  const record = monthRecord(series);
+  const reach = inp.ig ? igReachWindow(inp.ig) : null;
+
+  return {
+    curSum,
+    prevSum,
+    pct,
+    days14: series.slice(-14),
+    peak,
+    posts: inp.posts.length,
+    subsNow: inp.subsNow ?? null,
+    subsD7: inp.subsD7 ?? null,
+    best,
+    recordOfMonth: record,
+    ig: reach ? { reach: reach.cur, pct: reach.pct } : null,
+    insight: buildInsight(inp, last7, prev7, pct, record),
+  };
+}
+
 /** Plain-рендер тех же сегментов — TG-дайджест и любой текстовый контекст. */
 export function narrativeToPlain(nar: WeekNarrative): string {
   return nar.paragraphs
