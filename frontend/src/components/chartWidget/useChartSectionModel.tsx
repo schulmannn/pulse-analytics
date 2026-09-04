@@ -2,7 +2,7 @@ import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, u
 import type { CSSProperties } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useViewTransitionNavigate } from '@/lib/viewTransitionNavigate';
-import { WidgetTargetContext } from '@/components/ExpandableChart';
+import { WidgetTargetContext, ChartCardTitleContext } from '@/components/ExpandableChart';
 import { ThrowInRender } from '@/components/WidgetErrorBoundary';
 import { GroupCtx, prefersReducedMotion } from '@/components/widgets/WidgetGroup';
 import { maxSize } from '@/components/widgets/variants';
@@ -228,6 +228,7 @@ export function useChartSectionModel(props: ChartSectionProps) {
   );
   const overlayBody = (
     <WidgetPeriodProvider value={widgetPeriod}>
+      <ChartCardTitleContext.Provider value={label}>
       <WidgetTargetContext.Provider value={activeTarget}>
         {variantResult.ok
           ? activeVariant
@@ -236,6 +237,7 @@ export function useChartSectionModel(props: ChartSectionProps) {
           : <ThrowInRender error={variantResult.error} />}
         {activeVariant ? children : null}
       </WidgetTargetContext.Provider>
+      </ChartCardTitleContext.Provider>
     </WidgetPeriodProvider>
   );
 

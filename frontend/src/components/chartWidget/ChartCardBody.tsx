@@ -1,7 +1,7 @@
 import { useContext, type ReactNode } from 'react';
 import { KpiValue } from '@/components/chartWidget/KpiValue';
 import { DeltaPill } from '@/components/DeltaPill';
-import { ChartExpandedContext } from '@/components/ExpandableChart';
+import { ChartCardTitleContext, ChartExpandedContext } from '@/components/ExpandableChart';
 import { fmt } from '@/lib/format';
 import type { MetricDelta } from '@/lib/delta';
 
@@ -62,6 +62,21 @@ export function ChartCardBody({
   children,
 }: ChartCardBodyProps) {
   const expanded = useContext(ChartExpandedContext);
+  /* Подпись НЕ повторяет заголовок карточки. На IG-обзоре карточка называлась «Охват», и над
+     числом стояла вторая подпись «Охват» (аудит #554, D8); это вторая серия одного дефекта — до
+     неё так же дублировались «Просмотры». Если подпись — заголовок с хвостом окна («Охват · 30
+     дн.»), от неё остаётся только хвост: он несёт то, чего в заголовке нет. */
+  const cardTitle = useContext(ChartCardTitleContext);
+  const headline = (() => {
+    if (label == null || cardTitle == null) return label;
+    const title = cardTitle.trim();
+    const text = String(label).trim();
+    if (!title || text.toLowerCase() === title.toLowerCase()) return null;
+    const sep = ' · ';
+    return text.toLowerCase().startsWith(`${title.toLowerCase()}${sep}`)
+      ? text.slice(title.length + sep.length)
+      : label;
+  })();
   // A metric page already carries the current value and comparison in its inspector rail. Repeating
   // the same KPI inside the report card steals horizontal room from the plot (most visibly on the
   // MoySklad explorers). In an expanded/full-page context the chart is therefore the whole body;
@@ -77,7 +92,7 @@ export function ChartCardBody({
   return (
     <div className="flex h-full min-h-0 items-end gap-4" data-chart-card-body>
       <div className="flex shrink-0 flex-col items-start gap-1.5 pb-0.5" data-chart-card-headline>
-        {label != null && <div className="text-xs tracking-wide text-muted-foreground">{label}</div>}
+        {headline != null && <div className="text-xs tracking-wide text-muted-foreground">{headline}</div>}
         {/* KpiNumber: цифры морфятся при смене периода (канон 2026-08-18, паритет с морфом
             графиков); нечисловые строки остаются на снапе ValueSwap внутри него. */}
         <div className="flex items-center gap-1.5">
