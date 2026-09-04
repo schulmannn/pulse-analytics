@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useYmGoals, useYmHourly, useYmSummary } from '@/api/queries';
+import { useYmGoals, useYmHourly, useYmSummary } from '@/api/ym';
 import { PillSelect } from '@/components/PillSelect';
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
 import { ChartCardBody } from '@/components/chartWidget/ChartCardBody';

@@ -4,7 +4,7 @@
 // (и наоборот).
 
 import { useMemo } from 'react';
-import { useMsSummary } from '@/api/queries';
+import { useMsSummary } from '@/api/ms';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { DEFAULT_WIDGET_DAYS, widgetPeriodValue } from '@/lib/period';
 import { resolveWidgetMetric, type DataContext } from '@/lib/resolveWidgetMetric';

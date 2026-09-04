@@ -2,7 +2,7 @@ import { useContext, useMemo, useState } from 'react';
 import { ShareTrack } from '@/components/ShareRows';
 import type { ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useMsCohorts, useMsCustomers, useMsRfm, useMsTopCustomers } from '@/api/queries';
+import { useMsCohorts, useMsCustomers, useMsRfm, useMsTopCustomers } from '@/api/ms';
 import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
 import { ChartCardBody } from '@/components/chartWidget/ChartCardBody';

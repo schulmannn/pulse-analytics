@@ -39,19 +39,7 @@ import {
   type MsMetricUrlSchema,
 } from '@/lib/msMetricUrlState';
 import { setSavedFilter, useSavedFilter } from '@/lib/widgetPrefsStore';
-import {
-  useMsChannelSeries,
-  useMsCustomers,
-  useMsFunnel,
-  useMsGeography,
-  useMsReturns,
-  useMsRfm,
-  useMsSalesByChannel,
-  useMsSummary,
-  useMsTopCustomers,
-  useMsCohorts,
-  type MsProductSort,
-} from '@/api/queries';
+import { useMsChannelSeries, useMsCustomers, useMsFunnel, useMsGeography, useMsReturns, useMsRfm, useMsSalesByChannel, useMsSummary, useMsTopCustomers, useMsCohorts, type MsProductSort } from '@/api/ms';
 import {
   MsSummaryExplorer,
   MsFunnelRows,
