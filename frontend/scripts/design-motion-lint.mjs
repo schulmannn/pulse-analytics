@@ -75,6 +75,27 @@ function blockHasMarker({ lines, index }, marker) {
   return false;
 }
 
+/**
+ * Селекторы всех блоков, ВНУТРИ которых стоит строка — от ближайшего к внешнему.
+ *
+ * Скан назад со счётчиком: закрывающая скобка гасит свою открывающую, поэтому СОСЕДНИЙ закрытый
+ * блок с нужным селектором не выдаст индульгенцию тому, кто лежит после него. CSS здесь
+ * отформатирован Biome — одна скобка на строку, так что порядок скобок ВНУТРИ строки не важен.
+ */
+function enclosingSelectors({ lines, index }) {
+  const out = [];
+  let pending = 0;
+  for (let i = index - 1; i >= 0; i--) {
+    pending += (lines[i].match(/\}/g) ?? []).length;
+    let opens = (lines[i].match(/\{/g) ?? []).length;
+    while (opens-- > 0) {
+      if (pending > 0) pending -= 1;
+      else out.push(lines[i]);
+    }
+  }
+  return out;
+}
+
 const rules = [
   {
     id: 'house-easing-inlined',
@@ -214,9 +235,6 @@ const rules = [
     // и держит шкалу ink/ink2/ink3. Рендер сторожит e2e/type-weight-canon.spec.ts, но он видит
     // только демо-маршруты — экраны логина, /connect и Radix-меню открываются лишь по действию.
     test: (line) => /\bfont-(?:semibold|bold|extrabold|black)\b/.test(line),
-    // Таблицу контента Instagram параллельно переписывает отдельная работа (D10); её три
-    // `font-semibold` снимаются там. Исключение удаляется вместе с тем PR.
-    exempt: (rel) => rel === 'src/panels/instagram/IgContentDesktop.tsx',
   },
   {
     id: 'emphasis-browser-bold',
@@ -237,6 +255,33 @@ const rules = [
       line.includes('bg-primary/10') &&
       line.includes('text-primary') &&
       !line.includes('text-accent-foreground'),
+  },
+  {
+    id: 'css-third-font-weight',
+    hint: 'канон — два начертания: 400 и 500. В CSS это такой же третий вес, как font-semibold в классе',
+    // Второй канал того же дефекта, и он СИЛЬНЕЕ классового: правило в index.css перебивает
+    // утилитарный класс на элементе, и чистка по классам (#591, D18) его НЕ видит. Шапка таблицы
+    // контента Instagram так и стояла на 600, а классы её ряда (`text-2xs font-semibold
+    // tracking-wide`) вообще не доезжали — читающий разметку видел одно, браузер рисовал другое.
+    // Объявление с ДВУМЯ значениями (`font-weight: 100 900` в @font-face) — диапазон вариативного
+    // шрифта, а не выбор начертания, и под правило не попадает.
+    test: (line, ctx) => {
+      const m = /font-weight:\s*(?:(\d{3})|(bold|bolder))\s*;/.exec(line);
+      if (!m) return false;
+      if (m[1] && Number(m[1]) < 600) return false;
+      // `.report-rhea` — ЛЕКСИКОН отчёта (свой шрифт Geist и свой трекинг), такой же bespoke, как
+      // лендинг и Legal в BESPOKE_TYPE. Его веса живут по своим правилам и только внутри отчёта.
+      return !enclosingSelectors(ctx).some((sel) => sel.includes('report-rhea'));
+    },
+  },
+  {
+    id: 'disabled-cursor',
+    hint: 'канон #265 — disabled:pointer-events-none. Курсор «нельзя» не ставить никогда',
+    // Решение владельца (#265): выключенный элемент НЕ отвечает на указатель вовсе — он просто
+    // приглушён. Перечёркнутый круг — это упрёк в ответ на движение мыши, а не объяснение.
+    // Button живёт по канону с #265; семь примитивов в components/ui сохранили заводскую строку
+    // shadcn и разъехались с ним молча (аудит #554).
+    test: (line) => /\bcursor-not-allowed\b/.test(line),
   },
 ];
 

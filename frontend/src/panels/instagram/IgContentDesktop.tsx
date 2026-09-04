@@ -581,7 +581,7 @@ export function IgContentDesktop({ ig }: { ig: IgData }) {
       ref={floating ? undefined : tableHeaderRef}
       aria-hidden={!floating && stickyHeader != null ? true : undefined}
     >
-      <tr className="text-2xs font-semibold tracking-wide text-foreground">
+      <tr>
         <th className="w-10 pl-4 pr-2 sm:pl-5">
           <Checkbox
             aria-label="Выбрать все видимые публикации"
@@ -1070,7 +1070,7 @@ function SortButton({ label, active, order, onClick }: { label: string; active: 
     <button
       type="button"
       onClick={onClick}
-      className="group ml-auto inline-flex items-center gap-1 font-semibold tabular-nums text-foreground transition-colors hover:text-foreground/80"
+      className="group ml-auto inline-flex items-center gap-1 tabular-nums text-foreground transition-colors hover:text-foreground/80"
     >
       {label}
       <span
@@ -1279,7 +1279,7 @@ export function IgContentTableSkeleton({ metricCount = METRIC_COLS.length }: { m
     >
       <table aria-hidden="true" className="data-table ig-content-table text-left text-sm">
         <thead>
-          <tr className="text-2xs font-semibold tracking-wide text-foreground">
+          <tr>
             <th className="w-10 pl-4 pr-2 sm:pl-5"><Skeleton className="h-4 w-4 rounded" /></th>
             <th className="w-12 pl-0 pr-3" />
             <th className="min-w-[240px] px-3"><Skeleton className="h-3 w-24" /></th>
