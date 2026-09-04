@@ -450,6 +450,15 @@ export async function bootDemo(
   // Wait for the authed shell (present on every route incl. an empty /home), then settle so
   // ResizeObserver-driven chart heights are final before any measurement.
   await page.locator('main').waitFor({ state: 'visible', timeout: 25_000 });
+  // Докстрока выше обещала «shell + first widget card», а код ждал только оболочку и часы. Под
+  // нагрузкой (несколько worker'ов на одном CPU, холодный dev-сервер) 1200 мс истекали раньше карточек, и
+  // замеры ловили пустую страницу — целый класс флаков (аудит #554). Теперь ждём САМУ карточку;
+  // маршруты без виджетов (пустой /home, списки) просто проходят дальше по истечении своего бюджета.
+  await page
+    .locator('section[data-widget-size], [data-widget-grid], table')
+    .first()
+    .waitFor({ state: 'visible', timeout: 15_000 })
+    .catch(() => {});
   await page.waitForTimeout(1200);
 }
 

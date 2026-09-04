@@ -32,6 +32,16 @@ export interface ChartSectionProps {
   defaultTinted?: boolean;
   /** Locks the surface size and hides the size control in the editor. */
   fixedSize?: WidgetSize;
+  /**
+   * Явная высота тела — для full-карточек С ГРАФИКОМ (аудит #554, D15).
+   *
+   * `SIZE_HEIGHT.full` пустая намеренно: полноширинная карточка с леджером или таблицей растёт
+   * по содержимому. Но тело карточки — это `flex-1 min-h-0` в КОЛОНКЕ БЕЗ ВЫСОТЫ, а такой элемент
+   * по спеке флекса получает базис 0 и схлопывается. График внутри меряет хост, видит крошки и падает
+   * в свой минимум — замерено на «Упоминаниях по дням»: карточка 164px, тело 81px, svg 60px
+   * (пол), тогда как любая фикс-карточка рядом отдаёт графику 161–181px.
+   */
+  chartHeight?: number;
   /** Rich fullscreen explorer configuration. */
   expand?: ChartExpandConfig;
   /** Dedicated metric route used by every expand affordance when present. */

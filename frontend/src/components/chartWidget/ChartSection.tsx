@@ -239,6 +239,7 @@ export function ChartSection(props: ChartSectionProps) {
           period={model.period.widgetPeriod}
           target={model.layout.activeTarget}
           fillHeight={model.layout.fillHeight}
+          height={props.chartHeight}
           fixedTile={!props.strip && effectiveSize !== 'full'}
           primary={model.variants.primaryBody}
           footer={model.variants.activeVariant ? props.children : undefined}
