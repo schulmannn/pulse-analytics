@@ -18,16 +18,23 @@ test('desktop shell owns the only vertical scrollbar', async ({ page }) => {
   test.skip((page.viewportSize()?.width ?? 0) < 768, 'mobile intentionally uses document scrolling');
   await bootDemo(page, '/', { theme: 'dark' });
 
-  const scroll = await page.evaluate(() => {
-    const shell = document.querySelector<HTMLElement>('[data-dashboard-scroll]');
-    if (!shell) throw new Error('dashboard scroll container is missing');
-    return {
-      documentOverflow:
-        document.documentElement.scrollHeight - document.documentElement.clientHeight,
-      shellOverflow: shell.scrollHeight - shell.clientHeight,
-      shellOverflowY: getComputedStyle(shell).overflowY,
-    };
-  });
+  const read = () =>
+    page.evaluate(() => {
+      const shell = document.querySelector<HTMLElement>('[data-dashboard-scroll]');
+      if (!shell) throw new Error('dashboard scroll container is missing');
+      return {
+        documentOverflow:
+          document.documentElement.scrollHeight - document.documentElement.clientHeight,
+        shellOverflow: shell.scrollHeight - shell.clientHeight,
+        shellOverflowY: getComputedStyle(shell).overflowY,
+      };
+    });
+
+  // Ждём КОНТЕНТ, а не часы: под нагрузкой (несколько worker'ов Playwright на одном CPU)
+  // фиксированный settle в bootDemo истекает раньше, чем доезжают виджеты, и панель ещё короче
+  // вьюпорта — гейт падал на пустой странице, а не на втором скроллбаре (аудит #554, флаки).
+  await expect.poll(async () => (await read()).shellOverflow, { timeout: 20_000 }).toBeGreaterThan(1);
+  const scroll = await read();
 
   expect(scroll.documentOverflow, 'desktop document must not create a second scrollbar').toBeLessThanOrEqual(1);
   expect(scroll.shellOverflowY).toBe('auto');
@@ -84,7 +91,8 @@ test('no inner scrollbars — home (seeded defaults)', async ({ page }) => {
 
 test('chart x-axis labels stay sparse and unrotated on compact charts', async ({ page }) => {
   await bootDemo(page, '/analytics');
-  const audit = await page.evaluate(() => {
+  const readAxis = () =>
+    page.evaluate(() => {
     const labels = [...document.querySelectorAll<HTMLElement | SVGTextElement>('[data-chart-axis-label]')]
       .filter((el) => {
         const text = (el.textContent || '').trim();
@@ -120,8 +128,12 @@ test('chart x-axis labels stay sparse and unrotated on compact charts', async ({
       }
     }
 
-    return { count: labels.length, rotated, overlaps };
-  });
+      return { count: labels.length, rotated, overlaps };
+    });
+
+  // Тот же флак: осей на странице ещё нет, и `count > 0` падает до того, как есть что мерять.
+  await expect.poll(async () => (await readAxis()).count, { timeout: 20_000 }).toBeGreaterThan(0);
+  const audit = await readAxis();
 
   expect(audit.count).toBeGreaterThan(0);
   expect(audit.rotated, `rotated labels: ${JSON.stringify(audit.rotated)}`).toEqual([]);

@@ -42,6 +42,7 @@ import {
 import { formatByRole, formatMoney, moneyFormatterFor } from '@/lib/metricNumber';
 import { useCardShowsPeriod, usePagePeriod } from '@/lib/period';
 import { useMsPagePeriod } from '@/lib/msPeriod';
+import { WidgetGrid } from '@/components/widgets/WidgetGrid';
 
 /**
  * «Обзор» СДЭКа. Величины здесь СВОИ — рубли и заказы; с просмотрами TG и охватом IG они не
@@ -224,7 +225,7 @@ export function CdekOverview() {
   };
 
   return (
-    <div className="grid grid-cols-1 gap-6 lg:grid-cols-6">
+    <WidgetGrid className="grid grid-cols-1 gap-6 lg:grid-cols-6">
       {series.isPending || summary.isPending ? (
         <ChartWidget id="cdek-revenue" drillTo="/metrics/cdek-revenue" title="Выручка" fixedSize="half" defaultColor={1} defaultTinted>
           <ChartSkeleton />
@@ -386,7 +387,7 @@ export function CdekOverview() {
           fallback={contribution === 'channel' ? 'Без канала' : 'Без названия'}
         />
       </ChartWidget>
-    </div>
+    </WidgetGrid>
   );
 }
 

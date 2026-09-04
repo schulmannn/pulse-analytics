@@ -1,4 +1,5 @@
 import { useContext, useMemo, useState } from 'react';
+import { WidgetGrid } from '@/components/widgets/WidgetGrid';
 import { ShareTrack } from '@/components/ShareRows';
 import { useMsChannelSeries, useMsGeography, useMsSalesByChannel } from '@/api/queries';
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
@@ -81,7 +82,7 @@ export function MsChannels() {
   }
 
   return (
-    <div className="grid grid-cols-1 gap-6 lg:grid-cols-6">
+    <WidgetGrid className="grid grid-cols-1 gap-6 lg:grid-cols-6">
       <MsChannelDynamicsCard
         period={period}
         windowLabel={windowLabel}
@@ -138,7 +139,7 @@ export function MsChannels() {
           <MsGeographyRows rows={geo.data.rows} noCity={geo.data.no_city_orders} totalOrders={geo.data.total_orders} />
         )}
       </ChartWidget>
-    </div>
+    </WidgetGrid>
   );
 }
 

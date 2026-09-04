@@ -21,6 +21,7 @@ import { useCardShowsPeriod, usePagePeriod } from '@/lib/period';
 import { useMsPagePeriod } from '@/lib/msPeriod';
 import { plural } from '@/lib/narrative';
 import { cn } from '@/lib/utils';
+import { WidgetGrid } from '@/components/widgets/WidgetGrid';
 
 /**
  * «Заказы» СДЭКа — рабочая лента склада: найти конкретную посылку и понять ритм спроса.
@@ -70,7 +71,7 @@ export function CdekOrders() {
   const orders = useCdekOrders(period, { channel: channels, q: q || undefined }, include);
 
   return (
-    <div className="grid grid-cols-1 gap-6 lg:grid-cols-6">
+    <WidgetGrid className="grid grid-cols-1 gap-6 lg:grid-cols-6">
       <ChartWidget id="cdek-rhythm" title={`Когда покупают ${periodInLabel ?? ''}`.trim()} fixedSize="full">
         {hourly.isPending ? (
           <TableSkeleton rows={7} columns={12} />
@@ -158,7 +159,7 @@ export function CdekOrders() {
           />
         )}
       </ChartWidget>
-    </div>
+    </WidgetGrid>
   );
 }
 

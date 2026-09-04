@@ -19,6 +19,7 @@ import { formatByRole } from '@/lib/metricNumber';
 import { usePagePeriod, useCardShowsPeriod } from '@/lib/period';
 import { msPreviousPeriod, useMsPagePeriod } from '@/lib/msPeriod';
 import { YM_BREAKDOWNS } from '@/panels/metrika/ymBreakdowns';
+import { WidgetGrid } from '@/components/widgets/WidgetGrid';
 
 /**
  * Обзор «Яндекс.Метрики» — веб-аналитика сайта рядом с аналитикой каналов. Все числа приходят
@@ -155,13 +156,13 @@ export function YmOverview() {
 
   if (summary.isPending) {
     return (
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-6">
+      <WidgetGrid className="grid grid-cols-1 gap-6 lg:grid-cols-6">
         {Array.from({ length: 2 }).map((_, i) => (
           <div key={i} className="h-[264px] rounded-2xl border border-border bg-card p-5 lg:col-span-3">
             <ChartSkeleton />
           </div>
         ))}
-      </div>
+      </WidgetGrid>
     );
   }
 
@@ -262,7 +263,7 @@ export function YmOverview() {
   const prev = previousPeriod != null ? previous.data : undefined;
 
   return (
-    <div className="grid grid-cols-1 gap-6 lg:grid-cols-6">
+    <WidgetGrid className="grid grid-cols-1 gap-6 lg:grid-cols-6">
       {metricCard('ym-visits', 'Визиты', true, visits, prev?.visits.total)}
       {metricCard('ym-users', 'Посетители', false, users, prev?.users.total, usersCaption)}
       {metricCard('ym-pageviews', 'Просмотры страниц', false, pageviews, prev?.pageviews.total)}
@@ -295,7 +296,7 @@ export function YmOverview() {
           <def.Body period={period} goalId={selectedGoalId} surface="board" />
         </ChartWidget>
       ))}
-    </div>
+    </WidgetGrid>
   );
 }
 
