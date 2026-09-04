@@ -124,14 +124,14 @@ jobs:
           done
           echo "::error::реестр npm недоступен после трёх попыток"
           exit 1
-      # GHSA-qwww-vcr4-c8h2 (react-router: CSRF в RSC-режиме) приложение не затрагивает: RSC/server-
-      # режим react-router не используется (клиентский BrowserRouter поверх Express-статики, RSC-API
-      # в коде нет), а фикс существует только в мажоре v8. audit-ci даёт точечный allowlist поверх
-      # той же npm-audit базы — новые advisories по-прежнему валят джоб. Снять allowlist при бампе
-      # react-router-dom на исправленную версию (Dependabot предложит).
-      # Тот же ретрай, что у серверного шага выше: 2026-09-04 audit-ci провисел 12 минут и упал с
-      # «code undefined» — реестр npm лежал, уязвимостей не было. Настоящая находка печатает
-      # advisory и валит джоб с первой попытки; ретраится только отказ без находок.
+      # Гейт фронта спрашивает САМ npm (тот же bulk-эндпоинт, что и серверный шаг), а не audit-ci:
+      # тот делает СВОЙ запрос на ретирящийся `/security/audits/quick` и 2026-09-04 три попытки
+      # подряд вернули «code undefined» за двадцать минут при нуле уязвимостей. Скрипт отличает
+      # сетевой отказ (код 75) от находки (код 1) — ретраится только первое, находка валит сразу.
+      # Allowlist живёт в самом скрипте рядом с обоснованием.
+      # Дерево нужно и здесь — по той же причине, что серверному шагу выше: без него npm уходит
+      # на ретирящийся `/security/audits/quick` и получает «400 Invalid package tree». Первый
+      # прогон этого гейта поймал ровно это: скрипт был прав, установки не хватало.
       - name: Install frontend deps for a real audit tree
         working-directory: frontend
         run: npm ci --ignore-scripts
@@ -139,12 +139,9 @@ jobs:
         working-directory: frontend
         run: |
           for attempt in 1 2 3; do
-            out=$(npx -y audit-ci@^7 --high --skip-dev --allowlist GHSA-qwww-vcr4-c8h2 2>&1) && exit 0
-            echo "$out"
-            if printf '%s' "$out" | grep -qiE 'GHSA-|CVE-|severity|vulnerabilit'; then
-              echo "::error::audit-ci нашёл уязвимость уровня high и выше"
-              exit 1
-            fi
+            node scripts/audit-gate.mjs && exit 0
+            code=$?
+            if [ "$code" != "75" ]; then exit "$code"; fi
             echo "::warning::реестр npm недоступен (попытка $attempt из 3) — повтор через 15с"
             sleep 15
           done
