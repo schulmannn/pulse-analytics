@@ -18,7 +18,7 @@ const SelectTrigger = React.forwardRef<
     ref={ref}
     data-mobile-touch-target=""
     className={cn(
-      'flex h-8 min-h-11 w-full items-center justify-between gap-1 whitespace-nowrap rounded-full border border-border bg-background px-3 text-xs font-medium text-foreground ring-offset-background data-placeholder:text-muted-foreground focus:outline-hidden focus:ring-2 focus:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-0 [&>span]:line-clamp-1',
+      'flex h-8 min-h-11 w-full items-center justify-between gap-1 whitespace-nowrap rounded-full border border-border bg-background px-3 text-xs font-medium text-foreground ring-offset-background data-placeholder:text-muted-foreground focus:outline-hidden focus:ring-2 focus:ring-primary/40 disabled:pointer-events-none disabled:opacity-50 sm:min-h-0 [&>span]:line-clamp-1',
       className,
     )}
     {...props}
@@ -104,7 +104,7 @@ const SelectLabel = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <SelectPrimitive.Label
     ref={ref}
-    className={cn('px-2 py-1.5 text-sm font-semibold', className)}
+    className={cn('px-2 py-1.5 text-sm font-medium', className)}
     {...props}
   />
 ));

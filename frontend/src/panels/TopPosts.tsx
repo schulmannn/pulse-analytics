@@ -3,7 +3,7 @@ import { useChannels, useTgFull } from '@/api/queries';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { normalizeTgPosts, type NormalizedPost } from '@/lib/posts';
 import { compareToMedian, medianDeltaLabel, periodMedian } from '@/lib/postMedian';
-import { fmt } from '@/lib/format';
+import { fmt, POST_STAT_LABEL, type PostStatKey } from '@/lib/format';
 import { markdownToPlainText } from '@/lib/markdown';
 import { cn } from '@/lib/utils';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -301,11 +301,17 @@ function TgMediaPlaceholderGlyph({ video }: { video: boolean }) {
   return <Icon name={video ? 'playCircle' : 'image'} className="h-7 w-7" />;
 }
 
-/** One metric cell in the card footer — label over value, centred. */
-function CardStat({ label, value }: { label: string; value: string }) {
+/** One metric cell in the card footer — label over value, centred. Подпись берётся из общего
+    словаря (lib/format POST_STAT_LABEL), а полную или короткую форму выбирает container query по
+    ширине самой строки статистики — автор разметки этот выбор не делает. */
+function CardStat({ stat, value }: { stat: PostStatKey; value: string }) {
+  const { full, short } = POST_STAT_LABEL[stat];
   return (
     <div className="min-w-0">
-      <div className="truncate text-2xs text-muted-foreground">{label}</div>
+      <div className="truncate text-2xs text-muted-foreground">
+        <span className={full === short ? undefined : '@max-[280px]/post-stats:hidden'}>{full}</span>
+        {full !== short && <span className="hidden @max-[280px]/post-stats:inline">{short}</span>}
+      </div>
       <div className="mt-0.5 truncate text-sm font-medium tabular-nums text-foreground">{value}</div>
     </div>
   );
@@ -368,11 +374,14 @@ function TopPostCard({ post, rank, onOpen }: { post: NormalizedPost; rank: numbe
       <p className={cn('mt-3 line-clamp-3 flex-1 text-sm leading-relaxed', title ? 'text-foreground' : 'italic text-muted-foreground')}>
         {title || 'Без подписи'}
       </p>
-      <div className="mt-3 grid grid-cols-4 gap-1 border-t border-border pt-3 text-center">
-        <CardStat label="Просм." value={fmt.short(post.reach)} />
-        <CardStat label="Реакции" value={fmt.short(post.likes)} />
-        <CardStat label="Коммент." value={fmt.short(post.comments)} />
-        <CardStat label="Репосты" value={fmt.short(post.shares)} />
+      <div
+        data-post-stats
+        className="@container/post-stats mt-3 grid grid-cols-4 gap-1 border-t border-border pt-3 text-center"
+      >
+        <CardStat stat="views" value={fmt.short(post.reach)} />
+        <CardStat stat="reactions" value={fmt.short(post.likes)} />
+        <CardStat stat="comments" value={fmt.short(post.comments)} />
+        <CardStat stat="shares" value={fmt.short(post.shares)} />
       </div>
     </button>
   );

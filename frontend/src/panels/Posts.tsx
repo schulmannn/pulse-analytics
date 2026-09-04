@@ -19,8 +19,9 @@ import { exportFilename } from '@/lib/analyticsExport';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Checkbox } from '@/components/ui/checkbox';
 import { RichText } from '@/components/RichText';
+import { TwoLineDate } from '@/components/TwoLineDate';
 import { PostDetailModal } from '@/components/PostDetailModal';
-import { MEDIAN_MIN_SAMPLE, compareToMedian, medianDeltaLabel, periodMedian } from '@/lib/postMedian';
+import { MEDIAN_MIN_SAMPLE, compareToMedian, medianDeltaLabel, medianDeltaShort, periodMedian } from '@/lib/postMedian';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { membershipKey, useCampaignFilter, useMembershipSet } from '@/lib/campaignFilter';
 import { AddToCampaignDialog } from '@/components/campaigns/AddToCampaignDialog';
@@ -477,7 +478,9 @@ function PostsTable({ allPosts, loadedCount }: { allPosts: NormalizedPost[]; loa
                 />
               </th>
               <th className="w-12 py-2.5 pl-0 pr-3 text-center"></th>
-              <th className="min-w-[240px] px-3 py-2.5">Пост</th>
+              {/* w-full: колонка заголовка забирает всю ширину, которую не заняли числовые
+                  — табличный эквивалент minmax(0, 1fr) (аудит #554, D11). */}
+              <th className="w-full min-w-[240px] px-3 py-2.5">Пост</th>
               {CONTENT_SORT_COLUMNS.filter((c) => c.key !== 'date').map((c) => {
                 const active = c.key === filters.sort;
                 return (
@@ -540,7 +543,7 @@ function PostsTable({ allPosts, loadedCount }: { allPosts: NormalizedPost[]; loa
                       <button
                         type="button"
                         onClick={() => setOpenId(post.id)}
-                        className="block w-full max-w-sm space-y-1 text-left md:max-w-md lg:max-w-lg"
+                        className="block w-full space-y-1 text-left"
                       >
                         <span className={cn('line-clamp-1 font-medium', post.caption ? 'text-foreground' : 'italic text-muted-foreground')}>
                           {post.caption ? markdownToPlainText(post.caption) : 'Без подписи'}
@@ -551,7 +554,7 @@ function PostsTable({ allPosts, loadedCount }: { allPosts: NormalizedPost[]; loa
                         </span>
                       </button>
                     ) : (
-                      <div className="max-w-sm space-y-1 md:max-w-md lg:max-w-lg">
+                      <div className="space-y-1">
                         <div className="line-clamp-1 font-medium text-foreground">
                           {post.caption ? <RichText text={post.caption} /> : <span className="italic text-muted-foreground">Без подписи</span>}
                         </div>
@@ -679,17 +682,6 @@ function SortButton({
   );
 }
 
-/** Дата максимум в две строки («20 июн.» / «06:01»): узкая колонка не должна ломать дату на три. */
-function TwoLineDate({ iso }: { iso: string }) {
-  const [day, time] = fmt.date(iso).split(', ');
-  return (
-    <span className="inline-flex flex-col items-end">
-      <span className="whitespace-nowrap">{day}</span>
-      {time && <span className="whitespace-nowrap">{time}</span>}
-    </span>
-  );
-}
-
 /** Media-format word for the post-caption subline — replaces the ad-hoc date there (date is now its
     own sortable column), so the format bucket the search/filter uses is also legible in the row. */
 function FormatTag({ post }: { post: NormalizedPost }) {
@@ -720,9 +712,7 @@ function MedianCell({
 }) {
   if (value == null) return <span className="text-muted-foreground/40">—</span>;
   const cmp = compareToMedian(value, median);
-  const deltaShort = cmp
-    ? cmp.dir === 'at' ? '±0%' : `${cmp.pct > 0 ? '+' : '−'}${Math.abs(Math.round(cmp.pct))}%`
-    : null;
+  const deltaShort = cmp ? medianDeltaShort(cmp) : null;
   return (
     <>
       <span className={cn('block font-medium tabular-nums', tone === 'signal' ? 'text-foreground' : 'text-muted-foreground')}>

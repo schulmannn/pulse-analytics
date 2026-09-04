@@ -93,7 +93,7 @@ function YmMetricShell({
       <MetricColumns
         rail={
           <>
-            <RailSection title="Сравнение">
+            <RailSection title="Сравнение" mark="comparison">
               {comparison ?? (
                 <p className="text-xs leading-relaxed text-muted-foreground">
                   Для этого отчёта нет одной канонической метрики периода — сравнение не рассчитывается.

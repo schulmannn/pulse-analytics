@@ -51,6 +51,15 @@ the spoken direction in muted ink. Brand-mention VOLUME is the standing case —
 self-evidently better (mirrors `DeltaLine` on `/mentions`: «never green/red — mention counts carry no
 sentiment»). Share the component, not the judgement.
 
+**Проверено аудитом #554 (D12) — исключение ПОДТВЕРЖДЕНО.** Аудит предложил «либо подтвердить,
+либо снять одним флагом». Флаг уже есть (`evaluative`), компонент один на все вертикали, направление
+читается без цвета (глиф + `sr-only`-слово), а место одно — разбор метрики. Снимать нечего: третьим
+«голосом» в аудите оказалась не дельта, а РАЗНЫЙ МАКЕТ рейла сравнения у TG и IG — это и починено.
+
+**Рейл сравнения — ОДНОГО ВИДА на всех вертикалях**: плоская секция (`RailSection` без
+варианта) с `mark="comparison"`, а итог окна — общий `RailWindowTotal` поверх `KpiValue`. Карточная
+подача была единственной копией (только TG) и снята.
+
 **Everything outside the explorer reads muted**, direction carried by the sign alone: card stats
 (`DeltaPill`, `StatTile`), the per-cell «к медиане» deltas in the content tables (four coloured
 percentages per row turned the densest surface into the loudest one) **and the same «к медиане» line

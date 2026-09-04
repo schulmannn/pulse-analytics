@@ -52,12 +52,34 @@ test('GET /api/health returns the health shape', async () => {
   assert.equal(body.status, 'ok');
   assert.equal(body.service, 'pulse-analytics-web');
   assert.equal(typeof body.uptime, 'number');
-  assert.equal(typeof body.cache, 'number');
   assert.equal(body.sessions, 'signed+versioned');
   assert.equal(typeof body.database_ready, 'boolean');
   assert.equal(typeof body.request_id, 'string');
-  assert.deepEqual(Object.keys(body.env).sort(), ['auth', 'ig', 'tg']);
-  assert.equal(body.env.auth, true);
+});
+
+test('GET /api/health не рассказывает анониму, какие интеграции настроены', async () => {
+  // Прежний блок `env` (ig/tg/auth) — карта поверхности для того, кто ещё не вошёл: видно,
+  // какие вертикали подняты и настроен ли session secret. Его не читал ни фронт, ни
+  // healthcheck; `cache` ушёл заодно — размер кэша говорит о нагрузке, а пробе не нужен (I-1).
+  const { body } = await getJson('/api/health');
+
+  assert.equal(body.env, undefined);
+  assert.equal(body.cache, undefined);
+  assert.deepEqual(
+    Object.keys(body).sort(),
+    ['database_ready', 'request_id', 'service', 'sessions', 'status', 'uptime'],
+  );
+});
+
+test('security-заголовки стоят на РЕАЛЬНЫХ /api-ответах, а не только на 404', async () => {
+  // Раньше nosniff доезжал лишь до тех /api-путей, что проваливались сквозь роуты в статику,
+  // то есть ни до одного настоящего ответа API. Проверяем 200, 401 и сам health (I-1).
+  for (const path of ['/api/health', '/api/ready', '/api/config', '/api/auth/me']) {
+    const response = await fetch(baseUrl + path);
+    assert.equal(response.headers.get('x-content-type-options'), 'nosniff', `${path}: nosniff`);
+    assert.equal(response.headers.get('x-frame-options'), 'DENY', `${path}: x-frame-options`);
+    assert.equal(response.headers.get('referrer-policy'), 'no-referrer', `${path}: referrer-policy`);
+  }
 });
 
 test('GET /api/config returns public runtime config', async () => {

@@ -16,8 +16,13 @@ const crypto = require('crypto');
  */
 
 // В строке импорта храним усечённый список отвергнутого: он для отчёта, а не для восстановления
-// данных — исходник целиком лежит рядом в file_bytes.
+// данных — исходник целиком лежит рядом в file_bytes, пока не выйдет за окно хранения
+// (pruneCdekImportFiles): отчёт живёт вечно, блоб — нет.
 const MAX_REJECTED_STORED = 200;
+
+// Что записать в `cdek_imports.error`, когда импорт упал исключением без userMessage. Пользователь
+// читает эту строку в витрине импортов — там место человеческой причине, а не внутренностям.
+const IMPORT_FAILED = 'Импорт не удался — попробуйте загрузить файл ещё раз';
 
 function createCdekImportService({ db, readSheetRows, parseCdekSheet, log = () => {}, maxRows = 100000 }) {
   const sha256 = (buffer) => crypto.createHash('sha256').update(buffer).digest('hex');
@@ -96,14 +101,30 @@ function createCdekImportService({ db, readSheetRows, parseCdekSheet, log = () =
         const winner = await db.findCdekImportByHash(channelId, hash);
         return { duplicate: true, import: winner };
       }
+      // Окно хранения сырых исходников — сразу после успешной записи, best-effort. Архив уже
+      // сохранён, и неудача уборки не повод отменять загрузку; зато без неё каждый импорт
+      // добавлял в Postgres до 2 МБ навсегда и ничем не ограничивался (M-1, аудит #554).
+      const dropped = await db.pruneCdekImportFiles(channelId).catch((error) => {
+        log('warn', 'cdek_import_prune_failed', { channelId, error: error && error.message });
+        return 0;
+      });
       log('info', 'cdek_import_done', {
         channelId, importId, rows: parsed.stats.rows_total, orders: parsed.stats.orders_total,
-        rejected: parsed.stats.rows_rejected,
+        rejected: parsed.stats.rows_rejected, files_pruned: dropped,
       });
       return { duplicate: false, import: saved };
     } catch (e) {
-      await db.failCdekImport(channelId, importId, e.userMessage || e.message).catch(() => {});
-      log('warn', 'cdek_import_failed', { channelId, importId, error: e && e.message });
+      // В строку импорта идёт ТОЛЬКО userMessage. Прежний `|| e.message` означал, что при
+      // неожиданном исключении в `cdek_imports.error` (а значит — в витрину импортов) уезжал
+      // текст драйвера: «Invalid code point 9999999» вместо «файл не разобрался» (I-2).
+      // Настоящая причина не теряется — она уходит в лог вместе с `cause` от ридера.
+      await db.failCdekImport(channelId, importId, e.userMessage || IMPORT_FAILED).catch(() => {});
+      log('warn', 'cdek_import_failed', {
+        channelId,
+        importId,
+        error: e && e.message,
+        cause: e && e.cause && e.cause.message,
+      });
       throw e;
     }
   }
@@ -117,7 +138,14 @@ function createCdekImportService({ db, readSheetRows, parseCdekSheet, log = () =
   async function replayImport({ channelId, importId, tz }) {
     if (!db.enabled) throw Object.assign(new Error('База данных недоступна'), { status: 503 });
     const file = await db.getCdekImportFile(channelId, importId);
-    if (!file) throw Object.assign(new Error('Исходный файл этого импорта не сохранён'), { status: 404 });
+    // Файла нет у упавшего импорта и у того, что вышел за окно хранения исходников. Причину не
+    // различаем — пользователю в обоих случаях нужно одно и то же: загрузить выгрузку заново.
+    if (!file) {
+      throw Object.assign(
+        new Error('Исходный файл этого импорта не сохранён — загрузите выгрузку заново'),
+        { status: 404 },
+      );
+    }
     const { saved } = await ingest({
       channelId, importId, filename: file.filename, buffer: file.file_bytes, tz, replay: true,
     });

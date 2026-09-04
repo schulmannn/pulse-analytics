@@ -347,7 +347,12 @@ function registerRusenderRoutes({
    * НЕ за фичефлагом витрин — и это осознанно: именно этим ответом решают, ВКЛЮЧАТЬ ли флаг.
    * Спрятать диагностику за тем самым флагом, который она помогает открыть, значит замкнуть круг.
    * Гейт здесь другой и достаточный: admin воркспейса, потому что это отладочная поверхность,
-   * а не продуктовая. Уедет, когда числа сверены.
+   * а не продуктовая.
+   *
+   * Отладочный `?raw=<campaignId>` — сырое проксирование ответа апстрима — снят: он существовал,
+   * чтобы отличить баг парсинга от ограниченного окна активности Rusender, и вопрос закрыт
+   * замером 3/3 (#546: активность живёт 11 дней от отправки, ряд честно пуст). Сама сводка
+   * остаётся: она считается по АРХИВУ и ключа не трогает.
    */
   app.get('/api/rusender/diagnostics', requireAuth, async (req, res, next) => {
     try {
@@ -358,43 +363,6 @@ function registerRusenderRoutes({
       }
       const out = await db.getRusenderDiagnosticsForActor(resolved.channel.id, req.user);
       if (!out) return res.status(404).json({ error: 'Нет данных' });
-
-      /**
-       * `?raw=<campaignId>` — СЫРОЙ ответ апстрима по дневной активности одной рассылки.
-       *
-       * Понадобилось по факту: первый же прод-проход дал activity_rows=0 при непустых итогах
-       * (134 открытия), и по архиву НЕЛЬЗЯ различить две причины с разными выводами — форма
-       * ответа разошлась со спекой (баг парсинга, чинится) либо у Rusender ограничено окно
-       * активности (ряд честно пуст, и дневной поток наполнится только с новых рассылок).
-       *
-       * Отдаём тело КАК ЕСТЬ и усечённым: это отладка формы, а не витрина. Ключ сюда не
-       * попадает по построению (rusenderClient держит его только в заголовке). Уедет вместе с
-       * остальной диагностикой, когда числа сверены.
-       */
-      const rawId = Number.parseInt(String(req.query.raw || ''), 10);
-      if (Number.isFinite(rawId) && rawId > 0) {
-        let apiKey;
-        try {
-          apiKey = rusenderCrypto.decrypt(resolved.acc.api_key_enc);
-        } catch {
-          return res.json({ ...out, raw: { error: 'Не удалось прочитать сохранённый ключ' } });
-        }
-        const probe = async (path) => {
-          try {
-            const r = await rusenderFetch(apiKey, path);
-            return { path, ok: true, meta: r.meta, data: JSON.stringify(r.data).slice(0, 2000) };
-          } catch (e) {
-            return { path, ok: false, status: (e && e.status) || 0, message: (e && e.message) || '' };
-          }
-        };
-        // Два запроса: сама активность и рассылка по id. Второй нужен, чтобы отличить «эта
-        // рассылка вообще недоступна ключу» от «активности у неё нет».
-        const raw = await Promise.all([
-          probe(`/v1/public/campaigns/${rawId}/activity`),
-          probe(`/v1/public/campaigns/${rawId}?withStats=true`),
-        ]);
-        return res.json({ ...out, raw });
-      }
       res.json(out);
     } catch (e) {
       next(e);

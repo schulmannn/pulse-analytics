@@ -1,3 +1,5 @@
+# ГЕЙТ: `npm run check:pypins` сверяет точные пины этого файла с lock. Бамп без перегенерации
+# lock до прода НЕ доезжает — именно так разошлись fastapi 0.141.1 (txt) и 0.140.0 (lock, прод).
 # Человекочитаемый ИСТОЧНИК зависимостей mtproto-сервиса. Прод-образ (Dockerfile.mtproto)
 # ставится по requirements.lock с --require-hashes; после правки здесь перегенерируй lock
 # (python 3.12, pip-tools):

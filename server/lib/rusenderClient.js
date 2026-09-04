@@ -1,5 +1,7 @@
 'use strict';
 
+const { readRetryAfterHeader, parseRetryAfterMs } = require('./retryAfter');
+
 // ── Rusender (Public API v1) — единственная точка исходящих вызовов ──────────────────────────
 // Зеркалит lib/ymClient по духу и контракту (гейт параллелизма + singleflight + ровно один
 // ретрай на 429), с поправками на то, чем Rusender отличается от Метрики:
@@ -38,18 +40,6 @@ function keyDigest(apiKey) {
   return crypto.createHash('sha256').update(String(apiKey)).digest('hex').slice(0, 16);
 }
 
-// Retry-After ответа (секунды ИЛИ HTTP-дата) → миллисекунды. Значение НЕ кэпается здесь:
-// для 429 cap применяется только к внутреннему ожиданию, а роут должен получить исходную
-// паузу и честно передать её клиенту.
-function parseRetryAfter(res) {
-  const raw = res && res.headers && typeof res.headers.get === 'function' ? res.headers.get('retry-after') : null;
-  if (raw == null || raw === '') return null;
-  const secs = Number(raw);
-  if (Number.isFinite(secs) && secs >= 0) return Math.round(secs * 1000);
-  const at = Date.parse(raw);
-  if (Number.isFinite(at)) return Math.max(0, at - Date.now());
-  return null;
-}
 
 // Счётный семафор: не более `max` одновременных держателей. release() отдаёт слот ждущему,
 // если он есть (active не трогаем — слот просто переходит), иначе освобождает его.
@@ -134,7 +124,7 @@ function createRusenderClient({ fetchImpl, log, sleepImpl, maxConcurrency = RUSE
       // КЛЮЧА в ней нет (он только в заголовке).
       if (status === 429) {
         err.quota = true;
-        const retryMs = parseRetryAfter(res);
+        const retryMs = parseRetryAfterMs(readRetryAfterHeader(res), Date.now());
         if (retryMs != null) err.retryAfterMs = retryMs;
       }
       throw err;

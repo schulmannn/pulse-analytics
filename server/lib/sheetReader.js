@@ -23,12 +23,20 @@ const zlib = require('zlib');
  */
 
 class SheetReadError extends Error {
-  constructor(message) {
-    super(message);
+  constructor(message, options) {
+    super(message, options);
     this.name = 'SheetReadError';
     this.userMessage = message;
   }
 }
+
+/**
+ * Что показать, когда ридер упал НЕ своей ошибкой. Любое исключение, кроме SheetReadError, —
+ * это внутренность реализации (RangeError из String.fromCodePoint, ошибка zlib, промах по
+ * буферу), и его текст ничего не говорит пользователю: он видел «Invalid code point 9999999»
+ * и пятисотку, а строка импорта сохраняла ту же фразу в `error` (I-2, аудит #554).
+ */
+const UNPARSEABLE = 'Файл не разобрался — сохраните его заново как .xlsx или .csv и попробуйте ещё раз';
 
 // ── ZIP ────────────────────────────────────────────────────────────────────────────────────────
 
@@ -118,7 +126,10 @@ function decodeXml(s) {
   return s.replace(/&(#x[0-9a-fA-F]+|#\d+|[a-z]+);/g, (m, e) => {
     if (e[0] === '#') {
       const code = e[1] === 'x' ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10);
-      return Number.isFinite(code) && code > 0 ? String.fromCodePoint(code) : m;
+      // Верхняя граница обязательна: `&#9999999;` — валидный синтаксис, но за пределами Unicode,
+      // и String.fromCodePoint на нём бросает RangeError. Неразбираемая ссылка остаётся собой —
+      // ровно как неизвестная именованная сущность ниже.
+      return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : m;
     }
     return ENTITIES[e] !== undefined ? ENTITIES[e] : m;
   });
@@ -508,7 +519,7 @@ function readCsvRows(buffer, { maxRows = 100000 } = {}) {
  * Старый бинарный .xls (OLE-контейнер) распознаётся ОТДЕЛЬНО и отвергается с подсказкой: иначе он
  * ушёл бы в CSV-ветку и разобрался бы в мусорные строки — молча и правдоподобно.
  */
-function readSheetRows(buffer, filename = '', options = {}) {
+function readSheetRowsUnguarded(buffer, filename = '', options = {}) {
   const name = String(filename || '').toLowerCase();
   const isZip = buffer.length > 4 && buffer.readUInt32LE(0) === LOCAL_SIG;
   const isOle = buffer.length > 8 && buffer.readUInt32LE(0) === 0xe011cfd0;
@@ -517,6 +528,23 @@ function readSheetRows(buffer, filename = '', options = {}) {
     throw new SheetReadError('Старый формат .xls не поддерживается — пересохраните как .xlsx или .csv');
   }
   return readCsvRows(buffer, options);
+}
+
+/**
+ * Единственная граница ридера наружу: ЛЮБОЙ выход — либо строки, либо SheetReadError.
+ * Разбор чужого файла — это разбор недоверенного ввода, и полный список его отказов не
+ * перечислим по построению: на каждый предусмотренный случай найдётся непредусмотренный.
+ * Поэтому дело не в починке конкретного RangeError (он тоже починен выше), а в том, что
+ * «неизвестно почему не читается» — тоже ответ пользователю, а не пятисотка с текстом драйвера.
+ * Исходное исключение не теряется: оно уезжает в `cause`, и вызывающий пишет его в лог.
+ */
+function readSheetRows(buffer, filename = '', options = {}) {
+  try {
+    return readSheetRowsUnguarded(buffer, filename, options);
+  } catch (e) {
+    if (e instanceof SheetReadError) throw e;
+    throw new SheetReadError(UNPARSEABLE, { cause: e });
+  }
 }
 
 module.exports = { readSheetRows, readXlsxRows, readCsvRows, SheetReadError, serialToNaive, decodeText };

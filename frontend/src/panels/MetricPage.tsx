@@ -45,7 +45,7 @@ import { MediaThumb } from '@/components/MediaThumb';
 
 import { MetricRailToggle } from '@/components/metric/shared';
 import { useMetricRailHidden } from '@/lib/metricRail';
-import { ComparisonDeltaRow, MetricBackLink, MetricDescriptor, RailSection } from '@/components/metric/shared';
+import { ComparisonDeltaRow, MetricBackLink, MetricDescriptor, RailSection, RailWindowTotal } from '@/components/metric/shared';
 
 /** Короткий день недели для тултипов дневной гранулы («чт, 2 июл») — артефакт v2. */
 const WEEKDAY_FMT = new Intl.DateTimeFormat('ru-RU', { weekday: 'short' });
@@ -1108,7 +1108,7 @@ export function MetricPage() {
               <header className="flex items-end justify-between gap-3 border-b border-border px-4 py-4 sm:px-5">
                 <div className="min-w-0">
                   <div className="text-2xs font-medium tracking-wide text-muted-foreground">Публикации</div>
-                  <h3 className="mt-1 truncate text-sm font-semibold tracking-tight text-foreground">
+                  <h3 className="mt-1 truncate text-sm font-medium tracking-tight text-foreground">
                     Топ постов по {CONTRIB_LABEL[metricKey] ?? 'метрике'}
                   </h3>
                 </div>
@@ -1161,7 +1161,7 @@ export function MetricPage() {
                             >
                               <span
                                 className={cn(
-                                  'flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-2xs font-semibold tabular-nums',
+                                  'flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-2xs font-medium tabular-nums',
                                   i === 0
                                     ? 'bg-primary text-primary-foreground'
                                     : i < 3
@@ -1197,7 +1197,7 @@ export function MetricPage() {
                                 </span>
                               </span>
                               <span className="min-w-15 shrink-0 text-right sm:min-w-0">
-                                <span className="block text-sm font-semibold tabular-nums text-foreground">
+                                <span className="block text-sm font-medium tabular-nums text-foreground">
                                   {fmt.short(value)}
                                 </span>
                                 {share > 0 && (
@@ -1236,11 +1236,13 @@ export function MetricPage() {
             общий MetricColumns. Пока её снимали совсем, на ноутбуке в половину экрана и на телефоне
             вместе с ней исчезала и кнопка возврата — итог окна, база сравнения, разбивка и «О
             метрике» пропадали, и вернуть их можно было только через чистку хранилища браузера. */}
-        <aside id="tg-metric-inspector" className={cn('space-y-4', railHidden && 'lg:hidden')}>
-          <RailSection title="Сравнение" mark="comparison" variant="card">
-            {/* Итог окна — доминанта карточки (hero переехал сюда после тихой шапки). */}
-            <div className="text-2xs tracking-wide text-muted-foreground">Текущий период</div>
-            <KpiValue size="compact" text={meta.total} className="mt-1 text-foreground" />
+        <aside id="tg-metric-inspector" className={cn('space-y-6', railHidden && 'lg:hidden')}>
+          {/* Рейл — ТОГО ЖЕ ВИДА, что у остальных четырёх вертикалей (аудит #554, D12). Карточная
+              подача была только здесь: IG, Метрика, Rusender и упоминания всегда рисовали рейл flat,
+              и одна сущность в двух макетах читалась как две разные. */}
+          <RailSection title="Сравнение" mark="comparison">
+            {/* Итог окна — доминанта рейла (hero переехал сюда после тихой шапки); разметка общая. */}
+            <RailWindowTotal label="Текущий период" value={meta.total} />
             {winFrom == null ? (
               <p className="mt-3 text-xs text-muted-foreground">Для окна «Всё» прошлого периода не существует.</p>
             ) : (
@@ -1277,7 +1279,7 @@ export function MetricPage() {
           </RailSection>
 
           {field && (
-            <RailSection title="Разбивка" mark="breakdown" variant="card">
+            <RailSection title="Разбивка" mark="breakdown">
               <SegSelect
                 ariaLabel="Измерение разбивки"
                 value={dim}

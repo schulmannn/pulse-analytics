@@ -169,7 +169,7 @@ export function ChartTooltip({ tip, appearance = 'default' }: { tip: TooltipStat
     >
       {tip.rows ? (
         <>
-          {tip.title && <div data-chart-tooltip-title className="mb-2 whitespace-nowrap text-xs font-semibold text-foreground">{tip.title}</div>}
+          {tip.title && <div data-chart-tooltip-title className="mb-2 whitespace-nowrap text-xs font-medium text-foreground">{tip.title}</div>}
           <div className="space-y-1">
             {tip.rows.map((r, i) => (
               <div key={i} data-chart-tooltip-row className="flex items-start justify-between gap-4 whitespace-nowrap">

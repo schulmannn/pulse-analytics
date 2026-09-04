@@ -25,7 +25,15 @@ export type NarrativeSeg =
   | { kind: 'number'; text: string; to?: string }
   /** Знаковая дельта-пилюля; pct со знаком (минус = вниз). */
   | { kind: 'delta'; pct: number }
-  /** Спарклайн-в-строке — ряд как есть (обе недели), рендерер сам масштабирует. */
+  /**
+   * Спарклайн-в-строке — ряд как есть (обе недели), рендерер сам масштабирует.
+   *
+   * СТОИТ СРАЗУ ЗА СВОИМ ЧИСЛОМ (аудит #554, D7). Раньше искра замыкала предложение
+   * ПОСЛЕ точки и места в макете не имела: если предложение заполняло строку, inline-block
+   * переносился ОДИН на новую (TG); если места хватало — болтался в пробеле после точки (IG).
+   * Без рамки, оси и подписи линия читалась случайным росчерком. Теперь она стоит вплотную к
+   * числу, которое объясняет, и рендерер держит пару одним неразрывным словом.
+   */
   | { kind: 'spark'; values: number[] }
   /** Чип поста: postIndex открывает карточку TG-поста (input.posts), href — внешняя ссылка
    *  (IG-permalink); без обоих — просто выделенный текст. */
@@ -160,14 +168,10 @@ function buildIgStory(
   const para: NarrativeParagraph = [
     t(sameWeek ? 'Instagram за ту же неделю: охват ' : 'Instagram за неделю: охват '),
     n(fmt.kpi(reach.cur), '/metrics/ig-reach'),
+    { kind: 'spark', values: ig.reachDaily.slice(-14).map((x) => x.v) },
     t(' — на '),
     { kind: 'delta', pct },
-    // Точка закрывает предложение ДО спарклайна: за инлайн-SVG она повисала в пустоте, оторванная
-    // от текста на всю ширину графика. Спарклайн идёт последним и пунктуации после себя не несёт.
-    // Искра стоит в предложении как слово: пробелы вокруг неё — настоящие, в тексте. Иначе SVG
-    // (aria-hidden) выпадает из дерева доступности и склеивает «предыдущей.База там потеряла».
     t(` ${pct < 0 ? 'ниже' : 'выше'} предыдущей. `),
-    { kind: 'spark', values: ig.reachDaily.slice(-14).map((x) => x.v) },
   ];
   const f7 = ig.followsDaily.slice(-7);
   if (f7.length === 7) {
@@ -221,11 +225,10 @@ export function buildIgWeekNarrative(ig: NarrativeIgInput | null | undefined): W
       paragraphs.push([
         t('Охват за неделю — '),
         n(fmt.kpi(reach.cur), '/metrics/ig-reach'),
+        { kind: 'spark', values: ig.reachDaily.slice(-14).map((x) => x.v) },
         t(', на '),
         { kind: 'delta', pct },
-        // Точка — до спарклайна (см. buildIgStory): инлайн-SVG замыкает предложение.
         t(` ${pct < 0 ? 'ниже' : 'выше'} предыдущей. `),
-        { kind: 'spark', values: ig.reachDaily.slice(-14).map((x) => x.v) },
       ]);
     }
     // База — чистое движение подписчиков (Σ дневных нетто-подписок) + текущий уровень.
@@ -303,11 +306,10 @@ export function buildWeekNarrative(inp: NarrativeInput): WeekNarrative {
     const p: NarrativeParagraph = [
       t('За неделю канал собрал '),
       n(fmt.kpi(curSum), '/metrics/views'),
+      { kind: 'spark', values: series.slice(-14).map((x) => x.v) },
       t(` ${pluralKpi(curSum, 'просмотр', 'просмотра', 'просмотров')} — на `),
       { kind: 'delta', pct },
-      // Точка — до спарклайна (см. buildIgStory): инлайн-SVG замыкает предложение.
       t(` ${pct < 0 ? 'ниже' : 'выше'} предыдущей. `),
-      { kind: 'spark', values: series.slice(-14).map((x) => x.v) },
     ];
 
     // Атрибуция — только считаемая. Приоритет: разница в тишине; иначе неповторённый пик.

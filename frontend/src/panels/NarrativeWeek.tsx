@@ -152,7 +152,7 @@ export function useIgWeekInput(): { input: NarrativeIgInput | null; loading: boo
   const input = useMemo(() => {
     if (!gate.igEnabled) return null;
     if (unavailable) return null;
-    if (!!(profile?.mock || ins?.mock) && !demo) return null;
+    if ((profile?.mock || ins?.mock) && !demo) return null;
     // Пока 7-дн фетч грузится — не строим вход, чтобы не мигнуть daily-fallback охвата перед дедупом.
     if (!ins7 && insights7Q.isPending) return null;
     const now = Date.now();
@@ -228,11 +228,10 @@ function SegSpan({ seg, onPost }: { seg: NarrativeSeg; onPost: (i: number) => vo
     case 'delta':
       return <DeltaPill delta={{ dir: seg.pct < 0 ? 'down' : 'up', pct: Math.abs(seg.pct) }} />;
     case 'spark':
-      // Искра замыкает предложение (точка стоит ДО неё) и стоит в тексте как слово: словесный
-      // зазор дают НАСТОЯЩИЕ пробелы соседних text-сегментов (narrative.ts) — они же разделяют
-      // предложения для скринридера, для которого сам SVG aria-hidden. Обёртка с margin была бы
-      // зазором только визуальным и удваивала бы отступ поверх пробела.
-      return <InlineSpark values={seg.values} />;
+      // Искра стоит ВПЛОТНУЮ за своим числом (аудит #554, D7) и связана с ним неразрывной
+      // обёрткой в рендерере абзаца ниже: пара переносится как одно слово и никогда не уезжает
+      // на строку одна. Размер слова, а не графика: 64×16 при кегле текста 14px.
+      return <InlineSpark values={seg.values} width={64} height={16} />;
     case 'post': {
       const chip =
         'rounded text-left font-medium text-foreground underline decoration-dotted decoration-1 underline-offset-4 transition-colors hover:text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40';
@@ -360,6 +359,18 @@ export function NarrativeProse({
         <p key={i}>
           {p.map((seg, j) => {
             const next = p[j + 1];
+            // ЧИСЛО + ИСКРА — ОДНО СЛОВО (аудит #554, D7). Искра объясняет именно это число,
+            // и разорвать их переносом значит потерять связь. Сама искра рендерится в этой же ветке,
+            // поэтому следующая итерация её пропускает.
+            if (seg.kind === 'number' && next?.kind === 'spark') {
+              return (
+                <span key={j} className="whitespace-nowrap">
+                  <SegSpan seg={seg} onPost={post} />
+                  <SegSpan seg={next} onPost={post} />
+                </span>
+              );
+            }
+            if (seg.kind === 'spark' && p[j - 1]?.kind === 'number') return null;
             // Резервная ветка (см. JSDoc): текущие шаблоны пунктуацию после спарка/дельты не ставят.
             if ((seg.kind === 'spark' || seg.kind === 'delta') && next?.kind === 'text' && /^[.,]/.test(next.text)) {
               return (

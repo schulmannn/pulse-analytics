@@ -384,7 +384,9 @@
     padding-block: 0.5rem;
     color: hsl(var(--foreground));
     font-size: 0.875rem;
-    font-weight: 600;
+    /* Канон двух начертаний: 500, а не 600. Шапка отделяется от тела весом и линейкой
+       снизу, а не третьим весом — так же, как в семи остальных таблицах продукта. */
+    font-weight: 500;
     letter-spacing: 0;
     line-height: 1.25rem;
   }

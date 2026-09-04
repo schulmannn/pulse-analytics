@@ -38,7 +38,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 20
           cache: npm
@@ -95,7 +95,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 20
       # Три попытки с паузой: 2026-09-04 гейт покраснел на ВСЁМ main из-за
@@ -103,6 +103,13 @@ jobs:
       # Красный CI по чужому сбою учит игнорировать красный CI, поэтому сетевой отказ
       # ретраится, а настоящая находка по-прежнему валит джоб с первой попытки
       # (npm audit отдаёт ненулевой код и без сети, и на уязвимости — различаем их по тексту).
+      # УСТАНОВКА ПЕРЕД АУДИТОМ — не прихоть. Без дерева зависимостей `npm audit` уходит на
+      # старый эндпоинт `/security/audits/quick`, который сам npm помечает как retiring и который
+      # отвечает то 503, то «400 Invalid package tree» (оба вида пойманы на одном прогоне 2026-09-04).
+      # С установленным деревом npm спрашивает поддерживаемый bulk-эндпоинт advisories.
+      # `--ignore-scripts`: аудиту нужен СПИСОК пакетов, а не их postinstall-код.
+      - name: Install server deps for a real audit tree
+        run: npm ci --ignore-scripts
       - name: Audit npm dependencies (server)
         run: |
           for attempt in 1 2 3; do
@@ -117,24 +124,24 @@ jobs:
           done
           echo "::error::реестр npm недоступен после трёх попыток"
           exit 1
-      # GHSA-qwww-vcr4-c8h2 (react-router: CSRF в RSC-режиме) приложение не затрагивает: RSC/server-
-      # режим react-router не используется (клиентский BrowserRouter поверх Express-статики, RSC-API
-      # в коде нет), а фикс существует только в мажоре v8. audit-ci даёт точечный allowlist поверх
-      # той же npm-audit базы — новые advisories по-прежнему валят джоб. Снять allowlist при бампе
-      # react-router-dom на исправленную версию (Dependabot предложит).
-      # Тот же ретрай, что у серверного шага выше: 2026-09-04 audit-ci провисел 12 минут и упал с
-      # «code undefined» — реестр npm лежал, уязвимостей не было. Настоящая находка печатает
-      # advisory и валит джоб с первой попытки; ретраится только отказ без находок.
+      # Гейт фронта спрашивает САМ npm (тот же bulk-эндпоинт, что и серверный шаг), а не audit-ci:
+      # тот делает СВОЙ запрос на ретирящийся `/security/audits/quick` и 2026-09-04 три попытки
+      # подряд вернули «code undefined» за двадцать минут при нуле уязвимостей. Скрипт отличает
+      # сетевой отказ (код 75) от находки (код 1) — ретраится только первое, находка валит сразу.
+      # Allowlist живёт в самом скрипте рядом с обоснованием.
+      # Дерево нужно и здесь — по той же причине, что серверному шагу выше: без него npm уходит
+      # на ретирящийся `/security/audits/quick` и получает «400 Invalid package tree». Первый
+      # прогон этого гейта поймал ровно это: скрипт был прав, установки не хватало.
+      - name: Install frontend deps for a real audit tree
+        working-directory: frontend
+        run: npm ci --ignore-scripts
       - name: Audit npm dependencies (frontend)
         working-directory: frontend
         run: |
           for attempt in 1 2 3; do
-            out=$(npx -y audit-ci@^7 --high --skip-dev --allowlist GHSA-qwww-vcr4-c8h2 2>&1) && exit 0
-            echo "$out"
-            if printf '%s' "$out" | grep -qiE 'GHSA-|CVE-|severity|vulnerabilit'; then
-              echo "::error::audit-ci нашёл уязвимость уровня high и выше"
-              exit 1
-            fi
+            node scripts/audit-gate.mjs && exit 0
+            code=$?
+            if [ "$code" != "75" ]; then exit "$code"; fi
             echo "::warning::реестр npm недоступен (попытка $attempt из 3) — повтор через 15с"
             sleep 15
           done
@@ -163,7 +170,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 20
           cache: npm
@@ -181,7 +188,7 @@ jobs:
         run: npm run test:e2e:smoke
       - name: Upload Playwright failure artifacts
         if: failure()
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: playwright-smoke-${{ github.run_attempt }}
           path: frontend/test-results/
@@ -213,7 +220,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 20
           cache: npm
@@ -225,7 +232,7 @@ jobs:
         run: npm run test:e2e:desktop -- --shard=${{ matrix.shard }}/6
       - name: Upload Playwright failure artifacts
         if: failure()
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: playwright-e2e-shard${{ matrix.shard }}-${{ github.run_attempt }}
           path: frontend/test-results/
@@ -244,7 +251,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 20
           cache: npm
@@ -256,7 +263,7 @@ jobs:
         run: npm run test:e2e:phone
       - name: Upload Playwright phone failure artifacts
         if: failure()
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: playwright-phone-${{ github.run_attempt }}
           path: frontend/test-results/
