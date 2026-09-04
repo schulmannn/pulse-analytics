@@ -8,7 +8,7 @@ function registerAuthRoutes({
   hashPassword, verifyPassword, DUMMY_HASH, signSession, SESSION_TTL, SESSION_ABSOLUTE_TTL,
   GOOGLE_CLIENT_ID, fetchWithTimeout, log, audit, appBase, sha256, newToken,
   VERIFY_TTL, RESET_TTL, sendEmail, emailShell, emailBtn, escHtml,
-  aiEnabledFor, rusenderSurfaces = false, setSessionCookie, clearSessionCookie, migrateSessionCookie,
+  aiEnabledFor, rusenderSurfaces = false, setSessionCookie, clearSessionCookie,
   jobTracker,
 }) {
   // Анти-enumeration роуты (register/forgot/resend) отвечают ДО работы с БД/почтой — это осознанно
@@ -27,10 +27,6 @@ function registerAuthRoutes({
   // ════════════════════════════════════════════════════════════════
   //  AUTH ROUTES
   // ════════════════════════════════════════════════════════════════
-
-  // Temporary one-release transport bridge. No other route accepts
-  // X-Session-Token; modern and /legacy clients purge the old keys afterwards.
-  app.post('/api/auth/migrate-cookie', authLimiter, migrateSessionCookie);
 
   // Registration (self-serve, Sprint 1B): create an 'unverified' account and email
   // a verification link. Anti-enumeration — always the same generic response; an

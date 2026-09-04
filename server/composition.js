@@ -144,9 +144,7 @@ function createComposition(config, overrides = {}) {
     limit: 600,
     // v8: сырые IPv6 в ключах запрещены валидацией — ipKeyGenerator нормализует до /56-бакета
     // (иначе ротация адресов внутри одного /64 обнуляла бы лимит). uid-ветка не меняется.
-    // Cookie-only session goes into the same per-user bucket. X-Session-Token is
-    // deliberately absent here: only /api/auth/migrate-cookie may consume it,
-    // under its own stricter authLimiter.
+    // Сессия приходит только HttpOnly-cookie: другого транспорта у неё нет.
     keyGenerator: (req) =>
       rateLimitKey(
         parseToken(readCookie(req.headers.cookie, SESSION_COOKIE)),
@@ -185,7 +183,6 @@ function createComposition(config, overrides = {}) {
     claimOwnerChannel,
     requireAuth,
     requireSuper,
-    migrateSessionCookie,
     setSessionCookie,
     clearSessionCookie,
   } = authService;
@@ -551,7 +548,6 @@ function createComposition(config, overrides = {}) {
       fetchWithTimeout,
       requireAuth,
       requireSuper,
-      migrateSessionCookie,
       setSessionCookie,
       clearSessionCookie,
       resolveChannel,

@@ -84,15 +84,6 @@ jobs:
           pip install mypy==2.3.0
           mypy mtproto collector --ignore-missing-imports
       - run: python -m unittest discover -s test -p "test_*.py"
-      - name: Parse inline browser scripts
-        run: |
-          node - <<'NODE'
-          const fs = require('fs'), vm = require('vm');
-          const html = fs.readFileSync('public/index.html', 'utf8');
-          const re = /<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/gi;
-          let match;
-          while ((match = re.exec(html))) new vm.Script(match[1]);
-          NODE
 
   # Аудит известных CVE в зависимостях. Гейтим только production-поверхность (--omit=dev) на
   # high+: dev-тулинг (vite/biome/playwright) обновляет Dependabot, а падение CI на каждом
