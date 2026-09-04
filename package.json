@@ -14,6 +14,7 @@
     "check:migrations": "node scripts/check-migrations.mjs",
     "check:boundaries": "node scripts/check-server-boundaries.mjs",
     "check:lintdebt": "node scripts/lint-debt.mjs",
+    "check:clockdrift": "node scripts/clock-drift.mjs",
     "check": "npm run check:syntax && npm run check:migrations && npm run check:boundaries && npm run check:pypins && npm run check:lintdebt && npm run lint && npm test",
     "check:pypins": "node scripts/check-python-pins.mjs"
   },
