@@ -3,23 +3,26 @@ import { buildIgWeekNarrative, buildWeekNarrative, narrativeToPlain, plural, plu
 
 /** Intl ставит NBSP/узкий пробел в разрядах — тесты сравнивают по обычным пробелам. */
 const norm = (s: string) => s.replace(/[  ]/g, ' ');
-/** Обрамление inline-искры: точка ДО неё, пунктуации после — нет, а зазор с соседями — НАСТОЯЩИЕ
- *  пробелы в тексте (SVG aria-hidden, margin для скринридера разделителем не работает). Проверка
- *  идёт по абзацам: сегмент из СЛЕДУЮЩЕГО абзаца соседом не считается. Возвращает число искр. */
+/**
+ * Обрамление inline-искры (аудит #554, D7): искра стоит СРАЗУ ЗА СВОИМ ЧИСЛОМ.
+ *
+ * Раньше она замыкала предложение ПОСЛЕ точки — и места в макете не имела: переносилась одна
+ * на новую строку (TG) или болталась в пробеле после точки (IG). Теперь она привязана к числу,
+ * которое объясняет, а рендерер держит пару одним неразрывным словом.
+ *
+ * Следующий текст обязан начинаться с пробела или запятой: SVG для скринридера aria-hidden, и без
+ * НАСТОЯЩЕГО разделителя в тексте число склеится со следующим словом. Проверка идёт по абзацам:
+ * сегмент из СЛЕДУЮЩЕГО абзаца соседом не считается. Возвращает число искр.
+ */
 function assertSparkFraming(nar: ReturnType<typeof buildWeekNarrative>): number {
   let sparks = 0;
   for (const p of nar.paragraphs) {
     for (let i = 1; i < p.length; i += 1) {
       if (p[i]?.kind !== 'spark') continue;
       sparks += 1;
-      const before = p[i - 1];
-      expect(before?.kind).toBe('text');
-      if (before?.kind === 'text') expect(before.text).toMatch(/\. $/u);
+      expect(p[i - 1]?.kind).toBe('number');
       const after = p[i + 1];
-      if (after?.kind === 'text') {
-        expect(after.text).not.toMatch(/^\s*[.,;:]/u);
-        expect(after.text).toMatch(/^ /u);
-      }
+      if (after?.kind === 'text') expect(after.text).toMatch(/^[ ,]/u);
     }
   }
   return sparks;
