@@ -129,6 +129,12 @@ jobs:
       # подряд вернули «code undefined» за двадцать минут при нуле уязвимостей. Скрипт отличает
       # сетевой отказ (код 75) от находки (код 1) — ретраится только первое, находка валит сразу.
       # Allowlist живёт в самом скрипте рядом с обоснованием.
+      # Дерево нужно и здесь — по той же причине, что серверному шагу выше: без него npm уходит
+      # на ретирящийся `/security/audits/quick` и получает «400 Invalid package tree». Первый
+      # прогон этого гейта поймал ровно это: скрипт был прав, установки не хватало.
+      - name: Install frontend deps for a real audit tree
+        working-directory: frontend
+        run: npm ci --ignore-scripts
       - name: Audit npm dependencies (frontend)
         working-directory: frontend
         run: |
