@@ -15,6 +15,8 @@ interface WidgetBodyProps {
   period: WidgetPeriodValue;
   target: number | null;
   fillHeight: number | null;
+  /** Явная высота колонки тела: без неё `flex-1 min-h-0` в авто-высотной full-карточке схлопывается. */
+  height?: number;
   /** Фикс-высотный тайл (SIZE_HEIGHT third/half): слот становится size-контейнером `tile`
       (высота задана флексом → containment легален), и height-запросы (tile-short:) работают.
       Авто-высотные full/strip меряются только по ширине. */
@@ -35,6 +37,7 @@ export function WidgetBody({
   period,
   target,
   fillHeight,
+  height,
   fixedTile,
   primary,
   footer,
@@ -48,7 +51,10 @@ export function WidgetBody({
       : 'flex min-h-0 flex-col pr-8'
     : 'mt-3 flex min-h-0 flex-1 flex-col';
   return (
-    <div className={`${bodyLayout} ${reorder ? 'pointer-events-none' : ''}`}>
+    <div
+      className={`${bodyLayout} ${reorder ? 'pointer-events-none' : ''}`}
+      style={height ? { height } : undefined}
+    >
       <WidgetPeriodProvider value={period}>
         <WidgetTargetContext.Provider value={target}>
           <div ref={bodyRef} className={`min-h-0 flex-1 overflow-hidden ${fixedTile ? 'widget-tile-fixed' : 'widget-tile'}`}>

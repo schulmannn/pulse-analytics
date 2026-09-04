@@ -39,6 +39,7 @@ export function useChartSectionModel(props: ChartSectionProps) {
     defaultColor,
     defaultTinted,
     fixedSize,
+    chartHeight,
     expand,
     drillTo,
     periodControl,
@@ -219,7 +220,9 @@ export function useChartSectionModel(props: ChartSectionProps) {
     },
     [configEditor, defaultSize, prefs, resizeMinSize, updatePrefs],
   );
-  const fillHeight = effectiveSize === 'full' ? null : bodyHeight;
+  // Авто-высотному full сообщать графику нечего — тело растёт ПОД него. Но если карточка
+  // объявила высоту явно (chartHeight, аудит #554 D15), измеренный тайл — честный ответ.
+  const fillHeight = effectiveSize === 'full' && chartHeight == null ? null : bodyHeight;
   const label = prefs.title || title;
   const bodyResetKeys = [bodyResetKey, activeVariant?.key ?? null, widgetDays];
   const richExpand = !!(
