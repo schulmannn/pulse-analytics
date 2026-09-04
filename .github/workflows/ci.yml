@@ -98,8 +98,25 @@ jobs:
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 20
+      # Три попытки с паузой: 2026-09-04 гейт покраснел на ВСЁМ main из-за
+      # «503 Service Unavailable» от registry.npmjs.org — уязвимостей не было ни одной.
+      # Красный CI по чужому сбою учит игнорировать красный CI, поэтому сетевой отказ
+      # ретраится, а настоящая находка по-прежнему валит джоб с первой попытки
+      # (npm audit отдаёт ненулевой код и без сети, и на уязвимости — различаем их по тексту).
       - name: Audit npm dependencies (server)
-        run: npm audit --omit=dev --audit-level=high
+        run: |
+          for attempt in 1 2 3; do
+            out=$(npm audit --omit=dev --audit-level=high 2>&1) && exit 0
+            echo "$out"
+            if ! printf '%s' "$out" | grep -qiE 'audit endpoint returned an error|Service Unavailable|ENOTFOUND|ETIMEDOUT|ECONNRESET'; then
+              echo "::error::npm audit нашёл уязвимость уровня high и выше"
+              exit 1
+            fi
+            echo "::warning::реестр npm недоступен (попытка $attempt из 3) — повтор через 15с"
+            sleep 15
+          done
+          echo "::error::реестр npm недоступен после трёх попыток"
+          exit 1
       # GHSA-qwww-vcr4-c8h2 (react-router: CSRF в RSC-режиме) приложение не затрагивает: RSC/server-
       # режим react-router не используется (клиентский BrowserRouter поверх Express-статики, RSC-API
       # в коде нет), а фикс существует только в мажоре v8. audit-ci даёт точечный allowlist поверх
