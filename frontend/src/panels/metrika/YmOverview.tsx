@@ -542,9 +542,12 @@ function YmQualityStrip({
                 {/* DeltaPill сам скрывается при flat/null — отдельных веток не нужно. */}
                 <DeltaPill delta={t.delta} />
               </div>
+              {/* 20px вместо 16: на 16 при домене от нуля искра «Качества трафика» вырождалась в
+                  зигзаг без формы (аудит #554, D17). Домен теперь по данным, а высота даёт размаху
+                  место. */}
               {trend.length >= 2 && (
-                <div className="mt-1 h-4">
-                  <InlineSpark values={trend} width={72} height={16} />
+                <div className="mt-1 h-5">
+                  <InlineSpark values={trend} width={72} height={20} />
                 </div>
               )}
             </div>

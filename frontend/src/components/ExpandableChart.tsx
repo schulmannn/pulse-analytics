@@ -23,6 +23,16 @@ export const ExpandedChartHeightContext = createContext<number | null>(null);
     draws a dashed goal line at the value. null = no target — the default everywhere else. */
 export const WidgetTargetContext = createContext<number | null>(null);
 
+/**
+ * Заголовок карточки, внутри которой рисуется тело.
+ *
+ * Нужен ровно затем, чтобы тело не печатало подпись-ДУБЛЬ: на IG-обзоре карточка называлась
+ * «Охват», и над числом стояла вторая подпись «Охват» (аудит #554, D8). Это уже вторая серия
+ * одного дефекта — до неё так же дублировались «Просмотры» (аудит 11 августа), — поэтому чинится
+ * структурно: хост объявляет своё имя, тело сравнивает и не повторяет.
+ */
+export const ChartCardTitleContext = createContext<string | null>(null);
+
 /** Min/Max/Average reference lines for the expanded explorer. The overlay computes them from the
     visible `statsFor` values when the «Линии» toggle is on and provides them here; LineChart /
     BarChart draw a dashed hairline at each. null = off (the default everywhere else). */
