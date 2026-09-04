@@ -245,3 +245,88 @@ test('отчёт импорта сохраняет отвергнутые стр
   assert.deepEqual(saved.rejected, [{ row: 12, order_id: '1', reason: 'нет товара' }]);
   assert.deepEqual(saved.warnings, ['Незнакомые статусы заказов: packing']);
 });
+
+// ── Окно хранения сырых исходников (M-1, аудит #554) ───────────────────────────────────────────
+
+/** Ещё один импорт того же канала с сохранённым файлом; created_at сдвигается вперёд явно. */
+async function addImportWithFile(channelId, uid, minutesAgo) {
+  const id = await db.startCdekImport({
+    channel_id: channelId, uploaded_by: uid, filename: `f${minutesAgo}.xlsx`,
+    file_sha256: `${nonce}-keep-${seq++}`, file_bytes: Buffer.from(`байты ${minutesAgo}`),
+  });
+  await pool.query(
+    "UPDATE cdek_imports SET created_at = now() - ($2 || ' minutes')::interval WHERE id = $1",
+    [id, String(minutesAgo)]);
+  return id;
+}
+
+const hasFile = async (id) => (await pool.query(
+  'SELECT file_bytes IS NOT NULL AS has FROM cdek_imports WHERE id = $1', [id])).rows[0].has;
+
+test('окно хранения оставляет свежие исходники и снимает старые', { skip }, async () => {
+  const { channelId, user, importId: seeded } = await makeSource();
+  // seeded — самый старый; дальше пять более свежих, от 50 минут назад к 10.
+  await pool.query("UPDATE cdek_imports SET created_at = now() - interval '60 minutes' WHERE id = $1", [seeded]);
+  const ids = [];
+  for (const minutes of [50, 40, 30, 20, 10]) ids.push(await addImportWithFile(channelId, user.id, minutes));
+
+  const dropped = await db.pruneCdekImportFiles(channelId, { keep: 3 });
+
+  assert.equal(dropped, 3, 'снято ровно лишнее: было шесть файлов, оставили три');
+  assert.equal(await hasFile(seeded), false);
+  assert.equal(await hasFile(ids[0]), false);
+  assert.equal(await hasFile(ids[1]), false);
+  assert.equal(await hasFile(ids[2]), true);
+  assert.equal(await hasFile(ids[3]), true);
+  assert.equal(await hasFile(ids[4]), true, 'последняя загрузка остаётся переигрываемой всегда');
+});
+
+test('окно хранения снимает только блоб — отчёт импорта остаётся целиком', { skip }, async () => {
+  const { channelId, user, importId } = await makeSource();
+  await db.finishCdekImport(channelId, importId, {
+    stats: { rows_total: 9, rows_rejected: 1, orders_total: 4, period_from: '2025-09-01', period_to: '2025-09-30' },
+    rejected: [{ row: 3, order_id: '7', reason: 'нет товара' }],
+    warnings: ['Незнакомые статусы заказов: packing'],
+    counts: { inserted: 8, updated: 0, deleted: 0 },
+  });
+  await pool.query("UPDATE cdek_imports SET created_at = now() - interval '99 minutes' WHERE id = $1", [importId]);
+  await addImportWithFile(channelId, user.id, 1);
+
+  await db.pruneCdekImportFiles(channelId, { keep: 1 });
+
+  const row = await db.getCdekImport(channelId, importId);
+  assert.equal(row.has_file, false, 'витрина честно показывает, что переигрывать больше нечего');
+  assert.equal(row.rows_total, 9);
+  assert.equal(row.rows_inserted, 8);
+  assert.equal(row.period_from, '2025-09-01');
+  assert.deepEqual(row.warnings, ['Незнакомые статусы заказов: packing']);
+  assert.deepEqual(row.rejected, [{ row: 3, order_id: '7', reason: 'нет товара' }]);
+  assert.equal(await db.getCdekImportFile(channelId, importId), null);
+});
+
+test('окно хранения не выходит за свой канал', { skip }, async () => {
+  // Служебная уборка — такой же tenant-write, как всё остальное: без скоупа по channel_id она
+  // стала бы первым межтенантным доступом.
+  const mine = await makeSource();
+  const foreign = await makeSource();
+  await pool.query("UPDATE cdek_imports SET created_at = now() - interval '30 minutes' WHERE id = $1", [mine.importId]);
+  await addImportWithFile(mine.channelId, mine.user.id, 1);
+
+  await db.pruneCdekImportFiles(mine.channelId, { keep: 1 });
+
+  assert.equal(await hasFile(mine.importId), false);
+  assert.equal(await hasFile(foreign.importId), true, 'чужой канал уборкой соседа не задет');
+});
+
+test('потолок хранения конечен и объявлен репозиторием', { skip }, async () => {
+  // Число продуктовое, но само его наличие — инвариант: без него storage растёт без предела.
+  assert.equal(typeof db.CDEK_IMPORT_FILES_KEPT, 'number');
+  assert.ok(db.CDEK_IMPORT_FILES_KEPT >= 1 && Number.isFinite(db.CDEK_IMPORT_FILES_KEPT));
+
+  const { channelId, user, importId } = await makeSource();
+  await pool.query("UPDATE cdek_imports SET created_at = now() - interval '5 minutes' WHERE id = $1", [importId]);
+  await addImportWithFile(channelId, user.id, 1);
+  // Дефолтный потолок (10) больше двух файлов — уборка по умолчанию ничего не трогает.
+  assert.equal(await db.pruneCdekImportFiles(channelId), 0);
+  assert.equal(await hasFile(importId), true);
+});

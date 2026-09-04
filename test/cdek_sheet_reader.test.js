@@ -254,3 +254,60 @@ test('xlsx: строковая таблица с оборванным <si> то�
   assert.throws(() => readXlsxRows(buf), /повреждён/i);
   assert.ok(performance.now() - t0 < 500);
 });
+
+// ── Наружу ридер отдаёт либо строки, либо SheetReadError (I-2, аудит #554) ─────────────────────
+// Разбор чужого файла — разбор недоверенного ввода: полный список его отказов не перечислим, и на
+// каждый предусмотренный случай найдётся непредусмотренный. Раньше такой случай означал пятисотку
+// и текст драйвера в `cdek_imports.error`, который пользователь читает в витрине импортов.
+
+/** Лист с ОДНОЙ inline-ячейкой заданного текста — без экранирования фикстурой. */
+function xlsxWithRawCell(inner) {
+  return buildZip([
+    { name: 'xl/workbook.xml', data: Buffer.from('<workbook xmlns:r="r"><sheets><sheet name="s" sheetId="1" r:id="rId1"/></sheets></workbook>', 'utf8') },
+    { name: 'xl/_rels/workbook.xml.rels', data: Buffer.from('<Relationships><Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>', 'utf8') },
+    {
+      name: 'xl/worksheets/sheet1.xml',
+      data: Buffer.from(
+        `<worksheet><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>${inner}</t></is></c></row></sheetData></worksheet>`,
+        'utf8',
+      ),
+    },
+  ]);
+}
+
+test('xlsx: числовая ссылка за пределами Unicode не роняет разбор RangeError-ом', () => {
+  // `&#9999999;` — валидный синтаксис XML-ссылки, но такого кодпоинта не существует, и
+  // String.fromCodePoint на нём бросает «Invalid code point 9999999». Эта строка доезжала до
+  // пользователя. Неразбираемая ссылка остаётся собой — как неизвестная именованная сущность.
+  const { rows } = readSheetRows(xlsxWithRawCell('&#9999999;'), 'export.xlsx');
+  assert.deepEqual(rows[0], ['&#9999999;']);
+});
+
+test('xlsx: обычные ссылки по-прежнему декодируются (граница не съела рабочий случай)', () => {
+  const { rows } = readSheetRows(xlsxWithRawCell('&#1055;&#x440;&amp;&#65;'), 'export.xlsx');
+  assert.deepEqual(rows[0], ['Пр&A']);
+});
+
+test('readSheetRows не выпускает наружу чужое исключение — только SheetReadError с userMessage', () => {
+  // Моделируем «непредусмотренный случай» изнутри разбора: подменённый Buffer.prototype бросает
+  // не-SheetReadError оттуда, где ридер этого не ждёт. Наружу обязан выйти пользовательский текст,
+  // а исходная ошибка — уехать в cause, чтобы вызывающий записал её в лог.
+  const buf = buildXlsx([['ID'], [1]]);
+  const original = Buffer.prototype.readUInt32LE;
+  Buffer.prototype.readUInt32LE = function patched(offset) {
+    if (offset === 0) throw new TypeError('внутренности драйвера: patched readUInt32LE');
+    return original.call(this, offset);
+  };
+  try {
+    assert.throws(() => readSheetRows(buf, 'export.xlsx'), (e) => {
+      assert.ok(e instanceof SheetReadError);
+      assert.match(e.userMessage, /не разобрал/i);
+      assert.doesNotMatch(e.message, /patched readUInt32LE/);
+      assert.equal(e.cause instanceof TypeError, true, 'исходная ошибка не потеряна — она в cause');
+      assert.match(e.cause.message, /patched readUInt32LE/);
+      return true;
+    });
+  } finally {
+    Buffer.prototype.readUInt32LE = original;
+  }
+});

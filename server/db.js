@@ -305,7 +305,7 @@ function createDatabase(config, overrides = {}) {
     collector: collectorRepo,
     reports: reportsRepo, // REPORT_SCHEDULES, listReports, getReport, createReport, updateReport, deleteReport, listDueReports, markReportSent, reserveReportDelivery, clearReportDelivery, listPostsWindow
     campaigns: campaignsRepo, // CAMPAIGN_*, listCampaigns, getCampaign, create/update/deleteCampaign, add/remove/listCampaignPosts, getCampaignSummary
-    cdek: cdekRepo, // get/saveCdekSource, setCdekWarehouse, find/start/finish/failCdekImport, list/getCdekImport(File), applyCdekImport, getCdekWarehouseFromOrders, getCdek{Summary,Series,Breakdown,Coverage,Bounds}ForActor
+    cdek: cdekRepo, // get/saveCdekSource, setCdekWarehouse, find/start/finish/failCdekImport, list/getCdekImport(File), pruneCdekImportFiles, applyCdekImport, getCdekWarehouseFromOrders, getCdek{Summary,Series,Breakdown,Coverage,Bounds}ForActor
     rusender: rusenderRepo, // save/get/list/deleteRusenderAccount, upsertRusender{Daily,Campaigns,CampaignActivity}, listRusenderCampaignsForActivity, getRusender{Summary,Series,Campaigns,Campaign,Bounds}ForActor
     mentionSettings: mentionSettingsRepo, // getMentionSettingsInternal/ForActor, upsertMentionSettingsForActor
     mentionNotify: mentionNotifyRepo, // issueMentionNotifyLink, bindMentionNotifyByToken, get/deleteMentionNotifyBinding, unbindMentionNotifyChat, set/getMentionNotifySubscription*, listRunnableMentionNotifySubscriptions, markMentionNotifyRun, filterNewMentions
