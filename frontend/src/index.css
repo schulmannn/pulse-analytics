@@ -234,6 +234,16 @@
   }
 }
 
+/* `tile-wide:` — слот широкий достаточно для ДВУХ колонок фактов (аудит #554, ТЗ-11).
+   Порог 30rem (480px) — по ЗАМЕРУ САМОГО КОНТЕЙНЕРА, а не секции: на 1440px M-карточка шириной 543px
+   даёт тайл 501px (минус p-5 с двух сторон), и пороги 32/34rem промахивались; S-тайл примерно 300px и не попадает
+   и держит одну колонку. Спрашиваем СЛОТ, а не экран: на Главной владелец задаёт ширину сам. */
+@custom-variant tile-wide {
+  @container tile (min-width: 30rem) {
+    @slot;
+  }
+}
+
 @utility data-table-surface {
   /* Shared dashboard data-table treatment. The shell owns the card chrome and horizontal
      overflow; the table class owns only typography, dividers and interaction states so complex

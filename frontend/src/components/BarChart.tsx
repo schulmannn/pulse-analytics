@@ -67,6 +67,15 @@ interface BarChartProps {
    * сравнения вдобавок делит полосу надвое, и это скачок формы, а не прозрачности).
    */
   ghostVisible?: boolean;
+  /**
+   * ТОН КАЖДОГО СТОЛБЦА по его индексу — для полоски ритма, где один ряд несёт ДВЕ недели
+   * (аудит #554, ТЗ-11). `ghost` — прошлая неделя, `peak` — пик текущей.
+   *
+   * Это НЕ то же, что `ghost`: там две ПАРАЛЛЕЛЬНЫЕ серии на одних датах (сегодня и год
+   * назад), а здесь одна непрерывная серия из 14 дней, у которой первая половина — прошлое. Разбивать
+   * её на две серии значило бы поставить два столбца на одну дату — враньё про сами данные.
+   */
+  barTone?: (index: number) => 'default' | 'ghost' | 'peak';
   /** Compact shadcn-style tooltip and higher-contrast series treatment for the metric explorer. */
   appearance?: 'default' | 'comparison';
 }
@@ -141,6 +150,7 @@ export function BarChart({
   pinnedIndex = null,
   comparisonStyle = 'grouped',
   ghostVisible = true,
+  barTone,
   appearance = 'default',
 }: BarChartProps) {
   // Геометрия столбцов числовая, а пропуск в ней невыразим — сводим его к нулевой высоте ОДИН
@@ -602,7 +612,15 @@ export function BarChart({
           // невидимый элемент, о который спотыкаются селекторы «первой серии» (forced-colors gate).
           (() => {
             const d = stackSegmentPath(b, true, false);
-            return d ? <path key={`b${i}`} data-chart-series="current" d={d} fill="hsl(var(--chart-role-primary))" /> : null;
+            // Тон столбца решает хост (barTone) — полоске ритма нужны три голоса в ОДНОЙ серии.
+            const tone = barTone?.(i) ?? 'default';
+            const fill =
+              tone === 'ghost'
+                ? 'hsl(var(--muted-foreground) / 0.55)'
+                : tone === 'peak'
+                  ? 'hsl(var(--foreground))'
+                  : 'hsl(var(--chart-role-primary))';
+            return d ? <path key={`b${i}`} data-chart-series="current" data-bar-tone={tone} d={d} fill={fill} /> : null;
           })()
         ))}
         {ghostBars.map((b, i) => plot.stacked ? (
@@ -620,7 +638,7 @@ export function BarChart({
         ))}
       </>
     );
-  }, [plot, morphed]);
+  }, [plot, morphed, barTone]);
 
   // Hover-only charts have no activation semantics: the SVG stays one passive named graphic and
   // pointer scrubbing is registered on its DOM node. Drillable charts use the real overlay button

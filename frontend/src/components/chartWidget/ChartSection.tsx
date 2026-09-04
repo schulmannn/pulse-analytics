@@ -20,6 +20,7 @@ import {
 } from '@/components/ui/context-menu';
 import { useHomeSource } from '@/lib/homeSourceContext';
 import { pinToHome, unpinFromHome } from '@/lib/widgetPrefsStore';
+import { WidgetSizeContext } from '@/lib/widgetSize';
 import { WidgetInViewContext } from '@/lib/widgetViewport';
 
 /** Configurable dashboard card. Public consumers import this through components/ChartWidget. */
@@ -152,6 +153,9 @@ export function ChartSection(props: ChartSectionProps) {
       {/* Provider оборачивает ТОЛЬКО тело карточки: оверлеи ниже — сиблинги, expand-тело обязано
           фетчить всегда (deep-link ?detail= может открыть невиденную карточку) и берёт дефолт
           контекста (true). */}
+      {/* Размер рядом с видимостью и по той же причине: тело иногда должно выбрать ДРУГОЙ макет,
+          а не сжать прежний (аудит #554, ТЗ-11). Оверлей развёртки — сиблинг и берёт дефолт `full`. */}
+      <WidgetSizeContext.Provider value={effectiveSize}>
       <WidgetInViewContext.Provider value={inView}>
       <ContextMenu>
       <ContextMenuTrigger asChild disabled={!contextActions}>
@@ -305,6 +309,7 @@ export function ChartSection(props: ChartSectionProps) {
       )}
       </ContextMenu>
       </WidgetInViewContext.Provider>
+      </WidgetSizeContext.Provider>
       {model.layout.resizeEnabled && !reorder && (
         <WidgetResizeHandle
           label={label}
