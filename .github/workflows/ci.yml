@@ -122,9 +122,24 @@ jobs:
       # в коде нет), а фикс существует только в мажоре v8. audit-ci даёт точечный allowlist поверх
       # той же npm-audit базы — новые advisories по-прежнему валят джоб. Снять allowlist при бампе
       # react-router-dom на исправленную версию (Dependabot предложит).
+      # Тот же ретрай, что у серверного шага выше: 2026-09-04 audit-ci провисел 12 минут и упал с
+      # «code undefined» — реестр npm лежал, уязвимостей не было. Настоящая находка печатает
+      # advisory и валит джоб с первой попытки; ретраится только отказ без находок.
       - name: Audit npm dependencies (frontend)
-        run: npx -y audit-ci@^7 --high --skip-dev --allowlist GHSA-qwww-vcr4-c8h2
         working-directory: frontend
+        run: |
+          for attempt in 1 2 3; do
+            out=$(npx -y audit-ci@^7 --high --skip-dev --allowlist GHSA-qwww-vcr4-c8h2 2>&1) && exit 0
+            echo "$out"
+            if printf '%s' "$out" | grep -qiE 'GHSA-|CVE-|severity|vulnerabilit'; then
+              echo "::error::audit-ci нашёл уязвимость уровня high и выше"
+              exit 1
+            fi
+            echo "::warning::реестр npm недоступен (попытка $attempt из 3) — повтор через 15с"
+            sleep 15
+          done
+          echo "::error::реестр npm недоступен после трёх попыток"
+          exit 1
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
