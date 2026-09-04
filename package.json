@@ -16,17 +16,17 @@
     "check": "npm run check:syntax && npm run check:migrations && npm run check:boundaries && npm run lint && npm test"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.112.4",
+    "@anthropic-ai/sdk": "^0.122.0",
     "compression": "^1.8.1",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^4.21.2",
-    "express-rate-limit": "^8.6.0",
-    "pg": "^8.22.0",
-    "sharp": "^0.35.3"
+    "express-rate-limit": "^8.7.0",
+    "pg": "^8.23.0",
+    "sharp": "^0.35.4"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.5.3"
+    "@biomejs/biome": "2.5.11"
   },
   "engines": {
     "node": ">=20.19"
