@@ -108,7 +108,7 @@ function RusenderMetricShell({
       <MetricColumns
         rail={
           <>
-            <RailSection title="Сравнение">{comparison}</RailSection>
+            <RailSection title="Сравнение" mark="comparison">{comparison}</RailSection>
             <Link
               to={BACK.to}
               className="inline-flex items-center gap-1 text-xs font-medium text-primary transition-colors hover-fine:text-primary/80"

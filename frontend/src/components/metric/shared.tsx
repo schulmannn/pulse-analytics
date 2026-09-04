@@ -6,6 +6,7 @@
  */
 
 import type { ReactNode } from 'react';
+import { KpiValue } from '@/components/chartWidget/KpiValue';
 import { Link } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -219,6 +220,22 @@ export function RailSection({
 
 /** Единый chrome тайм-бара окна: hairline сверху + метка слева; контролы (PeriodChips /
     SegmentedControl / спейсер) остаются у страницы — семантики периода различаются. */
+/**
+ * ИТОГ ОКНА В РЕЙЛЕ СРАВНЕНИЯ — одна разметка на все вертикали (аудит #554, D12).
+ *
+ * После тихой шапки итог окна — доминанта рейла, и обе страницы это записали в комментариях
+ * одними словами — а рисовали по-разному: TG крупным KpiValue под подписью, IG — `text-base`
+ * в одну строку с подписью, то есть очередной копией рецепта крупного числа мимо KpiValue.
+ */
+export function RailWindowTotal({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div className="text-2xs tracking-wide text-muted-foreground">{label}</div>
+      <KpiValue size="compact" text={value} className="mt-1 text-foreground" />
+    </div>
+  );
+}
+
 export function WindowBarShell({ label = 'Окно', children }: { label?: string; children: ReactNode }) {
   return (
     <div className="flex flex-wrap items-center gap-2 border-t border-border pt-2.5 print:hidden">

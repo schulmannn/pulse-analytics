@@ -39,7 +39,7 @@ import { useExplorerChartHeight } from '@/lib/useExplorerChartHeight';
 import type { ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 import { useMetricRailHidden } from '@/lib/metricRail';
-import { ComparisonDelta, ComparisonDeltaRow, MetricDescriptor, WindowBarShell, RailSection, MetricPageHeader} from '@/components/metric/shared';
+import { ComparisonDelta, ComparisonDeltaRow, MetricDescriptor, WindowBarShell, RailSection, RailWindowTotal, MetricPageHeader} from '@/components/metric/shared';
 
 /**
  * Instagram metric pages — the drill target the unified chart contract points IG cards at
@@ -557,15 +557,14 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
             вместе с ней исчезала и кнопка возврата — итог окна, база сравнения, разбивка и «О
             метрике» пропадали, и вернуть их можно было только через чистку хранилища браузера. */}
         <aside id="ig-metric-inspector" className={cn('space-y-6', railHidden && 'lg:hidden')}>
-          <RailSection title="Сравнение">
+          <RailSection title="Сравнение" mark="comparison">
             {/* Итог окна — канонический дом итога после тихой шапки (v2: hero переехал сюда).
-                Для ig-follows это текущая база (то, чем ведёт страница), не сумма подписок. */}
-            <div className="flex items-baseline justify-between gap-3">
-              <span className="text-xs text-muted-foreground">Текущее окно</span>
-              <span className="text-base font-medium tabular-nums text-foreground">
-                {metricKey === 'ig-follows' ? fmt.kpi(lvlNow ?? ig.followers) : fmt.kpi(sumCur)}
-              </span>
-            </div>
+                Для ig-follows это текущая база (то, чем ведёт страница), не сумма подписок.
+                Разметка общая с TG (аудит #554, D12): было два разных веса у одной сущности. */}
+            <RailWindowTotal
+              label="Текущее окно"
+              value={metricKey === 'ig-follows' ? fmt.kpi(lvlNow ?? ig.followers) : fmt.kpi(sumCur)}
+            />
             {metricKey === 'ig-follows' ? (
               lvlNow != null && lvlStart != null && lvlDiff != null ? (
                 <div className="space-y-2 text-sm">
@@ -707,7 +706,7 @@ function IgAggregatePage({ def, pair, windowDays, handle }: { def: IgAggDef; pai
         <aside id="ig-aggregate-inspector" className={cn('space-y-6', railHidden && 'lg:hidden')}>
           {/* v2: итог живёт в «Сравнении» — первая секция rail. Прошлый период у агрегатной
               страницы уже разложен в основном блоке, поэтому здесь только строка итога. */}
-          <RailSection title="Сравнение">
+          <RailSection title="Сравнение" mark="comparison">
             <div className="flex items-baseline justify-between gap-3">
               <span className="text-xs text-muted-foreground">Текущее окно</span>
               <span className="text-base font-medium tabular-nums text-foreground">{pair.hasCur ? fmt.kpi(pair.cur) : '—'}</span>
@@ -834,7 +833,7 @@ function IgErPage({
         <aside id="ig-er-inspector" className={cn('space-y-6', railHidden && 'lg:hidden')}>
           {/* v2: итог живёт в «Сравнении» — первая секция rail. Прошлый период у ER уже
               разложен в основном блоке, поэтому здесь только строка итога. */}
-          <RailSection title="Сравнение">
+          <RailSection title="Сравнение" mark="comparison">
             <div className="flex items-baseline justify-between gap-3">
               <span className="text-xs text-muted-foreground">Текущее окно</span>
               <span className="text-base font-medium tabular-nums text-foreground">{hasCur ? fmt.pctAbs(erReach) : '—'}</span>
@@ -898,7 +897,7 @@ function IgChartShell({
             вместе с ней исчезала и кнопка возврата — итог окна, база сравнения, разбивка и «О
             метрике» пропадали, и вернуть их можно было только через чистку хранилища браузера. */}
         <aside id="ig-shell-inspector" className={cn('space-y-6', railHidden && 'lg:hidden')}>
-          <RailSection title="Сравнение">{comparison}</RailSection>
+          <RailSection title="Сравнение" mark="comparison">{comparison}</RailSection>
           <Link to={back.to} className="inline-flex items-center gap-1 text-xs font-medium text-primary transition-colors hover:text-primary/80">
             Открыть раздел <span aria-hidden="true">→</span>
           </Link>
