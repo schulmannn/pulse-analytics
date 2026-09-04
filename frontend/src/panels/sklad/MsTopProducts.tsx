@@ -355,28 +355,45 @@ function MsTopProductsList({ rows, metric, limit }: { rows: TopRow[]; metric: Ms
       ? limit
       : Math.max(2, Math.min(limit, Math.floor(budget / (wide ? PRODUCT_ROW_WIDE : PRODUCT_ROW_NARROW))));
   const shown = compact ? rows.slice(0, fit) : rows;
+  /*
+   * СЕТКА, А НЕ ФЛЕКС-СТРОКИ (аудит #554, D11). Числовые колонки стояли на ФИКС-ширинах
+   * (w-20 = 80px и w-36 = 144px) и занимали своё место независимо от содержимого: имени товара
+   * доставалось ~221px, и оно резалось («Кофемашина автоматическая D…») при полупустой правой
+   * части строки.
+   *
+   * Треки `auto` в сетке считаются по САМОМУ ШИРОКОМУ СОДЕРЖИМОМУ ВСЕГО СТОЛБЦА, поэтому
+   * числа по-прежнему выровнены между строками, но берут ровно столько, сколько им нужно;
+   * остаток забирает `minmax(0, 1fr)` имени. `grid-cols-subgrid` на строке — чтобы колонки были
+   * ОБЩИМИ для всех строк, а `<li>` остался настоящим элементом списка (display: contents снес бы
+   * его семантику в части читалок).
+   */
+  const columns = compact
+    ? 'grid-cols-[auto_minmax(0,1fr)_auto_auto]'
+    : 'grid-cols-[auto_minmax(0,1fr)_auto_auto_auto]';
   return (
-    <ul>
+    <ul className={`grid ${columns} gap-x-3`}>
       {shown.map((row, i) => (
         <li
           key={`${row.name}-${i}`}
-          className={`flex items-center gap-3 border-t border-border first:border-t-0 ${compact ? 'py-1' : 'py-1.5'}`}
+          className={`col-span-full grid grid-cols-subgrid items-center border-t border-border first:border-t-0 ${compact ? 'py-1' : 'py-1.5'}`}
         >
-          <span className="w-5 shrink-0 text-center text-xs font-medium tabular-nums text-muted-foreground">{i + 1}</span>
+          <span className="text-center text-xs font-medium tabular-nums text-muted-foreground">{i + 1}</span>
           <span
             title={compact ? `${row.name} · ${fmt.num(row.quantity)} шт.` : row.name}
-            className="min-w-0 flex-1 truncate text-sm text-foreground"
+            className="min-w-0 truncate text-sm text-foreground"
           >
             {row.name}
           </span>
           {!compact && (
-            <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{fmt.num(row.quantity)} шт.</span>
+            <span className="whitespace-nowrap text-right text-xs tabular-nums text-muted-foreground">
+              {fmt.num(row.quantity)} шт.
+            </span>
           )}
-          <span className="w-20 shrink-0 text-right text-sm font-medium tabular-nums text-foreground">
+          <span className="whitespace-nowrap text-right text-sm font-medium tabular-nums text-foreground">
             {formatProductPrimary(row, metric)}
           </span>
           {/* nowrap: перенос вторички на 2-ю строку раздувал бы строку и рвал 264px-тайл. */}
-          <span className="w-36 shrink-0 whitespace-nowrap text-right text-2xs tabular-nums text-muted-foreground">
+          <span className="whitespace-nowrap text-right text-2xs tabular-nums text-muted-foreground">
             {formatProductSecondary(row, metric)}
           </span>
         </li>

@@ -477,7 +477,9 @@ function PostsTable({ allPosts, loadedCount }: { allPosts: NormalizedPost[]; loa
                 />
               </th>
               <th className="w-12 py-2.5 pl-0 pr-3 text-center"></th>
-              <th className="min-w-[240px] px-3 py-2.5">Пост</th>
+              {/* w-full: колонка заголовка забирает всю ширину, которую не заняли числовые
+                  — табличный эквивалент minmax(0, 1fr) (аудит #554, D11). */}
+              <th className="w-full min-w-[240px] px-3 py-2.5">Пост</th>
               {CONTENT_SORT_COLUMNS.filter((c) => c.key !== 'date').map((c) => {
                 const active = c.key === filters.sort;
                 return (
@@ -540,7 +542,7 @@ function PostsTable({ allPosts, loadedCount }: { allPosts: NormalizedPost[]; loa
                       <button
                         type="button"
                         onClick={() => setOpenId(post.id)}
-                        className="block w-full max-w-sm space-y-1 text-left md:max-w-md lg:max-w-lg"
+                        className="block w-full space-y-1 text-left"
                       >
                         <span className={cn('line-clamp-1 font-medium', post.caption ? 'text-foreground' : 'italic text-muted-foreground')}>
                           {post.caption ? markdownToPlainText(post.caption) : 'Без подписи'}
@@ -551,7 +553,7 @@ function PostsTable({ allPosts, loadedCount }: { allPosts: NormalizedPost[]; loa
                         </span>
                       </button>
                     ) : (
-                      <div className="max-w-sm space-y-1 md:max-w-md lg:max-w-lg">
+                      <div className="space-y-1">
                         <div className="line-clamp-1 font-medium text-foreground">
                           {post.caption ? <RichText text={post.caption} /> : <span className="italic text-muted-foreground">Без подписи</span>}
                         </div>
