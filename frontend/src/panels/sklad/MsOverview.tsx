@@ -1,5 +1,6 @@
 import { useContext, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { WidgetGrid } from '@/components/widgets/WidgetGrid';
+import { BoardSkeleton } from '@/components/BoardSkeleton';
 import { ShareTrack } from '@/components/ShareRows';
 import { ChartBand } from '@/components/ChartBand';
 import { Link, useNavigate } from 'react-router-dom';
@@ -143,15 +144,8 @@ export function MsOverview() {
   const previousReturns = useMsReturns(previousPeriod ?? period, { enabled: previousPeriod != null });
 
   if (summary.isPending) {
-    return (
-      <WidgetGrid className="grid grid-cols-1 gap-6 lg:grid-cols-6">
-        {Array.from({ length: 2 }).map((_, i) => (
-          <div key={i} className="h-[264px] rounded-2xl border border-border bg-card p-5 lg:col-span-3">
-            <ChartSkeleton />
-          </div>
-        ))}
-      </WidgetGrid>
-    );
+    // Семь карточек борда: выручка, заказы, средний чек, статусы, товары, возвраты, остатки.
+    return <BoardSkeleton tiles={['half', 'half', 'half', 'half', 'half', 'half', 'half']} />;
   }
 
   if (summary.isError) {
