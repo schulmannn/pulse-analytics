@@ -19,7 +19,7 @@ import { ChartTooltip, useHeatmapTip } from '@/components/ChartTooltip';
 import { Skeleton } from '@/components/ui/skeleton';
 import { KpiValue } from '@/components/chartWidget/KpiValue';
 import { fmt, timeAxisFromDayKeys } from '@/lib/format';
-import { lttbDownsample } from '@/lib/downsample';
+import { CHART_MAX_POINTS, lttbDownsample } from '@/lib/downsample';
 import { useExplorerChartHeight } from '@/lib/useExplorerChartHeight';
 import { usePeriod, type DateRange, type PeriodDays } from '@/lib/period';
 import { useMsResolvedPeriod, type MsPeriod } from '@/lib/msPeriod';
@@ -290,7 +290,7 @@ function YmSeriesPage({ def }: { def: YmSeriesDef }) {
 
   // Длинный архив («Всё») даунсэмплим до ~140 точек перед рендером (канон графиков); окна 7/30/90
   // короче порога и рисуются как есть, поэтому ghost выравнивается с ними по индексу.
-  const rendered = days === 0 ? lttbDownsample(winPoints, 140, (p) => p.value) : winPoints;
+  const rendered = days === 0 ? lttbDownsample(winPoints, CHART_MAX_POINTS, (p) => p.value) : winPoints;
   const values = rendered.map((p) => p.value);
   const labels = rendered.map((p) => fmt.day(p.day));
   const axisLabels = timeAxisFromDayKeys(rendered.map((p) => p.day));

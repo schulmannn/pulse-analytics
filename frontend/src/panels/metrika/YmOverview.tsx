@@ -13,7 +13,7 @@ import { ChartSkeleton } from '@/components/ui/dataSkeleton';
 import { DeltaPill } from '@/components/DeltaPill';
 import { InlineSpark } from '@/components/InlineSpark';
 import { pctDelta, type MetricDelta } from '@/lib/delta';
-import { lttbDownsample } from '@/lib/downsample';
+import { CHART_MAX_POINTS, lttbDownsample } from '@/lib/downsample';
 import { fmt, timeAxisFromDayKeys } from '@/lib/format';
 import { formatByRole } from '@/lib/metricNumber';
 import { usePagePeriod, useCardShowsPeriod } from '@/lib/period';
@@ -216,7 +216,7 @@ export function YmOverview() {
     prevTotal: number | null | undefined,
     caption?: string,
   ) => {
-    const sampled = lttbDownsample(block.series, 140, (p) => p.value);
+    const sampled = lttbDownsample(block.series, CHART_MAX_POINTS, (p) => p.value);
     const delta =
       block.total != null && prevTotal != null && prevTotal > 0
         ? pctDelta(block.total, prevTotal)

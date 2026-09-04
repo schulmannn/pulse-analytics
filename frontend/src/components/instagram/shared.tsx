@@ -1,7 +1,6 @@
 import type { ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { lttbDownsample } from '@/lib/downsample';
-import { CHART_MAX_POINTS } from '@/lib/msSeries';
+import { CHART_MAX_POINTS, lttbDownsample } from '@/lib/downsample';
 import { fmt, timeAxisFromDayKeys, timeAxisLabels } from '@/lib/format';
 import { pctDelta, type MetricDelta } from '@/lib/delta';
 import { DeltaPill } from '@/components/DeltaPill';

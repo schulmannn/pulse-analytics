@@ -22,24 +22,12 @@ import { RadialShare } from '@/components/RadialShare';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { Sparkline } from '@/components/Sparkline';
 import { pctDelta, type MetricDelta } from '@/lib/delta';
-import { lttbDownsample } from '@/lib/downsample';
+import { CHART_MAX_POINTS, lttbDownsample } from '@/lib/downsample';
 import { fmt, timeAxisFromDayKeys } from '@/lib/format';
 import { formatByRole, formatMoney } from '@/lib/metricNumber';
 import { usePagePeriod, useCardShowsPeriod } from '@/lib/period';
 import { msPreviousPeriod, useMsPagePeriod, type MsPeriod } from '@/lib/msPeriod';
-import {
-  aggregatePlotPoints,
-  bucketPoints,
-  densifyDayPoints,
-  fmtMetric,
-  metricTotal,
-  metricValue,
-  CHART_MAX_POINTS,
-  GRAIN_BUCKET_WORD,
-  type DayPoint,
-  type Grain,
-  type Metric,
-} from '@/lib/msSeries';
+import { aggregatePlotPoints, bucketPoints, densifyDayPoints, fmtMetric, metricTotal, metricValue, GRAIN_BUCKET_WORD, type DayPoint, type Grain, type Metric } from '@/lib/msSeries';
 
 /**
  * Обзор «МойСклада» — первый не-социальный источник. Все числа приходят СЕРВЕР-АГРЕГИРОВАННЫМИ
@@ -184,8 +172,8 @@ export function MsOverview() {
   // Канон графиков: длинные серии (окно «Всё» после лет архива ms_daily) даунсэмплятся до ~140
   // точек ПЕРЕД рендером — как в Charts/MsClients; labels/titles строятся из той же выборки,
   // чтобы тултипы совпадали с точками. Оконные 7/30/90 короче порога и проходят как есть.
-  const revSeries = lttbDownsample(revenue.series, 140, (p) => p.value);
-  const ordSeries = lttbDownsample(orders.series, 140, (p) => p.count);
+  const revSeries = lttbDownsample(revenue.series, CHART_MAX_POINTS, (p) => p.value);
+  const ordSeries = lttbDownsample(orders.series, CHART_MAX_POINTS, (p) => p.count);
   const revLabels = revSeries.map((p) => fmt.day(p.day));
   const revValues = revSeries.map((p) => p.value);
   const ordLabels = ordSeries.map((p) => fmt.day(p.day));
@@ -371,7 +359,7 @@ function MsReturnsCardBody({
     data.series.map((r) => ({ day: r.day, orders: r.count, sum: r.sum })),
     period,
   );
-  const sampled = lttbDownsample(dense, 140, (p) => p.orders);
+  const sampled = lttbDownsample(dense, CHART_MAX_POINTS, (p) => p.orders);
   const expanded = useContext(ChartExpandedContext);
   // Высоту svg считаем от ФАКТИЧЕСКОЙ высоты слота (паттерн band-измерения WidgetRenderer), а не
   // от бюджета «тело минус оценка шапки/сносок»: оценка расходилась с фактом на единицы px и

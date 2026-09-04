@@ -15,9 +15,10 @@ import {
   igStoryNavItems,
 } from '@/lib/igMetrics';
 import type { WindowPair, IgBreakdownItem } from '@/lib/igMetrics';
+import { CHART_MAX_POINTS, lttbDownsample } from '@/lib/downsample';
 import { pctDelta } from '@/lib/delta';
 import { KpiValue } from '@/components/chartWidget/KpiValue';
-import { fmt } from '@/lib/format';
+import { fmt, timeAxisFromDayKeys } from '@/lib/format';
 import { formatByRole } from '@/lib/metricNumber';
 import { windowIgSeries, KpiCard } from '@/components/instagram/shared';
 import { BestTimeHeatmap } from '@/components/instagram/audience';
@@ -299,11 +300,23 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
     if (shifted.every((v): v is number => v != null)) ghostVals = shifted;
   }
   const ghostOk = cmp !== 'off' && days > 0 && n > 1 && ghostVals.length === n;
+
+  // Длинный архив («Всё») даунсэмплим до CHART_MAX_POINTS перед рендером (канон CLAUDE.md: серии
+  // длиннее порога — суб-пиксельная мазня и дорогие кадры морфа; ig-history приходит за 400 дней).
+  // Окна 7/30/90 короче порога и рисуются как есть, поэтому ghost выравнивается с ними по индексу —
+  // а на «Всё» ghost и не строится (он требует days > 0). Ровно так же живёт YmMetricPage.
+  // Числа шапки и stats считаются НИЖЕ от полного окна: кап меняет только плотность точек графика.
+  const rendered = days === 0 ? lttbDownsample(winPoints, CHART_MAX_POINTS, (pt) => pt.value) : winPoints;
+  const values = rendered.map((pt) => pt.value);
+  const labels = rendered.map((pt) => fmt.day(pt.day));
+  const axisLabels = timeAxisFromDayKeys(rendered.map((pt) => pt.day));
+  const titles = rendered.map((pt) => `${fmt.day(pt.day)}: ${fmt.num(pt.value)} ${daily.genitive}`);
+  const m = values.length;
   const cmpLabel = cmp === 'year' ? 'Год назад' : 'Пред. период';
 
   // Pinned point: winPoints carries the calendar day per index, so the day (and its posts —
   // IG posts have timestamps) resolves exactly, at any window.
-  const pinnedValid = pinned != null && pinned >= 0 && pinned < n ? pinned : null;
+  const pinnedValid = pinned != null && pinned >= 0 && pinned < m ? pinned : null;
   const pinnedDay = pinnedValid != null ? winPoints[pinnedValid]?.day : null;
   const pinnedPosts = pinnedDay
     ? ig.posts
@@ -311,13 +324,20 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
         .sort((a, b) => Number(b.reach ?? b.views ?? 0) - Number(a.reach ?? a.views ?? 0))
         .slice(0, 5)
     : [];
-  const pinnedDiff = pinnedValid != null && pinnedValid > 0 ? win.values[pinnedValid] - win.values[pinnedValid - 1] : null;
+  const pinnedDiff = pinnedValid != null && pinnedValid > 0 ? values[pinnedValid] - values[pinnedValid - 1] : null;
 
   // ── «Подписчики» (только ig-follows): абсолютный уровень базы, как ТГ ────────────────────
   // Реальные дневные якоря followers_total + реконструкция от живого значения (см.
   // followerLevelSeries). Гейт ≥2 точек: без уровня страница остаётся прежней (сумма подписок).
   const levelFull = metricKey === 'ig-follows' ? ig.series.followerLevel : [];
   const lvl = levelFull.length > 1 ? windowIgSeries(levelFull, days, 'подписчиков') : null;
+  // Уровень базы рисуется линией и приходит тем же 400-дневным архивом — тот же кап.
+  const lvlPoints = lvl ? levelFull.slice(-lvl.values.length) : [];
+  const lvlShown = days === 0 ? lttbDownsample(lvlPoints, CHART_MAX_POINTS, (pt) => pt.value) : lvlPoints;
+  const lvlValues = lvlShown.map((pt) => pt.value);
+  const lvlLabels = lvlShown.map((pt) => fmt.day(pt.day));
+  const lvlAxisLabels = timeAxisFromDayKeys(lvlShown.map((pt) => pt.day));
+  const lvlTitles = lvlShown.map((pt) => `${fmt.day(pt.day)}: ${fmt.num(pt.value)} подписчиков`);
   const lvlNow = lvl && lvl.values.length > 1 ? lvl.values[lvl.values.length - 1]! : null;
   const lvlStart = lvl && lvl.values.length > 1 ? lvl.values[0]! : null;
   const lvlDiff = lvlNow != null && lvlStart != null ? lvlNow - lvlStart : null;
@@ -395,16 +415,16 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
               <ChartSection id="metric-ig-followers-level" title="Подписчики" defaultSize="full" noExpand>
                 <ChartExpandedContext.Provider value={true}>
                   <LineChart
-                    values={lvl.values}
-                    labels={lvl.labels}
-                    axisLabels={lvl.axisLabels}
-                    titles={lvl.titles}
+                    values={lvlValues}
+                    labels={lvlLabels}
+                    axisLabels={lvlAxisLabels}
+                    titles={lvlTitles}
                     height={chartH}
                     markExtremes
                     showPoints
                     legendToggle={false}
                     onPointClick={(i) => setPinnedLvl((p) => (p === i ? null : i))}
-                    pinnedIndex={pinnedLvl != null && pinnedLvl < lvl.values.length ? pinnedLvl : null}
+                    pinnedIndex={pinnedLvl != null && pinnedLvl < lvlValues.length ? pinnedLvl : null}
                   />
                 </ChartExpandedContext.Provider>
               </ChartSection>
@@ -461,10 +481,10 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
               <ChartExpandedContext.Provider value={true}>
                 {kind === 'line' ? (
                   <LineChart
-                    values={win.values}
-                    labels={win.labels}
-                    axisLabels={win.axisLabels}
-                    titles={win.titles}
+                    values={values}
+                    labels={labels}
+                    axisLabels={axisLabels}
+                    titles={titles}
                     height={chartH}
                     markExtremes
                     markAnomalies
@@ -478,10 +498,10 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
                   />
                 ) : (
                   <BarChart
-                    values={win.values}
-                    labels={win.labels}
-                    axisLabels={win.axisLabels}
-                    titles={win.titles}
+                    values={values}
+                    labels={labels}
+                    axisLabels={axisLabels}
+                    titles={titles}
                     height={chartH}
                     ghost={ghostOk ? ghostVals : undefined}
                     ghostLabel={cmpLabel}
@@ -519,9 +539,9 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
 
           {metricKey !== 'ig-follows' && pinnedValid != null && pinnedDay != null && (
             <PinnedDayPanel
-              dateLabel={win.labels[pinnedValid] ?? pinnedDay}
+              dateLabel={labels[pinnedValid] ?? pinnedDay}
               rows={[
-                { label: 'Значение', value: fmt.num(win.values[pinnedValid]) },
+                { label: 'Значение', value: fmt.num(values[pinnedValid]) },
                 ...(pinnedDiff != null
                   ? [
                       {

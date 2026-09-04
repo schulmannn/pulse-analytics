@@ -23,8 +23,6 @@ export const METRIC_LABEL: Record<Metric, string> = {
 /** Русское слово бакета грануляции — для честной подписи среднего чека «по … с заказами». */
 export const GRAIN_BUCKET_WORD: Record<Grain, string> = { day: 'дням', week: 'неделям', month: 'месяцам' };
 
-/** Максимум точек графика (канон CLAUDE.md: длинные серии прореживаются до рендера). */
-export const CHART_MAX_POINTS = 140;
 
 /** Значение метрики точки: средний чек честно null в бакет без заказов (деление на ноль = ложь). */
 export function metricValue(metric: Metric, p: { orders: number; sum: number }): number | null {

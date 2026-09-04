@@ -1,7 +1,7 @@
 import { lazy, Suspense, useMemo } from 'react';
 import { useHistory, useVelocity, useTgFull } from '@/api/queries';
 import type { TgFull } from '@/api/schemas';
-import { lttbDownsample } from '@/lib/downsample';
+import { CHART_MAX_POINTS, lttbDownsample } from '@/lib/downsample';
 import { BarChart } from '@/components/BarChart';
 import { LineChart } from '@/components/LineChart';
 import { fmt, pluralRu, timeAxisFromDayKeys } from '@/lib/format';
@@ -29,7 +29,7 @@ interface SubscriberRow {
  * они полезны. Один и тот же компонент рисует оба вида, поэтому это проп, а не удаление.
  */
 export function SubscriberHistoryChart({ rows, expanded = false }: { rows: SubscriberRow[]; expanded?: boolean }) {
-  const sampled = lttbDownsample(rows, 140, (row) => Number(row.subscribers));
+  const sampled = lttbDownsample(rows, CHART_MAX_POINTS, (row) => Number(row.subscribers));
   const values = sampled.map((row) => Number(row.subscribers));
   const titles = sampled.map((row) => `${fmt.day(row.day)}: ${fmt.num(row.subscribers)} ${pluralRu(Number(row.subscribers), ['подписчик', 'подписчика', 'подписчиков'])}`);
   // Full per-point labels: the axis-free card shows first/mid/last itself, the explorer

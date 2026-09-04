@@ -1,8 +1,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import { useTgFull, useTgGraphs } from '@/api/queries';
 import type { TgFull, TgGraphs } from '@/api/schemas';
-import { lttbDownsample } from '@/lib/downsample';
-import { CHART_MAX_POINTS } from '@/lib/msSeries';
+import { CHART_MAX_POINTS, lttbDownsample } from '@/lib/downsample';
 import { normalizeTgPosts } from '@/lib/posts';
 import { dayKeyToTs, fmt, ruSeriesName, pluralRu, timeAxisFromDayKeys } from '@/lib/format';
 import { withShares } from '@/lib/breakdownShare';
