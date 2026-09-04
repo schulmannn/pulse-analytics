@@ -8,6 +8,8 @@
 
 'use strict';
 
+const { readRetryAfterHeader, parseRetryAfterSeconds } = require('../lib/retryAfter');
+
 const { fetchWithTimeout } = require('../lib/http');
 
 // ── Detailed (idempotent) send policy for scheduled reports (sendEmailDetailed only) ────────────
@@ -23,20 +25,6 @@ const EMAIL_BACKOFF_BUDGET_MS = 1000; // hard ceiling on cumulative backoff slee
 // rejected locally rather than truncated into a possible collision.
 const EMAIL_IDEMPOTENCY_KEY_MAX = 256;
 
-// Retry-After may be an integer number of seconds or an HTTP-date; return whole seconds (≥0) or null
-// when absent/unparseable/overflowing. `nowMs` injected so the HTTP-date branch stays deterministic.
-function parseRetryAfterSeconds(headerValue, nowMs) {
-  if (headerValue == null) return null;
-  const s = String(headerValue).trim();
-  if (s === '') return null;
-  if (/^\d+$/.test(s)) {
-    const seconds = Number(s);
-    return Number.isSafeInteger(seconds) ? seconds : null;
-  }
-  const t = Date.parse(s);
-  if (!Number.isFinite(t)) return null;
-  return Math.max(0, Math.ceil((t - nowMs) / 1000));
-}
 
 // Pull Resend's machine error `name` (e.g. 'concurrent_idempotent_requests', 'invalid_idempotent_request')
 // out of an error body WITHOUT ever surfacing the message/full body. Resend returns the name either at
@@ -158,7 +146,7 @@ function createEmailService({ config, fetchImpl, sleep, now } = {}) {
     }
     let name = null;
     try { name = parseResendErrorName(await res.json()); } catch { /* malformed body — classify by status */ }
-    const retryAfter = parseRetryAfterSeconds(res.headers && res.headers.get && res.headers.get('retry-after'), clock());
+    const retryAfter = parseRetryAfterSeconds(readRetryAfterHeader(res), clock());
     if (status === 429) return { outcome: 'retryable', status, retryAfter };
     const retryMeta = retryAfter == null ? {} : { retryAfter };
     if (status >= 500) return { outcome: 'ambiguous', reason: 'http_5xx', status, ...retryMeta };
