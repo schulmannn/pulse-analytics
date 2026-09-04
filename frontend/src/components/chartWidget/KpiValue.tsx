@@ -39,10 +39,18 @@ const RECIPE = 'kpi-accent font-medium leading-[1.15] tabular-nums tracking-tigh
 export function KpiValue({ text, size = 'hero', onDrill, drillLabel, ariaLabel, className }: KpiValueProps) {
   const SIZE = { hero: 'text-hero', compact: 'text-3xl', small: 'text-2xl' } as const;
   const classes = cn(RECIPE, SIZE[size], className);
-  if (!onDrill) return <div className={classes}><KpiNumber text={text} /></div>;
+  // Стабильный крюк для гейтов анатомии карточки (аудит #554, D9): по классам рецепта
+  // цепляться нельзя — они здесь именно для того, чтобы меняться в одном месте.
+  if (!onDrill)
+    return (
+      <div className={classes} data-kpi-value>
+        <KpiNumber text={text} />
+      </div>
+    );
   return (
     <button
       type="button"
+      data-kpi-value
       aria-label={ariaLabel ?? (drillLabel ? `Разбор: ${drillLabel}` : undefined)}
       title="Подробный разбор"
       onClick={onDrill}

@@ -11,7 +11,7 @@ import { BarChart } from '@/components/BarChart';
 import { ChartBand } from '@/components/ChartBand';
 import { ChartCardBody, ChartSection as WidgetChartSection, seriesRange } from '@/components/ChartWidget';
 import { KpiValue } from '@/components/chartWidget/KpiValue';
-import { CenteredStat, CompactStatHeadline } from '@/components/CompareStat';
+import { StackedStat, CompactStatHeadline } from '@/components/CompareStat';
 import { Sparkline } from '@/components/Sparkline';
 import type { WidgetSize } from '@/lib/widgetPrefsStore';
 import { fmtDay, pairDelta, windowIgSeries, type Point, type WindowPair } from '@/lib/igMetrics';
@@ -568,8 +568,8 @@ export function IgInteractionsBody({ ig, viz }: { ig: IgData; viz?: 'line' | 'ba
   );
 }
 
-/** «Вовлечённость» (third): ER по центру карточки (референс владельца, 2026-08-14 — центрированный
-    процент, под ним сравнение с прошлым периодом; зеркало TG TgErBody). Дневная кривая ER снята
+/** «Вовлечённость» (third): та же анатомия, что у соседей по ряду — число с дельтой слева,
+    пояснение внизу (аудит #554, D9; зеркало TG TgErBody). Дневная кривая ER снята
     с карточки тем же решением — она остаётся на странице разбора /metrics/ig-er. Формат — единый
     абсолютный процент fmt.pctAbs («25.1%», не «25.10%»), паритет с TG «28.9%». */
 export function IgEngagementBody({ ig }: { ig: IgData }) {
@@ -580,7 +580,7 @@ export function IgEngagementBody({ ig }: { ig: IgData }) {
       : null;
   const live = ig.erReach > 0;
   return (
-    <CenteredStat
+    <StackedStat
       text={live ? fmt.pctAbs(ig.erReach) : '—'}
       delta={erTrend}
       onDrill={() => navigate('/metrics/ig-er')}
