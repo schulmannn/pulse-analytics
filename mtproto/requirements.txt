@@ -4,5 +4,5 @@
 #   pip-compile --generate-hashes --output-file=mtproto/requirements.lock mtproto/requirements.txt
 telethon==1.43.2
 fastapi==0.141.1
-uvicorn==0.30.1
+uvicorn==0.52.4
 python-dotenv==1.2.2
