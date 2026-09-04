@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
 import { apiGet, apiSend, apiUpload } from '@/api/client';
 import { qk } from '@/api/queryKeys';
+import { keepPreviousForChannel } from '@/api/keepPrevious';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { msPeriodQuery, type MsPeriod } from '@/lib/msPeriod';
 
@@ -301,8 +302,7 @@ export function useCdekSummary(
     // открывать её заново (владелец: «страница полностью перезагружается… я должен опять жать на
     // фильтр»). Заодно график получает старую геометрию для морфа вместо пустого полотна.
     // Данные НИКОГДА не переносятся между каналами: иначе мелькнули бы числа чужого склада.
-    placeholderData: (previous, previousQuery) =>
-      previousQuery?.queryKey[1] === channelId ? previous : undefined,
+    placeholderData: keepPreviousForChannel(channelId),
     retry: false,
     queryFn: ({ signal }) =>
       apiGet(
@@ -327,8 +327,7 @@ export function useCdekSeries(
     enabled: channelId != null,
     queryKey: qk.cdekSeries.window(channelId, period, include, grain ?? 'auto', productsKey(products), productsKey(channels), breakdown ?? ''),
     // Прошлое окно держится, пока грузится новое — см. useCdekSummary.
-    placeholderData: (previous, previousQuery) =>
-      previousQuery?.queryKey[1] === channelId ? previous : undefined,
+    placeholderData: keepPreviousForChannel(channelId),
     retry: false,
     queryFn: ({ signal }) =>
       apiGet(
@@ -352,8 +351,7 @@ export function useCdekBreakdown(
     enabled: channelId != null,
     queryKey: qk.cdekBreakdown.window(channelId, period, include, dim, limit, productsKey(products), productsKey(channels)),
     // Прошлое окно держится, пока грузится новое — см. useCdekSummary.
-    placeholderData: (previous, previousQuery) =>
-      previousQuery?.queryKey[1] === channelId ? previous : undefined,
+    placeholderData: keepPreviousForChannel(channelId),
     retry: false,
     queryFn: ({ signal }) =>
       apiGet(
@@ -435,6 +433,7 @@ export function useCdekOrders(period: MsPeriod, filters: CdekOrderFilters = {}, 
       filters.q ?? '',
     ),
     retry: false,
+    placeholderData: keepPreviousForChannel(channelId),
     queryFn: ({ signal }) => apiGet(`/api/cdek/orders?${serialized}`, CdekOrdersSchema, { signal, channelId }),
   });
 }
@@ -445,6 +444,7 @@ export function useCdekHourly(period: MsPeriod, include: CdekInclude = 'revenue'
     enabled: channelId != null,
     queryKey: qk.cdekHourly.window(channelId, period, include),
     retry: false,
+    placeholderData: keepPreviousForChannel(channelId),
     queryFn: ({ signal }) =>
       apiGet(`/api/cdek/hourly?${msPeriodQuery(period)}&include=${include}`, CdekHourlySchema, { signal, channelId }),
   });

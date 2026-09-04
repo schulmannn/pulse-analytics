@@ -20,7 +20,8 @@ const STALE_STATUS = 60 * 1000;        // свежесть-статусы (colle
 import { z } from 'zod';
 import { apiGet, apiSend } from '@/api/client';
 import { qk } from '@/api/queryKeys';
-import { msPeriodKey, msPeriodQuery, type MsPeriod } from '@/lib/msPeriod';
+import { keepPreviousForChannel } from '@/api/keepPrevious';
+import { msPeriodQuery, type MsPeriod } from '@/lib/msPeriod';
 import type { CampaignSourceScope } from '@/lib/campaignSources';
 import {
   AdminUserSchema,
@@ -384,8 +385,9 @@ export function useMentionsArchive(
   return useQuery({
     // opts.enabled — внешний гейт поверх канального (офскрин-виджеты Главной), queryKey прежний.
     enabled: channelId != null && opts?.enabled !== false,
-    queryKey: ['mentions-archive', channelId, d, src, lim, rng?.from ?? null, rng?.to ?? null],
+    queryKey: qk.mentionsArchive.window(channelId, d, src, lim, rng?.from ?? null, rng?.to ?? null),
     staleTime: STALE_ARCHIVE,
+    placeholderData: keepPreviousForChannel(channelId),
     queryFn: ({ signal }) =>
       apiGet(`/api/history/mentions${qs ? `?${qs}` : ''}`, MentionsSchema, { signal, channelId }),
   });
@@ -397,8 +399,9 @@ export function useHistory(days = 730, opts?: { enabled?: boolean }) {
   return useQuery({
     // opts.enabled — внешний гейт поверх канального (офскрин-виджеты Главной), queryKey прежний.
     enabled: channelId != null && opts?.enabled !== false,
-    queryKey: ['history-channel', channelId, days],
+    queryKey: qk.historyChannel.window(channelId, days),
     staleTime: STALE_ARCHIVE,
+    placeholderData: keepPreviousForChannel(channelId),
     queryFn: ({ signal }) => apiGet(`/api/history/channel?days=${days}`, HistorySchema, { signal, channelId }),
   });
 }
@@ -409,7 +412,7 @@ export function useVelocity(opts?: { enabled?: boolean }) {
   return useQuery({
     // opts.enabled — внешний гейт поверх канального (офскрин-виджеты Главной), queryKey прежний.
     enabled: channelId != null && opts?.enabled !== false,
-    queryKey: ['velocity', channelId],
+    queryKey: qk.velocity(channelId),
     staleTime: STALE_ARCHIVE,
     queryFn: ({ signal }) => apiGet('/api/tg/mtproto/velocity', VelocitySchema, { signal, channelId }),
   });
@@ -422,7 +425,7 @@ export function useIgProfile(enabled = true) {
   const { channelId } = useSelectedChannel();
   return useQuery({
     enabled: enabled && channelId != null,
-    queryKey: ['ig-profile', channelId],
+    queryKey: qk.ig.profile(channelId),
     staleTime: STALE_LIVE,
     queryFn: ({ signal }) => apiGet('/api/ig/profile', IgProfileSchema, { signal, channelId }),
   });
@@ -437,7 +440,7 @@ export function useIgInsights(days = 90, enabled = true) {
   // for every `insightsQ.data` consumer.
   return useQuery<IgInsights>({
     enabled: enabled && channelId != null,
-    queryKey: ['ig-insights', channelId, days],
+    queryKey: qk.ig.insights(channelId, days),
     staleTime: STALE_LIVE,
     // A period change re-keys `days`; keep the previous window's data mounted while the new one
     // loads (same contract as useTgFull windowPair). Without it ig.loading flips to true and the
@@ -445,8 +448,7 @@ export function useIgInsights(days = 90, enabled = true) {
     // MorphingSeries period morph never runs (owner report: «переход не как в shadcn»). The old
     // series re-windows client-side instantly, then the fresh response retargets the morph.
     // Never carry data across a channel switch — that would flash another source's metrics.
-    placeholderData: (previous, previousQuery) =>
-      previousQuery?.queryKey[1] === channelId ? previous : undefined,
+    placeholderData: keepPreviousForChannel(channelId),
     queryFn: ({ signal }) => apiGet(`/api/ig/insights?days=${days}`, IgInsightsSchema, { signal, channelId }),
   });
 }
@@ -455,7 +457,7 @@ export function useIgPosts(limit = 20, enabled = true) {
   const { channelId } = useSelectedChannel();
   return useQuery({
     enabled: enabled && channelId != null,
-    queryKey: ['ig-posts', channelId, limit],
+    queryKey: qk.ig.posts(channelId, limit),
     staleTime: STALE_LIVE,
     queryFn: ({ signal }) => apiGet(`/api/ig/posts?limit=${limit}`, IgPostsSchema, { signal, channelId }),
   });
@@ -467,12 +469,11 @@ export function useIgBreakdowns(timeframe = 'last_30_days', enabled = true) {
   return useQuery<IgBreakdowns>({
     // enabled — внешний гейт поверх канального (офскрин-виджеты Главной), queryKey прежний.
     enabled: enabled && channelId != null,
-    queryKey: ['ig-breakdowns', channelId, timeframe],
+    queryKey: qk.ig.breakdowns(channelId, timeframe),
     staleTime: STALE_ARCHIVE,
     // Period switches re-key `timeframe` — hold the previous breakdowns for the same channel so
     // the Аудитория sections don't collapse to empty mid-switch (mirrors useIgInsights above).
-    placeholderData: (previous, previousQuery) =>
-      previousQuery?.queryKey[1] === channelId ? previous : undefined,
+    placeholderData: keepPreviousForChannel(channelId),
     queryFn: ({ signal }) => apiGet(`/api/ig/breakdowns?timeframe=${timeframe}`, IgBreakdownsSchema, { signal, channelId }),
   });
 }
@@ -483,7 +484,7 @@ export function useIgOnline(enabled = true) {
   return useQuery({
     // enabled — внешний гейт поверх канального (офскрин-виджеты Главной), queryKey прежний.
     enabled: enabled && channelId != null,
-    queryKey: ['ig-online', channelId],
+    queryKey: qk.ig.online(channelId),
     staleTime: STALE_ARCHIVE,
     queryFn: ({ signal }) => apiGet('/api/ig/online', IgOnlineSchema, { signal, channelId }),
   });
@@ -494,7 +495,7 @@ export function useIgStories() {
   const { channelId } = useSelectedChannel();
   return useQuery({
     enabled: channelId != null,
-    queryKey: ['ig-stories', channelId],
+    queryKey: qk.ig.stories(channelId),
     staleTime: STALE_LIVE,
     queryFn: ({ signal }) => apiGet('/api/ig/stories', IgStoriesSchema, { signal, channelId }),
   });
@@ -505,7 +506,7 @@ export function useIgTags() {
   const { channelId } = useSelectedChannel();
   return useQuery({
     enabled: channelId != null,
-    queryKey: ['ig-tags', channelId],
+    queryKey: qk.ig.tags(channelId),
     staleTime: STALE_LIVE,
     queryFn: ({ signal }) => apiGet('/api/ig/tags', IgTagsSchema, { signal, channelId }),
   });
@@ -517,8 +518,9 @@ export function useIgHistory(days = 400, enabled = true) {
   const { channelId } = useSelectedChannel();
   return useQuery({
     enabled: enabled && channelId != null && !isDemoMode(),
-    queryKey: ['ig-history', channelId, days],
+    queryKey: qk.ig.history(channelId, days),
     staleTime: STALE_ARCHIVE,
+    placeholderData: keepPreviousForChannel(channelId),
     queryFn: ({ signal }) => apiGet(`/api/ig/history?days=${days}`, IgHistorySchema, { signal, channelId }),
   });
 }
@@ -547,7 +549,7 @@ export function useIgOauthStatus() {
   const { channelId } = useSelectedChannel();
   return useQuery({
     enabled: channelId != null,
-    queryKey: ['ig-oauth-status', channelId],
+    queryKey: qk.ig.oauthStatus(channelId),
     staleTime: STALE_LIVE,
     queryFn: ({ signal }) => apiGet('/api/ig/oauth/status', IgOauthStatusSchema, { signal, channelId }),
   });
@@ -571,12 +573,16 @@ export function useConnectIg() {
 /** Disconnect the Instagram account from the current channel; refetch IG data + status. */
 export function useDisconnectIg() {
   const qc = useQueryClient();
+  const { channelId } = useSelectedChannel();
   return useMutation({
     mutationFn: () => apiSend('DELETE', '/api/ig/oauth', undefined, OkSchema),
     onSuccess: () =>
       Promise.all([
         qc.invalidateQueries({ queryKey: qk.channels }),
-        qc.invalidateQueries({ predicate: (q) => String(q.queryKey[0]).startsWith('ig-') }),
+        // Префикс семьи вместо строкового predicate: сбрасывается IG ЭТОГО канала, а не всех
+        // сразу. Отключение поканальное (DELETE идёт с x-channel-id), и сбрасывать чужие
+        // аккаунты было лишним — они просто перезапрашивались без причины.
+        qc.invalidateQueries({ queryKey: qk.ig.all(channelId) }),
       ]),
   });
 }
@@ -864,6 +870,7 @@ export function useYmSummary(period: MsPeriod, opts?: { enabled?: boolean }) {
     enabled: channelId != null && opts?.enabled !== false,
     queryKey: qk.ymSummary.window(channelId, period),
     staleTime: STALE_LIVE,
+    placeholderData: keepPreviousForChannel(channelId),
     queryFn: ({ signal }) => apiGet(`/api/ym/summary?${msPeriodQuery(period)}`, YmSummarySchema, { signal, channelId }),
   });
 }
@@ -886,7 +893,7 @@ export interface YmBreakdownParams {
 
 /** Ключевая семья разреза из `qk` — структурный контракт, чтобы фабрика не знала про весь `qk`. */
 interface YmKeyFamily {
-  window: (channelId: number | null, period: MsPeriod, ...tail: number[]) => Array<string | number | null>;
+  window: (channelId: number | null, period: MsPeriod, ...tail: number[]) => Array<string | number | boolean | null>;
 }
 
 /**
@@ -1160,8 +1167,9 @@ export function useMsFunnel(period: MsPeriod) {
   const { channelId } = useSelectedChannel();
   return useQuery({
     enabled: channelId != null,
-    queryKey: ['ms-funnel', channelId, ...msPeriodKey(period)],
+    queryKey: qk.msFunnel.window(channelId, period),
     staleTime: STALE_LIVE,
+    placeholderData: keepPreviousForChannel(channelId),
     queryFn: ({ signal }) => apiGet(`/api/ms/funnel?${msPeriodQuery(period)}`, MsFunnelSchema, { signal, channelId }),
   });
 }
@@ -1201,8 +1209,9 @@ export function useMsCustomers(period: MsPeriod, opts?: { enabled?: boolean }) {
   return useQuery({
     // opts.enabled — внешний гейт поверх канального (зеркало useMsSummary/useYmSummary).
     enabled: channelId != null && opts?.enabled !== false,
-    queryKey: ['ms-customers', channelId, ...msPeriodKey(period)],
+    queryKey: qk.msCustomers.window(channelId, period),
     staleTime: STALE_LIVE,
+    placeholderData: keepPreviousForChannel(channelId),
     queryFn: ({ signal }) => apiGet(`/api/ms/customers?${msPeriodQuery(period)}`, MsCustomersSchema, { signal, channelId }),
   });
 }
@@ -1237,8 +1246,9 @@ export function useMsRfm(period: MsPeriod) {
   const { channelId } = useSelectedChannel();
   return useQuery({
     enabled: channelId != null,
-    queryKey: ['ms-rfm', channelId, ...msPeriodKey(period)],
+    queryKey: qk.msRfm.window(channelId, period),
     staleTime: STALE_LIVE,
+    placeholderData: keepPreviousForChannel(channelId),
     queryFn: ({ signal }) => apiGet(`/api/ms/rfm?${msPeriodQuery(period)}`, MsRfmSchema, { signal, channelId }),
   });
 }
@@ -1298,8 +1308,13 @@ export function useMsRfmSegmentCustomers(period: MsPeriod, segment: string | nul
   const { channelId } = useSelectedChannel();
   return useQuery({
     enabled: channelId != null && segment != null,
-    queryKey: ['ms-rfm-customers', channelId, ...msPeriodKey(period), segment, offset],
+    queryKey: qk.msRfmCustomers.window(channelId, period, segment, offset),
     staleTime: STALE_LIVE,
+    // placeholderData здесь НАМЕРЕННО нет, хотя ключ и оконный. Это ПОСТРАНИЧНЫЙ запрос: ключ
+    // меняет не только период, но и offset («Показать ещё»), а страницы копятся в состоянии
+    // хоста. Отдать при смене offset данные ПРЕДЫДУЩЕЙ страницы значит подсунуть накопителю ту
+    // же страницу второй раз — список перестаёт расти и не доходит до порога виртуализации
+    // (поймано e2e virtual-tables). Морф периода этой таблице и не нужен: она не график.
     queryFn: ({ signal }) =>
       apiGet(
         `/api/ms/rfm-customers?${msPeriodQuery(period)}&segment=${encodeURIComponent(segment ?? '')}&limit=${msRfmCustomersLimit(offset)}&offset=${offset}`,
@@ -1346,7 +1361,7 @@ export function useMsCohorts() {
   const { channelId } = useSelectedChannel();
   return useQuery({
     enabled: channelId != null,
-    queryKey: ['ms-cohorts', channelId],
+    queryKey: qk.msCohorts.byChannel(channelId),
     staleTime: STALE_ARCHIVE,
     queryFn: ({ signal }) => apiGet('/api/ms/cohorts', MsCohortsSchema, { signal, channelId }),
   });
@@ -1377,8 +1392,9 @@ export function useMsSalesByChannel(period: MsPeriod) {
   const { channelId } = useSelectedChannel();
   return useQuery({
     enabled: channelId != null,
-    queryKey: ['ms-sales-by-channel', channelId, ...msPeriodKey(period)],
+    queryKey: qk.msSalesByChannel.window(channelId, period),
     staleTime: STALE_LIVE,
+    placeholderData: keepPreviousForChannel(channelId),
     queryFn: ({ signal }) =>
       apiGet(`/api/ms/sales-by-channel?${msPeriodQuery(period)}`, MsSalesByChannelSchema, { signal, channelId }),
   });
@@ -1414,8 +1430,9 @@ export function useMsChannelSeries(period: MsPeriod, opts: { channels: string[];
   const channelParam = channels.length > 0 ? `&channels=${encodeURIComponent(channels.join(','))}` : '';
   return useQuery({
     enabled: channelId != null,
-    queryKey: ['ms-channel-series', channelId, ...msPeriodKey(period), channels.join(',') || 'all', breakdown],
+    queryKey: qk.msChannelSeries.window(channelId, period, channels.join(',') || 'all', breakdown),
     staleTime: STALE_LIVE,
+    placeholderData: keepPreviousForChannel(channelId),
     queryFn: ({ signal }) =>
       apiGet(
         `/api/ms/channel-series?${msPeriodQuery(period)}${channelParam}${breakdown ? '&breakdown=1' : ''}`,
@@ -1438,8 +1455,9 @@ export function useMsGeography(period: MsPeriod) {
   const { channelId } = useSelectedChannel();
   return useQuery({
     enabled: channelId != null,
-    queryKey: ['ms-geography', channelId, ...msPeriodKey(period)],
+    queryKey: qk.msGeography.window(channelId, period),
     staleTime: STALE_LIVE,
+    placeholderData: keepPreviousForChannel(channelId),
     queryFn: ({ signal }) => apiGet(`/api/ms/geography?${msPeriodQuery(period)}`, MsGeographySchema, { signal, channelId }),
   });
 }
@@ -1459,8 +1477,9 @@ export function useMsTopCustomers(period: MsPeriod) {
   const { channelId } = useSelectedChannel();
   return useQuery({
     enabled: channelId != null,
-    queryKey: ['ms-top-customers', channelId, ...msPeriodKey(period)],
+    queryKey: qk.msTopCustomers.window(channelId, period),
     staleTime: STALE_LIVE,
+    placeholderData: keepPreviousForChannel(channelId),
     queryFn: ({ signal }) => apiGet(`/api/ms/top-customers?${msPeriodQuery(period)}`, MsTopCustomersSchema, { signal, channelId }),
   });
 }
@@ -1485,8 +1504,9 @@ export function useMsReturns(period: MsPeriod, opts?: { enabled?: boolean }) {
   return useQuery({
     // opts.enabled — внешний гейт поверх канального (зеркало useMsSummary/useMsCustomers).
     enabled: channelId != null && opts?.enabled !== false,
-    queryKey: ['ms-returns', channelId, ...msPeriodKey(period)],
+    queryKey: qk.msReturns.window(channelId, period),
     staleTime: STALE_LIVE,
+    placeholderData: keepPreviousForChannel(channelId),
     queryFn: ({ signal }) => apiGet(`/api/ms/returns?${msPeriodQuery(period)}`, MsReturnsSchema, { signal, channelId }),
   });
 }
@@ -1498,6 +1518,7 @@ export function useMsSummary(period: MsPeriod, opts?: { enabled?: boolean }) {
     enabled: channelId != null && opts?.enabled !== false,
     queryKey: qk.msSummary.window(channelId, period),
     staleTime: STALE_LIVE,
+    placeholderData: keepPreviousForChannel(channelId),
     queryFn: ({ signal }) => apiGet(`/api/ms/summary?${msPeriodQuery(period)}`, MsSummarySchema, { signal, channelId }),
   });
 }
@@ -1510,6 +1531,7 @@ export function useMsTopProducts(period: MsPeriod, limit = 10, sort: MsProductSo
     enabled: enabled && channelId != null,
     queryKey: qk.msTopProducts.window(channelId, period, limit, sort),
     staleTime: STALE_LIVE,
+    placeholderData: keepPreviousForChannel(channelId),
     queryFn: ({ signal }) =>
       apiGet(`/api/ms/top-products?${msPeriodQuery(period)}&limit=${limit}&sort=${sort}`, MsTopProductsSchema, { signal, channelId }),
   });
@@ -1526,8 +1548,9 @@ export function useMsAssortmentComparison(period: MsPeriod, enabled: boolean) {
   const { channelId } = useSelectedChannel();
   return useQuery({
     enabled: enabled && channelId != null,
-    queryKey: ['ms-top-products-compare', channelId, ...msPeriodKey(period)],
+    queryKey: qk.msTopProductsCompare.window(channelId, period),
     staleTime: STALE_LIVE,
+    placeholderData: keepPreviousForChannel(channelId),
     queryFn: ({ signal }) =>
       apiGet(`/api/ms/top-products?${msPeriodQuery(period)}&limit=1&compare=prev`, MsTopProductsSchema, { signal, channelId }),
   });
@@ -1562,8 +1585,9 @@ export function useMsStock(period: MsPeriod) {
   const { channelId } = useSelectedChannel();
   return useQuery({
     enabled: channelId != null,
-    queryKey: ['ms-stock', channelId, ...msPeriodKey(period)],
+    queryKey: qk.msStock.window(channelId, period),
     staleTime: STALE_LIVE,
+    placeholderData: keepPreviousForChannel(channelId),
     queryFn: ({ signal }) => apiGet(`/api/ms/stock?${msPeriodQuery(period)}`, MsStockSchema, { signal, channelId }),
   });
 }
