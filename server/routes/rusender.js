@@ -1,6 +1,7 @@
 'use strict';
 
 const { hasWorkspaceRole, tenantChannelId } = require('../middleware/tenant');
+const { makeResolveSourceChannel } = require('./sourceRouteKit');
 
 /**
  * Роуты Rusender (/api/rusender/{connect,status,account}) — серверная половина источника
@@ -39,32 +40,13 @@ const isDayKey = (v) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v);
 function registerRusenderRoutes({
   app, requireAuth, db, audit, rusenderCrypto, rusenderFetch, surfacesEnabled = false, log,
 }) {
-  /**
-   * Канал + учётка Rusender для запроса. Порядок проверок — канон resolveYm/resolveMs:
-   * БД → ключ шифрования → канал/учётка. `optional` — для status/disconnect, которым 404
-   * на отсутствующей учётке не нужен.
-   */
-  async function resolveRusenderChannel(req, res, { optional = false } = {}) {
-    const wanted = tenantChannelId(req);
-    const channel = await db.getChannelOrDefault(wanted, req.user).catch(() => null);
-    if (!channel) {
-      // Явно запрошенный чужой канал — 403; отсутствие подключения вообще — 404.
-      if (wanted) {
-        res.status(403).json({ error: 'Нет доступа к этому каналу' });
-        return null;
-      }
-      if (optional) return { channel: null, acc: null };
-      res.status(404).json({ error: 'Rusender не подключён к этому каналу' });
-      return null;
-    }
-    const acc = await db.getRusenderAccount(channel.id).catch(() => null);
-    if (!acc || !acc.api_key_enc) {
-      if (optional) return { channel, acc: null };
-      res.status(404).json({ error: 'Rusender не подключён к этому каналу' });
-      return null;
-    }
-    return { channel, acc };
-  }
+  // Канал + учётка Rusender: общий резолв источников (routes/sourceRouteKit).
+  const resolveRusenderChannel = makeResolveSourceChannel({
+    db,
+    getAccount: (id) => db.getRusenderAccount(id),
+    secretField: 'api_key_enc',
+    notConnected: 'Rusender не подключён к этому каналу',
+  });
 
   /** Каких обязательных разрешений не хватает ключу. Пустой массив = всё на месте. */
   function missingScopes(scopes) {

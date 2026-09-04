@@ -9,6 +9,7 @@ const {
 } = require('../lib/msTopProducts');
 const { SEGMENT_ORDER } = require('../domain/msRfm');
 const { hasWorkspaceRole, tenantChannelId } = require('../middleware/tenant');
+const { makeResolveSourceChannel } = require('./sourceRouteKit');
 
 /**
  * Роуты МойСклада (/api/ms/{connect,summary,top-products,top-customers,status,account,backfill,
@@ -199,37 +200,13 @@ function registerMsRoutes({ app, requireAuth, db, audit, msCrypto, msFetch, msBa
     }
   }
 
-  // Резолв канала запроса + строки ms_accounts БЕЗ расшифровки токена. Канал приходит тем же
-  // путём, что у resolveIg: ?channel= / заголовок x-channel-id, при их отсутствии — дефолтный
-  // канал пользователя (db.getChannelOrDefault — тот же ownership/disabled-предикат, что
-  // getChannel). Явный id без доступа → 403 ВСЕГДА (не раскрываем существование канала, даже
-  // для status). optional=true (status) смягчает только «не подключён»-исходы: нет каналов или
-  // нет учётки → { channel?, acc:null } вместо 404, чтобы status честно ответил connected:false.
-  // Возвращает { channel, acc } или null (ответ уже отправлен).
-  async function resolveMsChannel(req, res, { optional = false } = {}) {
-    if (!db.enabled) {
-      res.status(503).json({ error: 'База данных недоступна' });
-      return null;
-    }
-    const channelId = tenantChannelId(req);
-    const channel = await db.getChannelOrDefault(channelId, req.user).catch(() => null);
-    if (!channel) {
-      if (channelId) {
-        res.status(403).json({ error: 'Нет доступа к этому каналу' });
-        return null;
-      }
-      if (optional) return { channel: null, acc: null };
-      res.status(404).json({ error: 'МойСклад не подключён к этому каналу' });
-      return null;
-    }
-    const acc = await db.getMsAccount(channel.id).catch(() => null);
-    if (!acc || !acc.access_token_enc) {
-      if (optional) return { channel, acc: null };
-      res.status(404).json({ error: 'МойСклад не подключён к этому каналу' });
-      return null;
-    }
-    return { channel, acc };
-  }
+  // Канал пользователя + строка ms_accounts: общий резолв источников (routes/sourceRouteKit).
+  const resolveMsChannel = makeResolveSourceChannel({
+    db,
+    getAccount: (id) => db.getMsAccount(id),
+    secretField: 'access_token_enc',
+    notConnected: 'МойСклад не подключён к этому каналу',
+  });
 
   // Пер-запросная идентичность МойСклада для live-вызовов (расшифрованный токен). Мок-фолбэка,
   // в отличие от IG, нет: без подключённого склада роут честно отвечает 404 и UI показывает

@@ -7,7 +7,7 @@ import { observeSize } from '@/lib/observeSize';
 import { columnIndex } from '@/lib/chartHover';
 import { axisLabelIndexSet } from '@/lib/chartLabels';
 import { ChartTooltip, type TooltipRow, type TooltipState } from '@/components/ChartTooltip';
-import { axisLabel, niceScale } from '@/components/LineChart';
+import { axisLabel, axisTextWidth, niceScale } from '@/components/LineChart';
 import { seriesMotionKey } from '@/lib/chartMotion';
 import { useMorphValues } from '@/lib/useMorphValues';
 import {
@@ -89,7 +89,6 @@ const MAX_BAR_W = 48;
 // Bar takes 70% of its column; the rest is gap.
 const BAR_RATIO = 0.7;
 // Approximate glyph width of the 11px tabular numerals used for tick/value labels.
-const CHAR_W = 6.6;
 // Горизонтальное поле пилюли текущей метки оси X (px с каждой стороны текста).
 const AXIS_PILL_PAD = 6;
 // ОДНА альфа призрачных столбцов на все подачи: grouped-пара, stacked-сегмент, hover-хайлайт,
@@ -304,7 +303,7 @@ export function BarChart({
     const yTicks = scaledTicks.map((t) => t.v);
     const tickLabels = scaledTicks.map((t) => t.label);
     const gutterW = expanded
-      ? Math.max(28, Math.round(Math.max(...tickLabels.map((l) => l.length)) * CHAR_W) + 14)
+      ? Math.max(28, Math.round(Math.max(...tickLabels.map(axisTextWidth))) + 14)
       : 0;
 
     // Cap the column width and center the group when there are few bars.
@@ -459,7 +458,7 @@ export function BarChart({
           // отступает от края на поле своей пилюли, чтобы пилюля не клипалась рамкой svg.
           // Канонная ось: центр колонки, но КЛАМП в рамку svg по половине текста — месячный тик
           // первого столбца иначе клипался левым краем («ay» вместо «May»).
-          const axisTextW = String(axisText ?? '').length * CHAR_W;
+          const axisTextW = axisTextWidth(String(axisText ?? ''));
           const labelX = letterAxis
             ? Math.max(axisTextW / 2 + 1, Math.min(barCenterX(i), chartWidth - axisTextW / 2 - 1))
             : isLast
@@ -470,10 +469,10 @@ export function BarChart({
           const anchor = letterAxis ? 'middle' : isLast ? 'end' : i === 0 ? 'start' : 'middle';
           // ПИЛЮЛЯ текущей (последней) метки — «где сейчас» на оси (референс владельца:
           // «Aug» / обведённая «T»). viewBox здесь 1:1 с CSS-px, поэтому скруглённый rect не
-          // искажается. Ширина текста оценивается CHAR_W — тем же приёмом, что y-gutter.
+          // искажается. Ширина текста — общая оценка axisTextWidth, тем же приёмом, что y-gutter.
           const pill = showLabel && isLast
             ? (() => {
-                const textW = String(axisText).length * CHAR_W;
+                const textW = axisTextWidth(String(axisText));
                 const pillH = 15;
                 const pillW = Math.max(textW + AXIS_PILL_PAD * 2, pillH);
                 const x = anchor === 'end' ? labelX - textW - AXIS_PILL_PAD : labelX - pillW / 2;

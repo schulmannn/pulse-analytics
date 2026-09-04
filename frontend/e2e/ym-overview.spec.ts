@@ -498,10 +498,12 @@ test('Обзор Метрики: карточки метрик, источник
   // Слайс качества — полоса качества трафика: отказы/средний визит/глубина/новые/доля новых.
   await expect(page.getByRole('heading', { name: 'Качество трафика', exact: true })).toBeVisible();
   await expect(page.getByText('Отказы', { exact: true })).toBeVisible();
-  await expect(page.getByText('34.2%')).toBeVisible();
-  await expect(page.getByText('Глубина', { exact: true })).toBeVisible();
-  await expect(page.getByText('2.77')).toBeVisible();
   const qualityStrip = page.getByTestId('ym-quality-strip');
+  // Числа полосы идут через KpiValue с `morph={false}`: рецепт общий, но без барабана
+  // цифр — шесть штук в одной строке были бы шестью движениями рядом (аудит #554).
+  await expect(qualityStrip).toContainText('34.2%');
+  await expect(page.getByText('Глубина', { exact: true })).toBeVisible();
+  await expect(qualityStrip).toContainText('2.77');
   await expect(qualityStrip.getByText('Роботы', { exact: true })).toBeVisible();
   await expect(qualityStrip.getByText('6.9% · 10', { exact: true })).toBeVisible();
   await expect(qualityStrip.getByText(/не исключены автоматически/)).toBeVisible();
