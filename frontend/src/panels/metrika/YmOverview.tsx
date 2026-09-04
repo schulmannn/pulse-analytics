@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { KpiValue } from '@/components/chartWidget/KpiValue';
 import { useNavigate } from 'react-router-dom';
 import { useYmGoals, useYmHourly, useYmSummary } from '@/api/queries';
 import { PillSelect } from '@/components/PillSelect';
@@ -538,7 +539,9 @@ function YmQualityStrip({
             <div key={t.key} className="min-w-0">
               <div className="text-2xs tracking-wide text-muted-foreground">{t.label}</div>
               <div className="mt-0.5 flex items-baseline gap-2">
-                <span className="text-lg font-medium tabular-nums tracking-tight text-foreground">{t.value}</span>
+                {/* Рецепт крупного числа живёт в KpiValue — набирать его классами на месте значит
+                  завести пятую копию, которая разойдётся (аудит #554). */}
+                <KpiValue text={t.value} size="xs" morph={false} />
                 {/* DeltaPill сам скрывается при flat/null — отдельных веток не нужно. */}
                 <DeltaPill delta={t.delta} />
               </div>

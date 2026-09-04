@@ -199,16 +199,18 @@ export function RailSection({
     return (
       <section
         data-rail-card={mark}
-        className="rounded-2xl border border-border bg-card p-4 shadow-xs dark:border-white/6 sm:p-5"
+        // Тень и трекинг — те же, что у виджет-карточки (ChartSection): две разные карточные
+        // тени на одной странице читаются как две разные системы (аудит #554).
+        className="rounded-2xl border border-border bg-card p-4 shadow-[0_12px_32px_-30px_rgba(0,0,0,0.9)] dark:border-white/6 sm:p-5"
       >
-        <h3 className="text-xs font-medium tracking-wider text-muted-foreground">{title}</h3>
+        <h3 className="text-xs font-medium tracking-wide text-muted-foreground">{title}</h3>
         <div className="mt-3">{children}</div>
       </section>
     );
   }
   return (
     <section data-rail-card={mark} className="space-y-3">
-      <h3 className="flex items-center gap-3 text-xs font-medium tracking-wider text-muted-foreground">
+      <h3 className="flex items-center gap-3 text-xs font-medium tracking-wide text-muted-foreground">
         <span className="whitespace-nowrap">{title}</span>
         <span aria-hidden="true" className="h-px flex-1 bg-border" />
       </h3>
