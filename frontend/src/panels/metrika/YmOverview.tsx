@@ -20,6 +20,7 @@ import { usePagePeriod, useCardShowsPeriod } from '@/lib/period';
 import { msPreviousPeriod, useMsPagePeriod } from '@/lib/msPeriod';
 import { YM_BREAKDOWNS } from '@/panels/metrika/ymBreakdowns';
 import { WidgetGrid } from '@/components/widgets/WidgetGrid';
+import { BoardSkeleton } from '@/components/BoardSkeleton';
 
 /**
  * Обзор «Яндекс.Метрики» — веб-аналитика сайта рядом с аналитикой каналов. Все числа приходят
@@ -155,14 +156,12 @@ export function YmOverview() {
     ) : undefined;
 
   if (summary.isPending) {
+    // Форма борда один в один: три метрики → полоса качества → часы → разрезы. Разрезы берём
+    // из того же источника, что и борд, — иначе число разъедется при первом же новом разрезе.
     return (
-      <WidgetGrid className="grid grid-cols-1 gap-6 lg:grid-cols-6">
-        {Array.from({ length: 2 }).map((_, i) => (
-          <div key={i} className="h-[264px] rounded-2xl border border-border bg-card p-5 lg:col-span-3">
-            <ChartSkeleton />
-          </div>
-        ))}
-      </WidgetGrid>
+      <BoardSkeleton
+        tiles={['half', 'half', 'half', 'strip', 'half', ...YM_BREAKDOWNS.map(() => 'half' as const)]}
+      />
     );
   }
 

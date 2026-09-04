@@ -304,7 +304,14 @@ function withGoalCtx<T extends { rows: readonly Record<string, unknown>[] }>(
   } as T;
 }
 
-async function bootMetrika(page: Page, path: string, { connected = true, orphan = false } = {}) {
+async function bootMetrika(
+  page: Page,
+  path: string,
+  { connected = true, orphan = false, holdSummary = false } = {},
+) {
+  // Задержка /api/ym/summary держит борд в состоянии скелетона столько, сколько нужно замеру.
+  let releaseSummary: () => void = () => {};
+  const summaryGate = holdSummary ? new Promise<void>((r) => { releaseSummary = r; }) : null;
   // Счётчиков может быть НЕСКОЛЬКО: у каждого свой канал (сервер дедупит их по counter_id),
   // поэтому стенд держит список, а /api/ym/status отвечает ПО КАНАЛУ из заголовка.
   const state = {
@@ -348,7 +355,10 @@ async function bootMetrika(page: Page, path: string, { connected = true, orphan 
     }
     const goalId = new URL(request.url()).searchParams.get('goal_id');
     const attributed = goalId === '11';
-    if (urlPath === '/api/ym/summary') return json(200, SUMMARY);
+    if (urlPath === '/api/ym/summary') {
+      if (summaryGate) await summaryGate;
+      return json(200, SUMMARY);
+    }
     if (urlPath === '/api/ym/sources') return json(200, attributed ? withGoalCtx(SOURCES, 6, 3.1) : SOURCES);
     if (urlPath === '/api/ym/goals') return json(200, GOALS);
     if (urlPath === '/api/ym/utm') return json(200, attributed ? withGoalCtx(UTM, 8, 5.3) : UTM);
@@ -398,7 +408,7 @@ async function bootMetrika(page: Page, path: string, { connected = true, orphan 
   }, { channel: connected ? '9' : '7' });
   await page.goto(path);
   await page.locator('main').waitFor({ state: 'visible', timeout: 25_000 });
-  return state;
+  return { ...state, releaseSummary: () => releaseSummary() };
 }
 
 test('Обзор Метрики: карточки метрик, источники трафика, свой FeedBlock-заголовок без дублей', async ({ page }, testInfo) => {
@@ -429,11 +439,12 @@ test('Обзор Метрики: карточки метрик, источник
   await expect(sourcesHeading).toBeVisible();
   await expect(page.getByText('Переходы из поисковых систем')).toBeVisible();
   await expect(page.getByText('Прямые заходы')).toBeVisible();
-  await expect(page.getByText('Внутренние переходы')).toHaveCount(0);
-  // Хвост компакта: знаменатель (145) остался — он и есть честная часть строки; изменилась
-  // только форма (строка «Прочее» с собственной дорожкой вместо текста под списком).
-  await expect(page.getByText('Прочее · 1', { exact: true }).first()).toBeVisible();
-  await expect(page.getByText(/Ещё 4 визитов из 145/)).toBeVisible();
+  // ПЯТЫЙ ИСТОЧНИК ТЕПЕРЬ ВИДЕН (аудит #554, D16). Раньше здесь стояло `toHaveCount(0)` — то есть
+  // тест закреплял ИМЕННО ТО, на что жалуется аудит: четыре строки в теле, куда влезает
+  // шесть, и пятая в хвосте при пустой нижней половине карточки. Смена контракта сознательная.
+  await expect(page.getByText('Внутренние переходы')).toBeVisible();
+  // Сворачивать больше нечего: все пять источников на виду, хвостовой строки нет.
+  await expect(page.getByText(/Ещё \d+ визитов из 145/)).toHaveCount(0);
 
   // Карточки-разрезы грузятся ПРОГРЕССИВНО (deferData): офскрин-карточка не шлёт свой запрос,
   // пока не подойдёт к вьюпорту. Поэтому перед проверкой содержимого доскролливаем заголовок —
@@ -454,17 +465,21 @@ test('Обзор Метрики: карточки метрик, источник
   await expect(page.getByText('instagram', { exact: true })).toBeVisible();
   await expect(page.getByText(/Без метки — 100 визитов из 145/)).toBeVisible();
 
-  // Слайс 2 — топ-страницы: пути, компактный топ-4 (5-я строка спрятана) + хвост «из полного отчёта».
+  // Слайс 2 — топ-страницы: пути + хвост «из полного отчёта» (его даёт серверный лимит, не тайл).
   await revealed('Топ-страницы');
   await expect(page.getByText('/catalog/notebooks')).toBeVisible();
-  await expect(page.getByText('/blog/new-collection')).toHaveCount(0);
-  await expect(page.getByText(/Ещё 20 просмотров из 402/)).toBeVisible();
+  // Строка больше НЕ прячется: тайл вмещает шесть строк, и прятать пятую при пустой
+  // нижней половине карточки — ровно то, на что жалуется аудит #554 (D16).
+  await expect(page.getByText('/blog/new-collection')).toBeVisible();
+  await expect(page.getByText(/Ещё \d+ просмотров из 402/)).toHaveCount(0);
 
   // Слайс аудитории/источников — реферальные сайты: внешние домены + хвост своего total.
   await revealed('Реферальные сайты');
   await expect(page.getByText('vc.ru', { exact: true })).toBeVisible();
-  await expect(page.getByText('pikabu.ru')).toHaveCount(0);
-  await expect(page.getByText(/Ещё 10 визитов из 210/)).toBeVisible();
+  // Строка больше НЕ прячется: тайл вмещает шесть строк, и прятать пятую при пустой
+  // нижней половине карточки — ровно то, на что жалуется аудит #554 (D16).
+  await expect(page.getByText('pikabu.ru')).toBeVisible();
+  await expect(page.getByText(/Ещё \d+ визитов из 210/)).toHaveCount(0);
 
   // Соцсети: конкретные сети (lastsignSocialNetwork) + отказы вторичным контекстом.
   await revealed('Соцсети');
@@ -519,16 +534,18 @@ test('Обзор Метрики: карточки метрик, источник
   await expect(exitsHeading).toBeVisible();
   await expect(page.getByText('/checkout/success')).toBeVisible();
   await expect(page.getByText(/12\.5% отказов/)).toBeVisible();
-  await expect(page.getByText('/faq')).toHaveCount(0);
-  await expect(page.getByText(/Ещё 5 визитов из 140/)).toBeVisible();
+  // Пятая строка больше не прячется — тайл её вмещает (аудит #554, D16).
+  await expect(page.getByText('/faq')).toBeVisible();
+  await expect(page.getByText(/Ещё \d+ визитов из 140/)).toHaveCount(0);
 
   // Слайс географии — страны (regionCountry): русское имя, отказы по строке, хвост своего total (320).
   const countriesHeading = page.getByRole('heading', { name: 'Страны', exact: true });
   await countriesHeading.scrollIntoViewIfNeeded();
   await expect(countriesHeading).toBeVisible();
   await expect(page.getByText('Россия', { exact: true })).toBeVisible();
-  await expect(page.getByText('Германия', { exact: true })).toHaveCount(0); // пятая строка — в хвосте
-  await expect(page.getByText(/Ещё 10 визитов из 320/)).toBeVisible();
+  // Пятая строка больше не прячется — тайл её вмещает (аудит #554, D16).
+  await expect(page.getByText('Германия', { exact: true })).toBeVisible();
+  await expect(page.getByText(/Ещё \d+ визитов из 320/)).toHaveCount(0);
   await expect(page.getByText('География определяется Метрикой по данным визита, а не по GPS.')).toBeVisible();
 
   // Слайс географии — города (regionCity): отдельная от страны карточка, свой total (275).
@@ -536,7 +553,8 @@ test('Обзор Метрики: карточки метрик, источник
   await citiesHeading.scrollIntoViewIfNeeded();
   await expect(citiesHeading).toBeVisible();
   await expect(page.getByText('Москва', { exact: true })).toBeVisible();
-  await expect(page.getByText(/Ещё 10 визитов из 275/)).toBeVisible();
+  // Сворачивать нечего: тайл вмещает все строки разреза (аудит #554, D16).
+  await expect(page.getByText(/Ещё \d+ визитов из 275/)).toHaveCount(0);
 
   // Слайс демографии — возраст (ageInterval): локализация по СТАБИЛЬНОМУ id ('25' → «25–34 года»),
   // сырое имя API не показывается; пятая строка — в хвосте своего total (410); оговорка об оценке.
@@ -739,4 +757,67 @@ test('ссылка выдачи токена собирается из ClientID 
   // Внешние ссылки открываются новой вкладкой и без передачи referrer.
   await expect(link).toHaveAttribute('target', '_blank');
   await expect(link).toHaveAttribute('rel', /noreferrer/);
+});
+
+const RE_TAIL = /ещё\s+\d/;
+
+/**
+ * D16 (аудит #554) — СКЕЛЕТОН ДЕРЖИТ МЕСТО БОРДА.
+ *
+ * Обзор Метрики рисовал ДВЕ половинные плитки там, где загрузится девятнадцать карточек: страница
+ * на время загрузки была высотой в один ряд, а потом вырастала в разы. Скролл и всё, что было
+ * под курсором, уезжало. Тот же скелетон стоит на обзоре МойСклада — один компонент на оба.
+ */
+test('Обзор Метрики: скелетон занимает место борда, а не один ряд', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop-1440', 'Метрика — desktop-first поверхность');
+  const state = await bootMetrika(page, '/metrika', { holdSummary: true });
+
+  const tiles = page.locator('[data-board-skeleton-tile]');
+  await expect(tiles.first()).toBeVisible({ timeout: 20_000 });
+  const skeleton = await page.evaluate(() => ({
+    height: document.documentElement.scrollHeight,
+    tiles: document.querySelectorAll('[data-board-skeleton-tile]').length,
+  }));
+
+  state.releaseSummary();
+  const cards = page.locator('section[data-widget-size]');
+  await expect(cards.first()).toBeVisible({ timeout: 25_000 });
+  await expect.poll(async () => cards.count(), { timeout: 20_000 }).toBeGreaterThan(2);
+  await page.waitForTimeout(1200);
+  const loaded = await page.evaluate(() => ({
+    height: document.documentElement.scrollHeight,
+    cards: document.querySelectorAll('section[data-widget-size]').length,
+  }));
+
+  // Плиток не меньше, чем карточек: форма скелетона повторяет форму борда.
+  expect(
+    skeleton.tiles,
+    `плитки ${skeleton.tiles} против карточек ${loaded.cards}`,
+  ).toBeGreaterThanOrEqual(loaded.cards);
+  // И высота страницы почти не меняется: скачок был кратным.
+  expect(
+    Math.abs(loaded.height - skeleton.height) / loaded.height,
+    `скачок высоты: скелетон ${skeleton.height}px → борд ${loaded.height}px`,
+  ).toBeLessThan(0.35);
+});
+
+/**
+ * D16 (аудит #554) — КАРТОЧКА-СПИСОК ЗАПОЛНЯЕТ СВОЙ ТАЙЛ.
+ *
+ * `ShareRows` умел только СЖИМАТЬ число строк ниже `compactRows`, но не вырастать до того,
+ * что тайл реально вмещает: четыре строки в теле на 181px, куда влезает шесть, а пятая
+ * строка пряталась в хвост «ещё 1» при пустой нижней половине карточки.
+ */
+test('Обзор Метрики: все пять источников стоят в карточке, а не четыре и «ещё 1»', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop-1440', 'Метрика — desktop-first поверхность');
+  await bootMetrika(page, '/metrika');
+
+  const card = page
+    .locator('section[data-widget-size]')
+    .filter({ has: page.getByRole('heading', { name: 'Источники трафика' }) });
+  await expect(card).toBeVisible({ timeout: 20_000 });
+  const rows = card.locator('ul[aria-label^="Распределение"] > li');
+  await expect.poll(async () => rows.count(), { timeout: 10_000 }).toBe(SOURCES.rows.length);
+  // Прятать больше нечего — хвоста нет.
+  await expect(card.getByText(RE_TAIL)).toHaveCount(0);
 });
