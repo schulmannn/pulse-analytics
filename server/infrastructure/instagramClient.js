@@ -9,6 +9,8 @@
 
 'use strict';
 
+const { readRetryAfterHeader, parseRetryAfterSeconds } = require('../lib/retryAfter');
+
 const { fetchWithTimeout } = require('../lib/http');
 
 // "Instagram API with Instagram Login" (no Facebook Page): the IG user access token works
@@ -50,20 +52,6 @@ function isIgReauthError(graphError, code, graphType) {
   return /session has (?:expired|been invalidated)/i.test(message);
 }
 
-// Retry-After may be an integer number of seconds or an HTTP-date; return whole seconds (≥0) or
-// null when absent/unparseable. `nowMs` is injected so the HTTP-date branch is deterministic.
-function parseRetryAfterSeconds(headerValue, nowMs) {
-  if (headerValue == null) return null;
-  const s = String(headerValue).trim();
-  if (s === '') return null;
-  if (/^\d+$/.test(s)) {
-    const seconds = Number(s);
-    return Number.isSafeInteger(seconds) ? seconds : null;
-  }
-  const t = Date.parse(s);
-  if (!Number.isFinite(t)) return null;
-  return Math.max(0, Math.ceil((t - nowMs) / 1000));
-}
 
 // X-App-Usage / X-Business-Use-Case-Usage are JSON blobs; return the parsed object only when it is
 // genuinely an object, otherwise undefined (a malformed header must never crash the read).
@@ -163,7 +151,7 @@ function createInstagramClient({ db, log, igCrypto, defaultToken, inflight, fetc
     err.transient = transient;
     err.upstreamStatus = status;
 
-    const retryAfter = parseRetryAfterSeconds(res.headers && res.headers.get('retry-after'), clock());
+    const retryAfter = parseRetryAfterSeconds(readRetryAfterHeader(res), clock());
     if (retryAfter != null) err.retryAfter = retryAfter;
     if (graphError) {
       err.graph = {
