@@ -23,7 +23,7 @@ import { lttbDownsample } from '@/lib/downsample';
 import { useExplorerChartHeight } from '@/lib/useExplorerChartHeight';
 import { usePeriod, type DateRange, type PeriodDays } from '@/lib/period';
 import { useMsResolvedPeriod, type MsPeriod } from '@/lib/msPeriod';
-import { useYmGoals, useYmHourly, useYmSummary } from '@/api/queries';
+import { useYmGoals, useYmHourly, useYmSummary } from '@/api/ym';
 import { YM_BREAKDOWN_BY_KEY, type YmBreakdownDef } from '@/panels/metrika/ymBreakdowns';
 import { isYmMetricKey } from '@/panels/metrika/ymMetricKeys';
 import { ComparisonDeltaRow, MetricColumns, MetricDescriptor, WindowBarShell, RailSection, MetricPageHeader} from '@/components/metric/shared';

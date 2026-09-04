@@ -1,22 +1,6 @@
 import { useContext } from 'react';
 import type { ReactElement, ReactNode } from 'react';
-import {
-  useYmAge,
-  useYmCities,
-  useYmCountries,
-  useYmDevices,
-  useYmExits,
-  useYmGender,
-  useYmGoals,
-  useYmLandings,
-  useYmMessengers,
-  useYmPages,
-  useYmReferrers,
-  useYmSocial,
-  useYmSources,
-  useYmUtm,
-  type YmBreakdownParams,
-} from '@/api/queries';
+import { useYmAge, useYmCities, useYmCountries, useYmDevices, useYmExits, useYmGender, useYmGoals, useYmLandings, useYmMessengers, useYmPages, useYmReferrers, useYmSocial, useYmSources, useYmUtm, type YmBreakdownParams } from '@/api/ym';
 import { ChartExpandedContext } from '@/components/ExpandableChart';
 import { RadialShare } from '@/components/RadialShare';
 import { ShareRows } from '@/components/ShareRows';

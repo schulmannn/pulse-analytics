@@ -1,7 +1,7 @@
 import { useContext, useMemo, useState } from 'react';
 import { WidgetGrid } from '@/components/widgets/WidgetGrid';
 import { ShareTrack } from '@/components/ShareRows';
-import { useMsChannelSeries, useMsGeography, useMsSalesByChannel } from '@/api/queries';
+import { useMsChannelSeries, useMsGeography, useMsSalesByChannel } from '@/api/ms';
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
 import { ChartCardBody } from '@/components/chartWidget/ChartCardBody';
 import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';

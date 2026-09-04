@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { MsRfmCustomers } from '@/api/queries';
+import type { MsRfmCustomers } from '@/api/ms';
 import { downloadCsv, toCsv } from '@/lib/csv';
 import {
   collectRfmSegmentRows,

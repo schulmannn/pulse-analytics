@@ -6,7 +6,7 @@ import { ChartBand } from '@/components/ChartBand';
 import { Link, useNavigate } from 'react-router-dom';
 import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
 import { observeSize } from '@/lib/observeSize';
-import { useMsFunnel, useMsReturns, useMsSummary } from '@/api/queries';
+import { useMsFunnel, useMsReturns, useMsSummary } from '@/api/ms';
 import { MsTopProductsCard } from '@/panels/sklad/MsTopProducts';
 import { MsStockCard } from '@/panels/sklad/MsStock';
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
