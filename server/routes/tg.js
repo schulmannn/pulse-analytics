@@ -264,7 +264,11 @@ function registerTgRoutes({
       if (data.status === 'expired' || data.status === 'error') _qrStarts.delete(id);
       const error = safeQrError(data.error);
       // pending | password | expired | error; `error` отдаётся только из allow-list
-      res.json({ status: data.status, ...(error ? { error } : {}) });
+      // The login token rotates while the scan is pending — mtproto re-mints it every ~30s and the
+      // browser must re-render the fresh code, or the user scans a dead QR. Forward ONLY that url,
+      // never the rest of `data` (the ok-path payload carries the session and goes via tgQrFinish).
+      const url = data.status === 'pending' && typeof data.url === 'string' ? data.url : undefined;
+      res.json({ status: data.status, ...(error ? { error } : {}), ...(url ? { url } : {}) });
     } catch (e) { next(e); }
   });
 
