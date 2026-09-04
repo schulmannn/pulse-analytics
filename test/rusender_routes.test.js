@@ -203,3 +203,28 @@ test('disconnect: не-admin получает 403, архив не трогае�
   assert.equal(res.status, 403);
   assert.equal(deleted, 0);
 });
+
+// ── Общий резолв канала (аудит #554): база недоступна — говорим это, а не «не подключено» ─────
+
+test('база недоступна → 503, а не 404 «не подключён»', async () => {
+  // Копия резолва у Rusender была ЕДИНСТВЕННОЙ без гейта `db.enabled`: при недоступной базе
+  // МойСклад и Метрика честно отвечали 503, а Rusender — 404 «не подключён к этому каналу»,
+  // то есть врал про состояние подключения там, где не работало вообще ничего. Пользователь
+  // шёл переподключать рабочий аккаунт. Общий резолв держит гейт в одном месте.
+  const { routes } = build({ surfacesEnabled: true, db: { enabled: false } });
+  for (const key of ['GET /api/rusender/status', 'GET /api/rusender/summary']) {
+    // eslint-disable-next-line no-await-in-loop
+    const res = await call(routes, key);
+    assert.equal(res.status, 503, key);
+    assert.match(String(res.body.error), /База данных недоступна/, key);
+  }
+});
+
+test('чужой канал по явному id → 403 даже там, где 404 «не подключён» смягчён', async () => {
+  // `optional` (status/disconnect) смягчает только исходы «не подключён». Явно запрошенный
+  // недоступный канал обязан оставаться 403: 404 выдал бы, что такого канала нет вовсе.
+  const { routes } = build({ surfacesEnabled: true, db: { getChannelOrDefault: async () => null } });
+  const res = await call(routes, 'GET /api/rusender/status', { query: { channel: '4242' } });
+  assert.equal(res.status, 403);
+  assert.match(String(res.body.error), /Нет доступа к этому каналу/);
+});

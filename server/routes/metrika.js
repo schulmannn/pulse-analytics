@@ -1,6 +1,7 @@
 'use strict';
 
 const { hasWorkspaceRole, tenantChannelId } = require('../middleware/tenant');
+const { makeResolveSourceChannel } = require('./sourceRouteKit');
 
 /**
  * Роуты Яндекс.Метрики
@@ -365,33 +366,14 @@ function registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cach
     }
   }
 
-  // Резолв канала запроса + строки ym_accounts БЕЗ расшифровки токена — зеркало
-  // resolveMsChannel: явный id без доступа → 403 ВСЕГДА; optional=true (status) смягчает
-  // только «не подключён»-исходы. Возвращает { channel, acc } или null (ответ уже отправлен).
-  async function resolveYmChannel(req, res, { optional = false } = {}) {
-    if (!db.enabled) {
-      res.status(503).json({ error: 'База данных недоступна' });
-      return null;
-    }
-    const channelId = tenantChannelId(req);
-    const channel = await db.getChannelOrDefault(channelId, req.user).catch(() => null);
-    if (!channel) {
-      if (channelId) {
-        res.status(403).json({ error: 'Нет доступа к этому каналу' });
-        return null;
-      }
-      if (optional) return { channel: null, acc: null };
-      res.status(404).json({ error: 'Яндекс.Метрика не подключена к этому каналу' });
-      return null;
-    }
-    const acc = await db.getYmAccount(channel.id).catch(() => null);
-    if (!acc || !acc.access_token_enc) {
-      if (optional) return { channel, acc: null };
-      res.status(404).json({ error: 'Яндекс.Метрика не подключена к этому каналу' });
-      return null;
-    }
-    return { channel, acc };
-  }
+  // Канал запроса + строка ym_accounts БЕЗ расшифровки токена: общий резолв источников
+  // (routes/sourceRouteKit) — там же и причины, почему 403 сильнее optional.
+  const resolveYmChannel = makeResolveSourceChannel({
+    db,
+    getAccount: (id) => db.getYmAccount(id),
+    secretField: 'access_token_enc',
+    notConnected: 'Яндекс.Метрика не подключена к этому каналу',
+  });
 
   // Пер-запросная идентичность Метрики для live-вызовов (расшифрованный токен + id счётчика).
   // Мок-фолбэка нет: без подключённого счётчика роут честно отвечает 404 и UI показывает
