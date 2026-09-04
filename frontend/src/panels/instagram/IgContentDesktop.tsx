@@ -41,11 +41,13 @@ import { ErrorState } from '@/components/ErrorState';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Skeleton } from '@/components/ui/skeleton';
 import { RichText } from '@/components/RichText';
+import { TwoLineDate } from '@/components/TwoLineDate';
+import { Icon, type IconName } from '@/components/nav-icons';
 import { exportIgPosts } from '@/lib/igExport';
 import { exportFilename } from '@/lib/analyticsExport';
 import { fmt } from '@/lib/format';
 import { MEDIA_TYPE_LABEL } from '@/lib/igMetrics';
-import { compareToMedian, medianDeltaLabel, periodMedian, MEDIAN_MIN_SAMPLE } from '@/lib/postMedian';
+import { compareToMedian, medianDeltaLabel, medianDeltaShort, periodMedian, MEDIAN_MIN_SAMPLE } from '@/lib/postMedian';
 import {
   IG_SECONDARY_VIEWS,
   applyIgContentFilters,
@@ -836,7 +838,7 @@ export function IgContentDesktop({ ig }: { ig: IgData }) {
                     );
                   })}
                   <td className="px-3 pr-4 text-right text-xs tabular-nums text-muted-foreground sm:pr-5">
-                    {post.timestamp ? fmt.date(post.timestamp) : <span className="text-muted-foreground/40">—</span>}
+                    {post.timestamp ? <TwoLineDate iso={post.timestamp} /> : <span className="text-muted-foreground/40">—</span>}
                   </td>
                   <td className="sticky right-0 ig-sticky-action-cell w-10 border-l border-border/0 bg-inherit px-2 text-center transition-colors group-hover:border-border/40">
                     {clickable && (
@@ -1099,11 +1101,16 @@ function IgFormatTag({ post }: { post: IgPost }) {
 }
 
 /**
- * A metric cell with explicit comparable-period median context. Value is always shown; the «±N% к
- * медиане» delta appears only when periodMedian cleared the min-sample gate (never a faked
- * benchmark). Missing value → «—». The delta reads MUTED (канон дельт, зеркало Posts.tsx):
- * direction is carried by the ±N% wording, and verdant/ember stay reserved for the one evaluated
- * period-vs-period Δ of a comparison rail. `tone` only picks the value ink.
+ * A metric cell with explicit comparable-period median context. Value is always shown; the delta
+ * appears only when periodMedian cleared the min-sample gate (never a faked benchmark). Missing
+ * value → «—». The delta reads MUTED (канон дельт, зеркало Posts.tsx): direction is carried by the
+ * sign, and verdant/ember stay reserved for the one evaluated period-vs-period Δ of a comparison
+ * rail. `tone` only picks the value ink.
+ *
+ * Подпись КОРОТКАЯ («+44%», полная формулировка — в title), как в таблице Telegram: «+44% к
+ * медиане» не помещалась в колонку метрики (73–113 px) и переносилась на две строки, а «на уровне
+ * медианы» — на три, раздувая ряд с 67 до 81 px (аудит #554, D10). `whitespace-nowrap` держит
+ * инвариант: колонка расширится, но подпись не сломается.
  */
 function MedianCell({
   value,
@@ -1121,12 +1128,21 @@ function MedianCell({
   return (
     <>
       <span className={cn('block font-medium tabular-nums', tone === 'signal' ? 'text-foreground' : 'text-muted-foreground')}>{format(value)}</span>
-      {cmp && <span className="block text-2xs text-muted-foreground">{medianDeltaLabel(cmp)}</span>}
+      {cmp && (
+        <span className="block whitespace-nowrap text-2xs tabular-nums text-muted-foreground" title="к медиане за период">
+          {medianDeltaShort(cmp)}
+        </span>
+      )}
     </>
   );
 }
 
-/** Small square preview for a table row; neutral word-fallback on missing/broken cover. */
+/**
+ * Small square preview for a table row. На отсутствующей/битой обложке — ПИКТОГРАММА формата, как в
+ * таблице Telegram: словом формат назван рядом (`IgFormatTag` в колонке «Публикация», бейдж в
+ * инспекторе), а в квадрат 40 px слово не влезало — «Альбом» рисовался на 45 px и обрезался
+ * (аудит #554, D10). Точный формат остаётся доступен ховером через `title`.
+ */
 function IgPostThumb({ post }: { post: IgPost }) {
   const [brokenSrc, setBrokenSrc] = useState<string | null>(null);
   const [loadedSrc, setLoadedSrc] = useState<string | null>(null);
@@ -1137,7 +1153,9 @@ function IgPostThumb({ post }: { post: IgPost }) {
   const cover = proxyFailed ? originalCover : post.table_thumbnail_url || originalCover;
   const broken = cover != null && brokenSrc === cover;
   const loaded = cover != null && loadedSrc === cover;
-  const label = classifyIgFormat(post) === 'reels' ? 'Reels' : classifyIgFormat(post) === 'video' ? 'Видео' : classifyIgFormat(post) === 'carousel' ? 'Альбом' : 'Фото';
+  const bucket = classifyIgFormat(post);
+  const label = igFormatLabel(post);
+  const glyph: IconName = bucket === 'carousel' ? 'carousel' : bucket === 'photo' ? 'image' : 'playCircle';
   useEffect(() => {
     const image = imageRef.current;
     if (!image || !cover || broken) return;
@@ -1157,10 +1175,12 @@ function IgPostThumb({ post }: { post: IgPost }) {
   }, [cover, broken]);
 
   return (
-    <div className="relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border/40 bg-muted">
-      {(!cover || broken || !loaded) && (
-        <span className="px-0.5 text-center text-2xs font-medium leading-tight text-muted-foreground">{label}</span>
-      )}
+    <div
+      data-ig-content-thumb={label}
+      title={!cover || broken ? label : undefined}
+      className="relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border/40 bg-muted"
+    >
+      {(!cover || broken || !loaded) && <Icon name={glyph} className="size-4 text-muted-foreground" />}
       {cover && !broken ? (
         <img
           ref={imageRef}

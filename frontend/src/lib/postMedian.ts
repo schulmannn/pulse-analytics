@@ -79,3 +79,16 @@ export function medianDeltaLabel(cmp: MedianComparison): string {
   const sign = cmp.pct > 0 ? '+' : '−';
   return `${sign}${Math.abs(Math.round(cmp.pct))}% к медиане`;
 }
+
+/**
+ * Тот же вывод, но БЕЗ слов «к медиане» — для ячейки плотной таблицы. Полная подпись там не
+ * помещается в колонку метрики и переносится на две-три строки, раздувая ряд (аудит #554, D10);
+ * «к медиане» в каждой ячейке подряд и без того шум, а смысл несёт заголовок колонки + title
+ * ячейки. Ноль нейтрален («±0%», канон дельт DESIGN_TOKENS), направление — в знаке, не в цвете.
+ * Живёт рядом с `medianDeltaLabel`, чтобы таблицы Telegram и Instagram не разъезжались снова.
+ */
+export function medianDeltaShort(cmp: MedianComparison): string {
+  if (cmp.dir === 'at') return '±0%';
+  const sign = cmp.pct > 0 ? '+' : '−';
+  return `${sign}${Math.abs(Math.round(cmp.pct))}%`;
+}
