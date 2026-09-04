@@ -96,6 +96,9 @@ interface Hover {
 
 // Approximate glyph width of the 11px tabular numerals used for axis/value labels.
 const CHAR_W = 6.6;
+// Высота строки подписи-экстремума (2xs, 11px + просвет). По ней решается, слиплись ли две
+// подписи одной серии и надо ли разводить их вверх/вниз — см. `extremes` ниже.
+const EXTREME_LINE_H = 13;
 
 /** Next step up the 1-2-5×10ⁿ ladder (20 → 50 → 100 → 200 …). */
 function nextStep(step: number): number {
@@ -457,7 +460,7 @@ export function LineChart({
       let maxE = real[0];
       for (const r of real) if (r.v > maxE.v) maxE = r;
       const idxs = maxE.i === lastReal.i ? [lastReal] : [maxE, lastReal];
-      return idxs.map((e) => {
+      const laidOut = idxs.map((e) => {
         const px = points[e.i].x;
         const py = yFor(e.v);
         const text = fmt.short(e.v);
@@ -466,8 +469,31 @@ export function LineChart({
         const x = Math.min(Math.max(px, gutterW + halfW), Math.max(W - padR - halfW - 6, gutterW + halfW));
         const fitsAbove = py - 18 >= 0;
         const y = fitsAbove ? py - 8 : py + 16;
-        return { key: e.i, x, y, text };
+        return { key: e.i, x, y, text, halfW, py, v: e.v };
       });
+
+      /* Две подписи одной серии — максимум и последняя точка — клампились к ОДНОМУ правому краю и
+         ставились по одному правилу «выше точки». Когда максимум приходится на хвост ряда, они
+         оказывались буквально друг на друге: на /metrics/views «10.1k» и «9.9k» слипались в кашу
+         (аудит #554, D3). Любые два близких хвоста давали то же самое.
+
+         Лечение в два шага. Если точки практически совпали — печатаем только последнюю: две
+         подписи об одном и том же месте не несут информации. Иначе разводим их вверх и вниз от
+         общего центра: большее значение выше, меньшее ниже — порядок читается без легенды. */
+      if (laidOut.length === 2) {
+        const [a, b] = laidOut;
+        const overlapX = Math.abs(a.x - b.x) < a.halfW + b.halfW + 4;
+        if (!overlapX) return laidOut;
+        if (Math.abs(a.py - b.py) < 4) return [laidOut[1]];
+        if (Math.abs(a.y - b.y) < EXTREME_LINE_H) {
+          const center = (a.py + b.py) / 2;
+          const upper = a.v >= b.v ? a : b;
+          const lower = upper === a ? b : a;
+          upper.y = Math.max(EXTREME_LINE_H, center - 6);
+          lower.y = Math.min(h - 2, center + EXTREME_LINE_H + 2);
+        }
+      }
+      return laidOut;
     })();
 
     // ── The chart splits into three z-layers so the RAF morph re-renders ONLY the series paths ──
@@ -584,7 +610,7 @@ export function LineChart({
 
         {/* Max / last value labels (markExtremes) — bare tabular text, no boxes */}
         {extremes.map((e) => (
-          <text key={`e${e.key}`} x={e.x} y={e.y} textAnchor="middle" className="pointer-events-none select-none fill-ink2 text-2xs font-medium tabular-nums">
+          <text key={`e${e.key}`} x={e.x} y={e.y} data-chart-extreme="" textAnchor="middle" className="pointer-events-none select-none fill-ink2 text-2xs font-medium tabular-nums">
             {e.text}
           </text>
         ))}
