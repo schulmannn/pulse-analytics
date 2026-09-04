@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { KpiValue } from '@/components/chartWidget/KpiValue';
-import { DeltaPill } from '@/components/DeltaPill';
+import { DeltaPill, deltaLabel } from '@/components/DeltaPill';
 import type { MetricDelta } from '@/lib/delta';
 
 /**
@@ -15,21 +15,34 @@ import type { MetricDelta } from '@/lib/delta';
  * one; identity hues drive only the composition segments. Green/red stay reserved for the DeltaPill.
  */
 
-/** Big headline number, optionally a drill button (with the app-wide «Разбор: …» a11y label), with
-    the delta pill inline. */
+/**
+ * ГОЛОВА S-КАРТОЧКИ — число и дельта на ОДНОЙ базовой линии, слева. Опциональная
+ * кнопка разбора несёт общеприложенческую a11y-подпись «Разбор: …».
+ *
+ * СЛОТ ДЕЛЬТЫ ДЕРЖИТСЯ ВСЕГДА (аудит #554, D9). Раньше «Ср. охват» печатал голое
+ * число (пары окон нет → DeltaPill отдавал null), а соседние «Реакции» — число со стрелкой:
+ * две карточки одного размера в одном ряду читались как карточки разных типов. Теперь слот говорит
+ * всегда и говорит честно: «0%» — сравнили и изменений нет, «— к пред.» — сравнивать НЕ С ЧЕМ.
+ * Сам DeltaPill не трогаем: его молчание на flat — канон для разбора и таблиц сравнения.
+ *
+ * `deltaText` — честные «п.п.» там, где относительный процент от процента был бы ложью (ER); выигрывает у пилюли.
+ */
 export function CompactStatHeadline({
   text,
   delta,
+  deltaText,
   onDrill,
   drillLabel,
   live,
 }: {
   text: string;
   delta?: MetricDelta | null;
+  deltaText?: string | null;
   onDrill?: () => void;
   drillLabel?: string;
   live: boolean;
 }) {
+  const quiet = 'shrink-0 text-xs font-medium tabular-nums text-muted-foreground';
   return (
     <div className="flex items-baseline gap-2">
       <KpiValue
@@ -37,19 +50,30 @@ export function CompactStatHeadline({
         onDrill={onDrill && live ? onDrill : undefined}
         drillLabel={drillLabel}
       />
-      {live ? <DeltaPill delta={delta} /> : null}
+      {live ? (
+        deltaText ? (
+          <span className={quiet}>{deltaText}</span>
+        ) : deltaLabel(delta) ? (
+          <DeltaPill delta={delta} />
+        ) : (
+          <span className={quiet}>{delta ? '0%' : '— к пред.'}</span>
+        )
+      ) : null}
     </div>
   );
 }
 
 /**
- * Центрированный стат без графика (референс владельца, 2026-08-14): крупное число ПО ЦЕНТРУ тела
- * карточки, строкой под ним — сравнение с прошлым периодом, внизу — тихая пояснительная строка.
- * Для карточек «Вовлечённость» (TG/IG): у TG искры нет по решению 2026-07 (форма ER дублировала
- * «Реакции», корреляция 0.996), у IG она снята этим же референсом — дневной ER остаётся на
- * странице разбора. `deltaText` (у TG — честные «п.п.») выигрывает у процентной DeltaPill.
+ * СТАТ БЕЗ ГРАФИКА — та же анатомия, что у соседей по ряду: число и дельта одной строкой
+ * слева, внизу — одна пояснительная строка вместо искры.
+ *
+ * БЫЛО ЦЕНТРИРОВАНИЕ (референс владельца, 2026-08-14): крупный процент по центру тела,
+ * строкой ниже — сравнение с прошлым периодом. Аудит #554 (D9) снял его: три соседние
+ * карточки одного размера держали три разные оси выравнивания, и ряд читался как три разные
+ * карточки вместо одной семьи. Всё остальное из того решения цело: графика здесь по-прежнему
+ * нет, дельта ER остаётся в честных «п.п.», пояснение стоит внизу тем же тихим набором.
  */
-export function CenteredStat({
+export function StackedStat({
   text,
   delta,
   deltaText,
@@ -66,22 +90,16 @@ export function CenteredStat({
   live: boolean;
   note?: ReactNode;
 }) {
-  const showDelta = live && (deltaText || (delta && delta.dir !== 'flat'));
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 text-center">
-        <KpiValue
-          text={text}
-          onDrill={onDrill && live ? onDrill : undefined}
-          drillLabel={drillLabel}
-        />
-        {showDelta ? (
-          <div className="flex items-center justify-center gap-1.5 text-xs font-medium tabular-nums text-muted-foreground">
-            {deltaText ? <span>{deltaText}</span> : <DeltaPill delta={delta} />}
-            <span className="font-normal">к прошлому периоду</span>
-          </div>
-        ) : null}
-      </div>
+    <div className="flex h-full min-h-0 flex-col justify-between gap-4">
+      <CompactStatHeadline
+        text={text}
+        delta={delta}
+        deltaText={live ? deltaText : null}
+        onDrill={onDrill}
+        drillLabel={drillLabel}
+        live={live}
+      />
       {note ? <p className="text-2xs leading-relaxed text-muted-foreground">{note}</p> : null}
     </div>
   );

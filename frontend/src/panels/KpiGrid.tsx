@@ -17,7 +17,7 @@ import { DeltaPill } from '@/components/DeltaPill';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ChartCardBody, seriesRange } from '@/components/ChartWidget';
 import type { RangeSummary } from '@/components/ChartWidget';
-import { CenteredStat, CompactStatHeadline } from '@/components/CompareStat';
+import { StackedStat, CompactStatHeadline } from '@/components/CompareStat';
 import { useCardShowsPeriod, usePagePeriod, useWidgetPeriod, widgetPeriodValue } from '@/lib/period';
 import { useWidgetInView } from '@/lib/widgetViewport';
 import type { MetricDelta } from '@/lib/delta';
@@ -203,8 +203,8 @@ export function TgReactionsBody({ state, viz }: { state: TgKpiState; viz?: 'line
   );
 }
 
-/** «Вовлечённость» — ER по центру карточки (референс владельца, 2026-08-14: центрированный
-    процент, под ним сравнение с прошлым периодом). */
+/** «Вовлечённость» — ER в той же анатомии, что у соседей по ряду (аудит #554, D9):
+    число с дельтой слева, пояснение внизу. Центрирование снято — см. StackedStat. */
 export function TgErBody({ state }: { state: TgKpiState }) {
   const { derived, isPending, isError } = state;
   const navigate = useNavigate();
@@ -218,7 +218,7 @@ export function TgErBody({ state }: { state: TgKpiState }) {
   // расхождении форм 5.4% высоты плота — меньше двух пикселей на искре 200×32). Соседняя карточка
   // уже показывает эту форму. Дельта — в честных «п.п.» (erCaption), не в относительных процентах.
   return (
-    <CenteredStat
+    <StackedStat
       text={live ? fmt.pctAbs(er as number) : '—'}
       delta={erTrend}
       deltaText={erCaption}
