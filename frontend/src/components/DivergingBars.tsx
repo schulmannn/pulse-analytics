@@ -35,6 +35,11 @@ interface DivergingBarsProps {
 
 // Approximate glyph width of the 11px tabular labels (канон BarChart/LineChart).
 const CHAR_W = 6.6;
+// Полоса подписей оси и посадка пилюли — общие с BarChart (там AXIS_PILL_PAD = 6).
+const AXIS_BAND_H = 24;
+const AXIS_PILL_GAP = 6.5;
+const AXIS_PILL_H = 15;
+const AXIS_PILL_PAD = 6;
 
 /**
  * Нулевая линия и масштаб ОДНОГО кадра — из тех же значений, что в этом кадре и рисуются.
@@ -134,7 +139,11 @@ export function DivergingBars({
     // Буквенная ось короткого окна: буквы узкие, подписан КАЖДЫЙ столбец (канон BarChart).
     const letterAxis = axisLabels && axisLabels.length === values.length ? axisLabels : null;
     const hasLabels = (!!labels && labels.length > 0) || !!letterAxis;
-    const labelPad = hasLabels ? 20 : 0;
+    // Полоса подписей оси — 24px, как у BarChart: пилюля садится на band + 6.5, а не на +2.5.
+    // Прежние 20px при просвете 2.5 клали пилюлю вплотную к столбцам, и на плотном ряду она
+    // визуально ложилась ПОВЕРХ них (аудит #554, D2 и «десять мелочей»: 6.5 против 2.5 в одной
+    // семье графиков).
+    const labelPad = hasLabels ? AXIS_BAND_H : 0;
     // The dictated height covers the whole element; reserve the label band inside it so the bars
     // area (mid line ± bars) never grows past the tile.
     const total = ctxHeight ?? height ?? 120;
@@ -193,27 +202,42 @@ export function DivergingBars({
           const show = axisText && labelIndexes.has(i);
           if (!show) return null;
           const isLast = i === axisCurrentIdx;
-          const x = i * step + step / 2;
+          const isFirst = i === 0;
+          const textW = String(axisText).length * CHAR_W;
+          /* Крайние подписи ПРИЖИМАЮТСЯ внутрь, а не центрируются под столбцом.
+             Центрирование съедало половину текста за кромкой svg: на «Чистом приросте» в узкой
+             карточке левая подпись показывала «авг.» вместо «5 авг.», а пилюля справа обрезалась
+             до «3 се» (аудит #554, D2). BarChart решает это ровно так же — start у первой, end у
+             последней; здесь была единственная в семье копия со старым поведением. */
+          const anchor = isLast ? 'end' : isFirst ? 'start' : 'middle';
+          const centerX = i * step + step / 2;
+          const x = isLast
+            ? Math.max(textW + AXIS_PILL_PAD + 1, Math.min(centerX + textW / 2, W - AXIS_PILL_PAD - 1))
+            : isFirst
+              ? Math.max(1, Math.min(centerX - textW / 2, W - textW - 1))
+              : Math.max(textW / 2 + 1, Math.min(centerX, W - textW / 2 - 1));
           // Пилюля текущей (последней) метки — канон семьи графиков (BarChart/LineChart):
           // солидная заливка цветом серии, чернила — фон; тонированная карточка перекрашивает
           // токен в своём скоупе. viewBox 1:1 с px — rect не искажается.
           const pill = isLast
             ? (() => {
-                const textW = String(axisText).length * CHAR_W;
-                const pillH = 15;
-                const pillW = Math.max(textW + 12, pillH);
-                return { x: Math.max(1, Math.min(x - pillW / 2, W - pillW - 1)), w: pillW, h: pillH };
+                const pillW = Math.max(textW + AXIS_PILL_PAD * 2, AXIS_PILL_H);
+                return {
+                  x: Math.max(1, Math.min(x - textW - AXIS_PILL_PAD, W - pillW - 1)),
+                  w: pillW,
+                  h: AXIS_PILL_H,
+                };
               })()
             : null;
           return (
             <g key={`l${i}`} data-axis-current={isLast ? '' : undefined}>
               {pill && (
-                <rect x={pill.x} y={h + 2.5} width={pill.w} height={pill.h} rx={pill.h / 2} fill="hsl(var(--chart-role-primary))" className="pointer-events-none" />
+                <rect x={pill.x} y={h + AXIS_PILL_GAP} width={pill.w} height={pill.h} rx={pill.h / 2} fill="hsl(var(--chart-role-primary))" className="pointer-events-none" />
               )}
               <text
                 x={x}
-                y={h + 14}
-                textAnchor="middle"
+                y={h + AXIS_PILL_GAP + AXIS_PILL_H / 2 + 4}
+                textAnchor={anchor}
                 data-chart-axis-label="x"
                 fill={isLast ? 'hsl(var(--background))' : undefined}
                 className={`pointer-events-none select-none text-2xs font-medium tabular-nums ${isLast ? '' : 'fill-muted-foreground'}`}

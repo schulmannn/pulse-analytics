@@ -75,8 +75,12 @@ describe('DivergingBars accessibility contract', () => {
  * на разборе «Что изменило выручку» все вклады ушли в минус, верх карточки пустовал всегда, а
  * столбцы делили оставшуюся половину и вырождались в полоски (жалоба владельца).
  *
- * Числа тут точные и потому проверяемые: высота по умолчанию 120, полоса подписей 20 → h = 100,
- * поля по 4px сверху и снизу → на столбцы остаётся 92.
+ * Числа тут точные и потому проверяемые: высота по умолчанию 120, полоса подписей оси 24 → h = 96,
+ * поля по 4px сверху и снизу → на столбцы остаётся 88.
+ *
+ * Полоса была 20px при просвете до пилюли 2.5px; выровнена с BarChart (24px, просвет 6.5), где
+ * пилюля не ложится на плотный ряд столбцов. Инвариант не изменился — изменилась одна константа,
+ * из которой все числа ниже и выводятся.
  */
 describe('DivergingBars zero line follows the data', () => {
   const zeroLineY = (html: string) => Number(html.match(/<line[^>]*y1="([\d.]+)"/)?.[1]);
@@ -88,25 +92,25 @@ describe('DivergingBars zero line follows the data', () => {
   it('gives the whole height to the only sign present — all negative', () => {
     const html = bars([-100, -50, -10]);
     expect(zeroLineY(html)).toBe(4);
-    // Самый глубокий столбец достаёт до нижнего поля: 4 + 92 = 96.
-    expect(html).toMatch(/[QLM]\s*[\d.]+\s+96\b/);
+    // Самый глубокий столбец достаёт до нижнего поля: 4 + 88 = 92.
+    expect(html).toMatch(/[QLM]\s*[\d.]+\s+92\b/);
   });
 
   it('gives the whole height to the only sign present — all positive', () => {
-    expect(zeroLineY(bars([10, 20, 5]))).toBe(96);
+    expect(zeroLineY(bars([10, 20, 5]))).toBe(92);
   });
 
   it('keeps the classic midline for a symmetric spread', () => {
-    expect(zeroLineY(bars([10, -10]))).toBe(50);
+    expect(zeroLineY(bars([10, -10]))).toBe(48);
   });
 
   it('splits the height by the real up/down ratio', () => {
-    // maxUp 12, maxDown 4 → верх забирает 12/16 поля: 4 + 92 · 0.75 = 73.
-    expect(zeroLineY(bars([12, -4]))).toBe(73);
+    // maxUp 12, maxDown 4 → верх забирает 12/16 поля: 4 + 88 · 0.75 = 70.
+    expect(zeroLineY(bars([12, -4]))).toBe(70);
   });
 
   it('degenerates to the midline when there is nothing to scale', () => {
-    expect(zeroLineY(bars([0, 0]))).toBe(50);
+    expect(zeroLineY(bars([0, 0]))).toBe(48);
   });
 });
 
@@ -232,5 +236,65 @@ describe('divergingFrame — ни один кадр не выходит за п�
       if (prev != null) expect(Math.abs(mid - prev)).toBeLessThan(8);
       prev = mid;
     }
+  });
+});
+
+/**
+ * D2 (аудит #554): в узкой карточке крайние подписи оси клипались рамкой svg.
+ *
+ * Подписи центрировались под столбцом (`textAnchor="middle"`, x = i·step + step/2), поэтому
+ * половина первой уходила левее нуля, а половина последней — правее ширины: на «Чистом приросте»
+ * левая подпись показывала «авг.» вместо «5 авг.», а пилюля справа обрезалась до «3 се».
+ * BarChart решает это прижатием крайних внутрь; здесь была единственная копия со старым поведением.
+ */
+describe('DivergingBars: крайние подписи оси не клипаются', () => {
+  const axisLabels = (html: string) =>
+    [...html.matchAll(/<text[^>]*data-chart-axis-label="x"[^>]*>/g)].map((m) => m[0]);
+  const attr = (tag: string, name: string) => tag.match(new RegExp(`${name}="([^"]*)"`))?.[1];
+
+  // Ширину компонент МЕРЯЕТ сам (observeSize), в SSR это дефолтные 600 — прокинуть проп нельзя.
+  // Клиппинг от ширины не зависит: он ловится на КРАЯХ любой ширины, поэтому проверяем 600.
+  const W = 600;
+  const narrow = renderToStaticMarkup(
+    <DivergingBars
+      values={Array.from({ length: 30 }, (_, i) => (i % 2 ? -i : i))}
+      labels={Array.from({ length: 30 }, (_, i) => `${i + 1} авг.`)}
+    />,
+  );
+
+  it('первая подпись прижата к левому краю, последняя — к правому', () => {
+    const tags = axisLabels(narrow);
+    expect(tags.length).toBeGreaterThan(1);
+    expect(attr(tags[0], 'text-anchor')).toBe('start');
+    expect(attr(tags[tags.length - 1], 'text-anchor')).toBe('end');
+  });
+
+  it('ни одна подпись не выходит за рамку svg', () => {
+    const CHAR_W = 6.6;
+    for (const tag of axisLabels(narrow)) {
+      const x = Number(attr(tag, 'x'));
+      const anchor = attr(tag, 'text-anchor');
+      // Ширину текста берём по канону компонента; проверяем ОБЕ кромки бокса подписи.
+      const text = narrow.slice(narrow.indexOf(tag) + tag.length).split('<')[0];
+      const w = text.length * CHAR_W;
+      const left = anchor === 'end' ? x - w : anchor === 'start' ? x : x - w / 2;
+      const right = left + w;
+      expect(left).toBeGreaterThanOrEqual(0);
+      expect(right).toBeLessThanOrEqual(W);
+    }
+  });
+
+  it('пилюля последней метки помещается в полосу оси и не лежит на столбцах', () => {
+    const pill = narrow.match(/<rect[^>]*fill="hsl\(var\(--chart-role-primary\)\)"[^>]*>/)?.[0];
+    expect(pill).toBeTruthy();
+    const y = Number(attr(pill!, 'y'));
+    const h = Number(attr(pill!, 'height'));
+    const x = Number(attr(pill!, 'x'));
+    const w = Number(attr(pill!, 'width'));
+    // Плот 96px (120 − полоса 24); пилюля начинается НИЖЕ него и умещается в полосу.
+    expect(y).toBeGreaterThanOrEqual(96);
+    expect(y + h).toBeLessThanOrEqual(120);
+    expect(x).toBeGreaterThanOrEqual(0);
+    expect(x + w).toBeLessThanOrEqual(W);
   });
 });
