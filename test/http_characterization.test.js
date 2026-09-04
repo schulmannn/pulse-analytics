@@ -65,15 +65,18 @@ test('middleware order: неизвестный НЕ-API GET обслуживае
   if (r.status === 200) assert.match(ct, /text\/html/, 'с собранным dist — HTML-shell');
 });
 
-test('middleware order: security-заголовки на API-ответах (chain-путь, напр. 404)', async () => {
-  // ТЕКУЩЕЕ поведение: security-headers применяются в основной цепочке (404 идёт сквозь неё).
-  // /api/health зарегистрирован инлайном и заголовки на нём НЕ ставятся — фиксируем как есть,
-  // рефактор не должен это МЕНЯТЬ (спека «сохранение поведения»).
+test('middleware order: security-заголовки на ВСЕХ /api-ответах, не только на 404', async () => {
+  // Прежняя редакция ФИКСИРОВАЛА обратное: «/api/health сейчас БЕЗ security-headers — не
+  // менять». Для characterization-теста времён декомпозиции index.js это было честно (он
+  // защищал от случайного сдвига), но заодно закрепляло дыру: заголовки ставила ТОЛЬКО
+  // цепочка статики, до которой доходили лишь непойманные пути (404). Ни один настоящий
+  // ответ API их не нёс. Замок снят намеренно — это и есть правка I-1 аудита #554.
   const r = await req('GET', '/api/no-such-route');
   assert.equal(r.headers.get('x-content-type-options'), 'nosniff');
   assert.equal(r.headers.get('x-frame-options'), 'DENY');
   const health = await req('GET', '/api/health');
-  assert.equal(health.headers.get('x-content-type-options'), null, '/api/health сейчас БЕЗ security-headers (инлайн-роут) — не менять');
+  assert.equal(health.headers.get('x-content-type-options'), 'nosniff');
+  assert.equal(health.headers.get('x-frame-options'), 'DENY');
 });
 
 // ── Route contract snapshot: текущие status/shape ключевых эндпоинтов (DB-less) ─────────────────
@@ -105,14 +108,17 @@ test('route contract: POST /api/ingest/daily без ingest-токена → 401/
   assert.ok([401, 403].includes(r.status), `ingest без токена → ${r.status} (ожидали 401/403)`);
 });
 
-test('route contract: /api/health форма стабильна (uptime/cache/sessions/env)', async () => {
+test('route contract: /api/health форма стабильна (uptime/sessions), без фактов конфигурации', async () => {
   const r = await req('GET', '/api/health');
   const body = await r.json();
   assert.equal(body.status, 'ok');
   assert.equal(body.service, 'pulse-analytics-web');
   assert.equal(typeof body.uptime, 'number');
   assert.equal(body.sessions, 'signed+versioned');
-  assert.deepEqual(Object.keys(body.env).sort(), ['auth', 'ig', 'tg']);
+  // `env` (ig/tg/auth) и `cache` убраны: анонимной пробе они не нужны, а постороннему
+  // рассказывают, какие вертикали подняты и какова нагрузка (I-1, аудит #554).
+  assert.equal(body.env, undefined);
+  assert.equal(body.cache, undefined);
 });
 
 test('route contract: /api/ready DB-less → 200 {status:ready, database:{enabled:false,ok:true}}', async () => {
