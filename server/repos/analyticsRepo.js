@@ -858,80 +858,51 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
   }
 
   // ── Actor-gated reads: сначала проверяем доступ, иначе пусто (ПУТЬ ДЛЯ РОУТОВ) ──────────────────
-  // null-доступ → пустой результат того же типа, что у Internal (список → [], одиночка → null).
   const allowed = (channelId, actor) => getAccessibleChannel(channelId, actor);
 
-  async function getChannelHistoryForActor(channelId, actor, days = 400) {
-    return (await allowed(channelId, actor)) ? getChannelHistoryInternal(channelId, days) : [];
-  }
-  async function getMentionsHistoryForActor(channelId, actor) {
-    return (await allowed(channelId, actor)) ? getMentionsHistoryInternal(channelId) : null;
-  }
-  async function getMentionsArchiveForActor(channelId, actor, opts = 30) {
-    return (await allowed(channelId, actor)) ? getMentionsArchiveInternal(channelId, opts) : null;
-  }
-  async function getSnapshotForActor(channelId, actor) {
-    return (await allowed(channelId, actor)) ? getSnapshotInternal(channelId) : null;
-  }
-  async function getLatestVelocityForActor(channelId, actor) {
-    return (await allowed(channelId, actor)) ? getLatestVelocityInternal(channelId) : null;
-  }
-  async function listPostsForActor(channelId, actor, limit = 100) {
-    return (await allowed(channelId, actor)) ? listPostsInternal(channelId, limit) : [];
-  }
-  async function listIgDailyForActor(channelId, actor, days = 400) {
-    return (await allowed(channelId, actor)) ? listIgDailyInternal(channelId, days) : [];
-  }
-  async function listIgMediaDailyForActor(channelId, actor, days = 400) {
-    return (await allowed(channelId, actor)) ? listIgMediaDailyInternal(channelId, days) : [];
-  }
-  async function getMsDailyAllForActor(channelId, actor) {
-    return (await allowed(channelId, actor)) ? getMsDailyAllInternal(channelId) : [];
-  }
+  /**
+   * Actor-gated ридер: проверка доступа ОДНИМ правилом на все двадцать четыре.
+   *
+   * Раньше каждая обёртка писала её сама — три строки, визуально неотличимые от соседних. Забыть
+   * в них `allowed()` было самой дешёвой ошибкой в репозитории и стоило бы утечки чужого канала:
+   * ревью такую пропажу не видит, потому что пропажа выглядит как обычная строка. Теперь гейт
+   * стоит В ФАБРИКЕ, и вызывающий приносит только Internal и пустое значение — забыть нечего.
+   *
+   * Пустое значение — ФАБРИКА, а не готовый объект: один общий `[]` на все вызовы вернул бы
+   * наружу ОДИН И ТОТ ЖЕ массив, и мутация у одного потребителя стала бы видна другому.
+   *
+   * Форма пустого совпадает с формой Internal (список → [], одиночка → null): отозванный доступ
+   * обязан быть неотличим по типу, иначе роут упадёт на `.map` вместо честного ответа.
+   */
+  const gated = (read, empty) => async (channelId, actor, ...rest) =>
+    (await allowed(channelId, actor)) ? read(channelId, ...rest) : empty();
 
-  async function getYmDailyAllForActor(channelId, actor) {
-    return (await allowed(channelId, actor)) ? getYmDailyAllInternal(channelId) : [];
-  }
-  async function getMsFunnelForActor(channelId, actor, opts = {}) {
-    return (await allowed(channelId, actor)) ? getMsFunnelInternal(channelId, opts) : [];
-  }
-  async function getMsCustomersForActor(channelId, actor, opts = {}) {
-    return (await allowed(channelId, actor)) ? getMsCustomersInternal(channelId, opts) : null;
-  }
-  async function getMsCohortsForActor(channelId, actor) {
-    return (await allowed(channelId, actor)) ? getMsCohortsInternal(channelId) : [];
-  }
-  async function getMsRfmForActor(channelId, actor, opts = {}) {
-    return (await allowed(channelId, actor)) ? getMsRfmInternal(channelId, opts) : null;
-  }
-  async function getMsRfmCustomersForActor(channelId, actor, opts = {}) {
-    return (await allowed(channelId, actor)) ? getMsRfmCustomersInternal(channelId, opts) : null;
-  }
-  async function getMsTopCustomersForActor(channelId, actor, opts = {}) {
-    return (await allowed(channelId, actor)) ? getMsTopCustomersInternal(channelId, opts) : [];
-  }
-  async function getMsOldestOrderDayForActor(channelId, actor) {
-    return (await allowed(channelId, actor)) ? getMsOldestOrderDayInternal(channelId) : null;
-  }
-  async function getMsSalesByChannelForActor(channelId, actor, opts = {}) {
-    return (await allowed(channelId, actor)) ? getMsSalesByChannelInternal(channelId, opts) : [];
-  }
-  async function getMsGeographyForActor(channelId, actor, opts = {}) {
-    // Нет доступа → та же форма, что у Internal (объект с нулями), не список — роут не ветвится.
-    return (await allowed(channelId, actor))
-      ? getMsGeographyInternal(channelId, opts)
-      : { rows: [], total_orders: 0, no_city_orders: 0 };
-  }
-  async function getMsChannelSeriesForActor(channelId, actor, opts = {}) {
-    return (await allowed(channelId, actor)) ? getMsChannelSeriesInternal(channelId, opts) : [];
-  }
-  async function getMsReturnsForActor(channelId, actor, opts = {}) {
-    // null от ForActor = доступ отозван (гонка) — роут ответит 403, а не сфабрикованными нулями.
-    return (await allowed(channelId, actor)) ? getMsReturnsInternal(channelId, opts) : null;
-  }
-  async function getMsChannelSeriesGroupedForActor(channelId, actor, opts = {}) {
-    return (await allowed(channelId, actor)) ? getMsChannelSeriesGroupedInternal(channelId, opts) : [];
-  }
+  const LIST = () => [];   // Internal отдаёт массив
+  const NONE = () => null; // Internal отдаёт одиночку
+
+  const getChannelHistoryForActor = gated(getChannelHistoryInternal, LIST);
+  const getMentionsHistoryForActor = gated(getMentionsHistoryInternal, NONE);
+  const getMentionsArchiveForActor = gated(getMentionsArchiveInternal, NONE);
+  const getSnapshotForActor = gated(getSnapshotInternal, NONE);
+  const getLatestVelocityForActor = gated(getLatestVelocityInternal, NONE);
+  const listPostsForActor = gated(listPostsInternal, LIST);
+  const listIgDailyForActor = gated(listIgDailyInternal, LIST);
+  const listIgMediaDailyForActor = gated(listIgMediaDailyInternal, LIST);
+  const getMsDailyAllForActor = gated(getMsDailyAllInternal, LIST);
+  const getYmDailyAllForActor = gated(getYmDailyAllInternal, LIST);
+  const getMsFunnelForActor = gated(getMsFunnelInternal, LIST);
+  const getMsCustomersForActor = gated(getMsCustomersInternal, NONE);
+  const getMsCohortsForActor = gated(getMsCohortsInternal, LIST);
+  const getMsRfmForActor = gated(getMsRfmInternal, NONE);
+  const getMsRfmCustomersForActor = gated(getMsRfmCustomersInternal, NONE);
+  const getMsTopCustomersForActor = gated(getMsTopCustomersInternal, LIST);
+  const getMsOldestOrderDayForActor = gated(getMsOldestOrderDayInternal, NONE);
+  const getMsSalesByChannelForActor = gated(getMsSalesByChannelInternal, LIST);
+  const getMsGeographyForActor = gated(getMsGeographyInternal, () => ({ rows: [], total_orders: 0, no_city_orders: 0 }));
+  const getMsChannelSeriesForActor = gated(getMsChannelSeriesInternal, LIST);
+  // null от ForActor = доступ отозван (гонка) — роут ответит 403, а не сфабрикованными нулями.
+  const getMsReturnsForActor = gated(getMsReturnsInternal, NONE);
+  const getMsChannelSeriesGroupedForActor = gated(getMsChannelSeriesGroupedInternal, LIST);
 
     // ── ig-tags read (finding 7: чтение — analytics, write — collectorRepo) ──
   async function getIgTags(limit = 100) {
