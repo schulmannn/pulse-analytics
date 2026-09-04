@@ -1108,7 +1108,7 @@ export function MetricPage() {
               <header className="flex items-end justify-between gap-3 border-b border-border px-4 py-4 sm:px-5">
                 <div className="min-w-0">
                   <div className="text-2xs font-medium tracking-wide text-muted-foreground">Публикации</div>
-                  <h3 className="mt-1 truncate text-sm font-semibold tracking-tight text-foreground">
+                  <h3 className="mt-1 truncate text-sm font-medium tracking-tight text-foreground">
                     Топ постов по {CONTRIB_LABEL[metricKey] ?? 'метрике'}
                   </h3>
                 </div>
@@ -1161,7 +1161,7 @@ export function MetricPage() {
                             >
                               <span
                                 className={cn(
-                                  'flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-2xs font-semibold tabular-nums',
+                                  'flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-2xs font-medium tabular-nums',
                                   i === 0
                                     ? 'bg-primary text-primary-foreground'
                                     : i < 3
@@ -1197,7 +1197,7 @@ export function MetricPage() {
                                 </span>
                               </span>
                               <span className="min-w-15 shrink-0 text-right sm:min-w-0">
-                                <span className="block text-sm font-semibold tabular-nums text-foreground">
+                                <span className="block text-sm font-medium tabular-nums text-foreground">
                                   {fmt.short(value)}
                                 </span>
                                 {share > 0 && (

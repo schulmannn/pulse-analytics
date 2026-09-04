@@ -564,7 +564,7 @@ function WeekdayBestDay({ full }: { full: TgFull | undefined }) {
   if (!bestWdLabel) return null;
   return (
     <div className="mt-3 text-xs font-medium text-muted-foreground">
-      лучший день: <strong className="text-foreground">{bestWdLabel}</strong>
+      лучший день: <strong className="font-medium text-foreground">{bestWdLabel}</strong>
     </div>
   );
 }

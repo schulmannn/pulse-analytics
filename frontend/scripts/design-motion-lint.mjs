@@ -206,6 +206,29 @@ const rules = [
     exempt: (rel) => rel === 'src/pages/Landing.tsx',
   },
   {
+    id: 'third-font-weight',
+    hint: 'канон — два начертания: 400 и 500 (font-medium). Иерархию даёт оттенок, а не вес',
+    // DOM-замер аудита #554 нашёл 27 текстовых узлов с весом 600 при каноне 400/500: заголовки,
+    // ранги и числа рейтингов набирались `font-semibold` по привычке. Вес — самый дорогой способ
+    // выделить: он ломает ритм страницы сильнее, чем разница оттенков, ради которой DESIGN_TOKENS
+    // и держит шкалу ink/ink2/ink3. Рендер сторожит e2e/type-weight-canon.spec.ts, но он видит
+    // только демо-маршруты — экраны логина, /connect и Radix-меню открываются лишь по действию.
+    test: (line) => /\bfont-(?:semibold|bold|extrabold|black)\b/.test(line),
+    // Таблицу контента Instagram параллельно переписывает отдельная работа (D10); её три
+    // `font-semibold` снимаются там. Исключение удаляется вместе с тем PR.
+    exempt: (rel) => rel === 'src/panels/instagram/IgContentDesktop.tsx',
+  },
+  {
+    id: 'emphasis-browser-bold',
+    hint: 'добавьте font-medium к <strong>/<b> — UA-правило font-weight: bolder даёт 700',
+    // Второй канал утечки того же дефекта, и он не виден в поиске по классам: у <strong>/<b>
+    // браузерное правило `font-weight: bolder` считается ОТ РОДИТЕЛЯ, и родитель с весом 500 даёт
+    // ровно 700 — самое тяжёлое начертание на экране появлялось там, где про вес никто не думал
+    // («лучший слот», «лучший день», «база без тегов», приглашение в команду). Образец — RichText.
+    test: (line) => /<(?:strong|b)(?=[\s>])/.test(line) && !line.includes('font-medium'),
+    exempt: (rel) => rel.endsWith('.test.ts') || rel.endsWith('.test.tsx'),
+  },
+  {
     id: 'primary-tint-ink',
     hint: 'use text-accent-foreground on bg-primary/10 (AA composite); reserve text-primary for neutral surfaces',
     // The safe hover recipe may keep a base `text-primary` while switching BOTH the hover

@@ -203,7 +203,7 @@ export function BestTimeHeatmap({ online }: { online: IgOnline | undefined }) {
       </div>
       <ChartTooltip tip={tip} />
       <div className="mt-3 text-xs font-medium text-muted-foreground">
-        лучший слот: <strong className="text-foreground">{DAY_NAMES[best.w]} {best.h}:00</strong>
+        лучший слот: <strong className="font-medium text-foreground">{DAY_NAMES[best.w]} {best.h}:00</strong>
       </div>
     </div>
   );

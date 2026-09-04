@@ -320,6 +320,21 @@ const RU_SERIES: Record<string, string> = {
   left: 'Отписались',
 };
 
+/**
+ * Подписи строки статистики поста — ОДИН словарь на все поверхности, где эта четвёрка встречается.
+ * Полное слово — канон: «Просм.» и «Коммент.» стояли рядом с целыми «Реакции» и «Репосты», и
+ * сокращение читалось не как экономия места, а как случайность (аудит #554, D18). Короткая форма
+ * остаётся только для контейнера уже 280px, где полное слово физически не помещается; выбор между
+ * ними делает container query на месте, а не автор разметки.
+ */
+export const POST_STAT_LABEL = {
+  views: { full: 'Просмотры', short: 'Просм.' },
+  reactions: { full: 'Реакции', short: 'Реакции' },
+  comments: { full: 'Комментарии', short: 'Коммент.' },
+  shares: { full: 'Репосты', short: 'Репосты' },
+} as const;
+export type PostStatKey = keyof typeof POST_STAT_LABEL;
+
 /** Russian name for an API-provided series ("Views" → "Просмотры"); fallback = the original. */
 export function ruSeriesName(name?: string | null): string {
   const raw = (name ?? '').trim();
