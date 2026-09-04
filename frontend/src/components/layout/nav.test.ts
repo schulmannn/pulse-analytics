@@ -1,24 +1,38 @@
 import { describe, expect, it } from 'vitest';
-import { FEED_ROUTES } from './nav';
+import { NETWORKS } from '@/lib/networks';
+import { FEEDS } from '@/panels/feed/feeds';
+import { isFeedRoute, routeTitle } from './nav';
 
-describe('FEED_ROUTES — feed pages suppress the shared Atlavue topbar', () => {
-  // МойСклад analysis pages render their own FeedBlock header (like TG/IG). If their routes are
-  // absent here, DashboardLayout's Topbar renders a duplicate title + divider over them.
-  it('covers every MoySklad analysis page', () => {
-    for (const route of ['/sklad', '/sklad/clients', '/sklad/channels']) {
-      expect(FEED_ROUTES).toContain(route);
+/**
+ * Страница ленты несёт СВОЙ FeedBlock-заголовок, поэтому общий topbar над ней не монтируется.
+ * Раньше это был список, который вели руками, и он трижды отставал: «МойСклад» дописали после
+ * того, как дубль уехал в прод, «Метрику» после этого, а СДЭК повторил всё заново — над «Обзором»
+ * висела надпись «Atlavue» с полосой.
+ *
+ * Поэтому тест проверяет не список, а ИНВАРИАНТ: каждая секция каждой зарегистрированной сети
+ * подавляет topbar. Новый источник, забывший про это, валит прогон — а не уезжает в прод.
+ */
+describe('isFeedRoute — страницы лент подавляют общий topbar', () => {
+  for (const net of NETWORKS) {
+    const prefix = 'prefix' in net ? net.prefix : '';
+    for (const section of FEEDS[net.key].sections) {
+      const route = section.section === '' ? prefix || '/' : `${prefix}/${section.section}`;
+      it(`${net.key}: ${route}`, () => {
+        expect(isFeedRoute(route)).toBe(true);
+      });
+    }
+  }
+
+  it('поверхности со своим заголовком тоже подавляют topbar', () => {
+    for (const route of ['/home', '/connect', '/settings']) {
+      expect(isFeedRoute(route)).toBe(true);
     }
   });
 
-  it('still covers the TG and IG feed routes (no regression)', () => {
-    for (const route of ['/', '/analytics', '/posts', '/mentions', '/instagram', '/instagram/audience']) {
-      expect(FEED_ROUTES).toContain(route);
+  it('страницы БЕЗ своего заголовка его получают', () => {
+    for (const route of ['/metrics/views', '/reports', '/admin']) {
+      expect(isFeedRoute(route)).toBe(false);
+      expect(routeTitle(route)).toBeTruthy();
     }
-  });
-
-  // Обзор Метрики рендерит собственный FeedBlock-заголовок — без строки здесь layout смонтировал
-  // бы поверх него дублирующий Atlavue-topbar (тот же регресс, что был у «МойСклада»).
-  it('covers the Yandex Metrika overview page', () => {
-    expect(FEED_ROUTES).toContain('/metrika');
   });
 });

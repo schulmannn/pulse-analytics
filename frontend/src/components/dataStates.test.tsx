@@ -1,4 +1,5 @@
 import { renderToStaticMarkup } from 'react-dom/server';
+import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it } from 'vitest';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
@@ -13,7 +14,10 @@ describe('shared data states', () => {
     expect(html).toContain('Нет данных');
     expect(html).toContain('Выберите другой период.');
     expect(html).toContain('min-h-40');
-    expect(html).not.toContain('border-dashed');
+    expect(html).toContain('data-slot="empty"');
+    expect(html).toContain('data-slot="empty-icon"');
+    expect(html).toContain('border-0');
+    expect(html).toContain('bg-transparent');
   });
 
   it('announces compact failures and preserves retry without nested page chrome', () => {
@@ -24,7 +28,24 @@ describe('shared data states', () => {
     expect(html).toContain('role="alert"');
     expect(html).toContain('Повторить');
     expect(html).toContain('min-h-32');
-    expect(html).not.toContain('border-dashed');
+    expect(html).toContain('data-slot="empty"');
+    expect(html).toContain('border-0');
+    expect(html).toContain('bg-transparent');
+  });
+
+  it('uses the shared shadcn composition and a quiet solid surface for page-level states', () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <EmptyState title="Отчётов пока нет" reason="Создайте первый отчёт." action={{ to: '/reports/new', label: 'Создать отчёт' }} />
+      </MemoryRouter>,
+    );
+
+    expect(html).toContain('data-slot="empty-header"');
+    expect(html).toContain('data-slot="empty-content"');
+    expect(html).toContain('border-solid');
+    expect(html).toContain('bg-muted/20');
+    expect(html).toContain('Создать отчёт');
+    expect(html).not.toContain('Создать отчёт →');
   });
 
   it('exposes readable loading status while hiding decorative skeleton geometry', () => {

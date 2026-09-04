@@ -54,12 +54,12 @@ export function ContentOpportunity({
               <button
                 type="button"
                 className={cn(
-                  'relative flex h-9 min-w-9 items-center justify-center rounded-full border px-2 text-xs font-medium tabular-nums transition-transform hover:scale-105 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/50',
+                  'relative flex h-9 min-w-9 items-center justify-center rounded-full border px-2 text-xs font-medium tabular-nums transition-transform hover-fine:scale-105 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/50',
                   item.opportunity
                     ? 'border-verdant/50 bg-verdant/15 text-verdant'
                     : item.confidence === 'low'
                       ? 'border-border bg-muted text-muted-foreground'
-                      : 'border-primary/40 bg-primary/10 text-primary',
+                      : 'border-primary/40 bg-primary/10 text-accent-foreground',
                 )}
                 aria-label={`${item.label}: ${Math.round(item.share * 100)}% публикаций, охват ${Math.round(item.reachIndex * 100)}% от среднего`}
               >

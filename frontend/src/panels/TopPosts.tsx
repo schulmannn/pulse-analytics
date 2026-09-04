@@ -1,9 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useChannels, useTgFull } from '@/api/queries';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { normalizeTgPosts, type NormalizedPost } from '@/lib/posts';
 import { compareToMedian, medianDeltaLabel, periodMedian } from '@/lib/postMedian';
-import { fmt } from '@/lib/format';
+import { fmt, POST_STAT_LABEL, type PostStatKey } from '@/lib/format';
 import { markdownToPlainText } from '@/lib/markdown';
 import { cn } from '@/lib/utils';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -144,10 +144,13 @@ export function TopPosts({ variant = 'table' }: { variant?: 'table' | 'cards' } 
   return (
     <>
       {variant === 'cards' && (
+        // Фиксированные колонки (IG-парити, content.tsx): auto-fit СХЛОПЫВАЛ пустые треки, и при
+        // одной публикации в окне карточка растягивалась на всю ширину — крошечный телеграм-превью
+        // раздувался в размытого гиганта (владелец, 7д). С фикс-сеткой одиночная карточка честно
+        // занимает свою треть ряда.
         <div
           data-testid="tg-top-posts-cards"
-          className="hidden md:grid md:gap-6"
-          style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(240px, 100%), 1fr))' }}
+          className="hidden md:grid md:grid-cols-2 md:gap-6 lg:grid-cols-3"
         >
           {cardPosts.map((post, idx) => (
             <TopPostCard
@@ -185,7 +188,7 @@ export function TopPosts({ variant = 'table' }: { variant?: 'table' | 'cards' } 
                   )}
                 >
                   {c.label}
-                  <span aria-hidden="true" className={cn('text-2xs', !active && 'text-ink3/60')}>
+                  <span aria-hidden="true" className={cn('text-2xs', !active && 'text-ink3')}>
                     {active ? (sortDir === 'desc' ? '↓' : '↑') : '↕'}
                   </span>
                 </button>
@@ -298,11 +301,17 @@ function TgMediaPlaceholderGlyph({ video }: { video: boolean }) {
   return <Icon name={video ? 'playCircle' : 'image'} className="h-7 w-7" />;
 }
 
-/** One metric cell in the card footer — label over value, centred. */
-function CardStat({ label, value }: { label: string; value: string }) {
+/** One metric cell in the card footer — label over value, centred. Подпись берётся из общего
+    словаря (lib/format POST_STAT_LABEL), а полную или короткую форму выбирает container query по
+    ширине самой строки статистики — автор разметки этот выбор не делает. */
+function CardStat({ stat, value }: { stat: PostStatKey; value: string }) {
+  const { full, short } = POST_STAT_LABEL[stat];
   return (
     <div className="min-w-0">
-      <div className="truncate text-2xs text-muted-foreground">{label}</div>
+      <div className="truncate text-2xs text-muted-foreground">
+        <span className={full === short ? undefined : '@max-[280px]/post-stats:hidden'}>{full}</span>
+        {full !== short && <span className="hidden @max-[280px]/post-stats:inline">{short}</span>}
+      </div>
       <div className="mt-0.5 truncate text-sm font-medium tabular-nums text-foreground">{value}</div>
     </div>
   );
@@ -316,9 +325,18 @@ function CardStat({ label, value }: { label: string; value: string }) {
  */
 function TopPostCard({ post, rank, onOpen }: { post: NormalizedPost; rank: number; onOpen: () => void }) {
   const [failed, setFailed] = useState(false);
+  const imageRef = useRef<HTMLImageElement>(null);
   const isVideo = post.mediaType === 'video';
   const cover = !failed ? post.thumb : null;
   const title = post.caption ? markdownToPlainText(post.caption) : '';
+  useEffect(() => {
+    const image = imageRef.current;
+    if (!image || !cover) return;
+    const handleError = () => setFailed(true);
+    image.addEventListener('error', handleError);
+    if (image.complete && image.naturalWidth === 0) handleError();
+    return () => image.removeEventListener('error', handleError);
+  }, [cover]);
   return (
     <button
       type="button"
@@ -334,15 +352,20 @@ function TopPostCard({ post, rank, onOpen }: { post: NormalizedPost; rank: numbe
       {/* Stable 4:5 cover keeps the 3-up row aligned; absent/failed media falls back to a glyph. */}
       <div
         data-testid="tg-top-post-media"
-        className="flex aspect-4/5 w-full items-center justify-center overflow-hidden rounded bg-muted text-muted-foreground"
+        // 12px, а не 4: `--radius` (4px) — ступень ИНПУТОВ и мелких контролов, а это крупный
+        // медиа-блок 4:5 внутри карточки с радиусом 16. Концентричность тут не применима —
+        // при паддинге карточки, равном её радиусу, правило «внешний минус паддинг» даёт 0, то
+        // есть обложка перестаёт быть вложенной формой и становится самостоятельным объектом.
+        // Для него берём следующую ступень лестницы канона (16 → 12 → 4 → pill).
+        className="flex aspect-4/5 w-full items-center justify-center overflow-hidden rounded-xl bg-muted text-muted-foreground"
       >
         {cover ? (
           <img
+            ref={imageRef}
             src={cover}
             alt=""
             referrerPolicy="no-referrer"
-            onError={() => setFailed(true)}
-            className="h-full w-full object-cover transition-transform group-hover:scale-[1.02]"
+            className="h-full w-full object-cover transition-transform group-hover-fine:scale-[1.02]"
           />
         ) : (
           <TgMediaPlaceholderGlyph video={isVideo} />
@@ -351,11 +374,14 @@ function TopPostCard({ post, rank, onOpen }: { post: NormalizedPost; rank: numbe
       <p className={cn('mt-3 line-clamp-3 flex-1 text-sm leading-relaxed', title ? 'text-foreground' : 'italic text-muted-foreground')}>
         {title || 'Без подписи'}
       </p>
-      <div className="mt-3 grid grid-cols-4 gap-1 border-t border-border pt-3 text-center">
-        <CardStat label="Просм." value={fmt.short(post.reach)} />
-        <CardStat label="Реакции" value={fmt.short(post.likes)} />
-        <CardStat label="Коммент." value={fmt.short(post.comments)} />
-        <CardStat label="Репосты" value={fmt.short(post.shares)} />
+      <div
+        data-post-stats
+        className="@container/post-stats mt-3 grid grid-cols-4 gap-1 border-t border-border pt-3 text-center"
+      >
+        <CardStat stat="views" value={fmt.short(post.reach)} />
+        <CardStat stat="reactions" value={fmt.short(post.likes)} />
+        <CardStat stat="comments" value={fmt.short(post.comments)} />
+        <CardStat stat="shares" value={fmt.short(post.shares)} />
       </div>
     </button>
   );
@@ -365,17 +391,14 @@ function TopPostsSkeleton({ variant = 'table' }: { variant?: 'table' | 'cards' }
   return (
     <>
       {variant === 'cards' && (
-        <div
-          className="hidden md:grid md:gap-6"
-          style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(240px, 100%), 1fr))' }}
-        >
+        <div className="hidden md:grid md:grid-cols-2 md:gap-6 lg:grid-cols-3">
           {Array.from({ length: CARDS_LIMIT }).map((_, i) => (
             <div key={i} className="flex flex-col border-t border-border pt-3">
               <div className="mb-2 flex items-center justify-between">
                 <Skeleton className="h-3 w-6" />
                 <Skeleton className="h-3 w-12" />
               </div>
-              <Skeleton className="aspect-4/5 w-full rounded" />
+              <Skeleton className="aspect-4/5 w-full rounded-xl" />
               <Skeleton className="mt-3 h-4 w-full" />
               <Skeleton className="mt-2 h-4 w-3/4" />
               <Skeleton className="mt-3 h-10 w-full" />

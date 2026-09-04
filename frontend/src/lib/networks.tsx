@@ -6,6 +6,13 @@ export interface NavLinkDef {
   label: string;
   icon: IconName;
   end?: boolean;
+  /**
+   * Раздел за фичефлагом: пока флаг выключен, строка НЕ показывается в наве (и её маршрут
+   * отвечает «раздел ещё не включён»). Нужен, чтобы витрины можно было довезти в прод и
+   * копить архив, не обещая пользователю поверхность, числа которой ещё не сверены.
+   * Сейчас единственный носитель — Rusender; см. `useActiveNetworkNav`.
+   */
+  gate?: 'rusenderSurfaces';
 }
 
 /** The channel fields network predicates read — structural, the API channel object satisfies it. */
@@ -55,8 +62,16 @@ export const NETWORKS = [
       { to: '/posts', label: 'Контент', icon: 'posts' },
       { to: '/mentions', label: 'Упоминания', icon: 'mentions' },
     ],
-    // Standalone Instagram/МойСклад/Метрика sources have no Telegram side.
-    hasChannel: (c) => c.source !== 'ig' && c.source !== 'ms' && c.source !== 'ym',
+    // Standalone Instagram/МойСклад/Метрика/СДЭК/Rusender sources have no Telegram side. Список исключений,
+    // а не белый список: канал коллектора приезжает с разными source ('qr', 'collector', 'central'),
+    // и все они — Telegram. Зато каждый НОВЫЙ не-телеграмный источник обязан попасть сюда, иначе
+    // он молча притворится телеграм-каналом с пустыми данными.
+    hasChannel: (c) =>
+      c.source !== 'ig'
+      && c.source !== 'ms'
+      && c.source !== 'ym'
+      && c.source !== 'cdek'
+      && c.source !== 'rusender',
   },
   {
     key: 'ig',
@@ -105,6 +120,49 @@ export const NETWORKS = [
     // Отдельный канал source='ym', создаётся при подключении OAuth-токена счётчика.
     hasChannel: (c) => c.source === 'ym',
   },
+  {
+    // «СДЭК Fulfillment» — первый источник БЕЗ API: заказы приезжают выгрузкой Excel, которую
+    // пользователь загружает руками. Отсюда второй раздел «Загрузки» рядом с «Обзором»: у
+    // источника, который наполняют вручную, вопрос «что и за какой период вообще залито» — такой
+    // же рабочий, как «сколько выручки», и живёт своей поверхностью.
+    key: 'cdek',
+    name: 'СДЭК',
+    color: '#00B33C',
+    home: '/cdek',
+    prefix: '/cdek',
+    nav: [
+      { to: '/cdek', label: 'Обзор', icon: 'overview', end: true },
+      { to: '/cdek/orders', label: 'Заказы', icon: 'charts' },
+      { to: '/cdek/products', label: 'Товары', icon: 'posts' },
+      { to: '/cdek/imports', label: 'Загрузки', icon: 'upload' },
+    ],
+    // Отдельный канал source='cdek', создаётся кнопкой на /connect.
+    hasChannel: (c) => c.source === 'cdek',
+  },
+  {
+    // «Rusender» — email-рассылки. Величины СВОИ: доставлено/открытия/клики по письмам не
+    // смешиваются ни с просмотрами TG, ни с охватом IG, ни с визитами Метрики — тот же канон,
+    // что «TG-просмотры ≠ IG-охват». Считаем ТОЛЬКО рассылки (решение владельца): вторая семья
+    // Rusender — транзакционные письма — сюда сознательно не заводится.
+    key: 'rusender',
+    name: 'Rusender',
+    color: '#2B6BE4',
+    home: '/rusender',
+    prefix: '/rusender',
+    // «Рассылки» и «База» — за фичефлагом (RUSENDER_SURFACES): архив уже копится, но числа
+    // Rusender ещё не сверены с живыми данными, и до сверки показывать их всему воркспейсу
+    // рано. «Обзор» остаётся всегда — у подключённого источника должна быть точка входа,
+    // которая честно говорит о состоянии сбора.
+    nav: [
+      { to: '/rusender', label: 'Обзор', icon: 'overview', end: true },
+      // «Рассылки» — контент-единицы источника (слот «Контент» в каноническом порядке).
+      { to: '/rusender/campaigns', label: 'Рассылки', icon: 'mail', gate: 'rusenderSurfaces' },
+      // «База» — контакты и списки: аудитория этого источника.
+      { to: '/rusender/audience', label: 'База', icon: 'audience', gate: 'rusenderSurfaces' },
+    ],
+    // Отдельный канал source='rusender', создаётся при подключении API-ключа.
+    hasChannel: (c) => c.source === 'rusender',
+  },
 ] as const satisfies readonly NetworkDef[];
 
 /** Network key union — extends automatically when a registry entry is added. */
@@ -135,10 +193,14 @@ export function networkForPath(pathname: string): Network {
  * prefix-based, apart from the /instagram and /metrics families:
  *   /instagram, /instagram/*         → ig
  *   exact /, /analytics, /posts, /mentions → tg
- *   /metrics/ig-* → ig; /metrics/ms-* → ms; /metrics/ym-* → ym; other /metrics/*  → tg
+ *   /metrics/ig-* → ig; /metrics/ms-* → ms; /metrics/ym-* → ym; /metrics/cdek-* → cdek;
+ *   /metrics/rusender-* → rusender;
+ *   other /metrics/*  → tg
  *   everything else                  → null (agnostic — the store decides)
  */
 export function routeNetworkOwner(pathname: string): Network | null {
+  if (pathname === '/rusender' || pathname.startsWith('/rusender/')) return 'rusender';
+  if (pathname === '/cdek' || pathname.startsWith('/cdek/')) return 'cdek';
   if (pathname === '/sklad' || pathname.startsWith('/sklad/')) return 'ms';
   if (pathname === '/metrika' || pathname.startsWith('/metrika/')) return 'ym';
   if (pathname === '/instagram' || pathname.startsWith('/instagram/')) return 'ig';
@@ -150,6 +212,8 @@ export function routeNetworkOwner(pathname: string): Network | null {
     if (key.startsWith('ig-')) return 'ig';
     if (key.startsWith('ms-')) return 'ms';
     if (key.startsWith('ym-')) return 'ym';
+    if (key.startsWith('cdek-')) return 'cdek';
+    if (key.startsWith('rusender-')) return 'rusender';
     return 'tg';
   }
   return null;
@@ -184,10 +248,36 @@ export function NetworkGlyph({ k, className }: { k: string; className?: string }
     );
   }
   if (k === 'ym') {
-    // «Метрика» — три восходящих столбика (веб-аналитика), в духе stroke-only сета.
+    // «Метрика» — кольцо с секторами (мотив круговой диаграммы логотипа Метрики), в духе
+    // stroke-only сета. Прежние три восходящих столбика читались как уровень сотового сигнала
+    // («плохое соединение» — владелец).
     return (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={className} aria-hidden="true">
-        <path d="M5 20v-6M12 20V9M19 20V4" strokeLinecap="round" />
+        <circle cx="12" cy="12" r="8.5" />
+        <path d="M12 12V3.5M12 12l6 6" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  if (k === 'cdek') {
+    // «СДЭК» — фура доставки. Короб взять нельзя: он уже занят «МойСкладом», а два коробка в
+    // одном переключателе источников читались бы как один и тот же склад.
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={className} aria-hidden="true">
+        <path d="M14 17.5V7a1.5 1.5 0 0 0-1.5-1.5h-8A1.5 1.5 0 0 0 3 7v9.5a1 1 0 0 0 1 1h1" strokeLinejoin="round" />
+        <path d="M14 9h3.2a1 1 0 0 1 .8.4l2.8 3.6a1 1 0 0 1 .2.6v3a1 1 0 0 1-1 1h-1" strokeLinejoin="round" />
+        <path d="M9 17.5h6" strokeLinecap="round" />
+        <circle cx="7" cy="17.5" r="1.9" />
+        <circle cx="17" cy="17.5" r="1.9" />
+      </svg>
+    );
+  }
+  if (k === 'rusender') {
+    // «Rusender» — конверт с приподнятым клапаном: единственный источник, чья единица контента
+    // это письмо. Ни один соседний глиф не занят конвертом, спутать не с чем.
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={className} aria-hidden="true">
+        <rect x="2.5" y="5" width="19" height="14" rx="2" />
+        <path d="m3.5 7 8.5 6 8.5-6" strokeLinejoin="round" />
       </svg>
     );
   }

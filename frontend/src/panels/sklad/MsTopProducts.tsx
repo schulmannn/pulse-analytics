@@ -1,7 +1,8 @@
 import { useContext, useState } from 'react';
-import type { MsAssortmentComparison, MsMetricComparison, MsProductSort, MsTopSummary } from '@/api/queries';
-import { useMsAssortmentComparison, useMsTopProducts } from '@/api/queries';
+import type { MsAssortmentComparison, MsMetricComparison, MsProductSort, MsTopSummary } from '@/api/ms';
+import { useMsAssortmentComparison, useMsTopProducts } from '@/api/ms';
 import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
+import { useMediaQuery } from '@/lib/useMediaQuery';
 import { ChartCardBody } from '@/components/chartWidget/ChartCardBody';
 import { LineChart } from '@/components/LineChart';
 import { SegmentedControl } from '@/components/SegmentedControl';
@@ -9,6 +10,7 @@ import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { TableSkeleton } from '@/components/ui/dataSkeleton';
 import { fmt } from '@/lib/format';
+import { formatMoney, formatMoneyDelta } from '@/lib/metricNumber';
 import { cumulativeContribution, cumulativePointLabel } from '@/lib/msConcentration';
 import type { MsPeriod } from '@/lib/msPeriod';
 
@@ -306,7 +308,7 @@ function MsConcentrationKpis({
       label: 'Убыточных товаров',
       value:
         summary.loss_making_count > 0
-          ? `${fmt.num(summary.loss_making_count)} · −${fmt.short(summary.loss_making_amount)} ₽`
+          ? `${fmt.num(summary.loss_making_count)} · −${formatMoney(summary.loss_making_amount, 'axis')}`
           : '0',
     },
   ];
@@ -332,31 +334,66 @@ function MsConcentrationKpis({
 /** Список топ-товаров. Компакт передаёт `limit=5`; разворот-рейтинг показывает весь состав ответа.
     В компакте (half-тайл 264px) строки плотнее и без колонки «шт.» (кол-во уходит в title), иначе
     пятая строка режется кромкой карточки, а названию остаётся ~160px («Свеча в …»). */
+// Бюджет компакта: над списком стоит ряд переключателя метрики, и на узком экране его кнопки
+// имеют сенсорный размер (min-h-11 = 44px) — ряд занимает 48px против 36px на десктопе.
+// Замеры строк: 28px на узком, 24px на широком.
+const CONTROL_ROW_NARROW = 48;
+const CONTROL_ROW_WIDE = 36;
+const PRODUCT_ROW_NARROW = 28;
+const PRODUCT_ROW_WIDE = 24;
+
 function MsTopProductsList({ rows, metric, limit }: { rows: TopRow[]; metric: MsProductSort; limit?: number }) {
   const compact = limit != null;
-  const shown = compact ? rows.slice(0, limit) : rows;
+  // Сколько строк реально влезает: тело тайла минус ряд переключателя. Фикс-пятёрка
+  // переполняла карточку на узком экране на 24px — там и ряд выше (сенсорные цели), и
+  // строки. Свободная высота (разворот) считает как раньше.
+  const ctxHeight = useContext(ExpandedChartHeightContext);
+  const wide = useMediaQuery('(min-width: 640px)');
+  const budget = ctxHeight == null ? null : ctxHeight - (wide ? CONTROL_ROW_WIDE : CONTROL_ROW_NARROW);
+  const fit =
+    !compact || budget == null
+      ? limit
+      : Math.max(2, Math.min(limit, Math.floor(budget / (wide ? PRODUCT_ROW_WIDE : PRODUCT_ROW_NARROW))));
+  const shown = compact ? rows.slice(0, fit) : rows;
+  /*
+   * СЕТКА, А НЕ ФЛЕКС-СТРОКИ (аудит #554, D11). Числовые колонки стояли на ФИКС-ширинах
+   * (w-20 = 80px и w-36 = 144px) и занимали своё место независимо от содержимого: имени товара
+   * доставалось ~221px, и оно резалось («Кофемашина автоматическая D…») при полупустой правой
+   * части строки.
+   *
+   * Треки `auto` в сетке считаются по САМОМУ ШИРОКОМУ СОДЕРЖИМОМУ ВСЕГО СТОЛБЦА, поэтому
+   * числа по-прежнему выровнены между строками, но берут ровно столько, сколько им нужно;
+   * остаток забирает `minmax(0, 1fr)` имени. `grid-cols-subgrid` на строке — чтобы колонки были
+   * ОБЩИМИ для всех строк, а `<li>` остался настоящим элементом списка (display: contents снес бы
+   * его семантику в части читалок).
+   */
+  const columns = compact
+    ? 'grid-cols-[auto_minmax(0,1fr)_auto_auto]'
+    : 'grid-cols-[auto_minmax(0,1fr)_auto_auto_auto]';
   return (
-    <ul>
+    <ul className={`grid ${columns} gap-x-3`}>
       {shown.map((row, i) => (
         <li
           key={`${row.name}-${i}`}
-          className={`flex items-center gap-3 border-t border-border first:border-t-0 ${compact ? 'py-1' : 'py-1.5'}`}
+          className={`col-span-full grid grid-cols-subgrid items-center border-t border-border first:border-t-0 ${compact ? 'py-1' : 'py-1.5'}`}
         >
-          <span className="w-5 shrink-0 text-center text-xs font-medium tabular-nums text-muted-foreground">{i + 1}</span>
+          <span className="text-center text-xs font-medium tabular-nums text-muted-foreground">{i + 1}</span>
           <span
             title={compact ? `${row.name} · ${fmt.num(row.quantity)} шт.` : row.name}
-            className="min-w-0 flex-1 truncate text-sm text-foreground"
+            className="min-w-0 truncate text-sm text-foreground"
           >
             {row.name}
           </span>
           {!compact && (
-            <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{fmt.num(row.quantity)} шт.</span>
+            <span className="whitespace-nowrap text-right text-xs tabular-nums text-muted-foreground">
+              {fmt.num(row.quantity)} шт.
+            </span>
           )}
-          <span className="w-20 shrink-0 text-right text-sm font-medium tabular-nums text-foreground">
+          <span className="whitespace-nowrap text-right text-sm font-medium tabular-nums text-foreground">
             {formatProductPrimary(row, metric)}
           </span>
           {/* nowrap: перенос вторички на 2-ю строку раздувал бы строку и рвал 264px-тайл. */}
-          <span className="w-36 shrink-0 whitespace-nowrap text-right text-2xs tabular-nums text-muted-foreground">
+          <span className="whitespace-nowrap text-right text-2xs tabular-nums text-muted-foreground">
             {formatProductSecondary(row, metric)}
           </span>
         </li>
@@ -366,7 +403,8 @@ function MsTopProductsList({ rows, metric, limit }: { rows: TopRow[]; metric: Ms
 }
 
 function formatProfit(value: number): string {
-  return `${value < 0 ? '−' : ''}${fmt.short(Math.abs(value))} ₽`;
+  // Тот же дефект, что в MsChannels: «₽» дописывался поверх строки, которая его уже несёт.
+  return formatMoneyDelta(value, { role: 'axis' });
 }
 
 function formatMargin(value: number | null): string {
@@ -376,12 +414,12 @@ function formatMargin(value: number | null): string {
 function formatProductPrimary(row: { revenue: number; profit: number; margin: number | null }, metric: MsProductSort): string {
   if (metric === 'profit') return formatProfit(row.profit);
   if (metric === 'margin') return formatMargin(row.margin);
-  return `${fmt.short(row.revenue)} ₽`;
+  return `${formatMoney(row.revenue, 'axis')}`;
 }
 
 function formatProductSecondary(row: { revenue: number; profit: number; margin: number | null }, metric: MsProductSort): string {
-  if (metric === 'profit') return `выруч. ${fmt.short(row.revenue)} ₽ · ${formatMargin(row.margin)}`;
-  if (metric === 'margin') return `приб. ${formatProfit(row.profit)} · выруч. ${fmt.short(row.revenue)} ₽`;
+  if (metric === 'profit') return `выруч. ${formatMoney(row.revenue, 'axis')} · ${formatMargin(row.margin)}`;
+  if (metric === 'margin') return `приб. ${formatProfit(row.profit)} · выруч. ${formatMoney(row.revenue, 'axis')}`;
   return `приб. ${formatProfit(row.profit)} · ${formatMargin(row.margin)}`;
 }
 
@@ -392,7 +430,7 @@ type MoverKind = 'gain' | 'loss' | 'appeared' | 'disappeared';
 
 /** Значение метрики в её натуральной единице (сервер уже дал рубли/штуки). */
 export function fmtChangeValue(value: number, unit: 'rub' | 'count'): string {
-  return unit === 'rub' ? `${fmt.short(value)} ₽` : `${fmt.num(value)} шт.`;
+  return unit === 'rub' ? `${formatMoney(value, 'axis')}` : `${fmt.num(value)} шт.`;
 }
 
 /**
@@ -534,6 +572,9 @@ function MsAssortmentDynamics({ period, metric }: { period: MsPeriod; metric: Ch
   );
 }
 
+/** Границы окон сравнения — каноном дат приложения, но С ГОДОМ («10 июн. 2026 г.»), а не
+    «10.06.2026»: окна сравнения бывают по разные стороны Нового года, и без года «22 дек. — 31 дек.»
+    рядом с «1 янв. — 10 янв.» не прочитать. */
 function formatComparisonDay(day: string): string {
-  return `${day.slice(8, 10)}.${day.slice(5, 7)}.${day.slice(0, 4)}`;
+  return fmt.dayYear(day);
 }

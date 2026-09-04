@@ -113,7 +113,11 @@ test('desktop Overview keeps period context compact', async ({ page }, testInfo)
   await bootDemo(page, '/', { theme: 'dark' });
 
   await expect(page.locator('[data-source-identity]')).toContainText('Telegram · @demo_channel');
-  await expect(page.getByRole('heading', { name: 'Главное изменение' })).toBeVisible();
+  // «Главное изменение» больше нет отдельной карточкой — она слита в «Неделю канала» (владелец:
+  // «правый почти не несёт нагрузки»): медиана и лучшая публикация уехали в её леджер, разбор
+  // причины — абзацем рассказа. Контекст периода на Обзоре теперь несёт именно она.
+  await expect(page.getByRole('heading', { name: 'Неделя канала' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Главное изменение' })).toHaveCount(0);
 
   await page.getByRole('button', { name: 'Меню виджета «Просмотры»' }).click();
   await page.getByRole('menuitem', { name: 'Изменить' }).click();
@@ -124,12 +128,31 @@ test('desktop Overview keeps period context compact', async ({ page }, testInfo)
   await page.keyboard.press('Escape');
   expect(await overflowingCards(page)).toEqual([]);
 
-  // Owner override: the three third-width TG cards (Ср. охват / Реакции / Вовлечённость) each carry
-  // an honest active-window publication-date sparkline — its caption renders even though these
-  // cards have no previous-window comparison available.
-  for (const card of ['Ср. охват', 'Реакции', 'Вовлечённость']) {
+  // Owner override 2026-07-27: idle-подпись «по датам публикаций» под спарклайном убрана (лишняя
+  // строка на лице карточки); карточки с графиком остаются.
+  // Дискретные суточные метрики ведут СТОЛБЦАМИ (#461) — искра осталась вариантом, но не
+  // дефолтом; гейт по-прежнему требует график на лице карточки, только другой формы.
+  for (const card of ['Ср. охват', 'Реакции']) {
     const section = page.getByRole('heading', { name: card, exact: true }).locator('xpath=ancestor::section[1]');
-    await expect(section.getByText('по датам публикаций')).toBeVisible();
+    await expect(section.getByText('по датам публикаций')).toHaveCount(0);
+    await expect(section.locator('svg[data-chart-kind="bar"]')).toBeVisible();
+  }
+
+  // «Вовлечённость» — БЕЗ искры, и это гейт, а не упущение. ER = вовлечение ÷ аудитория, а
+  // аудитория за окно меняется на проценты против десятков раз у вовлечения, поэтому
+  // нормализованная по min–max кривая ER повторяла кривую «Реакций» почти в точности (замер на
+  // проде: корреляция 0.996). С 2026-08-14 карточка — центрированный стат (референс владельца);
+  // формула-пояснение остаётся её нижней строкой.
+  {
+    const er = page.getByRole('heading', { name: 'Вовлечённость', exact: true }).locator('xpath=ancestor::section[1]');
+    await expect(er.locator('svg[data-chart-kind="sparkline"]')).toHaveCount(0);
+    await expect(er.getByText(/Реакции, репосты и комментарии/)).toBeVisible();
+  }
+
+  // Пилюля текущей (последней) метки оси X (владелец, 2026-08-14) — на оси спарка hero-карточки.
+  {
+    const hero = page.getByRole('heading', { name: 'Просмотры', exact: true }).locator('xpath=ancestor::section[1]');
+    await expect(hero.locator('[data-axis-current]').first()).toBeVisible();
   }
 
   const compactTop = await page.getByRole('heading', { name: 'Ср. охват', exact: true }).evaluate((el) => el.closest('section')!.getBoundingClientRect().top);
@@ -155,19 +178,44 @@ test('desktop Instagram Overview keeps the split KPI hierarchy intact', async ({
     await expect(page.getByRole('heading', { name: heading, exact: true })).toBeVisible();
   }
   const audienceSection = page.getByRole('heading', { name: 'Динамика аудитории', exact: true }).locator('xpath=ancestor::section[1]');
-  await expect(audienceSection.getByText('по дням')).toBeVisible();
+  // Idle-подпись «по дням» убрана (владелец, 2026-07-27); сам спарклайн уровня базы остаётся.
+  await expect(audienceSection.getByText('по дням')).toHaveCount(0);
+  await expect(audienceSection.locator('svg[data-chart-kind="sparkline"]')).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Неделя аккаунта' })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Главное изменение' })).toBeVisible();
+  // Соседняя карточка держит два сильнейших инсайта строками во всю высоту тайла (было: один
+  // буллет под заголовком «Главное изменение», две трети пустовали).
+  await expect(page.getByRole('heading', { name: 'Главное', exact: true })).toBeVisible();
+  // Гейт «нет внутренних скроллов» меряется ДО скролла ниже: тела карточек грузятся по appearance,
+  // и прокрутка добудила бы нижние — гейт стал бы мерить другую доску, чем на всех прогонах раньше.
   expect(await overflowingCards(page)).toEqual([]);
+  const igWeekSection = page.getByRole('heading', { name: 'Неделя аккаунта' }).locator('xpath=ancestor::section[1]');
+  // Скролл обязателен: на узких вьюпортах карточка стоит ниже экрана и её тело ещё скелетон —
+  // без этого проверялся бы он, а не леджер. Сам леджер виден ВСЕГДА: до правки факты жили правой
+  // колонкой под гейтом 2xl, то есть на 1440px их не было вовсе.
+  await igWeekSection.scrollIntoViewIfNeeded();
+  await expect(igWeekSection.getByText('Пик охвата')).toBeVisible();
 
-  // The three third-width IG cards (Просмотры / Взаимодействия / Вовлечённость) now carry an
-  // active-window sparkline over the CANONICAL account daily series — its «по дням» caption renders
-  // and the old previous-period empty copy is gone (the chart never depends on prior-window coverage).
-  for (const card of ['Просмотры', 'Взаимодействия', 'Вовлечённость']) {
+  // Просмотры / Взаимодействия carry an active-window chart over the CANONICAL account daily
+  // series — the old previous-period empty copy is gone (the chart never depends on prior-window
+  // coverage).
+  for (const card of ['Просмотры', 'Взаимодействия']) {
     const section = page.getByRole('heading', { name: card, exact: true }).locator('xpath=ancestor::section[1]');
-    await expect(section.getByText('по дням')).toBeVisible();
+    // Idle-подпись «по дням» убрана (владелец, 2026-07-27); график остаётся.
+    await expect(section.getByText('по дням')).toHaveCount(0);
+    // «Взаимодействия» — счётный поток, ведёт столбцами (#461); «Просмотры» — искрой.
+    const kind = card === 'Взаимодействия' ? 'bar' : 'sparkline';
+    await expect(section.locator(`svg[data-chart-kind="${kind}"]`)).toBeVisible();
     await expect(section.getByText('Нет данных за предыдущий период для сравнения.')).toHaveCount(0);
     await expect(section.getByText('Недостаточно дневных данных для графика.')).toHaveCount(0);
+  }
+
+  // «Вовлечённость» — центрированный стат БЕЗ графика (владелец, 2026-08-14; зеркало TG-гейта):
+  // процент по центру, под ним сравнение с прошлым периодом, дневной ER остаётся на /metrics/ig-er.
+  {
+    const er = page.getByRole('heading', { name: 'Вовлечённость', exact: true }).locator('xpath=ancestor::section[1]');
+    await expect(er.locator('svg[data-chart-kind="sparkline"]')).toHaveCount(0);
+    await expect(er.locator('svg[data-chart-kind="bar"]')).toHaveCount(0);
+    await expect(er.getByText('Взаимодействия к охвату аккаунта за период.')).toBeVisible();
   }
 
   const compactTop = await page.getByRole('heading', { name: 'Просмотры', exact: true }).evaluate((el) => el.closest('section')!.getBoundingClientRect().top);

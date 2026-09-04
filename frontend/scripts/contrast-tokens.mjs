@@ -10,7 +10,21 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
-const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'index.css'), 'utf8');
+const srcDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'src');
+const css = readFileSync(join(srcDir, 'index.css'), 'utf8');
+
+// Призрачные столбцы «прошлого периода» рисуются НЕ токеном, а токеном под альфой, которая живёт
+// константой в BarChart.tsx. Хардкодить её копию здесь бесполезно — гейт зеленел бы вхолостую,
+// пока код уезжает (ровно так /0.35 и /0.5 годами не проверялись). Поэтому альфа читается ИЗ
+// КОДА: рассинхрон кода и гейта физически невозможен, а понижение альфы ниже non-text 3.0 роняет
+// прогон.
+const barChartSrc = readFileSync(join(srcDir, 'components', 'BarChart.tsx'), 'utf8');
+const ghostAlphaMatch = barChartSrc.match(/const GHOST_ALPHA = ([\d.]+);/);
+if (!ghostAlphaMatch) {
+  console.error('contrast-tokens: GHOST_ALPHA не найдена в src/components/BarChart.tsx — гейт призрачных столбцов потерян');
+  process.exit(1);
+}
+const GHOST_ALPHA = Number(ghostAlphaMatch[1]);
 
 /** Extract `--name: H S% L%;` tokens from a css block (first block matching `selector`). */
 function palette(selectorRe) {
@@ -120,16 +134,25 @@ const PAIRS = [
   ['cat 6 slice on card', 'chart-6-cat', 'card', 3.0, 'stroke'],
 
   // Semantic chart SERIES roles (index.css --chart-role-*, resolved from their var() aliases above).
-  // Non-text 3.0 (WCAG 1.4.11) on the surfaces charts paint on; comparison also at its dashed 0.8.
+  // Non-text 3.0 (WCAG 1.4.11) on the surfaces charts paint on. Призрак прошлого периода рисуется
+  // под альфой в ОБОИХ хостах: линия — strokeOpacity 0.8 (LineChart/MorphingSeries), столбцы —
+  // GHOST_FILL (BarChart, альфа читается из кода выше). Обе подачи держат одну планку 3.0.
   ['chart role: primary on card', 'chart-role-primary', 'card', 3.0, 'stroke'],
   ['chart role: primary on canvas', 'chart-role-primary', 'background', 3.0, 'stroke'],
   ['chart role: comparison on card', 'chart-role-comparison', 'card', 3.0, 'stroke'],
-  ['chart role: comparison ghost @0.8 on card', 'chart-role-comparison', 'card', 3.0, 'stroke', 0.8],
+  ['chart role: comparison dashed line @0.8 on card', 'chart-role-comparison', 'card', 3.0, 'stroke', 0.8],
+  [`ghost bar fill (BarChart GHOST_ALPHA ${GHOST_ALPHA}) on card`, 'chart-role-comparison', 'card', 3.0, 'stroke', GHOST_ALPHA],
+  [`ghost bar fill (BarChart GHOST_ALPHA ${GHOST_ALPHA}) on canvas`, 'chart-role-comparison', 'background', 3.0, 'stroke', GHOST_ALPHA],
   ['chart role: positive on card', 'chart-role-positive', 'card', 3.0, 'stroke'],
   ['chart role: negative on card', 'chart-role-negative', 'card', 3.0, 'stroke'],
   ['chart role: warning on card', 'chart-role-warning', 'card', 3.0, 'stroke'],
   ['chart role: neutral on card', 'chart-role-neutral', 'card', 3.0, 'stroke'],
   ['chart role: selection on card', 'chart-role-selection', 'card', 3.0, 'stroke'],
+
+  // Слот стори-карточки (--accent-card): акцент карточки, который объявил ХОСТ и которого
+  // пользователь не выбирал. В каноне это алиас --chart-1-accent, но токен отдельный — студия
+  // оформления его перекрашивает, поэтому пара проверяется своим именем.
+  ['story card accent on card', 'accent-card', 'card', 3.0, 'stroke'],
 
   ['hairline on card', 'border', 'card', 3.0, 'border'],
   ['hairline on canvas', 'border', 'background', 3.0, 'border'],
@@ -158,6 +181,18 @@ for (const [themeName, tokens] of [
     const mark = pass ? 'ok  ' : hard ? 'FAIL' : 'warn';
     console.log(`  ${mark}  ${r.toFixed(2).padStart(5)} (need ${target})  ${label}${kind === 'border' ? ' [decorative]' : ''}`);
   }
+
+  // Selected chips use a 10% primary wash over the page canvas. `primary` itself is intentionally
+  // the brighter link/accent token and misses AA on that tinted field in the light palette, so
+  // selected-state labels must use the deeper `accent-foreground` token. Keep the composite in the
+  // token gate: axe catches rendered examples, while this check protects every shared chip recipe.
+  const primaryTint = over(hslToRgb(tokens.primary), hslToRgb(tokens.background), 0.1);
+  const selectedChipRatio = ratio(hslToRgb(tokens['accent-foreground']), primaryTint);
+  const selectedChipPass = selectedChipRatio >= 4.5;
+  if (!selectedChipPass) failures++;
+  console.log(
+    `  ${selectedChipPass ? 'ok  ' : 'FAIL'}  ${selectedChipRatio.toFixed(2).padStart(5)} (need 4.5)  selected chip text on primary 10% tint`,
+  );
 }
 
 // Dark widget-accent surfaces: an accented card's hero number and line share the accent token,
@@ -194,6 +229,31 @@ for (let n = 1; n <= 6; n++) {
     const pass = r >= target;
     if (!pass) failures++;
     console.log(`  ${pass ? 'ok  ' : 'FAIL'}  ${r.toFixed(2).padStart(5)} (need ${target})  ${label}`);
+  }
+}
+
+// Тональная подложка стори-карточки — та же арифметика, что и у пронумерованных акцентов выше,
+// но по отдельному слоту: число и подпись на подложке, замешанной из --accent-card-deep.
+console.log('\n=== dark · story card accent ===');
+{
+  const acc = dark['accent-card'];
+  const deep = dark['accent-card-deep'];
+  if (!acc || !deep) {
+    console.log('  ?     accent-card — token missing');
+    failures++;
+  } else {
+    const cardRgb = hslToRgb(dark.card);
+    const tonal = over(hslToRgb(deep), cardRgb, 0.26);
+    for (const [label, ink, bg, target] of [
+      ['story number on tonal surface', hslToRgb(acc), tonal, 4.5],
+      ['story number on card', hslToRgb(acc), cardRgb, 4.5],
+      ['muted caption on story tonal', hslToRgb([240, 6, 84]), tonal, 4.5],
+    ]) {
+      const r = ratio(ink, bg);
+      const pass = r >= target;
+      if (!pass) failures++;
+      console.log(`  ${pass ? 'ok  ' : 'FAIL'}  ${r.toFixed(2).padStart(5)} (need ${target})  ${label}`);
+    }
   }
 }
 

@@ -1,43 +1,45 @@
-import { useCallback, useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
+import { ChevronDown, ListFilter } from 'lucide-react';
+import { toast } from 'sonner';
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
 
 import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { PeriodChips } from '@/components/PeriodChips';
+import { SearchField } from '@/components/SearchField';
 import { SourceIdentity } from '@/components/SourceIdentity';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
+import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { TableSkeleton } from '@/components/ui/dataSkeleton';
 import { Skeleton } from '@/components/ui/skeleton';
 import { fmt } from '@/lib/format';
+import { formatMoney } from '@/lib/metricNumber';
 import { useExplorerChartHeight } from '@/lib/useExplorerChartHeight';
 import { usePeriod, type DateRange, type PeriodDays } from '@/lib/period';
+import { useSelectedChannel } from '@/lib/channel-context';
+import {
+  msChannelFilterKey,
+  normalizeMsChannelFilter,
+  sameMsChannelFilter,
+} from '@/lib/msChannelFilter';
 import { msPreviousPeriod, useMsResolvedPeriod, type MsPeriod } from '@/lib/msPeriod';
 import { metricTotal, type Grain, type Metric } from '@/lib/msSeries';
 import { customerMetricTotal, type MsCustomerMetric } from '@/lib/msCustomerSeries';
 import type { MsChannelContributionMetric } from '@/lib/msChannelContribution';
 import { MS_COHORT_MODES, type MsCohortMode } from '@/lib/msCohortMode';
 import {
+  MS_CHANNEL_SELECTION_LIMIT,
   applyMsMetricChannels,
   applyMsMetricEnum,
   parseMsMetricUrl,
   type MsMetricUrlSchema,
 } from '@/lib/msMetricUrlState';
-import {
-  useMsChannelSeries,
-  useMsCustomers,
-  useMsFunnel,
-  useMsGeography,
-  useMsReturns,
-  useMsRfm,
-  useMsSalesByChannel,
-  useMsSummary,
-  useMsTopCustomers,
-  useMsCohorts,
-  type MsProductSort,
-} from '@/api/queries';
+import { setSavedFilter, useSavedFilter } from '@/lib/widgetPrefsStore';
+import { useMsChannelSeries, useMsCustomers, useMsFunnel, useMsGeography, useMsReturns, useMsRfm, useMsSalesByChannel, useMsSummary, useMsTopCustomers, useMsCohorts, type MsProductSort } from '@/api/ms';
 import {
   MsSummaryExplorer,
   MsFunnelRows,
@@ -73,7 +75,7 @@ import {
 } from '@/panels/sklad/MsTopProducts';
 import { MsStockTable, STOCK_SORT_OPTIONS, type MsStockSort } from '@/panels/sklad/MsStock';
 import { isMsMetricKey } from '@/panels/sklad/msMetricKeys';
-import { AboutRow, ComparisonDeltaRow, MetricBackLink, MetricColumns, MetricDescriptor, WindowBarShell, RailSection } from '@/components/metric/shared';
+import { ComparisonDeltaRow, MetricColumns, MetricDescriptor, WindowBarShell, RailSection, MetricPageHeader} from '@/components/metric/shared';
 
 /**
  * Полностраничные метрики МойСклада — `/metrics/ms-*`. Каждая раскрываемая карточка Обзора/Клиентов/
@@ -91,11 +93,6 @@ export function MsMetricPage({ metricKey }: { metricKey: string }) {
           metric="revenue"
           term="Выручка"
           descriptor="Продажи МойСклада за выбранное окно"
-          about={{
-            formula: 'Сумма продаж по дням; бакет недели/месяца — сумма за бакет.',
-            included: 'Возвраты считаются отдельно и из выручки не вычитаются.',
-            source: 'Отчёт продаж МойСклада (plotseries) + дневной архив ms_daily.',
-          }}
         />
       );
     case 'ms-orders':
@@ -104,10 +101,6 @@ export function MsMetricPage({ metricKey }: { metricKey: string }) {
           metric="orders"
           term="Заказы"
           descriptor="Число заказов МойСклада за выбранное окно"
-          about={{
-            formula: 'Число заказов по дням; бакет недели/месяца — сумма заказов за бакет.',
-            source: 'Заказы МойСклада (ms_orders) + дневной архив ms_daily.',
-          }}
         />
       );
     case 'ms-aov':
@@ -116,11 +109,6 @@ export function MsMetricPage({ metricKey }: { metricKey: string }) {
           metric="aov"
           term="Средний чек"
           descriptor="Средний чек МойСклада за выбранное окно"
-          about={{
-            formula:
-              'Σ суммы заказов ÷ Σ числа заказов за бакет (не среднее дневных чеков). В период без заказов не определён.',
-            source: 'Заказы МойСклада (ms_orders) + дневной архив ms_daily.',
-          }}
         />
       );
     case 'ms-customers':
@@ -246,7 +234,13 @@ function useMsMetricUrlControls(schema: MsMetricUrlSchema) {
     setParams((prev) => applyMsMetricChannels(prev, ids), { replace: true });
   }, [setParams]);
 
-  return { values: parsed.values, channels: parsed.channels, setEnum, setChannels };
+  return {
+    values: parsed.values,
+    channels: parsed.channels,
+    hasChannelsParam: schema.channels === true && params.has('channels'),
+    setEnum,
+    setChannels,
+  };
 }
 
 // ── Shared shell ─────────────────────────────────────────────────────────────────────────────
@@ -256,31 +250,27 @@ const BACK_OVERVIEW: Back = { to: '/sklad', label: 'МойСклад · Обзо
 const BACK_CLIENTS: Back = { to: '/sklad/clients', label: 'МойСклад · Клиенты' };
 const BACK_CHANNELS: Back = { to: '/sklad/channels', label: 'МойСклад · Каналы' };
 
-interface AboutDef {
-  formula: string;
-  included?: string;
-  source: string;
-}
 
 /** Тихая шапка + две колонки (главный блок + rail «О метрике»), как у `/metrics/ig-reach`. */
 function MsMetricShell({
   back,
   term,
   descriptor,
-  about,
   comparison,
+  tools,
   children,
 }: {
   back: Back;
   term: string;
   descriptor?: string;
-  about: AboutDef;
   comparison?: ReactNode;
+  /** Optional explorer controls: above the chart on phone, first in the right rail on desktop. */
+  tools?: ReactNode;
   children: ReactNode;
 }) {
   return (
     <div className="space-y-5">
-      <MetricBackLink to={back.to}>{back.label}</MetricBackLink>
+      <MetricPageHeader back={back} />
 
       <div>
         <h1 className="text-2xl font-medium tracking-tight text-foreground">{term}</h1>
@@ -288,9 +278,12 @@ function MsMetricShell({
         {descriptor && <MetricDescriptor>{descriptor}</MetricDescriptor>}
       </div>
 
+      {tools && <div className="lg:hidden">{tools}</div>}
+
       <MetricColumns
         rail={
           <>
+            {tools && <div className="hidden lg:block">{tools}</div>}
             <RailSection title="Сравнение">
               {comparison ?? (
                 <p className="text-xs leading-relaxed text-muted-foreground">
@@ -298,13 +291,7 @@ function MsMetricShell({
                 </p>
               )}
             </RailSection>
-            <RailSection title="О метрике">
-              <dl className="space-y-3 text-sm">
-                <AboutRow label="Как считается" text={about.formula} />
-                {about.included && <AboutRow label="Что учитывается" text={about.included} />}
-                <AboutRow label="Источник" text={about.source} />
-              </dl>
-            </RailSection>
+            {/* «О метрике» убран — техническая информация не для конечного пользователя (владелец). */}
             <Link
               to={back.to}
               className="inline-flex items-center gap-1 text-xs font-medium text-primary transition-colors hover:text-primary/80"
@@ -494,12 +481,10 @@ function MsSummaryPage({
   metric,
   term,
   descriptor,
-  about,
 }: {
   metric: Metric;
   term: string;
   descriptor: string;
-  about: AboutDef;
 }) {
   const window = useMsMetricWindow();
   const controls = useMsMetricUrlControls(SUMMARY_URL);
@@ -515,13 +500,12 @@ function MsSummaryPage({
     if (metric === 'orders') return data.orders.totalCount;
     return data.orders.totalCount > 0 ? data.orders.totalSum / data.orders.totalCount : null;
   };
-  const format = (value: number) => metric === 'orders' ? fmt.num(value) : `${fmt.short(value)} ₽`;
+  const format = (value: number) => metric === 'orders' ? fmt.num(value) : `${formatMoney(value, 'axis')}`;
   return (
     <MsMetricShell
       back={BACK_OVERVIEW}
       term={term}
       descriptor={descriptor}
-      about={about}
       comparison={
         <ComparisonReadout
           current={valueOf(current.data)}
@@ -585,18 +569,12 @@ function MsCustomerPage({
   const previous = useMsCustomers(comparisonPeriod ?? window.period);
   const valueOf = (data: typeof current.data) => data ? customerMetricTotal(data.series, metric).value : null;
   const format = (value: number) =>
-    metric === 'orders' ? fmt.num(value) : metric === 'revenue' ? `${fmt.short(value)} ₽` : `${value.toFixed(1)}%`;
+    metric === 'orders' ? fmt.num(value) : metric === 'revenue' ? `${formatMoney(value, 'axis')}` : `${value.toFixed(1)}%`;
   return (
     <MsMetricShell
       back={BACK_CLIENTS}
       term={term}
       descriptor={descriptor}
-      about={{
-        formula:
-          '«Новый» = первый заказ контрагента за всю историю канала; «повторный» — последующие. Доля повторной выручки = Σ повторной выручки ÷ Σ общей выручки.',
-        included: 'Заказы без контрагента не учитываются — некому приписать повторность.',
-        source: 'Архив заказов МойСклада (ms_orders).',
-      }}
       comparison={
         <ComparisonReadout
           current={valueOf(current.data)}
@@ -641,6 +619,7 @@ function MsCustomerPage({
 
 function MsChannelsPage() {
   const window = useMsMetricWindow();
+  const { channelId } = useSelectedChannel();
   const controls = useMsMetricUrlControls(CHANNELS_URL);
   const grain = controls.values.grain as Grain;
   const requestedKind = controls.values.chart as 'line' | 'bar';
@@ -648,6 +627,13 @@ function MsChannelsPage() {
   const view = controls.values.view as View;
   const compare = controls.values.compare as 'off' | 'prev';
   const selected = controls.channels;
+  const savedFilterKey = msChannelFilterKey(channelId);
+  const rawSavedFilter = useSavedFilter(savedFilterKey);
+  const savedFilter = useMemo(
+    () => normalizeMsChannelFilter(rawSavedFilter),
+    [rawSavedFilter],
+  );
+  const seededFilterKey = useRef<string | null>(null);
   const comparisonPeriod = compare === 'prev' ? window.previousPeriod : null;
   const channels = useMsSalesByChannel(window.period);
   const options: ChannelOption[] = useMemo(() => (channels.data?.rows ?? []).map((r) => ({
@@ -668,7 +654,25 @@ function MsChannelsPage() {
   const currentSeries = useMsChannelSeries(window.period, { channels: selected, breakdown: false });
   const previousSeries = useMsChannelSeries(comparisonPeriod ?? window.period, { channels: selected, breakdown: false });
   const valueOf = (data: typeof currentSeries.data) => data ? metricTotal(data.series, metric) : null;
-  const format = (value: number) => metric === 'orders' ? fmt.num(value) : `${fmt.short(value)} ₽`;
+  const format = (value: number) => metric === 'orders' ? fmt.num(value) : `${formatMoney(value, 'axis')}`;
+
+  // A normal drill from the compact card has no channels query: seed it once from the account-saved
+  // filter. An explicit deep link always wins and stays a preview until the user presses «Сохранить».
+  useEffect(() => {
+    if (seededFilterKey.current === savedFilterKey) return;
+    if (controls.hasChannelsParam) {
+      seededFilterKey.current = savedFilterKey;
+      return;
+    }
+    if (savedFilter.length === 0) return;
+    seededFilterKey.current = savedFilterKey;
+    controls.setChannels(savedFilter);
+  }, [
+    controls.hasChannelsParam,
+    controls.setChannels,
+    savedFilter,
+    savedFilterKey,
+  ]);
 
   // A multi-series breakdown is line-only. Direct incompatible links become canonical before the
   // user can share them; rendering is already line-only on the first frame.
@@ -681,16 +685,24 @@ function MsChannelsPage() {
   // Мультисерийные столбцы на 6×140 значений — нечитаемый частокол: в breakdown оставляем только
   // линии и прячем переключатель типа (как и в прежнем оверлее).
   const allowKind = !breakdown;
+  const filterEditor = (
+    <MsChannelFilterDisclosure
+      options={selectableOptions}
+      selected={selected}
+      saved={savedFilter}
+      onChange={controls.setChannels}
+      onSave={(ids) => {
+        setSavedFilter(savedFilterKey, normalizeMsChannelFilter(ids));
+        toast(ids.length > 0 ? 'Фильтр каналов сохранён' : 'Фильтр сброшен: все каналы');
+      }}
+    />
+  );
   return (
     <MsMetricShell
       back={BACK_CHANNELS}
       term="Каналы продаж"
       descriptor="Динамика по каналам продаж за выбранное окно"
-      about={{
-        formula:
-          'Выручка / заказы / средний чек по каналу продаж заказа. Пустой фильтр — все каналы в агрегате; мультивыбор агрегирует выбранные; разбивка рисует до 6 каналов отдельными сериями.',
-        source: 'Заказы МойСклада с salesChannel + дневной архив ms_daily.',
-      }}
+      tools={filterEditor}
       comparison={
         <ComparisonReadout
           current={valueOf(currentSeries.data)}
@@ -731,15 +743,147 @@ function MsChannelsPage() {
                 onMetric={(value) => controls.setEnum('metric', value)}
                 view={view}
                 onView={(value) => controls.setEnum('view', value)}
-                options={selectableOptions}
-                selected={selected}
-                onSelected={controls.setChannels}
               />
             }
           />
         }
       />
     </MsMetricShell>
+  );
+}
+
+function MsChannelFilterDisclosure({
+  options,
+  selected,
+  saved,
+  onChange,
+  onSave,
+}: {
+  options: ChannelOption[];
+  selected: string[];
+  saved: string[];
+  onChange: (ids: string[]) => void;
+  onSave: (ids: string[]) => void;
+}) {
+  const [query, setQuery] = useState('');
+  // Match the explorer rail: an active filter is visible through its count, but does not push the
+  // chart below the fold every time the page opens (especially on the single-column mobile shell).
+  const [expanded, setExpanded] = useState(false);
+  const idPrefix = useId();
+  const normalizedQuery = query.trim().toLocaleLowerCase('ru-RU');
+  const visibleOptions = normalizedQuery
+    ? options.filter((option) => option.name.toLocaleLowerCase('ru-RU').includes(normalizedQuery))
+    : options;
+  const dirty = !sameMsChannelFilter(selected, saved);
+  const atLimit = selected.length >= MS_CHANNEL_SELECTION_LIMIT;
+
+  const toggle = (id: string) => {
+    if (selected.includes(id)) {
+      onChange(selected.filter((candidate) => candidate !== id));
+      return;
+    }
+    if (!atLimit) onChange([...selected, id]);
+  };
+
+  return (
+    <details
+      className="group/filter border-y border-border bg-background/40 lg:border-t-0"
+      open={expanded}
+      onToggle={(event) => setExpanded(event.currentTarget.open)}
+      data-testid="ms-channel-filter"
+    >
+      <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 py-2 text-sm font-medium text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring/50 [&::-webkit-details-marker]:hidden">
+        <ListFilter aria-hidden="true" className="size-4 text-muted-foreground" />
+        <span>Фильтр</span>
+        {selected.length > 0 && (
+          <span className="rounded-full bg-accent px-1.5 py-0.5 text-2xs tabular-nums text-accent-foreground">
+            {selected.length}
+          </span>
+        )}
+        {dirty && <span className="ml-auto text-2xs font-normal text-muted-foreground">Не сохранено</span>}
+        <ChevronDown
+          aria-hidden="true"
+          className="ml-auto size-4 text-muted-foreground transition-transform group-open/filter:rotate-180"
+        />
+      </summary>
+
+      <fieldset className="m-0 space-y-3 border-0 pb-4 pt-2">
+        <legend className="sr-only">Каналы продаж</legend>
+        <SearchField
+          value={query}
+          onChange={setQuery}
+          ariaLabel="Поиск каналов продаж"
+          placeholder="Найти канал"
+          resultsLabel={`${visibleOptions.length} из ${options.length} каналов`}
+          className="[&_input]:h-9"
+        />
+
+        <div className="flex items-center justify-between gap-3 text-2xs text-muted-foreground">
+          <span aria-live="polite">
+            {selected.length === 0
+              ? 'Все каналы'
+              : `${selected.length} из ${MS_CHANNEL_SELECTION_LIMIT}`}
+          </span>
+          {selected.length > 0 && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="xs"
+              onClick={() => onChange([])}
+              className="h-8 px-2 text-2xs"
+            >
+              Выбрать все
+            </Button>
+          )}
+        </div>
+
+        <div className="max-h-64 space-y-0.5 overflow-y-auto overscroll-contain pr-1">
+          {visibleOptions.map((option, index) => {
+            const checked = selected.includes(option.id);
+            const optionId = `${idPrefix}-${index}`;
+            return (
+              <div
+                key={option.id}
+                className="flex min-h-11 items-center gap-2 rounded-lg px-2 transition-colors hover:bg-foreground/6"
+              >
+                <Checkbox
+                  id={optionId}
+                  checked={checked}
+                  disabled={!checked && atLimit}
+                  onCheckedChange={() => toggle(option.id)}
+                />
+                <label
+                  htmlFor={optionId}
+                  className="min-w-0 flex-1 cursor-pointer truncate text-xs text-foreground"
+                  title={option.name}
+                >
+                  {option.name}
+                </label>
+              </div>
+            );
+          })}
+          {visibleOptions.length === 0 && (
+            <p className="px-2 py-6 text-center text-xs text-muted-foreground">
+              Каналы не найдены
+            </p>
+          )}
+        </div>
+
+        <div className="flex items-center justify-between gap-3 border-t border-border pt-3">
+          <span className="text-2xs text-muted-foreground">
+            {saved.length === 0 ? 'Сохранено: все' : `Сохранено: ${saved.length}`}
+          </span>
+          <Button
+            type="button"
+            size="sm"
+            disabled={!dirty}
+            onClick={() => onSave(selected)}
+          >
+            Сохранить
+          </Button>
+        </div>
+      </fieldset>
+    </details>
   );
 }
 
@@ -780,16 +924,12 @@ function MsFunnelPage() {
     return data.rows.reduce((sum, row) => sum + (metric === 'orders' ? row.orders : row.sum), 0)
       + (metric === 'orders' ? data.no_state_orders : data.no_state_sum);
   };
-  const format = (value: number) => metric === 'orders' ? fmt.num(value) : `${fmt.short(value)} ₽`;
+  const format = (value: number) => metric === 'orders' ? fmt.num(value) : `${formatMoney(value, 'axis')}`;
   return (
     <MsMetricShell
       back={BACK_OVERVIEW}
       term="Структура заказов по статусам"
       descriptor="Заказы, созданные в выбранном окне, по последнему сохранённому статусу"
-      about={{
-        formula: 'Заказы, созданные в выбранном окне, сгруппированы по последнему статусу, полученному при обновлении истории. Переключатель показывает число заказов или их выручку. Это не история переходов, не конверсия и не порядок этапов.',
-        source: 'Заказы МойСклада (ms_orders, state_id).',
-      }}
       comparison={
         <ComparisonReadout
           current={valueOf(funnel.data)}
@@ -866,13 +1006,6 @@ function MsProductsPage() {
           периодом. Для окна «Всё» сопоставимого предыдущего периода нет.
         </p>
       }
-      about={{
-        formula:
-          'Концентрация — доля топ-N в положительной выручке или валовой прибыли (знаменатель по полному отчёту до limit). Рейтинг — сортировка по выручке / прибыли / марже. Динамика сравнивает окно с предыдущим равным по выручке / валовой прибыли / штукам.',
-        included:
-          'Маржа определена только при положительной выручке; убыточные позиции показаны отдельно. Динамика доказывает лишь наличие/отсутствие продаж в окнах; для «Всё» предыдущего равного окна нет. Возвраты не вычитаются.',
-        source: 'Отчёт по товарам МойСклада (profit).',
-      }}
     >
       <MsReportCard id="ms-page-products" title="Отчёт по товарам">
         <MsTopProductsCard
@@ -908,13 +1041,6 @@ function MsStockPage() {
       back={BACK_OVERVIEW}
       term="Остатки"
       descriptor="Что заканчивается: остатки склада и дни до нуля по скорости продаж окна"
-      about={{
-        formula:
-          '«~Дней до нуля» = остаток ÷ средняя дневная скорость продаж выбранного окна (продано за окно ÷ дней в окне). Резерв из остатка не вычитается — показан отдельной колонкой.',
-        included:
-          'Товар без продаж за окно получает «нет продаж» — прогноз для него не определён. Окно «Всё» недоступно: скорости нужен конечный знаменатель, выбор переводится в 30 дн. Показаны первые 200 позиций по срочности.',
-        source: 'Живой отчёт остатков МойСклада (stock/all) + отчёт продаж по товарам (profit).',
-      }}
       comparison={
         <p className="text-xs leading-relaxed text-muted-foreground">
           Остатки — живой снимок склада на сейчас; окно задаёт только скорость продаж, поэтому
@@ -961,11 +1087,6 @@ function MsReturnsPage() {
       back={BACK_OVERVIEW}
       term="Возвраты"
       descriptor="Возвраты МойСклада за выбранное окно"
-      about={{
-        formula: 'Число и сумма возвратов (salesreturn), созданных в выбранном окне, дневной серией из архива.',
-        included: 'Возвраты считаются отдельно и из выручки/RFM заказов НЕ вычитаются.',
-        source: 'Архив возвратов МойСклада (ms_returns).',
-      }}
       comparison={
         <ComparisonReadout
           current={valueOf(current.data)}
@@ -1027,18 +1148,12 @@ function MsSalesChannelsPage() {
     ? data.rows.reduce((sum, row) => sum + (metric === 'revenue' ? row.sum : row.orders),
         metric === 'revenue' ? data.no_channel_sum : data.no_channel_orders)
     : null;
-  const format = (value: number) => metric === 'revenue' ? `${fmt.short(value)} ₽` : fmt.num(value);
+  const format = (value: number) => metric === 'revenue' ? `${formatMoney(value, 'axis')}` : fmt.num(value);
   return (
     <MsMetricShell
       back={BACK_CHANNELS}
       term="Продажи по каналам"
       descriptor="Доля каждого канала и его абсолютный вклад в изменение выручки или заказов"
-      about={{
-        formula:
-          'Доля канала = его выручка или заказы ÷ общий результат окна, включая заказы без канала. Вклад в изменение — знаковая абсолютная разница канала против равного предыдущего окна; положительные и отрицательные изменения в сумме дают общее изменение.',
-        included: 'Заказы без канала — отдельная синтетическая строка «Без канала», а не сноска. Для окна «Всё» предыдущего равного периода нет — изменение не рассчитывается.',
-        source: 'Заказы МойСклада с salesChannel.',
-      }}
       comparison={
         <ComparisonReadout
           current={totalOf(channels.data)}
@@ -1123,10 +1238,6 @@ function MsGeographyPage() {
       back={BACK_CHANNELS}
       term="География заказов"
       descriptor="Города доставки за выбранное окно"
-      about={{
-        formula: 'Города доставки по числу заказов и сумме; самовывоз / без города вынесен отдельно.',
-        source: 'Адрес доставки заказов МойСклада (ms_orders).',
-      }}
       comparison={
         <ComparisonReadout
           current={geo.data?.total_orders ?? null}
@@ -1178,16 +1289,11 @@ function MsTopCustomersPage() {
       back={BACK_CLIENTS}
       term="Топ покупателей"
       descriptor="Контрагенты окна по сумме заказов"
-      about={{
-        formula: 'Контрагенты окна по сумме заказов; имена резолвит справочник counterparty по id.',
-        included: 'Удалённый / безымянный контрагент показывается заглушкой, а не выпадает из топа.',
-        source: 'Архив заказов МойСклада (ms_orders) + справочник counterparty.',
-      }}
       comparison={
         <ComparisonReadout
           current={sumOf(topCustomers.data)}
           previous={comparisonPeriod ? sumOf(previous.data) : null}
-          format={(value) => `${fmt.short(value)} ₽`}
+          format={(value) => `${formatMoney(value, 'axis')}`}
           previousPeriod={window.previousPeriod}
           pending={topCustomers.isPending || (comparisonPeriod != null && previous.isPending)}
           error={topCustomers.isError || (comparisonPeriod != null && previous.isError)}
@@ -1220,13 +1326,6 @@ function MsRfmPage() {
       back={BACK_CLIENTS}
       term="RFM-сегменты"
       descriptor="Относительная ценность и активность покупателей выбранного окна"
-      about={{
-        formula:
-          'R — календарные дни от последнего заказа до конца окна; F — число заказов; M — сумма заказов. Для каждой величины покупатели получают относительный score 1–5 по mid-rank: одинаковые значения всегда получают одинаковую оценку, а полностью одинаковая выборка — нейтральную 3.',
-        included:
-          'Только контрагенты с заказом в выбранном окне. Заказы без контрагента показаны отдельно. Возвраты не вычитаются: их архив и семантика выпускаются отдельной метрикой.',
-        source: 'Архив заказов МойСклада (ms_orders); расчёт на точную дату конца выбранного окна.',
-      }}
       comparison={
         <ComparisonReadout
           current={rfm.data?.customers ?? null}
@@ -1289,12 +1388,6 @@ function MsCohortsPage() {
       back={BACK_CLIENTS}
       term="Когорты"
       descriptor="Возвращаемость и монетизация по месяцу первой покупки"
-      about={{
-        formula: meta.formula,
-        included:
-          'Все режимы нормированы на исходный размер когорты, поэтому когорты разного размера сравнимы. Будущие месяцы когорты — пустые (данных ещё нет), а не ноль.',
-        source: 'Архив заказов МойСклада (ms_orders); суммы в рублях, возвраты не вычитаются.',
-      }}
     >
       <MsReportCard
         id="ms-page-cohorts"

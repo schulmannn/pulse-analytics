@@ -1,7 +1,9 @@
 # Atlavue
 
-Atlavue — дашборд аналитики Telegram и Instagram для авторов и команд: метрики аккаунтов и
-публикаций, кампании из нескольких источников, отчёты и настраиваемая Главная.
+Atlavue — дашборд мульти-источниковой аналитики для авторов и команд: метрики аккаунтов,
+публикаций и заказов, кампании из нескольких источников, отчёты и настраиваемая Главная.
+Подключённых источников шесть: Telegram, Instagram, МойСклад, Яндекс.Метрика, СДЭК Fulfillment
+и Rusender.
 
 Текущее состояние, принятые решения и ближайшая очередь поддерживаются в
 [`PROJECT_MEMORY.md`](PROJECT_MEMORY.md). Правила для worker-агентов находятся в
@@ -10,7 +12,7 @@ Atlavue — дашборд аналитики Telegram и Instagram для ав�
 ## Архитектура
 
 ```text
-frontend/            React 18 + Vite + TypeScript strict, TanStack Query, Zod, Tailwind
+frontend/            React 19 + Vite + TypeScript strict, TanStack Query, Zod, Tailwind
 server/              Node.js/Express: config -> app -> composition -> main
 server/migrations/   forward-only SQL-миграции, применяются перед запуском web
 mtproto/service.py   приватный FastAPI/Telethon-сервис
@@ -49,6 +51,7 @@ Telegram поддерживает две модели подключения:
 |---|---|---|
 | `APP_URL` | web | публичный HTTPS-origin, в production — `https://atlavue.app` |
 | `SESSION_SECRET` | web | подпись пользовательских сессий; обязательна в production |
+| `SESSION_ABSOLUTE_TTL_DAYS` | web | абсолютный срок cookie-сессии, 7–365 дней; по умолчанию 30 |
 | `DATABASE_URL` | web | Postgres; в production обязательна, кроме явного `ALLOW_DBLESS=true` |
 | `PGPOOL_MAX` | web | размер основного пула Postgres (live HTTP/auth/tenant), по умолчанию `10` (одна web-реплика, ADR-002) |
 | `PGPOOL_BACKGROUND_MAX` | web | размер отдельного малого пула для фонового сбора/отчётов/maintenance, по умолчанию `2` (те же fail-fast deadlines) |
@@ -62,7 +65,7 @@ Telegram поддерживает две модели подключения:
 | `TG_API_ID`, `TG_API_HASH` | mtproto/collector | Telegram application credentials |
 | `TG_SESSION`, `TG_CHANNEL` | mtproto | служебная управляемая Telegram-сессия и канал, если используются |
 | `IG_CLIENT_ID`, `IG_CLIENT_SECRET`, `IG_TOKEN_KEY` | web | Instagram Login и шифрование account token |
-| `MS_TOKEN_KEY`, `YM_TOKEN_KEY` | web | ключи AES-256-GCM для токенов МойСклада и Яндекс.Метрики; без ключа connect соответствующего источника отвечает 503 |
+| `MS_TOKEN_KEY`, `YM_TOKEN_KEY`, `RUSENDER_KEY` | web | ключи AES-256-GCM для токенов МойСклада, Яндекс.Метрики и Rusender; без ключа connect соответствующего источника отвечает 503 |
 | `IG_OAUTH_MAX_INFLIGHT` | web | предел одновременных Instagram OAuth callback-обменов, по умолчанию `8`, диапазон `1..64`; очередь ожидания ограничена тем же числом |
 | `IG_OAUTH_ACQUIRE_TIMEOUT_MS` | web | сколько callback ждёт свободный OAuth-слот перед честным `busy`, мс, по умолчанию `2000`, диапазон `100..10000` |
 | `INGEST_TOKEN` | web/cron | авторизация daily ingest через `x-ingest-token` |
@@ -116,16 +119,36 @@ python mtproto/service.py
 ## Проверки
 
 ```bash
-npm run check
+npm run check                    # syntax + migrations + boundaries + biome + backend-суита
 npm test --prefix frontend
 npm run build --prefix frontend
+npm run lint:motion --prefix frontend   # канон дизайн-токенов и форматов чисел
+npm run size-check --prefix frontend    # бюджет бандла по маршрутам
 python -m py_compile mtproto/service.py collector/pulse_collector.py
+```
+
+`npm run check` делит бэкенд-суиту (`scripts/run-tests.mjs`): интеграционные файлы идут
+последовательно на одной базе, юниты параллельно. Интеграционные суиты включаются
+`TEST_DATABASE_URL`; без него они пропускаются, а не падают:
+
+```bash
+TEST_DATABASE_URL=postgresql://postgres@localhost:5432/pulse PGSSL=disable npm run check
+```
+
+Бюджет бандла двухъярусный. `PRODUCT_BUDGETS` в `frontend/scripts/check-bundle-size.mjs` — это
+продуктовые потолки с запасом; их правят отдельным PR с обоснованием. `scripts/bundle-baseline.json`
+— последний замер: гейт краснеет на росте больше `max(3%, 5 КБ)` от него. Если рост осознанный,
+объясните его в описании PR и зафиксируйте новый вес:
+
+```bash
+npm run size-check:update --prefix frontend
 ```
 
 Для локального Playwright smoke:
 
 ```bash
 npm run test:e2e:smoke --prefix frontend
+npm run test:e2e:phone --prefix frontend
 ```
 
 CI поднимает Postgres для backend integration tests и Vite с детерминированными fixtures для

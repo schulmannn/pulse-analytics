@@ -7,7 +7,7 @@ import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/E
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
 import { SegmentedControl } from '@/components/SegmentedControl';
-import { SegSelect } from '@/panels/MetricPage';
+import { SegSelect } from '@/components/metric/SegSelect';
 import { PeriodChips } from '@/components/PeriodChips';
 import { PillSelect } from '@/components/PillSelect';
 import { SourceIdentity } from '@/components/SourceIdentity';
@@ -15,20 +15,18 @@ import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { PinnedDayPanel } from '@/components/PinnedDayPanel';
 import { ChartSkeleton } from '@/components/ui/dataSkeleton';
+import { ChartTooltip, useHeatmapTip } from '@/components/ChartTooltip';
 import { Skeleton } from '@/components/ui/skeleton';
-import { fmt } from '@/lib/format';
+import { KpiValue } from '@/components/chartWidget/KpiValue';
+import { fmt, timeAxisFromDayKeys } from '@/lib/format';
 import { lttbDownsample } from '@/lib/downsample';
 import { useExplorerChartHeight } from '@/lib/useExplorerChartHeight';
 import { usePeriod, type DateRange, type PeriodDays } from '@/lib/period';
 import { useMsResolvedPeriod, type MsPeriod } from '@/lib/msPeriod';
-import { useYmGoals, useYmHourly, useYmSummary } from '@/api/queries';
-import {
-  YM_BREAKDOWN_BY_KEY,
-  type AboutDef,
-  type YmBreakdownDef,
-} from '@/panels/metrika/ymBreakdowns';
+import { useYmGoals, useYmHourly, useYmSummary } from '@/api/ym';
+import { YM_BREAKDOWN_BY_KEY, type YmBreakdownDef } from '@/panels/metrika/ymBreakdowns';
 import { isYmMetricKey } from '@/panels/metrika/ymMetricKeys';
-import { AboutRow, ComparisonDeltaRow, MetricBackLink, MetricColumns, MetricDescriptor, WindowBarShell, RailSection } from '@/components/metric/shared';
+import { ComparisonDeltaRow, MetricColumns, MetricDescriptor, WindowBarShell, RailSection, MetricPageHeader} from '@/components/metric/shared';
 
 /**
  * Полностраничные метрики «Яндекс.Метрики» — `/metrics/ym-*`. Каждая карточка Обзора /metrika ведёт
@@ -74,19 +72,17 @@ const BACK = { to: '/metrika', label: 'Метрика · Обзор' };
 function YmMetricShell({
   term,
   descriptor,
-  about,
   comparison,
   children,
 }: {
   term: string;
   descriptor?: string;
-  about: AboutDef;
   comparison?: ReactNode;
   children: ReactNode;
 }) {
   return (
     <div className="space-y-5">
-      <MetricBackLink to={BACK.to}>{BACK.label}</MetricBackLink>
+      <MetricPageHeader back={BACK} />
 
       <div>
         <h1 className="text-2xl font-medium tracking-tight text-foreground">{term}</h1>
@@ -97,20 +93,14 @@ function YmMetricShell({
       <MetricColumns
         rail={
           <>
-            <RailSection title="Сравнение">
+            <RailSection title="Сравнение" mark="comparison">
               {comparison ?? (
                 <p className="text-xs leading-relaxed text-muted-foreground">
                   Для этого отчёта нет одной канонической метрики периода — сравнение не рассчитывается.
                 </p>
               )}
             </RailSection>
-            <RailSection title="О метрике">
-              <dl className="space-y-3 text-sm">
-                <AboutRow label="Как считается" text={about.formula} />
-                {about.included && <AboutRow label="Что учитывается" text={about.included} />}
-                <AboutRow label="Источник" text={about.source} />
-              </dl>
-            </RailSection>
+            {/* «О метрике» убран — техническая информация не для конечного пользователя (владелец). */}
             <Link
               to={BACK.to}
               className="inline-flex items-center gap-1 text-xs font-medium text-primary transition-colors hover:text-primary/80"
@@ -218,7 +208,6 @@ interface YmSeriesDef {
   /** true — аддитивная метрика (сумма по дням = период). false — посетители: дневные уникальные
       не суммируются в истинный уникум, подпись честно говорит «сумма дневных уникальных». */
   additive: boolean;
-  about: AboutDef;
 }
 
 const SERIES_DEFS: Record<'ym-visits' | 'ym-users' | 'ym-pageviews', YmSeriesDef> = {
@@ -227,34 +216,18 @@ const SERIES_DEFS: Record<'ym-visits' | 'ym-users' | 'ym-pageviews', YmSeriesDef
     term: 'Визиты',
     genitive: 'визитов',
     additive: true,
-    about: {
-      formula: 'Число визитов по дням; заголовок окна — сумма за выбранное окно.',
-      included: 'Визиты аддитивны — сумма по дням равна периоду. Роботы «по поведению» учтены, а не исключены молча.',
-      source: 'Дневные отчёты Reporting API Метрики (accuracy=full) + архив ym_daily.',
-    },
   },
   'ym-users': {
     block: 'users',
     term: 'Посетители',
     genitive: 'посетителей',
     additive: false,
-    about: {
-      formula: 'Число посетителей по дням; заголовок окна — СУММА дневных уникальных за окно.',
-      included:
-        'Дневные уникальные не складываются в истинный уникум за период (одного человека в разные дни считаем повторно) — сумма выше периодного уникума. Обе цифры честные, но отвечают на разные вопросы.',
-      source: 'Дневные отчёты Reporting API Метрики (accuracy=full) + архив ym_daily.',
-    },
   },
   'ym-pageviews': {
     block: 'pageviews',
     term: 'Просмотры страниц',
     genitive: 'просмотров',
     additive: true,
-    about: {
-      formula: 'Число просмотров страниц по дням; заголовок окна — сумма за выбранное окно.',
-      included: 'Просмотры аддитивны — сумма по дням равна периоду. Это hits-метрика, не визиты.',
-      source: 'Дневные отчёты Reporting API Метрики (accuracy=full) + архив ym_daily.',
-    },
   },
 };
 
@@ -278,14 +251,14 @@ function YmSeriesPage({ def }: { def: YmSeriesDef }) {
 
   if (summary.isPending) {
     return (
-      <YmMetricShell term={def.term} about={def.about}>
+      <YmMetricShell term={def.term}>
         <Skeleton className="h-[420px] w-full" />
       </YmMetricShell>
     );
   }
   if (summary.isError) {
     return (
-      <YmMetricShell term={def.term} about={def.about}>
+      <YmMetricShell term={def.term}>
         <ErrorState
           title="Не удалось получить данные Яндекс.Метрики"
           reason={summary.error instanceof Error ? summary.error.message : 'ошибка'}
@@ -320,6 +293,7 @@ function YmSeriesPage({ def }: { def: YmSeriesDef }) {
   const rendered = days === 0 ? lttbDownsample(winPoints, 140, (p) => p.value) : winPoints;
   const values = rendered.map((p) => p.value);
   const labels = rendered.map((p) => fmt.day(p.day));
+  const axisLabels = timeAxisFromDayKeys(rendered.map((p) => p.day));
   const titles = rendered.map((p) => `${fmt.day(p.day)}: ${fmt.num(p.value)} ${def.genitive}`);
   const m = values.length;
 
@@ -345,7 +319,6 @@ function YmSeriesPage({ def }: { def: YmSeriesDef }) {
     <YmMetricShell
       term={def.term}
       descriptor={`Веб-аналитика сайта за выбранное окно · ${sumCaption}`}
-      about={def.about}
       comparison={
         <div className="space-y-3">
           <div className="flex items-baseline justify-between gap-3">
@@ -410,11 +383,12 @@ function YmSeriesPage({ def }: { def: YmSeriesDef }) {
               <LineChart
                 values={values}
                 labels={labels}
+                axisLabels={axisLabels}
                 titles={titles}
                 height={chartH}
                 markExtremes
                 markAnomalies
-                showPoints={m <= 45}
+                showPoints
                 ghost={ghostOk ? ghostVals : undefined}
                 ghostLabel={cmpLabel}
                 legendToggle={false}
@@ -426,6 +400,7 @@ function YmSeriesPage({ def }: { def: YmSeriesDef }) {
               <BarChart
                 values={values}
                 labels={labels}
+                axisLabels={axisLabels}
                 titles={titles}
                 height={chartH}
                 ghost={ghostOk ? ghostVals : undefined}
@@ -525,7 +500,6 @@ function YmBreakdownPage({ def }: { def: YmBreakdownDef }) {
     <YmMetricShell
       term={def.title}
       descriptor={def.descriptor}
-      about={def.about}
       comparison={<NoComparison text={LIST_COMPARISON} />}
     >
       <YmReportCard
@@ -549,6 +523,7 @@ function YmHourlyPage() {
   const q = useYmHourly(window.period);
   const padHour = (h: number): string => String(h).padStart(2, '0');
   const maxVisits = Math.max(0, ...(q.data?.rows ?? []).map((row) => row.visits));
+  const { wrapRef, tip } = useHeatmapTip();
   const peakLabel = useMemo(
     () => (q.data?.peak_hour != null ? `Пик в ${padHour(q.data.peak_hour)}:00` : null),
     [q.data?.peak_hour],
@@ -557,11 +532,6 @@ function YmHourlyPage() {
     <YmMetricShell
       term="Трафик по часам"
       descriptor="Суточный профиль визитов за выбранное окно"
-      about={{
-        formula: 'Распределение визитов по часу суток (0..23) — всегда 24 плотные клетки, насыщенность нормирована на максимум окна.',
-        included: 'Часы — в часовом поясе счётчика. Визиты — своя единица, не TG-просмотры и не IG-охват.',
-        source: 'Отчёт визитов Метрики (ym:s:hour).',
-      }}
       comparison={
         <NoComparison text="Ритм по часам — форма распределения за окно, а не одна метрика периода; сравнение периодов не рассчитывается." />
       }
@@ -584,20 +554,34 @@ function YmHourlyPage() {
         ) : (
           <div className="space-y-4">
             <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-              <span className="text-3xl font-medium leading-none tabular-nums tracking-tight">{fmt.short(q.data.visits_total)}</span>
+              <KpiValue size="compact" text={fmt.short(q.data.visits_total)} />
               <span className="text-xs tracking-wide text-muted-foreground">визитов{peakLabel ? ` · ${peakLabel}` : ''}</span>
             </div>
-            <div className="grid grid-cols-8 gap-x-2 gap-y-3 sm:grid-cols-12">
-              {q.data.rows.map((row) => {
-                const opacity = maxVisits > 0 ? Math.max(0.1, row.visits / maxVisits) : 0.08;
-                const title = `${padHour(row.hour)}:00 — ${fmt.num(row.visits)} визитов, ${fmt.num(row.users)} посетителей`;
-                return (
-                  <div key={row.hour} role="img" aria-label={title} title={title} className="min-w-0 text-center">
-                    <div className="h-10 rounded-sm" style={{ backgroundColor: 'hsl(var(--brand-iris))', opacity }} />
-                    <span className="mt-1 block text-2xs tabular-nums text-muted-foreground">{padHour(row.hour)}</span>
-                  </div>
-                );
-              })}
+            {/* hover — канонный ChartTooltip через useHeatmapTip (нативный HTML title убран:
+                нестилизуемый острый прямоугольник); aria-label ячеек несёт те же точные числа. */}
+            <div ref={wrapRef} className="relative">
+              <div className="grid grid-cols-8 gap-x-2 gap-y-3 sm:grid-cols-12">
+                {q.data.rows.map((row) => {
+                  // Ноль — реальное отсутствие (канон п.8, зеркало карточки Обзора): нейтральный
+                  // трек вместо самой бледной ступени брендовой шкалы.
+                  const zero = row.visits === 0;
+                  const opacity = zero ? 1 : maxVisits > 0 ? Math.max(0.1, row.visits / maxVisits) : 0.08;
+                  const title = `${padHour(row.hour)}:00 — ${fmt.num(row.visits)} визитов, ${fmt.num(row.users)} посетителей`;
+                  return (
+                    <div key={row.hour} role="img" aria-label={title} data-heatmap-tip={title} className="min-w-0 cursor-crosshair text-center">
+                      <div
+                        className="h-10 rounded-sm transition-opacity dur-base ease-house"
+                        style={{
+                          backgroundColor: zero ? 'hsl(var(--border) / 0.3)' : 'hsl(var(--brand-iris))',
+                          opacity,
+                        }}
+                      />
+                      <span className="mt-1 block text-2xs tabular-nums text-muted-foreground">{padHour(row.hour)}</span>
+                    </div>
+                  );
+                })}
+              </div>
+              <ChartTooltip tip={tip} />
             </div>
             <p className="text-2xs text-muted-foreground">Часы — в часовом поясе счётчика.</p>
           </div>

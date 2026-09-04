@@ -1,12 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useMemo } from 'react';
 import { useHistory, useVelocity, useTgFull } from '@/api/queries';
 import type { TgFull } from '@/api/schemas';
 import { lttbDownsample } from '@/lib/downsample';
 import { BarChart } from '@/components/BarChart';
-import { DivergingBars } from '@/components/DivergingBars';
 import { LineChart } from '@/components/LineChart';
-import { ChartTooltip, type TooltipState } from '@/components/ChartTooltip';
-import { fmt, ruAxisLabel, pluralRu } from '@/lib/format';
+import { fmt, pluralRu, timeAxisFromDayKeys } from '@/lib/format';
 import { ChartSkeleton as DataChartSkeleton } from '@/components/ui/dataSkeleton';
 import { useWidgetPeriod } from '@/lib/period';
 import { useWidgetInView } from '@/lib/widgetViewport';
@@ -16,34 +14,27 @@ import { seriesBarValuesVariant } from '@/components/widgets/variants';
 import { pctDelta } from '@/lib/delta';
 import type { WidgetViz } from '@/lib/widgetMetrics';
 import type { WidgetSize } from '@/lib/widgetPrefsStore';
-
-interface HeatmapCell {
-  n: number;
-  ervSum: number;
-  reachSum: number;
-}
+import { lazyWithReload } from '@/lib/lazyWithReload';
+import { TG_DAY_NAMES, type HeatmapBestSlot, type HeatmapCell } from '@/lib/tgHeatmap';
 
 interface SubscriberRow {
   day: string;
   subscribers?: number | null;
 }
 
-function ddmm(dayStr: string) {
-  const parts = dayStr.split('-');
-  if (parts.length !== 3) return dayStr;
-  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  const monthLabel = months[Number(parts[1]) - 1] ?? '';
-  // ruAxisLabel: «18 May» → «18 мая» — chart axes/tooltips must be Russian in the RU UI.
-  return ruAxisLabel(`${Number(parts[2])} ${monthLabel}`);
-}
-
-export function SubscriberHistoryChart({ rows }: { rows: SubscriberRow[] }) {
+/**
+ * `expanded` — та же развилка, что у WidgetRenderer: числовые подписи максимума и последней точки
+ * это мебель ПОВЕРХНОСТИ ДОКАЗАТЕЛЬСТВА. На лице карточки они налезают на кривую и дублируют
+ * хедлайн (владелец: «показываются числа на графиках, убрать»); в развороте, где есть место и оси,
+ * они полезны. Один и тот же компонент рисует оба вида, поэтому это проп, а не удаление.
+ */
+export function SubscriberHistoryChart({ rows, expanded = false }: { rows: SubscriberRow[]; expanded?: boolean }) {
   const sampled = lttbDownsample(rows, 140, (row) => Number(row.subscribers));
   const values = sampled.map((row) => Number(row.subscribers));
-  const titles = sampled.map((row) => `${ddmm(row.day)}: ${fmt.num(row.subscribers)} ${pluralRu(Number(row.subscribers), ['подписчик', 'подписчика', 'подписчиков'])}`);
+  const titles = sampled.map((row) => `${fmt.day(row.day)}: ${fmt.num(row.subscribers)} ${pluralRu(Number(row.subscribers), ['подписчик', 'подписчика', 'подписчиков'])}`);
   // Full per-point labels: the axis-free card shows first/mid/last itself, the explorer
   // strides them into a real x-axis (a pre-picked 3-label array would starve the axis).
-  const labels = sampled.map((row) => ddmm(row.day));
+  const labels = sampled.map((row) => fmt.day(row.day));
 
   // Standard 1×-tile chart height (the LineChart default, 200); the expanded overlay
   // supplies its own 400 via ExpandedChartHeightContext.
@@ -54,33 +45,11 @@ export function SubscriberHistoryChart({ rows }: { rows: SubscriberRow[] }) {
       yMax={Math.max(...values)}
       titles={titles}
       labels={labels}
+      axisLabels={timeAxisFromDayKeys(sampled.map((row) => row.day))}
       markAnomalies
-      markExtremes
+      markExtremes={expanded}
     />
   );
-}
-
-/** Day-over-day deltas of the RAW archive rows, downsampled to ≤60 bars AFTER differencing.
-    The series is a LEVEL (~4800 подписчиков): zero-based bars of levels all render full
-    height and a decline disappears — the bar presentation plots the daily CHANGE instead. */
-function subscriberDeltas(rows: SubscriberRow[]) {
-  const deltas = rows.slice(1).map((row, i) => ({
-    day: row.day,
-    delta: Number(row.subscribers) - Number(rows[i]?.subscribers),
-  }));
-  const sampled = lttbDownsample(deltas, 60, (r) => r.delta);
-  return {
-    values: sampled.map((r) => r.delta),
-    labels: sampled.map((r) => ddmm(r.day)),
-    titles: sampled.map((r) => `${ddmm(r.day)}: ${r.delta >= 0 ? '+' : ''}${fmt.num(r.delta)} за день`),
-  };
-}
-
-/** Bar presentation of the same archive (widget «Тип: Столбцы») — diverging day-over-day deltas. */
-export function SubscriberHistoryBars({ rows }: { rows: SubscriberRow[] }) {
-  const d = subscriberDeltas(rows);
-  // 200 = the standard 1×-tile chart height, matching the line presentation.
-  return <DivergingBars values={d.values} labels={d.labels} titles={d.titles} height={200} />;
 }
 
 /**
@@ -154,11 +123,7 @@ export function HistoryChartBlock({ id, homeKey }: HomeBlockProps = {}) {
       expand={{
         renderExpanded: (days) => {
           const windowRows = days === 0 ? archiveRows : archiveRows.slice(-days);
-          return <SubscriberHistoryChart rows={windowRows} />;
-        },
-        renderExpandedBar: (days) => {
-          const windowRows = days === 0 ? archiveRows : archiveRows.slice(-days);
-          return <SubscriberHistoryBars rows={windowRows} />;
+          return <SubscriberHistoryChart rows={windowRows} expanded />;
         },
         statsFor: (days) =>
           (days === 0 ? archiveRows : archiveRows.slice(-days)).map((row) => Number(row.subscribers)),
@@ -177,7 +142,6 @@ export function HistoryChartBlock({ id, homeKey }: HomeBlockProps = {}) {
         }
         const isDownsampled = rows.length > 140;
         const periodCaption = `${rows.length} дн. в периоде${isDownsampled ? ' · сглажено' : ''}`;
-        const deltas = subscriberDeltas(rows);
         const last = Number(rows[rows.length - 1]?.subscribers ?? 0);
         const first = Number(rows[0]?.subscribers ?? 0);
         const levelDelta = first > 0 ? pctDelta(last, first) : null;
@@ -192,21 +156,6 @@ export function HistoryChartBlock({ id, homeKey }: HomeBlockProps = {}) {
               </ChartCardBody>
             ),
           },
-          {
-            key: 'bar',
-            label: 'Столбцы',
-            render: (
-              <ChartCardBody value={fmt.kpi(last)} delta={levelDelta} caption={caption}>
-                <SubscriberHistoryBars rows={rows} />
-              </ChartCardBody>
-            ),
-          },
-          seriesBarValuesVariant(deltas.values, deltas.labels, deltas.titles, {
-            diverging: true,
-            extraRows: [{ label: 'Сейчас', value: fmt.num(last) }],
-            sum: true,
-            sumLabel: 'Δ за период',
-          }),
         ];
       }}
     />
@@ -214,7 +163,7 @@ export function HistoryChartBlock({ id, homeKey }: HomeBlockProps = {}) {
 }
 
 /** Bare, config-driven history body for Home. The surrounding ConfigWidget owns all card chrome. */
-export function HistoryWidgetBody({ viz }: { viz: WidgetViz }) {
+export function HistoryWidgetBody() {
   // Прогрессивная загрузка Главной: офскрин-пин не фетчит (вне Главной контекст = true).
   const inView = useWidgetInView();
   const { data, isPending, isError, refetch } = useHistory(730, { enabled: inView });
@@ -235,19 +184,9 @@ export function HistoryWidgetBody({ viz }: { viz: WidgetViz }) {
 
   return (
     <ChartCardBody value={fmt.kpi(last)} delta={delta} caption={caption}>
-      {viz === 'bar' ? <SubscriberHistoryBars rows={rows} /> : <SubscriberHistoryChart rows={rows} />}
+      <SubscriberHistoryChart rows={rows} />
     </ChartCardBody>
   );
-}
-
-const DAY_NAMES = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
-
-interface HeatmapBestSlot {
-  weekday: number;
-  hour: number;
-  avgErv: number;
-  n: number;
-  reachSum: number;
 }
 
 /** Aggregate posts into the 7×24 ERV grid + the best slot. Pure — memoized by the block. */
@@ -316,6 +255,31 @@ export function HeatmapChartBlock({ id, homeKey }: HomeBlockProps = {}) {
   );
 }
 
+const ActivityCalendarBody = lazy(
+  lazyWithReload(() => import('@/panels/ActivityCalendar').then((module) => ({ default: module.ActivityCalendarBody }))),
+);
+const HeatmapSurface = lazy(
+  lazyWithReload(() => import('@/panels/HeatmapSurface').then((module) => ({ default: module.HeatmapSurface }))),
+);
+
+export function CalendarChartBlock({ id, homeKey }: HomeBlockProps = {}) {
+  return (
+    <ChartSection title="Календарь активности" defaultSize="full" id={id} homeKey={homeKey}>
+      <CalendarWidgetBody />
+    </ChartSection>
+  );
+}
+
+/** Fixed-year body shared by Analytics and the pinnable Home card. It deliberately ignores the
+    page/widget period: this view always answers the same trailing-365-day question. */
+export function CalendarWidgetBody() {
+  return (
+    <Suspense fallback={<ChartSkeletonBody />}>
+      <ActivityCalendarBody />
+    </Suspense>
+  );
+}
+
 /** Bare, self-fetching heatmap body shared by the source card and ConfigWidget. */
 export function HeatmapWidgetBody() {
   // Прогрессивная загрузка Главной: офскрин-пин не фетчит (вне Главной контекст = true).
@@ -352,13 +316,15 @@ function HeatmapBody({ posts }: { posts: NonNullable<TgFull['posts']> }) {
   const trimmed = hourRange.from > 0 || hourRange.to < 23;
   return (
     <>
-      <HeatmapSurface grid={grid} maxErv={maxErv} bestSlot={bestSlot} hourRange={hourRange} />
+      <Suspense fallback={<ChartSkeletonBody />}>
+        <HeatmapSurface grid={grid} maxErv={maxErv} bestSlot={bestSlot} hourRange={hourRange} />
+      </Suspense>
       <div className="mt-3 text-xs font-medium text-muted-foreground">
         {bestSlot ? (
           <span>
             лучший слот:{' '}
-            <strong className="text-foreground">
-              {DAY_NAMES[bestSlot.weekday] ?? ''} {bestSlot.hour}:00
+            <strong className="font-medium text-foreground">
+              {TG_DAY_NAMES[bestSlot.weekday] ?? ''} {bestSlot.hour}:00
             </strong>{' '}
             · ERV {bestSlot.avgErv.toFixed(1)}%
             {trimmed ? (
@@ -370,104 +336,6 @@ function HeatmapBody({ posts }: { posts: NonNullable<TgFull['posts']> }) {
         )}
       </div>
     </>
-  );
-}
-
-/** The interactive heatmap surface — owns the tooltip state so hovering re-renders only
-    this leaf (cheap cell mapping), never the parent's aggregation. */
-function HeatmapSurface({
-  grid,
-  maxErv,
-  bestSlot,
-  hourRange,
-}: {
-  grid: HeatmapCell[][];
-  maxErv: number;
-  bestSlot: HeatmapBestSlot | null;
-  hourRange: { from: number; to: number };
-}) {
-  const [tip, setTip] = useState<TooltipState>(null);
-  const wrapRef = useRef<HTMLDivElement>(null);
-  // Тултип не должен зависать при прокрутке/потере фокуса — mouseleave при колесе не срабатывает
-  // (канон BarChart/PieChart, дизайн-проход №3).
-  const hasTip = tip !== null;
-  useEffect(() => {
-    if (!hasTip) return;
-    const clear = () => setTip(null);
-    window.addEventListener('scroll', clear, true);
-    window.addEventListener('blur', clear);
-    return () => {
-      window.removeEventListener('scroll', clear, true);
-      window.removeEventListener('blur', clear);
-    };
-  }, [hasTip]);
-  // Видимые часы (сжатый диапазон из HeatmapBody). Подпись — «6:00», не голое «6»: на сжатом
-  // 7д-окне колонок мало и цифры без «:00» читались как непонятные числа/даты (проход №3).
-  // Плотность подписей — по ширине формата: «6:00» шире голой цифры, каждый час подписываем
-  // только на узких диапазонах.
-  const hours = Array.from({ length: hourRange.to - hourRange.from + 1 }, (_, i) => hourRange.from + i);
-  const cols = `30px repeat(${hours.length}, minmax(14px, 1fr))`;
-  const labelStride = hours.length <= 8 ? 1 : hours.length <= 16 ? 2 : 3;
-
-  return (
-    <div ref={wrapRef} className="relative" onMouseLeave={() => setTip(null)}>
-      <div className="overflow-x-auto pb-2">
-        <div className="min-w-[420px] space-y-[2px]">
-          <div className="grid gap-[2px]" style={{ gridTemplateColumns: cols }}>
-            <div />
-            {hours.map((hr) => (
-              <div key={hr} className="select-none whitespace-nowrap text-center text-2xs font-medium tabular-nums text-muted-foreground">
-                {hr % labelStride === 0 ? `${hr}:00` : ''}
-              </div>
-            ))}
-          </div>
-
-          {DAY_NAMES.map((dayName, w) => {
-            const currentRow = grid[w] ?? [];
-            return (
-              <div
-                key={w}
-                className="grid items-center gap-[2px]"
-                style={{ gridTemplateColumns: cols }}
-              >
-                <div className="select-none text-2xs font-medium text-muted-foreground">{dayName}</div>
-                {hours.map((hr) => {
-                  const cell = currentRow[hr];
-                  if (!cell || cell.n === 0) {
-                    return (
-                      <div
-                        key={hr}
-                        className="h-4 rounded-sm bg-muted/40"
-                        onMouseMove={() => setTip(null)}
-                      />
-                    );
-                  }
-                  const avgErv = cell.ervSum / cell.n;
-                  const opacity = maxErv > 0 ? Math.max(0.18, avgErv / maxErv) : 0;
-                  const isBest = bestSlot && bestSlot.weekday === w && bestSlot.hour === hr;
-                  const titleText = `${dayName} ${hr}:00 · ${cell.n} ${pluralRu(cell.n, ['пост', 'поста', 'постов'])} · ERV ${avgErv.toFixed(1)}% · ср.охват ${fmt.short(cell.reachSum / cell.n)}`;
-                  return (
-                    <div
-                      key={hr}
-                      className={`relative h-4 cursor-crosshair rounded-sm${isBest ? ' border-2 border-verdant' : ''}`}
-                      style={{
-                        backgroundColor: 'hsl(var(--brand-iris))',
-                        opacity,
-                      }}
-                      onMouseMove={(event) => {
-                        const rect = wrapRef.current?.getBoundingClientRect();
-                        if (rect) setTip({ x: event.clientX - rect.left, y: event.clientY - rect.top, text: titleText });
-                      }}
-                    />
-                  );
-                })}
-              </div>
-            );
-          })}
-        </div>
-      </div>
-      <ChartTooltip tip={tip} />
-    </div>
   );
 }
 

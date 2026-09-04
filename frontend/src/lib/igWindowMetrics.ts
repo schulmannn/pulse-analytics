@@ -1,5 +1,6 @@
 import type { IgHistoryRow, IgInsights, IgProfile } from '@/api/schemas';
 import { pctDelta, type MetricDelta } from '@/lib/delta';
+import { timeAxisLabels } from '@/lib/format';
 import {
   fmtDay,
   followerLevelSeries,
@@ -9,6 +10,7 @@ import {
   metricSeries,
   netFollowerDaily,
   pairDelta,
+  aggregatePair,
   windowPair,
   type Point,
   type WindowPair,
@@ -78,6 +80,9 @@ export interface IgWindowDaily {
 export interface IgOverviewChart {
   labels: string[];
   values: number[];
+  /** Ось короткого окна (≤ 8 дневных точек): однобуквенные дни недели (fmt.weekday) вместо дат.
+      Только подписи ОСИ — `labels` остаются полными датами для тултипа. */
+  axisLabels?: string[];
 }
 
 export interface IgOverviewCharts {
@@ -148,9 +153,15 @@ function windowedDaily(series: Point[], since: number, until: number): Point[] {
 }
 
 // A sparkline needs ≥2 points; fewer → empty (the card says «Недостаточно дневных данных…»).
-const toChart = (points: Point[]): IgOverviewChart =>
+// Короткое окно (≤ 8 дней) несёт ось буквами дней недели (канон timeAxisLabels) — буквы
+// только на оси, тултип держит полные даты из `labels`.
+const toChart = (points: Point[], windowDays?: number): IgOverviewChart =>
   points.length >= 2
-    ? { labels: points.map((p) => fmtDay(p.day)), values: points.map((p) => p.value) }
+    ? {
+        labels: points.map((p) => fmtDay(p.day)),
+        values: points.map((p) => p.value),
+        axisLabels: timeAxisLabels(points.map((p) => p.day), windowDays),
+      }
     : EMPTY_CHART;
 
 /**
@@ -165,6 +176,8 @@ export function igOverviewCharts(series: IgWindowSeries, since: number, until: n
   const viewsCanon = hasDailySeries(series.views, CHART_CANON_MIN);
   const tiCanon = hasDailySeries(series.ti, CHART_CANON_MIN);
   const tiDaily = tiCanon ? windowedDaily(series.ti, since, until) : [];
+  // Длина активного окна в днях — включительные границы [since, until] (см. useIgData).
+  const windowDays = Math.round((until - since) / 86_400_000) + 1;
 
   // ER needs BOTH a real daily interactions series and a real daily reach series. Align by calendar
   // day and keep only days with a positive reach denominator — a day with reach 0 or a missing reach
@@ -179,12 +192,12 @@ export function igOverviewCharts(series: IgWindowSeries, since: number, until: n
       const reach = reachByDay.get(p.day);
       if (reach != null && reach > 0) erPoints.push({ day: p.day, value: (p.value / reach) * 100 });
     }
-    engagement = toChart(erPoints);
+    engagement = toChart(erPoints, windowDays);
   }
 
   return {
-    views: viewsCanon ? toChart(windowedDaily(series.views, since, until)) : EMPTY_CHART,
-    interactions: toChart(tiDaily),
+    views: viewsCanon ? toChart(windowedDaily(series.views, since, until), windowDays) : EMPTY_CHART,
+    interactions: toChart(tiDaily, windowDays),
     engagement,
   };
 }
@@ -227,21 +240,40 @@ export function igWindowMetrics(raw: IgWindowRaw): IgWindowMetrics {
     unfollows: metricSeries(insights, 'unfollows'),
   };
 
-  const reachWin = windowPair(series.reachWindow, since, until);
+  // Синтетические агрегаты читаются ПОЗИЦИОННО, а не фильтром по дате: их точки штампуются
+  // временем серверного окна и всегда оказываются позже клиентской границы `until` (она округлена
+  // вниз до минуты). Прежний date-фильтр выбрасывал текущую точку на каждом рендере — охват молча
+  // откатывался на сумму дневных и завышался втрое. См. aggregatePair.
+  const reachWin = aggregatePair(insights, 'reach_window');
   const reachDaily = windowPair(series.reach, since, until);
+  /** Агрегат окна, если бэкенд его отдал; иначе — прежний путь по дневным. */
+  const agg = (name: string, daily: Point[]): WindowPair => {
+    const pair = aggregatePair(insights, name);
+    return pair.hasCur ? pair : windowPair(daily, since, until);
+  };
   const pairs: IgWindowPairs = {
+    // Дедуплицированный охват окна — то же число, что Instagram показывает как «Viewers».
+    // Сумма дневных остаётся фолбэком для аккаунтов, где Graph агрегат не отдал.
     reach: reachWin.hasCur ? reachWin : reachDaily,
-    views: windowPair(series.views, since, until),
-    ti: windowPair(series.ti, since, until),
-    engaged: windowPair(series.engaged, since, until),
+    // Просмотры и взаимодействия аддитивны, поэтому сумма дневных СЕМАНТИЧЕСКИ верна — но дневной
+    // архив бывает неполным (пропуски бэкфилла), и тогда он занижает: на проде 235k против 264k у
+    // Graph и 272k у самого Instagram. Авторитетным берём агрегат, дневные — фолбэк и график.
+    views: agg('views', series.views),
+    ti: agg('total_interactions', series.ti),
+    engaged: agg('accounts_engaged', series.engaged),
+    // follower_count — настоящий ДНЕВНОЙ ряд Graph, а не агрегат: только по дневным.
     follower: windowPair(series.follower, since, until),
-    saves: windowPair(series.saves, since, until),
-    likes: windowPair(series.likes, since, until),
-    comments: windowPair(series.comments, since, until),
-    shares: windowPair(series.shares, since, until),
-    profileViews: windowPair(series.profileViews, since, until),
-    follows: windowPair(series.follows, since, until),
-    unfollows: windowPair(series.unfollows, since, until),
+    // Составляющие вовлечённости берутся оттуда же, откуда `ti`: смешивать агрегат в сумме с
+    // архивом в слагаемых нельзя — разбивка перестала бы сходиться с собственным итогом.
+    saves: agg('saves', series.saves),
+    likes: agg('likes', series.likes),
+    comments: agg('comments', series.comments),
+    shares: agg('shares', series.shares),
+    profileViews: agg('profile_views', series.profileViews),
+    // У follows/unfollows дневного ряда НЕТ вовсе (Graph отдаёт только период), поэтому потерянная
+    // текущая точка обнуляла прирост подписчиков целиком.
+    follows: agg('follows', series.follows),
+    unfollows: agg('unfollows', series.unfollows),
   };
 
   const followerNet: WindowPair = {

@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { DeltaPill } from '@/components/DeltaPill';
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
@@ -9,6 +9,7 @@ import type { DailySeries, DrillKey } from '@/lib/kpiDerive';
 import type { PeriodDays } from '@/lib/period';
 import { REPORT_BLOCKS } from '@/lib/reportBlocks';
 import type { ReportBlockKey, ReportBlockType } from '@/lib/reportBlocks';
+import { KpiValue } from '@/components/chartWidget/KpiValue';
 
 // Inline «+» type menu. Desktop Telegram reports suppress «Карта» because the source exposes no
 // geography; the frozen mobile builder keeps its historical catalog until the mobile redesign.
@@ -203,11 +204,11 @@ export function ReportChart({
       <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">Недостаточно точек за период</div>
     );
   }
-  const titles = series.values.map((v, i) => `${series.labels[i]}: ${valueFmt(v)}`);
+  const titles = series.values.map((v, i) => (v == null ? `${series.labels[i]}: данных нет` : `${series.labels[i]}: ${valueFmt(v)}`));
   if (viz === 'bar') {
     return (
       <ChartExpandedContext.Provider value={true}>
-        <BarChart values={series.values} labels={series.labels} titles={titles} height={200} />
+        <BarChart values={series.values} labels={series.labels} axisLabels={series.axisLabels} titles={titles} height={200} />
       </ChartExpandedContext.Provider>
     );
   }
@@ -216,11 +217,12 @@ export function ReportChart({
     <LineChart
       values={series.values}
       labels={series.labels}
+      axisLabels={series.axisLabels}
       titles={titles}
       height={200}
       fullAxes
       markExtremes={!rheaChart}
-      showPoints={!rheaChart && series.values.length <= 45}
+      showPoints={!rheaChart}
       yMin={zeroBase ? 0 : undefined}
       formatValue={valueFmt}
       primaryLabel={chartLabel}
@@ -245,32 +247,28 @@ interface ReportMetricCardProps {
 /** Compact metric card for a preset metric-* block: headline + chart + whole-card metric drill. */
 export function ReportMetricCard({ title, total, trend, series, valueFmt, zeroBase, to, onOpen, chartAppearance = 'default', chartLabel }: ReportMetricCardProps) {
   const rheaChart = chartAppearance === 'rhea';
-  const navigate = useNavigate();
   const pressRef = useRef<{ x: number; y: number } | null>(null);
-  const openDetails = () => {
-    onOpen?.();
-    navigate(to);
-  };
   return (
-    <section
-      className="report-metric-card min-w-0 space-y-3"
+    <Link
+      to={to}
+      className="report-metric-card block min-w-0 space-y-3"
       data-report-chart-appearance={chartAppearance}
       data-report-chart-label={chartLabel}
-      role="link"
-      tabIndex={0}
       aria-label={`Открыть детали: ${title}`}
       onPointerDown={(event) => (pressRef.current = { x: event.clientX, y: event.clientY })}
       onClick={(event) => {
-        if ((event.target as HTMLElement).closest('button, a, input, select, textarea, [role="dialog"]')) return;
+        const nestedControl = (event.target as HTMLElement).closest('button, a, input, select, textarea, [role="dialog"]');
+        if (nestedControl && nestedControl !== event.currentTarget) {
+          event.preventDefault();
+          return;
+        }
         const press = pressRef.current;
         pressRef.current = null;
-        if (press && Math.hypot(event.clientX - press.x, event.clientY - press.y) > 5) return;
-        openDetails();
-      }}
-      onKeyDown={(event) => {
-        if (event.key !== 'Enter') return;
-        event.preventDefault();
-        openDetails();
+        if (press && Math.hypot(event.clientX - press.x, event.clientY - press.y) > 5) {
+          event.preventDefault();
+          return;
+        }
+        onOpen?.();
       }}
     >
       <div className="report-metric-card__header flex items-center gap-3">
@@ -278,24 +276,25 @@ export function ReportMetricCard({ title, total, trend, series, valueFmt, zeroBa
         <span aria-hidden="true" className="report-metric-card__rule h-px flex-1 bg-border" />
       </div>
       <div className="report-metric-card__value flex items-baseline gap-2">
-        <span className="report-metric-card__number text-2xl font-medium tabular-nums tracking-tight">{total}</span>
-        <DeltaPill delta={trend} subtle />
+        <KpiValue size="small" text={total} className="report-metric-card__number" />
+        <DeltaPill delta={trend} />
       </div>
       <div className="report-metric-card__chart">
         <LineChart
           values={series.values}
           labels={series.labels}
-          titles={series.values.map((v, i) => `${series.labels[i]}: ${valueFmt(v)}`)}
+          axisLabels={series.axisLabels}
+          titles={series.values.map((v, i) => (v == null ? `${series.labels[i]}: данных нет` : `${series.labels[i]}: ${valueFmt(v)}`))}
           height={rheaChart ? 200 : 170}
           fullAxes
           markExtremes={!rheaChart}
-          showPoints={!rheaChart && series.values.length > 1 && series.values.length <= 45}
+          showPoints={!rheaChart && series.values.length > 1}
           yMin={zeroBase && series.values.length > 1 ? 0 : undefined}
           formatValue={valueFmt}
           primaryLabel={chartLabel}
           appearance={chartAppearance}
         />
       </div>
-    </section>
+    </Link>
   );
 }

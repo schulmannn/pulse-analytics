@@ -88,8 +88,6 @@ async function boot(
   });
 
   await page.addInitScript(() => {
-    localStorage.setItem('pulse_token', 'e2e-token');
-    localStorage.setItem('pulse_token_exp', String(Date.now() + 60 * 60 * 1000));
     localStorage.setItem('pulse_channel', '1');
     localStorage.setItem('pulse_theme', 'dark');
   });
@@ -130,6 +128,12 @@ test.describe('Instagram Контент 2.0 (desktop)', () => {
     await page.goto('/instagram/content');
     const rows = page.locator('table tbody tr');
     await expect(rows).toHaveCount(6);
+    const routeTabs = page.getByRole('tablist', { name: 'Раздел контента' });
+    const breakdownTabs = page.getByRole('tablist', { name: 'Дополнительные разборы контента' });
+    // Второй уровень навигации страницы — line-табы (тот же контрол и вид, что на /analytics).
+    await expect(routeTabs).toHaveAttribute('data-variant', 'line');
+    await expect(breakdownTabs).toHaveAttribute('data-variant', 'line');
+    await expect(page.locator('[data-tabs-glider]')).toHaveCount(0);
     await expect(page.getByTestId('ig-content-result-count')).toHaveText(/6 публ\./);
     // ≤ 25 rows → no pagination footer at all.
     await expect(page.getByTestId('ig-content-pagination')).toHaveCount(0);
@@ -329,7 +333,10 @@ test.describe('Instagram Контент 2.0 (desktop)', () => {
     expect(searchHeight).toBe(campaignHeight);
     expect(searchHeight).toBe(formatHeight);
 
-    // Заголовки таблицы — белые и semibold, включая активную сортируемую колонку.
+    // Заголовки таблицы — полной яркости и весом 500, включая активную сортируемую колонку.
+    // Было 600: правило `.ig-content-table th` в index.css ставило третий вес мимо канона (и мимо
+    // классового гейта, который читает только разметку). Гейт держит РАВЕНСТВО заголовка и активной
+    // сортировки — оно и есть смысл проверки, — а само число приведено к канону двух начертаний.
     const publicationHeader = page.getByRole('columnheader', { name: 'Публикация' });
     const activeSort = page.getByRole('button', { name: 'Охват' });
     const firstRowTitle = firstRow.locator('[data-ig-content-open-trigger]');
@@ -338,8 +345,8 @@ test.describe('Instagram Контент 2.0 (desktop)', () => {
       activeSort.evaluate((node) => ({ color: getComputedStyle(node).color, weight: getComputedStyle(node).fontWeight, fontSize: getComputedStyle(node).fontSize })),
       firstRowTitle.evaluate((node) => ({ fontSize: getComputedStyle(node).fontSize })),
     ]);
-    expect(publicationStyle.weight).toBe('600');
-    expect(activeSortStyle.weight).toBe('600');
+    expect(publicationStyle.weight).toBe('500');
+    expect(activeSortStyle.weight).toBe('500');
     expect(activeSortStyle.color).toBe(publicationStyle.color);
     expect(publicationStyle.fontSize).toBe(firstRowTitleStyle.fontSize);
     expect(activeSortStyle.fontSize).toBe(firstRowTitleStyle.fontSize);

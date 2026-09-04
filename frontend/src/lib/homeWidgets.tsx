@@ -6,6 +6,7 @@ import { IgNarrativeWeekBlock } from '@/panels/IgNarrativeWeek';
 import { IgReachHomeCard, IgFollowsHomeCard, IgKpiHomeCard, IgMovementHomeCard, IgCompareHomeCard, IgInsightsHomeCard } from '@/panels/instagram/igHome';
 import { Compare } from '@/panels/Compare';
 import { Insights } from '@/panels/Insights';
+import { CalendarChartBlock } from '@/panels/Charts';
 import type { SourceNetwork } from '@/lib/homeSourceContext';
 
 /**
@@ -59,6 +60,12 @@ export const HOME_REGISTRY: Record<string, HomeWidgetDef> = {
     network: 'tg',
     defaultSize: 'full',
   },
+  calendar: {
+    label: 'Календарь активности',
+    network: 'tg',
+    defaultSize: 'full',
+    render: () => <CalendarChartBlock id="home-calendar" homeKey="calendar" />,
+  },
   mentions: {
     label: 'Упоминания по дням',
     network: 'tg',
@@ -71,7 +78,7 @@ export const HOME_REGISTRY: Record<string, HomeWidgetDef> = {
     render: () => <IgReachHomeCard id="home-ig-reach" homeKey="ig-reach" />,
   },
   'ig-follows': {
-    label: 'IG · Подписки по дням',
+    label: 'IG · Динамика подписчиков',
     network: 'ig',
     render: () => <IgFollowsHomeCard id="home-ig-follows" homeKey="ig-follows" />,
   },

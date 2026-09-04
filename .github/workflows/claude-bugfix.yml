@@ -3,14 +3,22 @@ name: Claude bug fix
 # Manual gate: the dashboard fires a repository_dispatch (POST /api/bugs/:id/claude-fix)
 # when the team clicks "🤖 Claude" on a bug. Claude attempts a fix and opens a PR.
 # It NEVER pushes to main directly (main auto-deploys to Railway) — a human merges.
+#
+# ВЫКЛЮЧЕН ДО РЕШЕНИЯ ВЛАДЕЛЬЦА (аудит #554, M-2). Состояние на момент правки: секрета
+# ANTHROPIC_API_KEY в репозитории нет, запусков ноль за всё время — то есть workflow не работает,
+# но при этом объявляет contents: write и получает токен в checkout. Запрет пуша в main держался
+# ТОЛЬКО на тексте промпта, а промпт собирается из пользовательских данных баг-репорта.
+# Держать неработающий путь с правом записи — плохая сделка, поэтому триггер снят.
+#
+# ЧТОБЫ ВКЛЮЧИТЬ ОБРАТНО: положить секрет ANTHROPIC_API_KEY, вернуть блок `on:` ниже, и
+# перед этим — ограничить права (см. permissions) и добавить persist-credentials: false в checkout.
 on:
-  repository_dispatch:
-    types: [bug-fix-request]
+  workflow_dispatch: {}
 
+# Права урезаны до чтения: открывать PR должен отдельный токен с минимальными правами, а не
+# GITHUB_TOKEN с contents: write, которым можно писать в любую ветку.
 permissions:
-  contents: write
-  pull-requests: write
-  issues: write
+  contents: read
 
 concurrency:
   group: claude-bugfix-${{ github.event.client_payload.id }}
@@ -20,10 +28,14 @@ jobs:
   fix:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # Токен не остаётся в .git/config рабочей копии: агент ходит по репозиторию, и
+          # оставленные там креды — это лишняя поверхность.
+          persist-credentials: false
 
       - name: Claude — diagnose & fix bug, open PR
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@be7b93b1907a4abad570368f3c74b6fe3807510b # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           claude_args: "--max-turns 25"

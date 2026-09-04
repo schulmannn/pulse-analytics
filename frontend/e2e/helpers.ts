@@ -1,70 +1,6 @@
 import type { Locator, Page } from '@playwright/test';
 
-// The only authenticated endpoint demo fixtures do NOT cover — stub it so the authed shell renders
-// offline. Shape matches MeSchema (all fields optional + passthrough), so this parses fine.
-const DEMO_ME = { uid: 999, email: 'demo@pulse.local', role: 'user', avatar: null };
 const DAY_MS = 86_400_000;
-
-const igDays = Array.from({ length: 60 }, (_, index) =>
-  new Date(Date.now() - (59 - index) * DAY_MS).toISOString(),
-);
-
-function igMetric(name: string, valueAt: (index: number) => number) {
-  return {
-    name,
-    period: 'day',
-    values: igDays.map((end_time, index) => ({ end_time, value: valueAt(index) })),
-  };
-}
-
-function demoIgPayload(path: string): unknown | undefined {
-  if (path === '/api/ig/profile') {
-    return { mock: true, username: 'demo_channel', name: 'Demo Instagram', followers_count: 12_840, synced_at: Date.now() };
-  }
-  if (path === '/api/ig/insights') {
-    const wave = (index: number, size: number) => ((index % 7) - 3) * size;
-    return {
-      mock: true,
-      data: [
-        igMetric('reach', (i) => 2_900 + i * 18 + wave(i, 85)),
-        igMetric('views', (i) => 4_800 + i * 24 + wave(i, 120)),
-        igMetric('total_interactions', (i) => 250 + i * 2 + wave(i, 8)),
-        igMetric('likes', (i) => 172 + i + wave(i, 5)),
-        igMetric('saves', (i) => 36 + Math.floor(i / 5) + wave(i, 1)),
-        igMetric('comments', (i) => 18 + Math.floor(i / 8) + Math.abs(wave(i, 1))),
-        igMetric('shares', (i) => 24 + Math.floor(i / 6) + Math.abs(wave(i, 1))),
-        igMetric('follows', (i) => 27 + Math.floor(i / 10) + Math.abs(wave(i, 1))),
-        igMetric('unfollows', (i) => 11 + Math.abs(wave(i, 1))),
-        igMetric('follower_count', (i) => 12_300 + i * 9),
-      ],
-    };
-  }
-  if (path === '/api/ig/posts') {
-    return {
-      mock: true,
-      data: Array.from({ length: 8 }, (_, index) => ({
-        id: `demo-ig-${index + 1}`,
-        timestamp: new Date(Date.now() - (index + 1) * DAY_MS).toISOString(),
-        media_type: index % 3 === 0 ? 'VIDEO' : 'IMAGE',
-        media_product_type: index % 3 === 0 ? 'REELS' : 'FEED',
-        reach: 4_900 - index * 280,
-        views: 7_200 - index * 310,
-        like_count: 260 - index * 14,
-        comments_count: 31 - index,
-        saved: 58 - index * 3,
-        shares: 37 - index * 2,
-        total_interactions: 386 - index * 20,
-        caption: `Demo publication ${index + 1}`,
-      })),
-    };
-  }
-  if (path === '/api/ig/breakdowns') return { mock: true, data: [] };
-  if (path === '/api/ig/online') return { mock: true, data: [] };
-  if (path === '/api/ig/stories') return { mock: true, data: [] };
-  if (path === '/api/ig/tags') return { mock: true, data: [] };
-  if (path === '/api/ig/oauth/status') return { connected: true, server_ready: true, env_fallback: false };
-  return undefined;
-}
 
 const MS_CHANNELS = [
   { id: '16f07379-8039-11ec-0a80-03970021e97d', name: 'Интернет-магазин', type: 'ECOMMERCE', orders: 48, sum: 428_000 },
@@ -280,18 +216,57 @@ function demoMsPayload(url: URL, opts: { max?: boolean } = {}): unknown | undefi
     return {
       window_days: days,
       as_of: new Date().toISOString().slice(0, 10),
-      customers: 100,
+      // «Чемпионы» = 300 — согласовано с листингом /api/ms/rfm-customers (порог виртуализации 120).
+      customers: 388,
       no_agent_orders: 3,
-      total_orders: 200,
-      total_sum: 1_500_000,
+      total_orders: 1_410,
+      total_sum: 13_500_000,
       segments: [
-        { key: 'champions', customers: 12, orders: 50, sum: 500_000, average_recency_days: 2, average_frequency: 4.2, average_monetary: 41_667 },
+        { key: 'champions', customers: 300, orders: 1_260, sum: 12_500_000, average_recency_days: 2, average_frequency: 4.2, average_monetary: 41_667 },
         { key: 'loyal', customers: 22, orders: 60, sum: 400_000, average_recency_days: 7, average_frequency: 2.7, average_monetary: 18_182 },
         { key: 'potential', customers: 25, orders: 35, sum: 250_000, average_recency_days: 12, average_frequency: 1.4, average_monetary: 10_000 },
         { key: 'new', customers: 20, orders: 20, sum: 100_000, average_recency_days: 3, average_frequency: 1, average_monetary: 5_000 },
         { key: 'at_risk', customers: 13, orders: 25, sum: 200_000, average_recency_days: 24, average_frequency: 1.9, average_monetary: 15_385 },
         { key: 'hibernating', customers: 8, orders: 10, sum: 50_000, average_recency_days: 28, average_frequency: 1.3, average_monetary: 6_250 },
       ],
+    };
+  }
+  if (path === '/api/ms/rfm-customers') {
+    // «Чемпионы» = 300 покупателей — заведомо больше порога виртуализации (VIRTUALIZE_FROM=120):
+    // спек virtual-tables проверяет оконный рендер длинного сегмента; остальные сегменты —
+    // числа своих карточек /api/ms/rfm. limit/offset — честная пагинация, как у сервера (кэп 200).
+    const SEGMENT_TOTALS: Record<string, number> = {
+      champions: 300, loyal: 22, potential: 25, new: 20, at_risk: 13, hibernating: 8,
+    };
+    const TOTAL = SEGMENT_TOTALS[url.searchParams.get('segment') ?? ''] ?? 20;
+    const limitRaw = Number.parseInt(url.searchParams.get('limit') ?? '', 10);
+    const limit = Number.isFinite(limitRaw) ? Math.min(200, Math.max(1, limitRaw)) : 50;
+    const offsetRaw = Number.parseInt(url.searchParams.get('offset') ?? '', 10);
+    const offset = Number.isFinite(offsetRaw) ? Math.max(0, offsetRaw) : 0;
+    const rows = Array.from({ length: Math.max(0, Math.min(limit, TOTAL - offset)) }, (_, index) => {
+      const n = offset + index + 1;
+      return {
+        agent_id: `rfm-agent-${n}`,
+        name: `Покупатель ${n}`,
+        address: n % 3 === 0 ? `ул. Складская, д. ${n}` : null,
+        phone: n % 2 === 0 ? `+7 900 ${String(1_000_000 + n).slice(1)}` : null,
+        email: n % 4 === 0 ? `client${n}@example.com` : null,
+        city: n % 3 === 0 ? 'Москва' : null,
+        orders: 1 + (n % 5),
+        sum: 10_000 + n * 500,
+        last_day: new Date(Date.now() - (n % 30) * DAY_MS).toISOString().slice(0, 10),
+        recency_days: n % 30,
+        r: 1 + (n % 5),
+        f: 1 + (n % 5),
+        m: 1 + (n % 5),
+      };
+    });
+    return {
+      window_days: days,
+      as_of: new Date().toISOString().slice(0, 10),
+      segment: url.searchParams.get('segment') ?? 'champions',
+      total_customers: TOTAL,
+      rows,
     };
   }
   if (path === '/api/ms/top-customers') {
@@ -432,9 +407,9 @@ function demoMsPayload(url: URL, opts: { max?: boolean } = {}): unknown | undefi
 }
 
 /**
- * Boot the app straight into the authenticated DEMO dashboard: stub /api/auth/me and set the demo
- * flag before load, so the whole Telegram dashboard renders from deterministic client-side fixtures —
- * no backend, no real credentials. Waits for the shell + first widget card, then a short settle so
+ * Boot the app straight into the DEMO dashboard. AuthGate recognises the persisted flag and must
+ * never request /api/auth/me; the Telegram dashboard renders from deterministic client fixtures —
+ * no backend, no credentials. Waits for the shell + first widget card, then a short settle so
  * ResizeObserver-driven chart heights are final before we measure them.
  * `opts.theme` pins the pulse_theme preference before load (default: system → the Playwright
  * environment's light) — the contrast gate scans both palettes explicitly.
@@ -442,35 +417,48 @@ function demoMsPayload(url: URL, opts: { max?: boolean } = {}): unknown | undefi
 export async function bootDemo(
   page: Page,
   route = '/',
-  opts: { theme?: 'light' | 'dark'; msMax?: boolean } = {},
+  opts: { theme?: 'light' | 'dark'; msMax?: boolean; msFixtures?: boolean } = {},
 ): Promise<void> {
-  // Covered demo endpoints resolve inside api/client.ts and never reach the network. Any uncovered
-  // optional request (IG/media today, future integrations tomorrow) gets a deterministic response
-  // instead of leaking through Vite's proxy to a missing local backend and filling CI with ECONNREFUSED.
+  // Covered demo endpoints (TG + IG, см. lib/demoFixtures + lib/demoIgFixtures) resolve inside
+  // api/client.ts and never reach the network. Any uncovered optional request (media today, future
+  // integrations tomorrow) gets a deterministic response instead of leaking through Vite's proxy to
+  // a missing local backend and filling CI with ECONNREFUSED.
   await page.route(/^https?:\/\/[^/]+\/api\//, (r) => {
     const url = new URL(r.request().url());
-    const path = url.pathname;
-    const isMe = path === '/api/auth/me';
-    const igPayload = demoIgPayload(path);
     const msPayload = demoMsPayload(url, { max: opts.msMax });
     return r.fulfill({
-      status: isMe || igPayload !== undefined || msPayload !== undefined ? 200 : 404,
+      status: msPayload !== undefined ? 200 : 404,
       contentType: 'application/json',
-      body: JSON.stringify(isMe ? DEMO_ME : igPayload ?? msPayload ?? { error: 'not_available_in_demo' }),
+      body: JSON.stringify(msPayload ?? { error: 'not_available_in_demo' }),
     });
   });
+  // МС/ЯМ-неймспейсы у демо ТОЖЕ покрыты клиентскими фикстурами (lib/demoMsFixtures,
+  // lib/demoYmFixtures) — иначе публичное демо без сессии ловило 401. Но перехват идёт ДО сети и
+  // подменил бы стаб выше, по которому написаны МС-спеки (компакт-лимиты, сортировки, msMax-длина).
+  // Флаг pulse_demo_net_msym возвращает эти два неймспейса сети; `msFixtures: true` его снимает —
+  // так проверяется сама витрина демо (demo-sklad.spec).
   await page.addInitScript(
-    (theme) => {
+    ({ theme, netMsYm }) => {
       localStorage.setItem('pulse_demo', '1');
       localStorage.setItem('pulse_channel', '0');
+      if (netMsYm) localStorage.setItem('pulse_demo_net_msym', '1');
       if (theme) localStorage.setItem('pulse_theme', theme);
     },
-    opts.theme ?? '',
+    { theme: opts.theme ?? '', netMsYm: !opts.msFixtures },
   );
   await page.goto(route);
   // Wait for the authed shell (present on every route incl. an empty /home), then settle so
   // ResizeObserver-driven chart heights are final before any measurement.
   await page.locator('main').waitFor({ state: 'visible', timeout: 25_000 });
+  // Докстрока выше обещала «shell + first widget card», а код ждал только оболочку и часы. Под
+  // нагрузкой (несколько worker'ов на одном CPU, холодный dev-сервер) 1200 мс истекали раньше карточек, и
+  // замеры ловили пустую страницу — целый класс флаков (аудит #554). Теперь ждём САМУ карточку;
+  // маршруты без виджетов (пустой /home, списки) просто проходят дальше по истечении своего бюджета.
+  await page
+    .locator('section[data-widget-size], [data-widget-grid], table')
+    .first()
+    .waitFor({ state: 'visible', timeout: 15_000 })
+    .catch(() => {});
   await page.waitForTimeout(1200);
 }
 
@@ -554,8 +542,30 @@ export async function openDetailOverlayByKeyboard(page: Page): Promise<void> {
  * Every card body (or any residual scroll container) that overflows its tile — the exact "no inner
  * scrollbars" invariant. Returns [] when clean; each entry names the widget for triage.
  */
-export function overflowingCards(page: Page) {
-  return page.evaluate(() =>
+/**
+ * Карточки с внутренним скроллом — прямой гейт канона плотности.
+ *
+ * ВАЖНО про честность замера: тела карточек грузятся по появлению в кадре (useWidgetInView), и
+ * до прокрутки нижняя половина доски — пустые боксы, которые «влезают» всегда. Гейт годами мерил
+ * только первый экран: переполнения «Пол», «Динамика аудитории», «По дням недели» и тринадцати
+ * разрезов Метрики спокойно жили в проде. Поэтому здесь доска ПРОКРУЧИВАЕТСЯ до конца, затем
+ * ждём исчезновения скелетонов (иначе меряем состояние загрузки) и только потом меряем.
+ */
+export async function overflowingCards(page: Page) {
+  const scroller = page.locator('[data-dashboard-scroll]');
+  const hasScroller = (await scroller.count()) > 0;
+  for (let i = 0; i < 12; i++) {
+    if (hasScroller) await scroller.first().evaluate((el) => el.scrollBy(0, 700));
+    else await page.mouse.wheel(0, 700);
+    await page.waitForTimeout(200);
+  }
+  // Скелетоны считаются содержимым карточки: их высота тоже обязана влезать в тайл.
+  for (let i = 0; i < 20; i++) {
+    if ((await page.locator('.animate-pulse').count()) === 0) break;
+    await page.waitForTimeout(400);
+  }
+  await page.waitForTimeout(500);
+  const result = await page.evaluate(() =>
     [...document.querySelectorAll('div.overflow-hidden, div.overflow-y-auto, div.overflow-auto')]
       .filter((el) => el.scrollHeight > el.clientHeight + 1)
       .map((el) => ({
@@ -563,4 +573,9 @@ export function overflowingCards(page: Page) {
         over: el.scrollHeight - el.clientHeight,
       })),
   );
+  // Возвращаем доску наверх: гейт не должен менять состояние страницы для следующих проверок.
+  if (hasScroller) await scroller.first().evaluate((el) => el.scrollTo(0, 0));
+  else await page.mouse.wheel(0, -20000);
+  await page.waitForTimeout(300);
+  return result;
 }

@@ -1,0 +1,30 @@
+{
+  "total": 1156,
+  "rules": {
+    "lint/complexity/noImportantStyles": 7,
+    "lint/complexity/noUselessCatch": 1,
+    "lint/complexity/noUselessEscapeInRegex": 1,
+    "lint/complexity/noUselessFragments": 3,
+    "lint/complexity/noUselessSwitchCase": 3,
+    "lint/complexity/useOptionalChain": 384,
+    "lint/correctness/noUnusedFunctionParameters": 35,
+    "lint/correctness/noUnusedVariables": 12,
+    "lint/correctness/useExhaustiveDependencies": 32,
+    "lint/correctness/useParseIntRadix": 4,
+    "lint/style/noDescendingSpecificity": 47,
+    "lint/style/noNonNullAssertion": 386,
+    "lint/style/useConst": 16,
+    "lint/style/useExponentiationOperator": 2,
+    "lint/style/useImportType": 3,
+    "lint/style/useNodejsImportProtocol": 33,
+    "lint/style/useTemplate": 27,
+    "lint/suspicious/noArrayIndexKey": 87,
+    "lint/suspicious/noAssignInExpressions": 10,
+    "lint/suspicious/noConfusingVoidType": 1,
+    "lint/suspicious/noControlCharactersInRegex": 11,
+    "lint/suspicious/noGlobalIsNan": 14,
+    "lint/suspicious/noPrototypeBuiltins": 2,
+    "lint/suspicious/noShadowRestrictedNames": 8,
+    "lint/suspicious/useIterableCallbackReturn": 27
+  }
+}

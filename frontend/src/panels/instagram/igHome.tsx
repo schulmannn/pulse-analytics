@@ -1,8 +1,8 @@
 import { Link } from 'react-router-dom';
-import { useIgData } from '@/lib/useIgData';
+import { useIgData, type IgData } from '@/lib/useIgData';
 import { useDemo } from '@/lib/demo-context';
 import { ChartSection } from '@/components/ChartWidget';
-import { TrendCard, FollowsByDayCard, IgKpiBlock, SubscriberMovement, igPeriodRows } from '@/components/instagram/shared';
+import { TrendCard, IgKpiBlock, SubscriberMovement, igPeriodRows } from '@/components/instagram/shared';
 import { InsightsBlock, PeriodCompareBlock } from '@/components/instagram/insights';
 
 /**
@@ -14,7 +14,9 @@ import { InsightsBlock, PeriodCompareBlock } from '@/components/instagram/insigh
  * real metrics — the in-feed pages have a page-level demo banner, a lone Home card has none.
  */
 
-function IgConnectPrompt({ id, homeKey, title }: { id?: string; homeKey?: string; title: string }) {
+type PromptProps = { id?: string; homeKey?: string; title: string };
+
+function IgConnectPrompt({ id, homeKey, title }: PromptProps) {
   return (
     <ChartSection id={id} homeKey={homeKey} title={title} noExpand>
       <div className="flex h-full min-h-40 flex-col items-center justify-center gap-2 text-center">
@@ -27,25 +29,60 @@ function IgConnectPrompt({ id, homeKey, title }: { id?: string; homeKey?: string
   );
 }
 
+/** Истёкший доступ ≠ «не подключено»: путь наружу другой (переподключить, а не подключить), и на
+ *  доске реальных метрик карточка обязана назвать причину, а не молча предлагать подключение. */
+function IgReauthPrompt({ id, homeKey, title }: PromptProps) {
+  return (
+    <ChartSection id={id} homeKey={homeKey} title={title} noExpand>
+      <div className="flex h-full min-h-40 flex-col items-center justify-center gap-2 text-center">
+        <p className="text-sm text-muted-foreground">Доступ к Instagram истёк — данные не обновляются.</p>
+        <Link to="/connect?source=instagram" className="text-xs font-medium text-primary hover:underline">
+          Переподключить →
+        </Link>
+      </div>
+    </ChartSection>
+  );
+}
+
+/** Одна заглушка на все шесть карточек: порядок проверок — состояние доступа, потом сбой, потом
+ *  демо. `null` = карточке есть что показать. */
+function igCardFallback(ig: IgData, demo: boolean, props: PromptProps) {
+  if (ig.reauth) return <IgReauthPrompt {...props} />;
+  if (ig.error || (ig.isMock && !demo)) return <IgConnectPrompt {...props} />;
+  return null;
+}
+
 export function IgReachHomeCard({ id, homeKey }: { id?: string; homeKey?: string }) {
   const ig = useIgData();
   const { demo } = useDemo();
   // In the app-wide demo EVERYTHING is sample data — the mock chart is the point, not a lie.
-  if (ig.error || (ig.isMock && !demo)) return <IgConnectPrompt id={id} homeKey={homeKey} title="IG · Охват по дням" />;
+  const fallback = igCardFallback(ig, demo, { id, homeKey, title: 'IG · Охват по дням' });
+  if (fallback) return fallback;
   return <TrendCard id={id} homeKey={homeKey} title="IG · Охват по дням" series={ig.series.reach} drillTo="/metrics/ig-reach" />;
 }
 
 export function IgFollowsHomeCard({ id, homeKey }: { id?: string; homeKey?: string }) {
   const ig = useIgData();
   const { demo } = useDemo();
-  if (ig.error || (ig.isMock && !demo)) return <IgConnectPrompt id={id} homeKey={homeKey} title="IG · Подписки по дням" />;
-  return <FollowsByDayCard id={id} homeKey={homeKey} title="IG · Подписки по дням" data={ig.series.follower} drillTo="/metrics/ig-follows" />;
+  const fallback = igCardFallback(ig, demo, { id, homeKey, title: 'IG · Динамика подписчиков' });
+  if (fallback) return fallback;
+  return (
+    <TrendCard
+      id={id}
+      homeKey={homeKey}
+      title="IG · Динамика подписчиков"
+      series={ig.series.followerLevel}
+      seriesKind="level"
+      drillTo="/metrics/ig-follows"
+    />
+  );
 }
 
 export function IgMovementHomeCard({ id, homeKey }: { id?: string; homeKey?: string }) {
   const ig = useIgData();
   const { demo } = useDemo();
-  if (ig.error || (ig.isMock && !demo)) return <IgConnectPrompt id={id} homeKey={homeKey} title="IG · Движение подписчиков" />;
+  const fallback = igCardFallback(ig, demo, { id, homeKey, title: 'IG · Движение подписчиков' });
+  if (fallback) return fallback;
   return (
     <ChartSection id={id} homeKey={homeKey} title="IG · Движение подписчиков" defaultSize="full" noExpand>
       <SubscriberMovement follows={ig.pairs.follows} unfollows={ig.pairs.unfollows} net={ig.netMovement} />
@@ -56,7 +93,8 @@ export function IgMovementHomeCard({ id, homeKey }: { id?: string; homeKey?: str
 export function IgCompareHomeCard({ id, homeKey }: { id?: string; homeKey?: string }) {
   const ig = useIgData();
   const { demo } = useDemo();
-  if (ig.error || (ig.isMock && !demo)) return <IgConnectPrompt id={id} homeKey={homeKey} title="IG · Сравнение периодов" />;
+  const fallback = igCardFallback(ig, demo, { id, homeKey, title: 'IG · Сравнение периодов' });
+  if (fallback) return fallback;
   return (
     <ChartSection id={id} homeKey={homeKey} title="IG · Сравнение периодов" defaultSize="full" noExpand>
       <PeriodCompareBlock rows={igPeriodRows(ig)} />
@@ -67,7 +105,8 @@ export function IgCompareHomeCard({ id, homeKey }: { id?: string; homeKey?: stri
 export function IgInsightsHomeCard({ id, homeKey }: { id?: string; homeKey?: string }) {
   const ig = useIgData();
   const { demo } = useDemo();
-  if (ig.error || (ig.isMock && !demo)) return <IgConnectPrompt id={id} homeKey={homeKey} title="IG · Главное" />;
+  const fallback = igCardFallback(ig, demo, { id, homeKey, title: 'IG · Главное' });
+  if (fallback) return fallback;
   return (
     <ChartSection id={id} homeKey={homeKey} title="IG · Главное" defaultSize="full" noExpand>
       <InsightsBlock insights={ig.insights} limit={4} />
@@ -78,7 +117,8 @@ export function IgInsightsHomeCard({ id, homeKey }: { id?: string; homeKey?: str
 export function IgKpiHomeCard({ id, homeKey }: { id?: string; homeKey?: string }) {
   const ig = useIgData();
   const { demo } = useDemo();
-  if (ig.error || (ig.isMock && !demo)) return <IgConnectPrompt id={id} homeKey={homeKey} title="IG · Показатели" />;
+  const fallback = igCardFallback(ig, demo, { id, homeKey, title: 'IG · Показатели' });
+  if (fallback) return fallback;
   return (
     <ChartSection id={id} homeKey={homeKey} title="IG · Показатели" defaultSize="full" drillTo="/metrics/ig-reach">
       <IgKpiBlock ig={ig} />

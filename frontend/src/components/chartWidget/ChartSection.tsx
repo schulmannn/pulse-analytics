@@ -1,14 +1,26 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { toast } from 'sonner';
 import { PERIOD_WORD, SIZE_COL_SPAN, SIZE_DEFER_RENDER, SIZE_HEIGHT } from './constants';
 import { useChartSectionModel } from './useChartSectionModel';
 import { WidgetBody } from './WidgetBody';
 import { WidgetHeader } from './WidgetHeader';
+import { MenuIcon } from './WidgetMenu';
 import { WidgetEditOverlay, WidgetExpandOverlay } from './WidgetOverlays';
 import { WidgetPeriodPills } from './WidgetPeriodPills';
 import { WidgetResizeHandle } from './WidgetResizeHandle';
 import type { ChartSectionProps } from './types';
 import { SourceIdentity } from '@/components/SourceIdentity';
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
 import { useHomeSource } from '@/lib/homeSourceContext';
+import { pinToHome, unpinFromHome } from '@/lib/widgetPrefsStore';
+import { WidgetSizeContext } from '@/lib/widgetSize';
 import { WidgetInViewContext } from '@/lib/widgetViewport';
 
 /** Configurable dashboard card. Public consumers import this through components/ChartWidget. */
@@ -43,7 +55,11 @@ export function ChartSection(props: ChartSectionProps) {
       { rootMargin: '600px 0px' },
     );
     io.observe(el);
-    // Скролл-фолбэк как в LazyBlock (useFeed): headless/frame-starved окружения, где IO молчит.
+    // Скролл-фолбэк как в LazyBlock (useFeed): headless/frame-starved окружения и фоновые вкладки,
+    // где IO молчит. ОБЯЗАТЕЛЬНО capture: scroll НЕ всплывает, а десктоп прокручивает не окно, а
+    // элемент [data-dashboard-scroll] (DashboardLayout) — без capture слушатель на window не
+    // получил бы НИ ОДНОГО события и фолбэк был бы мёртвым ровно там, где он нужен. Тот же приём
+    // уже используют ChartTooltip/LineChart для сброса подсказки.
     let lastRun = 0;
     const onScroll = () => {
       const now = Date.now();
@@ -51,16 +67,54 @@ export function ChartSection(props: ChartSectionProps) {
       lastRun = now;
       if (nearViewport()) setInView(true);
     };
-    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('scroll', onScroll, { passive: true, capture: true });
     return () => {
       io.disconnect();
-      window.removeEventListener('scroll', onScroll);
+      window.removeEventListener('scroll', onScroll, { capture: true });
     };
   }, [inView, sectionRef]);
   const { widgetId, label } = model.identity;
   const { group, reorder, dragging, effectiveSize } = model.layout;
   const { prefs, updatePrefs, pinned } = model.preferences;
   const allowExpand = !props.noExpand;
+  const cardRef = useRef<HTMLDivElement>(null);
+  const cardPressRef = model.refs.cardPressRef;
+  const openExpand = model.expansion.openExpand;
+  const navigate = useNavigate();
+  const { pathname } = useLocation();
+  // Контекстное (правый клик) меню карточки — те же действия, что у кнопки «⋯» (WidgetMenu):
+  // power-путь без прицеливания в иконку. В reorder-режиме и у strip-полос меню не живёт.
+  const contextActions = !reorder && !props.strip;
+
+  // The whole-card tap is a pointer convenience around the real, labelled expand button rendered
+  // by WidgetHeader. Keep the passive card a <div> (it contains menus and other controls, so it
+  // cannot validly become one giant button) and register the pointer gesture on its DOM node.
+  useEffect(() => {
+    const card = cardRef.current;
+    if (!card || reorder || props.noExpand) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      cardPressRef.current = { x: event.clientX, y: event.clientY };
+    };
+    const handleClick = (event: MouseEvent) => {
+      const target = event.target;
+      if (
+        target instanceof Element &&
+        target.closest('button, a, input, select, label, [role="dialog"], [data-widget-action]')
+      ) {
+        return;
+      }
+      const press = cardPressRef.current;
+      cardPressRef.current = null;
+      if (press && Math.hypot(event.clientX - press.x, event.clientY - press.y) > 5) return;
+      openExpand();
+    };
+    card.addEventListener('pointerdown', handlePointerDown);
+    card.addEventListener('click', handleClick);
+    return () => {
+      card.removeEventListener('pointerdown', handlePointerDown);
+      card.removeEventListener('click', handleClick);
+    };
+  }, [cardPressRef, openExpand, props.noExpand, reorder]);
 
   return (
     <section
@@ -71,6 +125,7 @@ export function ChartSection(props: ChartSectionProps) {
       style={model.layout.outerStyle}
       data-widget-size={effectiveSize}
       data-widget-user-sized={model.layout.userSized ? '' : undefined}
+      data-widget-no-stretch={props.noStretch ? '' : undefined}
       onPointerDown={
         reorder
           ? (event) => {
@@ -98,8 +153,14 @@ export function ChartSection(props: ChartSectionProps) {
       {/* Provider оборачивает ТОЛЬКО тело карточки: оверлеи ниже — сиблинги, expand-тело обязано
           фетчить всегда (deep-link ?detail= может открыть невиденную карточку) и берёт дефолт
           контекста (true). */}
+      {/* Размер рядом с видимостью и по той же причине: тело иногда должно выбрать ДРУГОЙ макет,
+          а не сжать прежний (аудит #554, ТЗ-11). Оверлей развёртки — сиблинг и берёт дефолт `full`. */}
+      <WidgetSizeContext.Provider value={effectiveSize}>
       <WidgetInViewContext.Provider value={inView}>
+      <ContextMenu>
+      <ContextMenuTrigger asChild disabled={!contextActions}>
       <div
+        ref={cardRef}
         className={`${
           props.strip
             ? 'group/strip relative flex flex-col'
@@ -113,31 +174,20 @@ export function ChartSection(props: ChartSectionProps) {
         } ${reorder ? 'widget-jiggle' : 'widget-enter cursor-pointer'} ${dragging ? 'shadow-lg' : ''}`}
         style={model.layout.innerStyle}
         data-widget-accented={model.layout.activeColor ? '' : undefined}
+        data-widget-card
         data-drill-to={props.drillTo || undefined}
         data-widget-tinted={model.layout.activeTinted && model.layout.activeColor ? '' : undefined}
-        onPointerDown={
-          reorder || props.noExpand
-            ? undefined
-            : (event) => (model.refs.cardPressRef.current = { x: event.clientX, y: event.clientY })
-        }
-        onClick={
-          reorder || props.noExpand
-            ? undefined
-            : (event) => {
-                if ((event.target as HTMLElement).closest('button, a, input, select, label, [role="dialog"]')) return;
-                const press = model.refs.cardPressRef.current;
-                model.refs.cardPressRef.current = null;
-                if (press && Math.hypot(event.clientX - press.x, event.clientY - press.y) > 5) return;
-                model.expansion.openExpand();
-              }
-        }
       >
         <WidgetHeader
           label={label}
           action={
             props.homeKey && homeSource ? (
               <>
-                <SourceIdentity network={homeSource.network} channelId={homeSource.channelId} />
+                <SourceIdentity
+                  network={homeSource.network}
+                  channelId={homeSource.channelId}
+                  compact={effectiveSize === 'third'}
+                />
                 {props.action}
               </>
             ) : props.action
@@ -193,13 +243,73 @@ export function ChartSection(props: ChartSectionProps) {
           period={model.period.widgetPeriod}
           target={model.layout.activeTarget}
           fillHeight={model.layout.fillHeight}
+          height={props.chartHeight}
           fixedTile={!props.strip && effectiveSize !== 'full'}
           primary={model.variants.primaryBody}
           footer={model.variants.activeVariant ? props.children : undefined}
           resetKeys={model.bodyResetKeys}
         />
       </div>
+      </ContextMenuTrigger>
+      {contextActions && (
+        <ContextMenuContent aria-label={`Действия виджета «${label}»`}>
+          {allowExpand && (
+            <ContextMenuItem onSelect={() => openExpand()}>
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5" aria-hidden="true">
+                <path d="M9.5 2.5h4v4M13.5 2.5 9 7M6.5 13.5h-4v-4M2.5 13.5 7 9" />
+              </svg>
+              Развернуть
+            </ContextMenuItem>
+          )}
+          {!props.strip && (
+            <ContextMenuItem onSelect={() => model.controls.openEdit()}>
+              <MenuIcon kind="edit" /> Изменить
+            </ContextMenuItem>
+          )}
+          {(allowExpand || !props.strip) && (group || props.homeKey) && <ContextMenuSeparator />}
+          {group && (
+            <ContextMenuItem
+              onSelect={() => {
+                group.beginReorder();
+                requestAnimationFrame(() =>
+                  document.querySelector<HTMLElement>('[data-reorder-done]')?.focus(),
+                );
+              }}
+            >
+              <MenuIcon kind="drag" /> Переставить
+            </ContextMenuItem>
+          )}
+          {props.homeKey && (
+            <ContextMenuItem
+              onSelect={() => {
+                // Зеркало пункта WidgetMenu: результат пина живёт на другой странице — тост.
+                const homeKey = props.homeKey as string;
+                if (pinned) {
+                  unpinFromHome(homeKey);
+                  if (pathname !== '/home') toast(`«${label}» — убрано с главной`);
+                } else {
+                  pinToHome(homeKey);
+                  if (pathname !== '/home') {
+                    toast(`«${label}» — на главной`, {
+                      action: { label: 'Открыть', onClick: () => navigate('/home') },
+                    });
+                  }
+                }
+              }}
+            >
+              <MenuIcon kind="home" /> {pinned ? 'Убрать с главной' : 'На главную'}
+            </ContextMenuItem>
+          )}
+          {group && (
+            <ContextMenuItem onSelect={() => updatePrefs({ ...prefs, hidden: true })}>
+              <MenuIcon kind="hide" /> Скрыть
+            </ContextMenuItem>
+          )}
+        </ContextMenuContent>
+      )}
+      </ContextMenu>
       </WidgetInViewContext.Provider>
+      </WidgetSizeContext.Provider>
       {model.layout.resizeEnabled && !reorder && (
         <WidgetResizeHandle
           label={label}
@@ -221,6 +331,7 @@ export function ChartSection(props: ChartSectionProps) {
         showSize={!!group && !props.fixedSize}
         defaultSize={props.defaultSize ?? 'third'}
         defaultColor={props.defaultColor}
+        defaultTinted={model.layout.tintedDefault}
         minSize={model.variants.activeVariant?.minSize ?? 'third'}
         onChange={updatePrefs}
         onClose={() => model.controls.setEditOpen(false)}

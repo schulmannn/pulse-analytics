@@ -2,8 +2,8 @@ import { createContext, useCallback, useEffect, useLayoutEffect, useMemo, useRef
 import { createPortal } from 'react-dom';
 import type { ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
-import { observeSize } from '@/lib/observeSize';
 import { getPrefs, setGroupOrder, setPrefs, subscribeStore, useGroupOrder } from '@/lib/widgetPrefsStore';
+import { useRowFill } from './useRowFill';
 
 // ── WidgetGroup: a flex/grid container whose ChartSection children can be reordered ───────
 export interface Registered {
@@ -43,10 +43,13 @@ export function currentTranslate(el: HTMLElement): [number, number] {
 export interface WidgetGroupProps {
   id: string;
   className?: string;
+  /** Stable first-mount order for groups whose data-backed cards may register asynchronously.
+      A persisted user order still wins; ids omitted from that order are appended by this list. */
+  defaultOrder?: readonly string[];
   children: ReactNode;
 }
 
-export function WidgetGroup({ id, className, children }: WidgetGroupProps) {
+export function WidgetGroup({ id, className, defaultOrder, children }: WidgetGroupProps) {
   const [registered, setRegistered] = useState<Registered[]>([]);
   const [reorderMode, setReorderMode] = useState(false);
   const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -72,76 +75,9 @@ export function WidgetGroup({ id, className, children }: WidgetGroupProps) {
       }),
     [],
   );
-  // ── Дырозатыкание: одинокая карточка в ПОСЛЕДНЕМ ряду растягивается на весь ряд ──────────
-  // Хвостовая дыра (half-виджет + пустые колонки до края) читается как сломанная сетка — ряд не
-  // должен уметь так выглядеть, даже если юзер сам ресайзнул (визуальный аудит). Прямой DOM-стиль
-  // вместо state: ни ре-рендеров, ни риска #185; rAF-хоп по паттерну observeSize. Прогон сначала
-  // только ЧИТАЕТ: не изменилась сигнатура раскладки → полный no-op без единой записи в style
-  // (прежний write-then-read на каждый rAF форсил reflow всей страницы и не давал RO-циклу
-  // угаснуть). Изменилась — снимаем прошлую растяжку, меряем честный layout и решаем заново.
+  // Ряд без дыр: правило живёт в useRowFill и одинаково работает здесь и на голых сетках.
   const groupRootRef = useRef<HTMLDivElement>(null);
-  const stretchedRef = useRef<HTMLElement | null>(null);
-  // Сигнатура ПРИМЕНЁННОЙ раскладки (ширина корня + offsetLeft:offsetWidth карточек): высоты в
-  // неё не входят намеренно — принадлежность ряду и ширины колонок от них не зависят, а именно
-  // высоты дёргаются при доезде данных/ховерах и будят RO группы каждый кадр.
-  const appliedSigRef = useRef('');
-  useEffect(() => {
-    let handle = 0;
-    const layoutSig = (root: HTMLElement, els: HTMLElement[]) =>
-      `${root.clientWidth}|${els
-        .map((el) => `${el.offsetLeft}:${el.offsetWidth}:${el.hasAttribute('data-widget-user-sized') ? 1 : 0}`)
-        .join(',')}`;
-    const apply = () => {
-      const root = groupRootRef.current;
-      if (!root) return;
-      // Только чтение на чистом layout'е — reflow не форсится.
-      const els = [...nodes.current.values()].filter((el) => el.isConnected && el.offsetWidth > 0);
-      const sig = layoutSig(root, els);
-      if (sig === appliedSigRef.current) return;
-      // Раскладка реально изменилась — единственный момент, когда позволены записи в style.
-      const hadStretch = stretchedRef.current !== null;
-      if (stretchedRef.current) {
-        stretchedRef.current.style.gridColumn = '';
-        stretchedRef.current = null;
-      }
-      // Семантика решения прежняя: одиночка в последнем ряду уже 0.8 ширины корня — тянется.
-      if (els.length >= 2) {
-        const maxTop = Math.max(...els.map((el) => el.offsetTop));
-        const lastRow = els.filter((el) => el.offsetTop === maxTop);
-        // An untouched default card may still close an accidental tail gap. Once the owner has
-        // explicitly chosen S/M/L (dialog or corner drag), that footprint is authoritative: silently
-        // stretching it back to a full row would make resize look broken after pointer-up.
-        if (
-          lastRow.length === 1 &&
-          !lastRow[0].hasAttribute('data-widget-user-sized') &&
-          lastRow[0].offsetWidth < root.clientWidth * 0.8
-        ) {
-          lastRow[0].style.gridColumn = '1 / -1';
-          stretchedRef.current = lastRow[0];
-        }
-      }
-      // Запоминаем сигнатуру ИТОГОВОЙ раскладки: без записей она равна уже посчитанной, после
-      // записей — перемеряем, чтобы следующий прогон no-op'нулся на ней же.
-      appliedSigRef.current = hadStretch || stretchedRef.current ? layoutSig(root, els) : sig;
-    };
-    const schedule = () => {
-      cancelAnimationFrame(handle);
-      handle = requestAnimationFrame(apply);
-    };
-    schedule();
-    const unsub = subscribeStore(schedule); // ресайз/скрытие виджета → пере-раскладка
-    window.addEventListener('resize', schedule);
-    // Данные доезжают ПОСЛЕ маунта и меняют высоты карточек БЕЗ notify стора — одноразовый прогон
-    // на скелетонах примет решение по неверному layout'у (прод-находка). Рост/сжатие корня группы
-    // = единственный надёжный сигнал «раскладка изменилась» → пере-меряем.
-    const unobserve = groupRootRef.current ? observeSize(groupRootRef.current, schedule) : undefined;
-    return () => {
-      cancelAnimationFrame(handle);
-      unsub();
-      unobserve?.();
-      window.removeEventListener('resize', schedule);
-    };
-  }, [registered]);
+  useRowFill(groupRootRef, { subscribe: subscribeStore });
 
   // ── Pointer drag (jiggle mode): the card ITSELF follows the pointer. Native HTML5 DnD
   // is deliberately not used — it floats a translucent browser snapshot while the real
@@ -199,7 +135,10 @@ export function WidgetGroup({ id, className, children }: WidgetGroupProps) {
       el.style.transition = 'none';
       el.style.transform = `translate(${dx}px, ${dy}px)`;
       void el.offsetHeight; // commit the inverted position before playing
-      el.style.transition = 'transform var(--motion-glide) var(--ease-standard)';
+      // Пружина почти критического дампинга (волна B): FLIP-глайд получает «вес» — микро-овершут
+    // ~1-2%, не bounce. Двойное объявление = фолбэк для браузеров без linear().
+    el.style.transition = 'transform var(--motion-glide) var(--ease-standard)';
+    el.style.transitionTimingFunction = 'var(--ease-spring, var(--ease-standard))';
       el.style.transform = '';
       const glideToken = String(++glideSequence.current);
       el.dataset.gliding = glideToken;
@@ -250,11 +189,18 @@ export function WidgetGroup({ id, className, children }: WidgetGroupProps) {
   const stored = useGroupOrder(id);
   const sequence = useMemo(() => {
     const registeredIds = registered.map((r) => r.id);
+    const defaultRank = new Map(defaultOrder?.map((widgetId, index) => [widgetId, index]));
+    const newcomers = registeredIds.filter((widgetId) => !stored.includes(widgetId));
+    newcomers.sort((a, b) => {
+      const aRank = defaultRank.get(a) ?? Number.MAX_SAFE_INTEGER;
+      const bRank = defaultRank.get(b) ?? Number.MAX_SAFE_INTEGER;
+      return aRank - bRank;
+    });
     return [
       ...stored.filter((x) => registeredIds.includes(x)),
-      ...registeredIds.filter((x) => !stored.includes(x)),
+      ...newcomers,
     ];
-  }, [stored, registered]);
+  }, [defaultOrder, stored, registered]);
   // Drag callbacks live across renders (pointer capture, edge-scroll interval) — read the
   // sequence through a ref so a mid-drag closure never splices a stale order.
   const sequenceRef = useRef(sequence);
@@ -422,7 +368,10 @@ export function WidgetGroup({ id, className, children }: WidgetGroupProps) {
     // Glide home from wherever the pointer let go (the live reorder already committed).
     el.dataset.gliding = '1';
     void el.offsetHeight;
+    // Пружина почти критического дампинга (волна B): FLIP-глайд получает «вес» — микро-овершут
+    // ~1-2%, не bounce. Двойное объявление = фолбэк для браузеров без linear().
     el.style.transition = 'transform var(--motion-glide) var(--ease-standard)';
+    el.style.transitionTimingFunction = 'var(--ease-spring, var(--ease-standard))';
     el.style.transform = '';
     el.addEventListener('transitionend', done);
     window.setTimeout(done, 400); // transitionend can be swallowed (tab switch) — belt & braces
@@ -449,7 +398,7 @@ export function WidgetGroup({ id, className, children }: WidgetGroupProps) {
 
   return (
     <GroupCtx.Provider value={ctxValue}>
-      <div ref={groupRootRef} className={className} data-widget-group-root>{children}</div>
+      <div ref={groupRootRef} className={className} data-widget-group-root data-widget-grid>{children}</div>
       {/* Клавиатурная перестановка немая по природе (двигается CSS-order, DOM не меняется) —
           объявляем новую позицию. Без role="status": на /home уже есть свой статус-регион, и второй
           с той же ролью ломал бы однозначность запросов к нему. */}

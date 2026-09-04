@@ -1,0 +1,64 @@
+/**
+ * Сколько высоты полотна цель имеет право отобрать у самого ряда.
+ *
+ * Зачем: домен обязан вмещать цель — иначе линия уезжает за кадр и человек не видит, куда стремится.
+ * Но цель задаёт ЧЕЛОВЕК, и ничто не мешает ему написать вдесятеро больше, чем бывает в данных.
+ * Тогда домен растягивается под цель, а ряд сплющивается в черту у нижнего края: график перестаёт
+ * отвечать на свой первый вопрос («как шло дело»), чтобы ответить на второй («далеко ли до цели»).
+ *
+ * Приём тот же, что у искры (см. sparkDomain): режется не значение, а ОКНО ПРОСМОТРА, и выход за
+ * край помечается — цель печатается со стрелкой «↑», её настоящее число остаётся в подписи. Разница
+ * в поводе: там окно режет выброс данных, здесь — недостижимая цель.
+ *
+ * Порог: ряду остаётся не меньше ПОЛОВИНЫ вертикали. Считается он от РАЗМАХА ряда, а не от нуля,
+ * и на узком размахе это чувствительно: при данных 2000…2400 цель 2800 — обычное «на 15% выше
+ * достигнутого», ряд занял бы ровно половину и остался читаемым. Порог в 60% такую цель уже
+ * отсекал, то есть запрещал типичный случай ради редкого. Клип включается там, где цель
+ * отрывается по-настоящему: данные 0…49k и цель 200k дали бы ряду четверть.
+ */
+export const MIN_SERIES_SHARE = 0.5;
+
+export interface ClampedTarget {
+  /** Уровень, до которого расширяется домен. null — цели нет. */
+  value: number | null;
+  /** Цель выше окна: линия стоит НЕ на своём значении и обязана быть помечена. */
+  clipped: boolean;
+}
+
+/**
+ * @param dataMin/dataMax размах САМОГО ряда (без цели) — только наблюдения, без null.
+ */
+export function clampTargetToDomain(
+  target: number | null | undefined,
+  dataMin: number,
+  dataMax: number,
+): ClampedTarget {
+  if (target == null || !Number.isFinite(target)) return { value: null, clipped: false };
+  // Цель внутри данных — расширять нечего, клипать нечего.
+  if (target <= dataMax) return { value: target, clipped: false };
+  const span = dataMax - dataMin;
+  // Плоский ряд (все точки равны) высоты не занимает — сплющивать нечего, цель берём как есть.
+  if (!(span > 0)) return { value: target, clipped: false };
+  const allowed = dataMin + span / MIN_SERIES_SHARE;
+  return target > allowed ? { value: allowed, clipped: true } : { value: target, clipped: false };
+}
+
+/**
+ * Строка цели для читалки — ОДНА на оба графика: линия и столбцы печатают её одинаково, и две
+ * копии разошлись бы по знаку отклонения или по маркеру. Кольцо, а не точка: величина назначена
+ * человеком, а не измерена.
+ */
+export function targetTooltipRow(
+  target: number,
+  current: number,
+  format: (n: number) => string,
+): { label: string; value: string; color: string; mark: 'ring'; delta?: number } {
+  const d = target !== 0 ? ((current - target) / Math.abs(target)) * 100 : null;
+  return {
+    label: 'Цель',
+    value: format(target),
+    color: 'hsl(var(--chart-role-neutral))',
+    mark: 'ring',
+    delta: d != null && Number.isFinite(d) ? d : undefined,
+  };
+}

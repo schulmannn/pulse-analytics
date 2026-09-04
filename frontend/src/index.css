@@ -10,12 +10,55 @@
 
 @plugin 'tailwindcss-animate';
 
+@font-face {
+  font-family: 'Geist Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url('../node_modules/@fontsource-variable/geist/files/geist-cyrillic-wght-normal.woff2')
+    format('woff2-variations');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+
+@font-face {
+  font-family: 'Geist Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url('../node_modules/@fontsource-variable/geist/files/geist-latin-wght-normal.woff2')
+    format('woff2-variations');
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
 @custom-variant dark (&:is(.dark *));
 
-/* v3-parity: в Tailwind v4 `hover:` по умолчанию действует только на устройствах с ховером
-   (@media (hover: hover)) — это меняло бы живое поведение тач-устройств, а мобильный канон
-   заморожен до отдельного mobile-этапа. Возвращаем семантику v3 дословно. */
+/* Staged v3-parity: в Tailwind v4 `hover:` по умолчанию действует только на устройствах с ховером
+   (@media (hover: hover)). Пока phone-поверхности поэтапно переводятся на общие примитивы и
+   44px touch-targets, сохраняем прежнюю семантику hover, чтобы миграция не меняла соседнее
+   поведение legacy-контролов. */
 @custom-variant hover (&:hover);
+
+/* Hover-driven MOTION only: a transform that fires on `:hover` sticks after a tap on a touch screen,
+   because the browser keeps the synthetic hover on the last-tapped element. Colour/ink hovers stay on
+   the v3-parity variant above (a stuck tint is invisible); anything that MOVES is gated to a real
+   pointer instead. Separate variants rather than flipping `hover:` back to the v4 default, so the
+   staged phone migration keeps its current semantics everywhere else. */
+@custom-variant hover-fine {
+  @media (hover: hover) and (pointer: fine) {
+    &:hover {
+      @slot;
+    }
+  }
+}
+@custom-variant group-hover-fine {
+  @media (hover: hover) and (pointer: fine) {
+    &:is(:where(.group):hover *) {
+      @slot;
+    }
+  }
+}
 
 @utility container {
   margin-inline: auto;
@@ -29,8 +72,8 @@
 }
 
 @theme {
-  --font-sans: Inter, system-ui, -apple-system, sans-serif;
-  --font-mono: Roboto Mono, ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-sans: 'Geist Variable', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 
   --text-2xs: 0.6875rem;
   --text-2xs--line-height: 0.9375rem;
@@ -150,6 +193,19 @@
   border-radius: 9999px;
 }
 
+/* Штриховка ПРОПУСКА для не-SVG поверхностей (клетки календаря покрытия). Та же лексика, что у
+   ChartGapPattern: нейтральный muted под 45°, шаг 6px — «данных нет» обязано выглядеть одинаково
+   и на графике, и в сетке, иначе пропуск в одном месте читается как ноль в другом. */
+@utility gap-hatch {
+  background-image: repeating-linear-gradient(
+    45deg,
+    color-mix(in oklab, var(--color-muted-foreground) 16%, transparent) 0,
+    color-mix(in oklab, var(--color-muted-foreground) 16%, transparent) 1px,
+    transparent 1px,
+    transparent 5px
+  );
+}
+
 /* ── Widget-slot container queries ─────────────────────────────────────────────────────────────
    Тело виджета (WidgetBody slot) — именованный CQ-контейнер `tile`: содержимое карточки меряет
    СВОЙ слот, а не вьюпорт. Full-карточки авто-высотные — контейнер только по inline-оси (height-
@@ -178,6 +234,16 @@
   }
 }
 
+/* `tile-wide:` — слот широкий достаточно для ДВУХ колонок фактов (аудит #554, ТЗ-11).
+   Порог 30rem (480px) — по ЗАМЕРУ САМОГО КОНТЕЙНЕРА, а не секции: на 1440px M-карточка шириной 543px
+   даёт тайл 501px (минус p-5 с двух сторон), и пороги 32/34rem промахивались; S-тайл примерно 300px и не попадает
+   и держит одну колонку. Спрашиваем СЛОТ, а не экран: на Главной владелец задаёт ширину сам. */
+@custom-variant tile-wide {
+  @container tile (min-width: 30rem) {
+    @slot;
+  }
+}
+
 @utility data-table-surface {
   /* Shared dashboard data-table treatment. The shell owns the card chrome and horizontal
      overflow; the table class owns only typography, dividers and interaction states so complex
@@ -200,6 +266,21 @@
   width: 100%;
   overflow-x: auto;
   overscroll-behavior-inline: contain;
+  /* Scroll-edge fade (полировка 2026-07-28): маска-подсказка «дальше есть контент». Ширины краёв
+     живут в --scroll-fade-l/r и ставятся ТОЛЬКО хуком useScrollEdgeFade по реальному скроллу;
+     без хука обе 0px → маска — no-op. Это mask видимости, а не декоративный градиент (канон). */
+  mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    black var(--scroll-fade-l, 0px),
+    black calc(100% - var(--scroll-fade-r, 0px)),
+    transparent 100%
+  );
+  /* ПЕЧАТЬ (ревью, high): inline --scroll-fade-* переживают window.print(), а в PDF скролла нет —
+     протухшая 20px-маска растворяла ПОСЛЕДНЮЮ КОЛОНКУ таблиц отчёта. В печати маска всегда прочь. */
+  @media print {
+    mask-image: none;
+  }
 }
 
 @utility data-table {
@@ -313,7 +394,9 @@
     padding-block: 0.5rem;
     color: hsl(var(--foreground));
     font-size: 0.875rem;
-    font-weight: 600;
+    /* Канон двух начертаний: 500, а не 600. Шапка отделяется от тела весом и линейкой
+       снизу, а не третьим весом — так же, как в семи остальных таблицах продукта. */
+    font-weight: 500;
     letter-spacing: 0;
     line-height: 1.25rem;
   }
@@ -457,7 +540,6 @@
   & [data-chart-tooltip-appearance='rhea'] {
     font-family:
       'Geist Variable',
-      'Inter',
       system-ui,
       -apple-system,
       sans-serif;
@@ -655,7 +737,6 @@
      controls keep the same semantics, but move from full pills to Rhea's tighter rounded shapes. */
   font-family:
     'Geist Variable',
-    'Inter',
     system-ui,
     -apple-system,
     sans-serif;
@@ -719,11 +800,6 @@
     border-radius: 0.75rem;
     background: hsl(var(--muted) / 0.32);
     padding: 0.125rem;
-  }
-  & [data-segmented-indicator] {
-    border-radius: 0.625rem;
-    background: hsl(var(--card));
-    box-shadow: 0 0 0 1px hsl(var(--foreground) / 0.08);
   }
   & [data-segmented-control] > button {
     min-height: 1.75rem;
@@ -1149,7 +1225,6 @@
 @utility report-select-content {
   font-family:
     'Geist Variable',
-    'Inter',
     system-ui,
     -apple-system,
     sans-serif;
@@ -1255,8 +1330,8 @@
 }
 
 @utility font-mono {
-  /* Roboto Mono is scoped to data-health readouts (timestamps / collector version / API status)
-     and other technical figures — never for body copy. */
+  /* The local system monospace stack is scoped to data-health readouts (timestamps / collector
+     version / API status) and other technical figures — never for body copy. */
   font-feature-settings: 'tnum' 1;
 }
 
@@ -1317,6 +1392,13 @@
 
 @utility anim-dur-fast {
   animation-duration: var(--motion-fast);
+}
+
+/* Exit counterpart of anim-dur-fast — pair it with `data-[state=closed]:` so a surface leaves faster
+   than it arrived. Animation-duration, not transition-duration: the Radix overlays leave through
+   tailwindcss-animate keyframes (`animate-out`), which `dur-*` cannot reach. */
+@utility anim-dur-exit {
+  animation-duration: var(--motion-exit);
 }
 
 /* The house curve for both axes — `ease-out`/`ease-in-out` are off-canon (see DESIGN_TOKENS). */
@@ -1759,17 +1841,34 @@
      ONE house easing + a small duration ladder, so UI timings live in one place instead of being
      re-typed per component/rule. Values map 1:1 to what already shipped — this is tokenisation, not
      a re-time. Bespoke illustration loops (cartograph / connect / starfield / reorder jiggle) and
-     framer on the landing keep their own timings on purpose. Reduced-motion collapses ALL of these
+     CSS-native landing choreography keep their own timings on purpose. Reduced-motion collapses these
      via the global 0.01ms cap below, so token-driven rules never need a per-rule duration guard.
      Full canon + usage: frontend/DESIGN_TOKENS.md. */
   :root {
-    --ease-standard: cubic-bezier(0.2, 0.7, 0.3, 1); /* entrance / settle ease-out — the house curve */
+    /* Strong ease-out (Emil Kowalski's curve, owner call 2026-08-11 — was the softer
+       cubic-bezier(0.2, 0.7, 0.3, 1)). Both control points ride the ceiling, so the motion is ~90%
+       done at a third of its duration and spends the rest settling: perceived speed lives in the
+       first third, not in the total. A half-strength ease-out reads as hesitation at any duration. */
+    --ease-standard: cubic-bezier(0.23, 1, 0.32, 1); /* entrance / settle ease-out — the house curve */
     /* The house curve mirrored (x₁,y₁,x₂,y₂ → 1-x₂,1-y₂,1-x₁,1-y₁): accelerating instead of
        settling. An element LEAVING should not decelerate into its own disappearance — ease-out on an
-       exit reads as hesitation. Same family, so enter and leave stay recognisably one system. */
-    --ease-exit: cubic-bezier(0.7, 0, 0.8, 0.3);
+       exit reads as hesitation. Same family, so enter and leave stay recognisably one system.
+       Re-derived with the house curve above; the visible delta from the previous
+       cubic-bezier(0.7, 0, 0.8, 0.3) is a few percent mid-flight. */
+    --ease-exit: cubic-bezier(0.68, 0, 0.77, 0);
     --ease-chart-morph: cubic-bezier(0.25, 0.1, 0.25, 1); /* Recharts `ease` update curve */
+    /* Пружина с ПОЧТИ критическим дампингом (овершут ~1-2% — «вес», не bounce; канон не терпит
+       отскоков). ТОЛЬКО для FLIP-glide реордера; у потребителей ОБЯЗАТЕЛЕН фолбэк двойным
+       объявлением (старый браузер отбрасывает linear() на парсинге):
+         transition-timing-function: var(--ease-standard);
+         transition-timing-function: var(--ease-spring); */
+    --ease-spring: linear(0, 0.0637, 0.2105, 0.3963 18.2%, 0.7538 29.4%, 0.9243, 1.0126 47%, 1.0329, 1.0298 58.8%, 1.0034 70.6%, 0.9982, 1);
     --motion-track: 100ms;    /* smoothing for a transform written per pointermove frame   */
+    /* Leaving is shorter than arriving. --ease-exit already gives the exit an accelerating CURVE,
+       but until now every overlay left over exactly as many milliseconds as it took to arrive, so
+       the dismissal still had to be waited out. An element the user has decided to be rid of should
+       be gone before it is missed; an entrance may take its time because it carries new content. */
+    --motion-exit: 120ms;     /* overlay dismissal (~0.8× the 150ms enter)                  */
     --motion-press: 140ms;    /* tactile press feedback (button dip)                       */
     --motion-fast: 200ms;     /* quick opacity / colour fades                              */
     --motion-base: 240ms;     /* standard control transition (mode swap · icon · hover→active) */
@@ -1791,12 +1890,19 @@
      gated in scripts/contrast-tokens.mjs; full canon in frontend/DESIGN_TOKENS.md. */
   :root {
     --chart-role-primary: var(--brand-iris);        /* main series — line · bars · area · default fill */
-    --chart-role-comparison: var(--chart-2);        /* baseline / previous-period ghost (dashed) */
+    --chart-role-comparison: var(--chart-2);        /* baseline / previous-period ghost — dashed no-fill line; bar hosts draw it as a quieter column (owner) */
     --chart-role-positive: var(--brand-verdant);    /* gains / up emphasis (delta text) */
     --chart-role-negative: var(--brand-ember);      /* losses / down (diverging bars · delta text) */
     --chart-role-warning: var(--status-warn);       /* anomaly / caution markers */
     --chart-role-neutral: var(--muted-foreground);  /* neutral fills — target line · «Прочее» slice */
     --chart-role-selection: var(--brand-iris);      /* hover / selected point + crosshair (= the accent) */
+    /* Акцент СТОРИ-КАРТОЧКИ — тот, что хост объявляет `defaultColor` и которого пользователь не
+       выбирал. Отдельный слот, а не прямая ссылка на --chart-1-accent, потому что студия
+       оформления должна уметь его перекрасить: карточка, чей цвет никто не выбирал, следует
+       акценту темы, а выбранный руками слот 1..6 остаётся собой (useChartSectionModel). В каноне
+       это ровно прежний --chart-1-accent, поэтому по умолчанию не меняется ничего. */
+    --accent-card: var(--chart-1-accent);
+    --accent-card-deep: var(--chart-1-accent-deep);
   }
 }
 
@@ -1806,7 +1912,7 @@
   }
   body {
     @apply bg-background text-foreground;
-    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    font-family: 'Geist Variable', ui-sans-serif, system-ui, -apple-system, sans-serif;
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
   }
@@ -1814,8 +1920,8 @@
      component forgets to gate collapses to a single imperceptible frame (fill-mode end states still
      apply, transitionend still fires — unlike `animation: none`, nothing waiting on events breaks).
      The targeted `animation: none` rules further down stay as the first line of defence for the
-     infinite loops (jiggle, twinkle) and for readability. JS-driven motion (framer on the landing)
-     is gated in-component via useReducedMotion. */
+     infinite loops (jiggle, twinkle) and for readability. JS-driven RAF motion is gated
+     in-component via the same media query. */
   @media (prefers-reduced-motion: reduce) {
     *,
     ::before,
@@ -1826,11 +1932,19 @@
       scroll-behavior: auto !important;
     }
   }
-  /* Quieter scrollbars — tinted to the surface instead of the loud system default (but never
-     hidden). Firefox via scrollbar-*; WebKit/Chromium via the pseudo-elements. */
-  * {
-    scrollbar-width: thin;
-    scrollbar-color: hsl(var(--border)) transparent;
+  /* Quieter scrollbars — tinted to the surface instead of the loud system default (но НИКОГДА не
+     спрятанные: полоса — единственный индикатор того, что под сгибом ещё есть содержимое).
+     ДВА МЕХАНИЗМА НЕЛЬЗЯ ЗАДАВАТЬ ВМЕСТЕ. Современный Chromium игнорирует ВСЕ псевдоэлементы
+     `::-webkit-scrollbar`, если на том же элементе задан `scrollbar-width` или `scrollbar-color`.
+     Раньше здесь стояло и то и другое — поэтому весь скруглённый thumb был мёртв, и на экране
+     жила системная полоса по умолчанию (замер: скроллер резервировал 12px вместо заявленных 10).
+     Поэтому стандартные свойства уходят в ветку для браузеров БЕЗ псевдоэлементов (Firefox), а
+     Chromium/Safari получают полный контроль. */
+  @supports not selector(::-webkit-scrollbar) {
+    * {
+      scrollbar-width: thin;
+      scrollbar-color: hsl(var(--border)) transparent;
+    }
   }
   ::-webkit-scrollbar {
     width: 10px;
@@ -1839,13 +1953,24 @@
   ::-webkit-scrollbar-track {
     background: transparent;
   }
+  /* Отступ вокруг ползунка делается ПРОЗРАЧНОЙ рамкой с `background-clip: padding-box`, а не
+     рамкой цвета фона. Красить её в `--background` — значит печатать цвет ОБОЛОЧКИ поверх любой
+     поверхности, над которой идёт скроллер: у края карточки это читалось как светлый шов
+     (замечено владельцем). Прозрачная рамка даёт тот же отступ на любом фоне. */
   ::-webkit-scrollbar-thumb {
     background: hsl(var(--border));
+    background-clip: padding-box;
+    border: 3px solid transparent;
     border-radius: 999px;
-    border: 3px solid hsl(var(--background));
   }
   ::-webkit-scrollbar-thumb:hover {
     background: hsl(var(--muted-foreground) / 0.6);
+    background-clip: padding-box;
+  }
+  /* Место под полосу резервируется всегда: иначе появление скролла сдвигает всю раскладку на
+     ширину полосы — заметный прыжок при смене периода или разворачивании списка. */
+  [data-dashboard-scroll] {
+    scrollbar-gutter: stable;
   }
   /* Visible keyboard focus across the whole app (WCAG 2.4.7) — one rule for every
      button/link/tab; inputs keep their own focus:ring. */
@@ -1881,6 +2006,15 @@
     from { opacity: 0; }
     to { opacity: 1; }
   }
+
+  /* Сравнение включают и выключают переключателем страницы, и прежде линия при этом СНИМАЛАСЬ из
+     DOM — анимировать было нечего, обе стороны выглядели рывком (владелец: «дёргано появляется»).
+     Теперь путь остаётся на месте и меняет только непрозрачность; переход идёт по той же лестнице
+     токенов, что и остальные смены состояния контролов. Геометрия при этом продолжает морфиться
+     своим RAF-слоем — здесь ровно один канал, opacity, и он не может подсветить пунктир. */
+  [data-chart-series='comparison'] {
+    transition: stroke-opacity var(--motion-base) var(--ease-standard);
+  }
   @keyframes chart-bar-grow {
     from { transform: scaleY(0); }
     to { transform: scaleY(1); }
@@ -1905,6 +2039,82 @@
     transition: transform var(--motion-base) var(--ease-standard);
     will-change: transform;
   }
+
+  /* ── Value swap (полировка 2026-07-28; ревизия 2026-08-18) ─────────────────────────────────
+     Снап-кроссфейд НЕЧИСЛОВЫХ свапов: значение меняется мгновенно, обёртка мягко проявляется
+     через keyed-ремаунт (components/ValueSwap). Числовые хедлайны с 2026-08-18 морфятся цифрами
+     (components/KpiNumber, тайминг = --motion-morph). Reduced-motion сеть глушит. */
+  @keyframes value-swap-in {
+    from {
+      opacity: 0;
+      transform: translateY(2px);
+    }
+  }
+  .value-swap {
+    animation: value-swap-in var(--motion-fast) var(--ease-standard);
+  }
+
+  /* ── Horizontal edge fade (2026-08-13) ────────────────────────────────────────────────────
+     The scroll hook exposes only the edges with hidden content. A 24px mask keeps dense rails
+     legible without overlay gradients, blur, extra hit targets or animated state. */
+  .scroll-fade-x[data-fade-start]:not([data-fade-end]) {
+    -webkit-mask-image: linear-gradient(to right, transparent 0, black 24px, black 100%);
+    mask-image: linear-gradient(to right, transparent 0, black 24px, black 100%);
+  }
+  .scroll-fade-x[data-fade-end]:not([data-fade-start]) {
+    -webkit-mask-image: linear-gradient(to right, black 0, black calc(100% - 24px), transparent 100%);
+    mask-image: linear-gradient(to right, black 0, black calc(100% - 24px), transparent 100%);
+  }
+  .scroll-fade-x[data-fade-start][data-fade-end] {
+    -webkit-mask-image: linear-gradient(to right, transparent 0, black 24px, black calc(100% - 24px), transparent 100%);
+    mask-image: linear-gradient(to right, transparent 0, black 24px, black calc(100% - 24px), transparent 100%);
+  }
+  @media print {
+    .report-table-shell {
+      -webkit-mask-image: none !important;
+      mask-image: none !important;
+    }
+  }
+
+  /* ── Loader canon (полировка 2026-07-28) ───────────────────────────────────────────────────
+     ЕДИНАЯ индетерминантная загрузка: hairline-бар с бегающим сегментом + три стаггер-точки
+     (components/ui/loader). Один цвет, без градиентов/glow. Под reduced-motion остаётся статичная
+     приглушённая форма (сеть режет анимации до 0.01ms). */
+  @keyframes loader-sweep {
+    from {
+      transform: translateX(-100%);
+    }
+    to {
+      transform: translateX(400%);
+    }
+  }
+  .loader-bar::after {
+    content: '';
+    position: absolute;
+    inset-block: 0;
+    inline-size: 25%;
+    border-radius: inherit;
+    background: hsl(var(--chart-role-primary));
+    animation: loader-sweep 1.4s var(--ease-standard) infinite;
+  }
+  @keyframes loader-dot-pulse {
+    0%,
+    100% {
+      opacity: 0.25;
+    }
+    35% {
+      opacity: 1;
+    }
+  }
+  .loader-dots > span {
+    animation: loader-dot-pulse 1.2s var(--ease-standard) infinite;
+  }
+  .loader-dots > span:nth-child(2) {
+    animation-delay: 0.2s;
+  }
+  .loader-dots > span:nth-child(3) {
+    animation-delay: 0.4s;
+  }
   @media (prefers-reduced-motion: reduce) {
     [data-chart-motion='reveal'],
     [data-chart-motion='morph'],
@@ -1914,6 +2124,29 @@
     [data-chart-tooltip] {
       animation: none;
       transition: none;
+    }
+    /* Сравнение по-прежнему появляется и уходит — просто мгновенно. */
+    [data-chart-series='comparison'] {
+      transition: none;
+    }
+  }
+
+  /* ── View Transitions (волна B, 2026-07-28) ────────────────────────────────────────────────
+     Нативный кроссфейд роут-переходов (RR viewTransition на сайдбаре/drill/back-link). Только
+     route-level: страница на время перехода заморожена снапшотом, поэтому НИКОГДА не оборачивать
+     внутристраничный стейт (морф графиков/FLIP живут своей жизнью). Держим коротко: RR исполняет
+     апдейт через flushSync. Без поддержки API — мгновенный переход, деградация канонична. */
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation-duration: var(--motion-base);
+    animation-timing-function: var(--ease-standard);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    ::view-transition-group(*),
+    ::view-transition-image-pair(*),
+    ::view-transition-old(*),
+    ::view-transition-new(*) {
+      animation: none !important;
     }
   }
 
@@ -1933,8 +2166,10 @@
    • Status colours = the utilities `text-verdant` / `text-ember` / `text-status-warn` (+ `bg-*`
      tints), generated from --brand-* / --status-warn. Use these CLASSES in markup; raw
      `hsl(var(--brand-*))` is reserved for SVG chart fills / strokes / gradients (CSS classes can't
-     reach SVG paint). verdant / ember = deltas & up/down only; status-warn (amber) = caution /
-     demo / stale data — never the red ember for a non-error caution.
+     reach SVG paint). verdant / ember = up/down chart roles + the evaluated comparison Δ of a metric
+     page (`ComparisonDelta`); card and table deltas read muted and direction lives in the glyph —
+     see «One voice for deltas» in DESIGN_TOKENS.md. status-warn (amber) = caution / demo / stale
+     data — never the red ember for a non-error caution.
    • Chart area-gradient (Steep-restrained, deliberately quiet): cards = peak 0.2 → 0.05 @55% → fade 0
      (fast falloff so the fill hugs the line, never a heavy full-height wash); the expanded explorer is
      quieter still (0.06 → 0, ended at ~68% height). Fill is the primary role at low opacity. See the
@@ -2049,6 +2284,17 @@
     transition: width var(--motion-reveal) var(--ease-standard);
   }
 
+  /* Keyboard path (Ctrl+B) — snap, don't tween. A shortcut is pressed dozens of times a day by the
+     people who use it, and at that frequency an animation stops being polish and becomes latency the
+     user is waiting out. `Sidebar.tsx` writes `data-instant` for exactly one commit and clears it on
+     the next painted frame, so the pointer path keeps the full 300ms gesture.
+     Double attribute (`data-rail` is always present) puts this at (0,3,0) — above every
+     `.sidebar-shell .x` rule below, whatever the source order. */
+  .sidebar-shell[data-instant='true'][data-rail],
+  .sidebar-shell[data-instant='true'][data-rail] * {
+    transition-duration: 0s;
+  }
+
   /* The utility strip: Search holds the 32px rail axis; the toggle is pinned to the panel's right edge
    when open and slides back onto the axis as the surface collapses (it tracks the moving outer edge).
    Both are absolutely placed and animate transform on the shared beat, so the source card below
@@ -2104,15 +2350,26 @@
       opacity var(--motion-fast) var(--ease-standard),
       transform var(--motion-fast) var(--ease-standard);
   }
-  .sidebar-toggle-btn:hover .panel-divider,
+  /* :focus-visible is unconditional — a keyboard focus is a real intent on every device. The :hover
+     half is gated to a fine pointer: on a touch screen the synthetic hover sticks to the last-tapped
+     element, which would leave the glyph frozen mid-morph. */
   .sidebar-toggle-btn:focus-visible .panel-divider {
     opacity: 0.55;
     transform: translateX(-1px) scaleY(0.55);
   }
-  .sidebar-toggle-btn:hover .panel-chevron,
   .sidebar-toggle-btn:focus-visible .panel-chevron {
     opacity: 1;
     transform: translateX(0);
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .sidebar-toggle-btn:hover .panel-divider {
+      opacity: 0.55;
+      transform: translateX(-1px) scaleY(0.55);
+    }
+    .sidebar-toggle-btn:hover .panel-chevron {
+      opacity: 1;
+      transform: translateX(0);
+    }
   }
 
   /* Compact tooltip beside the toggle — a separate, non-interactive layer opening to the RIGHT of the
@@ -2136,10 +2393,15 @@
       opacity var(--motion-fast) var(--ease-standard),
       transform var(--motion-fast) var(--ease-standard);
   }
-  .sidebar-toggle-btn:hover ~ .sidebar-tooltip,
   .sidebar-toggle-btn:focus-visible ~ .sidebar-tooltip {
     opacity: 1;
     transform: translate(0, -50%);
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .sidebar-toggle-btn:hover ~ .sidebar-tooltip {
+      opacity: 1;
+      transform: translate(0, -50%);
+    }
   }
   .sidebar-tooltip::before {
     position: absolute;
@@ -2581,6 +2843,28 @@
   .starfield .shooting { display: none; }
 }
 
+/* Widget resize feedback: geometry still follows the pointer directly and snaps to the six-column
+   S/M/L grid. Only the card hairline/depth reacts while held; displaced neighbours keep the existing
+   near-critically-damped FLIP glide. No second RAF physics loop and no layout animation. */
+[data-widget-card] {
+  transition:
+    color var(--motion-fast) var(--ease-standard),
+    background-color var(--motion-fast) var(--ease-standard),
+    border-color var(--motion-fast) var(--ease-standard),
+    box-shadow var(--motion-fast) var(--ease-standard);
+}
+section[data-widget-resizing] [data-widget-card] {
+  border-color: hsl(var(--primary) / 0.42);
+  box-shadow:
+    0 14px 32px -28px hsl(0 0% 0% / 0.7),
+    0 0 0 1px hsl(var(--primary) / 0.08);
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-widget-card] {
+    transition-duration: 0.01ms;
+  }
+}
+
 /* Нарратив→виджет: ховер числа-ссылки в рассказе подсвечивает карточку ТОЙ ЖЕ метрики
    (section[data-drill-to] помечается data-narr-link из NarrativeProse). Значения зеркалят
    card-hover: hairline ярче + тинт-лифт через --card-tint-alpha (инлайн-градиент карточки
@@ -2594,4 +2878,95 @@ section[data-narr-link] {
      пятно» на части карточки (владелец), поэтому dark держит alpha 0 и здесь, и на card-hover. */
   border-color: rgb(255 255 255 / 0.12);
   --card-tint-alpha: 0;
+}
+
+/* Public landing motion stays CSS-native so the anonymous route does not download an animation
+   runtime. All entrance effects finish in a stable DOM state and collapse to that state for
+   reduced-motion users. */
+@keyframes landing-enter {
+  from {
+    opacity: 0;
+    transform:
+      translate(var(--lp-x, 0), var(--lp-y, 0))
+      rotate(var(--lp-rotate, 0deg))
+      scale(var(--lp-scale, 1));
+  }
+  to {
+    opacity: 1;
+    transform: translate(0, 0) rotate(0deg) scale(1);
+  }
+}
+@keyframes landing-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+@keyframes landing-spark-draw {
+  from { stroke-dashoffset: 1; }
+  to { stroke-dashoffset: 0; }
+}
+@keyframes landing-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.landing-enter {
+  animation:
+    landing-enter
+    var(--lp-duration, 0.6s)
+    cubic-bezier(0.22, 1, 0.36, 1)
+    var(--lp-delay, 0s)
+    both;
+}
+.landing-bob {
+  animation:
+    landing-bob
+    var(--lp-bob, 4.8s)
+    ease-in-out
+    var(--lp-delay, 0s)
+    infinite;
+}
+.landing-spark-area {
+  opacity: 0;
+  animation: landing-fade 0.6s ease 0.9s both;
+}
+.landing-spark-line {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: landing-spark-draw 1s cubic-bezier(0.22, 1, 0.36, 1) 0.55s both;
+}
+.landing-spark-dot {
+  opacity: 0;
+  animation: landing-fade 0.3s ease 1.5s both;
+}
+.landing-reveal {
+  opacity: 0;
+  transform: translateY(24px);
+  transition:
+    opacity 0.6s cubic-bezier(0.22, 1, 0.36, 1) var(--lp-delay, 0s),
+    transform 0.6s cubic-bezier(0.22, 1, 0.36, 1) var(--lp-delay, 0s);
+}
+.landing-reveal[data-visible="true"] {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing-enter,
+  .landing-bob,
+  .landing-spark-area,
+  .landing-spark-line,
+  .landing-spark-dot {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+  .landing-spark-line {
+    stroke-dashoffset: 0;
+  }
+  .landing-reveal,
+  .landing-reveal[data-visible="true"] {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
 }

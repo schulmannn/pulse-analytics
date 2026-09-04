@@ -1,19 +1,22 @@
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useTgFull, useTgGraphs } from '@/api/queries';
 import type { TgFull, TgGraphs } from '@/api/schemas';
 import { lttbDownsample } from '@/lib/downsample';
 import { CHART_MAX_POINTS } from '@/lib/msSeries';
 import { normalizeTgPosts } from '@/lib/posts';
-import { compareDdMm } from '@/lib/dates';
-import { fmt, ruAxisLabel, ruSeriesName, ddmmDay, pluralRu } from '@/lib/format';
+import { dayKeyToTs, fmt, ruSeriesName, pluralRu, timeAxisFromDayKeys } from '@/lib/format';
+import { withShares } from '@/lib/breakdownShare';
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
-import { ChartCardBody, ChartSection } from '@/components/ChartWidget';
+import { DivergingBars } from '@/components/DivergingBars';
+import { GaugeArc } from '@/components/GaugeArc';
+import { ChartCardBody, ChartSection, seriesRange } from '@/components/ChartWidget';
 import { WidgetGroup } from '@/components/widgets/WidgetGroup';
 import { breakdownVariants, seriesBarValuesVariant } from '@/components/widgets/variants';
 import { Breakdown } from '@/components/Breakdown';
+import { ChartFill } from '@/components/ChartFill';
+import { SegmentedControl } from '@/components/SegmentedControl';
 import { pctDelta } from '@/lib/delta';
-import { DivergingBars } from '@/components/DivergingBars';
 import { EmptyState } from '@/components/EmptyState';
 import {
   calendarWindowForDays,
@@ -25,6 +28,7 @@ import type { CalendarWindow, WidgetPeriodValue } from '@/lib/period';
 import type { WidgetSeriesOpts } from '@/lib/widgetPrefsStore';
 import { cn } from '@/lib/utils';
 import { Skeleton } from '@/components/ui/skeleton';
+import { KpiValue } from '@/components/chartWidget/KpiValue';
 
 const SRC_NAMES: Record<string, string> = {
   Followers: 'Подписчики',
@@ -53,20 +57,12 @@ const SENT_COLOR: Record<string, string> = {
   Negative: 'hsl(var(--brand-ember))',
 };
 
-const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
 // Chart sections render as customisable widgets (components/ChartWidget) — card surface,
 // per-widget accent/tint menu. Supersedes the old local hairline section (FH3 dedupe).
 
 export type TgAnalyticsGroup = 'dynamics' | 'audience' | 'content';
 
 export const WD_LABELS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
-
-const formatMsDate = (ts: number) => {
-  const d = new Date(ts);
-  // ruAxisLabel: axis labels/tooltips must read Russian («18 May» → «18 мая»).
-  return ruAxisLabel(`${d.getDate()} ${MON[d.getMonth()] ?? ''}`);
-};
 
 /** Display options for a daily-flow series (the widget's edit-dialog «Грануляция» /
     «Включая сегодня»). Mirrors WidgetSeriesOpts, both fields optional at this layer. */
@@ -131,7 +127,11 @@ export function windowGraphSeries(values: number[], xs: number[], win: CalendarW
     wValues = rows.map((r) => r.sum);
     wxs = rows.map((r) => r.anchor);
   }
-  const labels = wValues.map((_, i) => (wxs[i] ? formatMsDate(wxs[i]!) : ''));
+  const labels = wValues.map((_, i) => (wxs[i] ? fmt.day(wxs[i]!) : ''));
+  // Временна́я ось (канон timeAxisCore): короткое окно — буквы дней, длинное (≥90 дн) — EN-месяцы.
+  // Grain-гарды не нужны: буквы у недельных корзин невозможны по размаху, а месяц у недельного/
+  // месячного якоря честный. Полные даты остаются в labels/titles.
+  const axisLabels = timeAxisFromDayKeys(wxs, { monthsOnly: grain !== 'day' });
   const suffix = grain === 'week' ? ' · неделя' : grain === 'month' ? ' · месяц' : '';
   const titles = wValues.map((v, i) => `${labels[i]}: ${fmt.num(v)} ${unit}${suffix}`);
   // Headline for the steep card anatomy: the window's total + the PREVIOUS same-length window's
@@ -143,7 +143,7 @@ export function windowGraphSeries(values: number[], xs: number[], win: CalendarW
   const prevTotal = selected.previous
     ? selected.previous.reduce((sum, row) => sum + row.value, 0)
     : null;
-  return { values: wValues, labels, titles, total, prevTotal };
+  return { values: wValues, labels, axisLabels, titles, total, prevTotal };
 }
 
 /** Кап ЛИНЕЙНОГО представления длинной серии (канон CLAUDE.md: длинные серии даунсэмплятся через
@@ -176,17 +176,22 @@ function mapSourceItems(
   colorMapper?: Record<string, string>,
 ) {
   if (!arr) return [];
-  return arr
-    .map((item) => {
-      const rawLabel = item.label ?? '';
-      return {
-        label: mapper ? mapper[rawLabel] || rawLabel : rawLabel,
-        value: Number(item.value ?? 0),
-        color: colorMapper ? colorMapper[rawLabel] : undefined,
-        display: fmt.num(Number(item.value ?? 0)),
-      };
-    })
-    .filter((item) => item.value > 0);
+  // Части целого: строка печатается как «значение · доля». Доля считается ЗДЕСЬ — от суммы всей
+  // разбивки, до сортировок и среза топ-8 у вызывающего кода (иначе восьмёрка языков дала бы
+  // ровно 100%, а хвост исчез бы). См. lib/breakdownShare.
+  return withShares(
+    arr
+      .map((item) => {
+        const rawLabel = item.label ?? '';
+        return {
+          label: mapper ? mapper[rawLabel] || rawLabel : rawLabel,
+          value: Number(item.value ?? 0),
+          color: colorMapper ? colorMapper[rawLabel] : undefined,
+          display: fmt.num(Number(item.value ?? 0)),
+        };
+      })
+      .filter((item) => item.value > 0),
+  );
 }
 
 export function tgViewsBySourceItems(graphs: TgGraphs | undefined) {
@@ -196,7 +201,8 @@ export function tgNewFollowersBySourceItems(graphs: TgGraphs | undefined) {
   return mapSourceItems(graphs?.new_followers_by_source, SRC_NAMES);
 }
 export function tgLanguageItems(graphs: TgGraphs | undefined) {
-  // Длинный хвост языков — топ-8, как у эмодзи/стран/городов.
+  // Длинный хвост языков — топ-8, как у эмодзи/стран/городов. Доли проставлены mapSourceItems от
+  // полной суммы, поэтому срез их не искажает (сумма видимых долей честно < 100%).
   return mapSourceItems(graphs?.languages)
     .sort((a, b) => b.value - a.value)
     .slice(0, 8);
@@ -231,16 +237,26 @@ function deriveTgAnalytics(
 ) {
   const vs = full?.views_summary;
 
-  // 2) Views by day — «dd.mm» keys sorted with year-rollover inference (Dec < Jan across NY).
+  // 2) Views by day — API отдаёт «dd.mm»-ключи. СОРТИРУЕМ ПО РАЗОБРАННОМУ КЛЮЧУ (dayKeyToTs,
+  // epoch-ms с выводом года: Dec < Jan через Новый год), подпись форматируем `fmt.day` уже ПОСЛЕ
+  // сортировки — порядок серии не зависит от формата подписи.
   const viewsByDayRaw: Record<string, number> = vs?.views_by_day ?? {};
-  const sortedDates = Object.keys(viewsByDayRaw).sort((a, b) => compareDdMm(a, b));
-  const last14Dates = sortedDates.slice(-14);
-  const vbdValues = last14Dates.map((d) => Number(viewsByDayRaw[d] ?? 0));
+  const sortedDays = Object.keys(viewsByDayRaw)
+    .map((key) => ({ key, ts: dayKeyToTs(key) }))
+    .sort((a, b) => (a.ts ?? 0) - (b.ts ?? 0));
+  const last14Days = sortedDays.slice(-14);
+  const vbdValues = last14Days.map((d) => Number(viewsByDayRaw[d.key] ?? 0));
   // Канонный вид дат («3 июл.»), не сырые dd.mm-ключи API (аудит).
-  const vbdTitles = last14Dates.map((d) => `${ddmmDay(d)}: ${fmt.num(viewsByDayRaw[d] ?? 0)} просмотров`);
+  const vbdLabels = last14Days.map((d) => fmt.day(d.ts));
+  const vbdTitles = last14Days.map(
+    (d) => `${fmt.day(d.ts)}: ${fmt.num(viewsByDayRaw[d.key] ?? 0)} просмотров`,
+  );
+  // Буквы недели включаются только у молодых/разреженных каналов: фикс-окно 14 дней шире
+  // порога ≤ 8, но при < 8 реальных днях данных ось честно переходит на буквы.
+  const vbdAxisLabels = timeAxisFromDayKeys(last14Days.map((d) => d.ts));
   // Ghost overlay = the previous equal-length window (the "vs прошлый период" comparison on the chart).
-  const prev14Dates = sortedDates.slice(-28, -14);
-  const vbdPrev = prev14Dates.length >= 2 ? prev14Dates.map((d) => Number(viewsByDayRaw[d] ?? 0)) : undefined;
+  const prev14Days = sortedDays.slice(-28, -14);
+  const vbdPrev = prev14Days.length >= 2 ? prev14Days.map((d) => Number(viewsByDayRaw[d.key] ?? 0)) : undefined;
 
   // 6) Views & reposts — two separate widgets (daily FLOWS, so zero-based bars are honest).
   // (The subscriber-LEVEL «Рост подписчиков» card lived here; removed as a duplicate — the level
@@ -294,7 +310,7 @@ function deriveTgAnalytics(
   const bestWdLabel = maxWdAvg > 0 ? WD_LABELS[wdAvgValues.indexOf(maxWdAvg)] ?? '' : '';
 
   return {
-    last14Dates, vbdValues, vbdTitles, vbdPrev,
+    vbdLabels, vbdValues, vbdTitles, vbdPrev, vbdAxisLabels,
     interGroup, viewSeries, shareSeries,
     vbsItems, nfsItems, langItems, sentItems,
     thData, hasHours, peakHourStr,
@@ -339,10 +355,12 @@ export function deriveEmojis(full: TgFull | undefined, inRange: InRange, keep: K
       if (rd.emoji) emojiMap[rd.emoji] = (emojiMap[rd.emoji] ?? 0) + rd.count;
     });
   });
-  return Object.entries(emojiMap)
-    .map(([label, value]) => ({ label, value }))
-    .sort((a, b) => b.value - a.value)
-    .slice(0, 8);
+  // Доля — от ВСЕХ эмодзи окна (withShares до slice), иначе топ-8 отчитался бы за 100% реакций.
+  return withShares(
+    Object.entries(emojiMap)
+      .map(([label, value]) => ({ label, value }))
+      .sort((a, b) => b.value - a.value),
+  ).slice(0, 8);
 }
 
 /** «Вовлечённость по формату» — avg ERV per media type over the in-window posts. */
@@ -371,11 +389,14 @@ export function deriveCompositionFromPosts(full: TgFull | undefined, inRange: In
   const reactions = posts.reduce((s, p) => s + p.likes, 0);
   const forwards = posts.reduce((s, p) => s + p.shares, 0);
   const replies = posts.reduce((s, p) => s + p.comments, 0);
-  return [
-    { label: 'Реакции', value: reactions, color: 'hsl(var(--chart-1))' },
-    { label: 'Репосты', value: forwards, color: 'hsl(var(--chart-2))' },
-    { label: 'Комментарии', value: replies, color: 'hsl(var(--chart-3))' },
-  ].filter((item) => item.value > 0);
+  // Состав = части одного целого → строки несут долю от суммы трёх видов вовлечённости.
+  return withShares(
+    [
+      { label: 'Реакции', value: reactions, color: 'hsl(var(--chart-1))' },
+      { label: 'Репосты', value: forwards, color: 'hsl(var(--chart-2))' },
+      { label: 'Комментарии', value: replies, color: 'hsl(var(--chart-3))' },
+    ].filter((item) => item.value > 0),
+  );
 }
 
 /** «Ср. охват по типу» from raw posts (avg views per media type) — the campaign-scoped counterpart
@@ -417,10 +438,19 @@ export function deriveWeekday(full: TgFull | undefined, inRange: InRange) {
   return { wdAvgValues, wdCountValues, maxWdAvg, bestWdLabel };
 }
 
-/** Joined, left and signed net follower flows over one resolved calendar window. */
-export function deriveFollowerFlows(graphs: TgGraphs | undefined, win: CalendarWindow | null) {
+/** Joined, left and signed net follower flows over one resolved calendar window.
+    opts.grain === 'week' сворачивает СЕРИЮ в Monday-anchored недельные корзины (сумма нетто —
+    поток), той же анкер-математикой, что у windowGraphSeries; тоталы/prevTotal остаются от
+    дневных рядов до свёртки (контракт «grain only re-shapes the chart»). */
+export function deriveFollowerFlows(
+  graphs: TgGraphs | undefined,
+  win: CalendarWindow | null,
+  opts?: { grain?: 'day' | 'week' },
+) {
   const empty = {
     values: [] as number[],
+    labels: [] as string[],
+    axisLabels: undefined as string[] | undefined,
     titles: [] as string[],
     total: 0,
     prevTotal: null as number | null,
@@ -446,15 +476,49 @@ export function deriveFollowerFlows(graphs: TgGraphs | undefined, win: CalendarW
     });
   }
   const selected = splitCalendarRows(rows, win, (row) => row.timestamp);
-  const values = selected.current.map((row) => row.net);
-  const titles = selected.current.map((row) => {
-    const label = Number.isFinite(row.timestamp) ? formatMsDate(row.timestamp) : '';
-    return `${label}: ${row.net >= 0 ? '+' : ''}${fmt.num(row.net)} за день`;
-  });
+  let values: number[];
+  let labels: string[];
+  let titles: string[];
+  // Ключи оси ВЫРОВНЕНЫ с итоговыми values: у недельной корзины — якоря-понедельники,
+  // у дневной — сырые timestamp'ы (иначе месяц-тик встал бы мимо своего бара).
+  let axisKeys: number[];
+  if (opts?.grain === 'week') {
+    const buckets = new Map<string, { sum: number; anchor: number }>();
+    for (const row of selected.current) {
+      if (!Number.isFinite(row.timestamp)) continue;
+      const d = new Date(row.timestamp);
+      const back = (d.getDay() + 6) % 7; // Monday-anchored week bucket
+      const mon = new Date(d.getFullYear(), d.getMonth(), d.getDate() - back);
+      const key = `${mon.getFullYear()}-${mon.getMonth()}-${mon.getDate()}`;
+      const b = buckets.get(key);
+      if (b) b.sum += row.net;
+      else buckets.set(key, { sum: row.net, anchor: mon.getTime() });
+    }
+    const weekRows = [...buckets.values()].sort((a, b) => a.anchor - b.anchor);
+    values = weekRows.map((r) => r.sum);
+    labels = weekRows.map((r) => fmt.day(r.anchor));
+    titles = weekRows.map(
+      (r) => `${fmt.day(r.anchor)}: ${r.sum >= 0 ? '+' : ''}${fmt.num(r.sum)} за неделю`,
+    );
+    axisKeys = weekRows.map((r) => r.anchor);
+  } else {
+    values = selected.current.map((row) => row.net);
+    labels = selected.current.map((row) =>
+      Number.isFinite(row.timestamp) ? fmt.day(row.timestamp) : '',
+    );
+    titles = selected.current.map((row) => {
+      const label = Number.isFinite(row.timestamp) ? fmt.day(row.timestamp) : '';
+      return `${label}: ${row.net >= 0 ? '+' : ''}${fmt.num(row.net)} за день`;
+    });
+    axisKeys = selected.current.map((row) => row.timestamp);
+  }
   return {
     values,
+    labels,
+    // Временна́я ось (timeAxisCore): буквы дней короткого окна / EN-месяцы длинного.
+    axisLabels: timeAxisFromDayKeys(axisKeys, { monthsOnly: opts?.grain === 'week' }),
     titles,
-    total: values.reduce((sum, value) => sum + value, 0),
+    total: selected.current.reduce((sum, row) => sum + row.net, 0),
     prevTotal: selected.previous
       ? selected.previous.reduce((sum, row) => sum + row.net, 0)
       : null,
@@ -463,10 +527,34 @@ export function deriveFollowerFlows(graphs: TgGraphs | undefined, win: CalendarW
   };
 }
 
-/** Backward-compatible focused shape used by the net-growth card and its tests. */
-export function deriveNetGrowth(graphs: TgGraphs | undefined, win: CalendarWindow | null) {
-  const { values, titles, total, prevTotal } = deriveFollowerFlows(graphs, win);
-  return { values, titles, total, prevTotal };
+/** Net movement as one accumulated curve from the start of the selected period. */
+export function deriveNetGrowth(
+  graphs: TgGraphs | undefined,
+  win: CalendarWindow | null,
+  opts?: { grain?: 'day' | 'week' },
+) {
+  const flow = deriveFollowerFlows(graphs, win, opts);
+  if (flow.values.length === 0) {
+    return { values: [], labels: [], titles: [], total: flow.total, prevTotal: flow.prevTotal };
+  }
+  let running = 0;
+  const cumulative = flow.values.map((value) => {
+    running += value;
+    return running;
+  });
+  return {
+    values: [0, ...cumulative],
+    labels: ['Начало', ...flow.labels],
+    titles: [
+      'Начало периода: 0',
+      ...flow.labels.map((label, index) => {
+        const value = cumulative[index] ?? 0;
+        return `${label}: ${value >= 0 ? '+' : '−'}${fmt.num(Math.abs(value))} с начала периода`;
+      }),
+    ],
+    total: flow.total,
+    prevTotal: flow.prevTotal,
+  };
 }
 
 /** «Лучший день» reads the same resolved window as its chart. */
@@ -476,7 +564,7 @@ function WeekdayBestDay({ full }: { full: TgFull | undefined }) {
   if (!bestWdLabel) return null;
   return (
     <div className="mt-3 text-xs font-medium text-muted-foreground">
-      лучший день: <strong className="text-foreground">{bestWdLabel}</strong>
+      лучший день: <strong className="font-medium text-foreground">{bestWdLabel}</strong>
     </div>
   );
 }
@@ -517,7 +605,7 @@ function TgAnalyticsSummary({ full }: { full: TgFull | undefined }) {
   const posts = normalizeTgPosts(full?.posts ?? [], full?.channel ?? {}).filter((post) => inRange(post.date));
 
   if (posts.length === 0) {
-    return <p className="border-t border-border py-5 text-sm text-muted-foreground">В выбранном периоде нет публикаций для сводки.</p>;
+    return <p className="py-2 text-sm text-muted-foreground">В выбранном периоде нет публикаций для сводки.</p>;
   }
 
   const erv = average(posts.map((post) => post.erv).filter((value): value is number => value != null));
@@ -535,11 +623,13 @@ function TgAnalyticsSummary({ full }: { full: TgFull | undefined }) {
   ];
 
   return (
-    <div className="grid grid-cols-2 gap-x-6 gap-y-4 border-t border-border pt-4 sm:grid-cols-3 lg:grid-cols-6">
+    // Без собственного border-t: раньше леджер жил «голой» полосой и линия отделяла его от
+    // контента выше; внутри карточки прямо под заголовком она давала двойную рамку и «пережимала».
+    <div className="grid grid-cols-2 gap-x-6 gap-y-5 pt-2 sm:grid-cols-3 lg:grid-cols-6">
       {items.map((item) => (
         <div key={item.label} className="min-w-0">
           <div className="truncate text-2xs tracking-wide text-muted-foreground">{item.label}</div>
-          <div className="mt-1.5 text-2xl font-medium tabular-nums tracking-tight text-foreground">{item.value}</div>
+          <KpiValue size="small" text={item.value} className="mt-1.5 text-foreground" />
           <div className="mt-1 truncate text-2xs text-muted-foreground" title={item.captionTitle}>{item.caption}</div>
         </div>
       ))}
@@ -565,6 +655,11 @@ export function TgAnalytics({
   campaign,
 }: { group?: TgAnalyticsGroup; campaign?: TgAnalyticsCampaign } = {}) {
   const inGroup = (g: TgAnalyticsGroup) => !group || group === g;
+  // Вкладка «Источников»: просмотры и новые подписчики — ОДНО измерение (источник) и две метрики,
+  // поэтому это одна карточка с переключателем, а не две (канон жанра: так же устроены разбивки у
+  // Plausible и Dub). Выбор живёт в state страницы: он и заголовок карточки не трогает, и уводит
+  // «Развернуть» на метрик-страницу ТОЙ метрики, что открыта.
+  const [sourceMetric, setSourceMetric] = useState<'views' | 'followers'>('views');
   // ONE wide fetch (limit 100 = server cap): every widget below filters this shared payload to the
   // resolved window. Source feeds take it from the shared top bar; Home widgets keep their own
   // saved period. ChartSection owns this distinction through PagePeriodProvider.
@@ -576,7 +671,7 @@ export function TgAnalytics({
   // inside TgWidgetBody from the resolved page/Home-widget window.
   const derived = useMemo(() => deriveTgAnalytics(full, graphs, alwaysInRange), [full, graphs]);
   const {
-    last14Dates, vbdValues, vbdTitles, vbdPrev,
+    vbdLabels, vbdValues, vbdTitles, vbdPrev, vbdAxisLabels,
     interGroup, viewSeries, shareSeries,
     vbsItems, nfsItems, langItems, sentItems,
     thData, hasHours, peakHourStr,
@@ -613,7 +708,7 @@ export function TgAnalytics({
   const emojiVariants = useCallback(
     (period: WidgetPeriodValue) =>
       breakdownVariants(
-        deriveEmojis(full, period.inRange, keep).map((e) => ({ label: e.label, value: e.value, display: fmt.num(e.value) })),
+        deriveEmojis(full, period.inRange, keep).map((e) => ({ label: e.label, value: e.value, display: fmt.num(e.value), share: e.share })),
       ),
     [full, keep],
   );
@@ -625,6 +720,7 @@ export function TgAnalytics({
           value: c.value,
           display: fmt.num(c.value),
           color: c.color,
+          share: c.share,
         })),
       ),
     [full, keep],
@@ -664,14 +760,15 @@ export function TgAnalytics({
           ? windowGraphSeries(viewSeries.values, interGroup.x, calendarWindowForPeriod(period), 'просмотров', { ...series, grain: 'week' })
           : w;
       const delta = w.prevTotal != null && w.prevTotal > 0 ? pctDelta(w.total, w.prevTotal) : null;
+      const range = seriesRange(w.values);
       const caption = delta ? 'к пред. периоду' : period.days === 0 ? 'за всё время' : undefined;
       return [
         {
           key: 'line',
           label: 'Линия',
           render: (
-            <ChartCardBody value={fmt.kpi(w.total)} delta={delta} caption={caption}>
-              <LineChart values={line.values} labels={line.labels} titles={line.titles} markAnomalies />
+            <ChartCardBody value={fmt.kpi(w.total)} delta={delta} range={range} caption={caption}>
+              <LineChart values={line.values} labels={line.labels} axisLabels={line.axisLabels} titles={line.titles} markAnomalies />
             </ChartCardBody>
           ),
         },
@@ -680,12 +777,12 @@ export function TgAnalytics({
           key: 'bar',
           label: 'Столбцы',
           render: (
-            <ChartCardBody value={fmt.kpi(w.total)} delta={delta} caption={caption}>
-              <BarChart values={bars.values} labels={bars.labels} titles={bars.titles} />
+            <ChartCardBody value={fmt.kpi(w.total)} delta={delta} range={range} caption={caption}>
+              <BarChart values={bars.values} labels={bars.labels} axisLabels={bars.axisLabels} titles={bars.titles} />
             </ChartCardBody>
           ),
         },
-        seriesBarValuesVariant(bars.values, bars.labels, bars.titles, { sum: true }),
+        seriesBarValuesVariant(bars.values, bars.labels, bars.titles, { sum: true, axisLabels: bars.axisLabels }),
       ];
     },
     [viewSeries, interGroup],
@@ -702,14 +799,15 @@ export function TgAnalytics({
           ? windowGraphSeries(shareSeries.values, interGroup.x, calendarWindowForPeriod(period), 'репостов', { ...series, grain: 'week' })
           : w;
       const delta = w.prevTotal != null && w.prevTotal > 0 ? pctDelta(w.total, w.prevTotal) : null;
+      const range = seriesRange(w.values);
       const caption = delta ? 'к пред. периоду' : period.days === 0 ? 'за всё время' : undefined;
       return [
         {
           key: 'line',
           label: 'Линия',
           render: (
-            <ChartCardBody value={fmt.kpi(w.total)} delta={delta} caption={caption}>
-              <LineChart values={line.values} labels={line.labels} titles={line.titles} />
+            <ChartCardBody value={fmt.kpi(w.total)} delta={delta} range={range} caption={caption}>
+              <LineChart values={line.values} labels={line.labels} axisLabels={line.axisLabels} titles={line.titles} />
             </ChartCardBody>
           ),
         },
@@ -717,33 +815,80 @@ export function TgAnalytics({
           key: 'bar',
           label: 'Столбцы',
           render: (
-            <ChartCardBody value={fmt.kpi(w.total)} delta={delta} caption={caption}>
-              <BarChart values={bars.values} labels={bars.labels} titles={bars.titles} />
+            <ChartCardBody value={fmt.kpi(w.total)} delta={delta} range={range} caption={caption}>
+              <BarChart values={bars.values} labels={bars.labels} axisLabels={bars.axisLabels} titles={bars.titles} />
             </ChartCardBody>
           ),
         },
-        seriesBarValuesVariant(bars.values, bars.labels, bars.titles, { sum: true }),
+        seriesBarValuesVariant(bars.values, bars.labels, bars.titles, { sum: true, axisLabels: bars.axisLabels }),
       ];
     },
     [shareSeries, interGroup],
   );
   const netGrowthVariants = useCallback(
     (period: WidgetPeriodValue) => {
-      const w = deriveNetGrowth(graphs, calendarWindowForPeriod(period));
-      const delta = w.prevTotal != null && w.prevTotal > 0 && w.total >= 0 ? pctDelta(w.total, w.prevTotal) : null;
-      const caption = delta ? 'к пред. периоду' : period.days === 0 && !period.range ? 'за всё время' : 'за период';
+      // Дневные плюс/минус столбцы скрывали главный ответ — как изменилась база за весь период.
+      // Поэтому ряд накапливает net от нуля; длинное окно честно сворачивается в календарные
+      // недели до накопления, а headline остаётся точным дневным итогом.
+      const daily = deriveNetGrowth(graphs, calendarWindowForPeriod(period));
+      const w =
+        daily.values.length > CHART_MAX_POINTS
+          ? deriveNetGrowth(graphs, calendarWindowForPeriod(period), { grain: 'week' })
+          : daily;
+      const delta = daily.prevTotal != null && daily.prevTotal > 0 && daily.total >= 0 ? pctDelta(daily.total, daily.prevTotal) : null;
+      const scope = period.days === 0 && !period.range ? 'накопительно за всё время' : 'накопительно за период';
+      const caption = delta ? `${scope} · к пред. периоду` : scope;
+      // Дневные ± столбцы вокруг нуля (владелец 2026-08-13): день с оттоком виден сразу, а
+      // «сколько всего» по-прежнему стоит в хедлайне — то, ради чего ряд когда-то накапливали.
+      // Форма — DivergingBars: монохром вокруг нулевой линии, направление несёт ПОЛОЖЕНИЕ, не цвет.
+      const flow = deriveFollowerFlows(graphs, calendarWindowForPeriod(period));
+      const flowW =
+        flow.values.length > CHART_MAX_POINTS
+          ? deriveFollowerFlows(graphs, calendarWindowForPeriod(period), { grain: 'week' })
+          : flow;
+      const headline = `${daily.total >= 0 ? '+' : '−'}${fmt.kpi(Math.abs(daily.total))}`;
       return [
         {
           key: 'bar',
           label: 'Столбцы',
           render:
+            flowW.values.length > 0 ? (
+              <ChartCardBody
+                value={headline}
+                delta={delta}
+                caption={delta ? 'по дням · к пред. периоду' : 'по дням'}
+              >
+                <DivergingBars
+                  values={flowW.values}
+                  labels={flowW.labels}
+                  axisLabels={flowW.axisLabels}
+                  titles={flowW.values.map(
+                    (value, index) =>
+                      `${flowW.labels[index] ?? ''}: ${value >= 0 ? '+' : '−'}${fmt.num(Math.abs(value))}`,
+                  )}
+                />
+              </ChartCardBody>
+            ) : (
+              <EmptyState title="Нет данных за выбранный период." />
+            ),
+        },
+        {
+          key: 'line',
+          label: 'Линия',
+          render:
             w.values.length > 0 ? (
               <ChartCardBody
-                value={`${w.total >= 0 ? '+' : '−'}${fmt.kpi(Math.abs(w.total))}`}
+                value={`${daily.total >= 0 ? '+' : '−'}${fmt.kpi(Math.abs(daily.total))}`}
                 delta={delta}
                 caption={caption}
               >
-                <DivergingBars values={w.values} titles={w.titles} />
+                {/* Без markExtremes: на лице карточки подписи макс/последней налезали на кривую и
+                    дублировали хедлайн (владелец). Разворот ниже их сохраняет. */}
+                <LineChart
+                  values={w.values}
+                  labels={w.labels}
+                  titles={w.titles}
+                />
               </ChartCardBody>
             ) : (
               <EmptyState title="Нет данных за выбранный период." />
@@ -753,9 +898,12 @@ export function TgAnalytics({
     },
     [graphs],
   );
-  // Аудит: красно-зелёный донат был единственной круговой в продукте. Единственное представление —
-  // две строки Breakdown БЕЗ color (нейтральный приглушённый трек --chart-role-primary);
-  // «N всего» из центра доната живёт футером (FollowerFlowTotal).
+  // История формы (важно): красно-зелёный ДОНАТ здесь когда-то сняли — за оценочные цвета и за
+  // «единственную круговую в продукте». Оба довода устарели (RadialShare давно в проде; новая
+  // дуга МОНОХРОМНА), и владелец вернул круговую форму референсом (2026-08-18, Amicro gauge):
+  // дефолт — спидометр-дуга GaugeArc «доля подписок в валовом движении», «Список» остаётся
+  // вариантом (и сохранённым выбором тех, кто его предпочёл). «N всего» живёт футером
+  // (FollowerFlowTotal) под обоими вариантами.
   const churnVariants = useCallback(
     (period: WidgetPeriodValue) => {
       const flow = deriveFollowerFlows(graphs, calendarWindowForPeriod(period));
@@ -763,17 +911,61 @@ export function TgAnalytics({
         return [{ key: 'list', label: 'Список', render: <EmptyState title="Нет данных за выбранный период." /> }];
       }
       const flowTotal = flow.joinedTotal + flow.leftTotal;
-      const rowDisplay = (value: number) =>
-        flowTotal > 0 ? `${fmt.num(value)} · ${Math.round((value / flowTotal) * 100)}%` : fmt.num(value);
+      // Доля — общим слоем (`share` у Breakdown, lib/breakdownShare), а не локальным Math.round:
+      // одна и та же строчная идиома «значение · доля» обязана печататься одним форматом рядом с
+      // соседними разбивками этой же страницы.
+      const rowShare = (value: number) => (flowTotal > 0 ? value / flowTotal : undefined);
+      const joinedShare = flowTotal > 0 ? flow.joinedTotal / flowTotal : 0;
       return [
+        {
+          key: 'gauge',
+          label: 'Дуга',
+          render: (
+            <div className="flex h-full min-h-0 flex-col justify-center gap-2">
+              {/* Ширина дуги задаёт её высоту (viewBox 200×148), а тело фикс-тайла — потолок:
+                  на max-w-56 легенду срезало нижней кромкой, а max-w-44 (176px → 130px высоты)
+                  сходился ровно в ноль на десктопе и не влезал на мобиле — гейт «нет внутренних
+                  скроллов» ловил там клип 4px. max-w-40 = 160px → 118px: запас 12px на десктопе
+                  и 5px на мобильном тайле, дуга по-прежнему крупная. */}
+              <GaugeArc
+                share={joinedShare}
+                centerValue={fmt.pctAbs(joinedShare * 100)}
+                centerLabel="доля подписок"
+                ariaLabel={`Подписалось ${fmt.num(flow.joinedTotal)} (${fmt.pctAbs(joinedShare * 100)}), отписалось ${fmt.num(flow.leftTotal)}, всего ${fmt.num(flowTotal)} за период`}
+                className="max-w-40"
+              />
+              {/* Легенда честно мапится на части дуги: заливка = подписки, трек = отписки. */}
+              <div aria-hidden="true" className="flex items-center justify-center gap-4 text-2xs tabular-nums text-muted-foreground">
+                <span className="flex items-center gap-1.5">
+                  <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: 'hsl(var(--chart-role-primary))' }} />
+                  Подписалось {fmt.num(flow.joinedTotal)}
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: 'hsl(var(--muted))' }} />
+                  Отписалось {fmt.num(flow.leftTotal)}
+                </span>
+              </div>
+            </div>
+          ),
+        },
         {
           key: 'list',
           label: 'Список',
           render: (
             <Breakdown
               items={[
-                { label: 'Отписалось', value: flow.leftTotal, display: rowDisplay(flow.leftTotal) },
-                { label: 'Подписалось', value: flow.joinedTotal, display: rowDisplay(flow.joinedTotal) },
+                {
+                  label: 'Отписалось',
+                  value: flow.leftTotal,
+                  display: fmt.num(flow.leftTotal),
+                  share: rowShare(flow.leftTotal),
+                },
+                {
+                  label: 'Подписалось',
+                  value: flow.joinedTotal,
+                  display: fmt.num(flow.joinedTotal),
+                  share: rowShare(flow.joinedTotal),
+                },
               ]}
             />
           ),
@@ -790,9 +982,15 @@ export function TgAnalytics({
           key: 'bar',
           label: 'Столбцы',
           render: (
-            <div>
-              <div className="mb-2 text-2xs tracking-wide text-muted-foreground">Ср. просмотры</div>
-              <BarChart values={wdAvgValues} labels={WD_LABELS} titles={wdAvgValues.map((v, i) => `${WD_LABELS[i]}: ${fmt.num(v)} ср. просмотров`)} />
+            // Флекс-колонка во всю высоту тела: подпись занимает своё, график меряет ОСТАТОК
+            // (BarChart берёт высоту у контейнера, когда тот её диктует). В обёртке с auto-высотой
+            // он рисовал дефолтные 200px, и тайл переполнялся на 23px — гейт «нет внутренних
+            // скроллов» это ловит, но до сих пор мерил только карточки первого экрана.
+            <div className="flex h-full min-h-0 flex-col">
+              <div className="mb-2 shrink-0 text-2xs tracking-wide text-muted-foreground">Ср. просмотры</div>
+              <ChartFill>
+                <BarChart values={wdAvgValues} labels={WD_LABELS} titles={wdAvgValues.map((v, i) => `${WD_LABELS[i]}: ${fmt.num(v)} ср. просмотров`)} />
+              </ChartFill>
             </div>
           ),
         },
@@ -813,7 +1011,7 @@ export function TgAnalytics({
           key: 'bar',
           label: 'Столбцы',
           render: (
-            <div className="max-w-[560px]">
+            <div className="mx-auto max-w-[560px]">
               <BarChart values={wdCountValues} labels={WD_LABELS} titles={wdCountValues.map((v, i) => `${WD_LABELS[i]}: ${fmt.num(v)} постов`)} />
             </div>
           ),
@@ -822,7 +1020,7 @@ export function TgAnalytics({
           key: 'line',
           label: 'Линия',
           render: (
-            <div className="max-w-[560px]">
+            <div className="mx-auto max-w-[560px]">
               <LineChart values={wdCountValues} labels={WD_LABELS} titles={wdCountValues.map((v, i) => `${WD_LABELS[i]}: ${fmt.num(v)} постов`)} yMin={0} />
             </div>
           ),
@@ -847,17 +1045,17 @@ export function TgAnalytics({
         className={cn(
           // grid-flow-dense: с широкими (full) вариантами обычная раскладка оставляла бы
           // дыры при переносе — плотная упаковка подтягивает узкие плитки в свободные ячейки.
+          // Дыру в хвосте ряда здесь больше не затыкает CSS-хак `:last-child:nth-child(odd)`: он видел
+          // только хвост и только здесь, а общее правило ряда теперь одно — useRowFill (аудит #554, D1).
           'grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-6',
-          // Аудитория: каждая секция — самостоятельная ячейка сетки; при нечётном числе
-          // half-плиток последняя дотягивается до полного ряда, чтобы рядом не зияла пустая дыра.
-          group === 'audience' && 'lg:[&>section:last-child:nth-child(odd)]:col-span-6',
         )}
       >
-        {/* Сводка показателей — the 'strip' contract (unified-feed step 2, hand-rolled):
-            a real widget (hide/reorder with its siblings) whose chrome is a bare full-width
-            row — a card frame would make a thin ratio strip compete with the charts. */}
+        {/* Сводка показателей — ОБЫЧНАЯ карточка. Обе «голые» ленты (плавающий strip и strip с
+            тулбаром) между двумя крупными тонированными картами читались как сломанная таблица —
+            «таблицу пережало» / «таблицу поправь» (владелец, 2026-07-27). Auto-height full-карточка
+            даёт леджеру ту же рамку и внутренние отступы, что у соседей. */}
         {inGroup('dynamics') && (
-          <ChartSection strip id="tg-derived-kpis" title="Сводка показателей" defaultSize="full" noExpand>
+          <ChartSection id="tg-derived-kpis" title="Сводка показателей" defaultSize="full" noExpand>
             <TgAnalyticsSummary full={full} />
           </ChartSection>
         )}
@@ -866,7 +1064,7 @@ export function TgAnalytics({
             на каналах с broadcast-статистикой. Теперь эта карточка — ЧЕСТНЫЙ FALLBACK только для
             каналов без graphs (мелкие/QR: views_summary есть, статистики нет); на больших остаётся
             один rich «Просмотры», а сравнение периодов живёт на метрик-странице просмотров. */}
-        {inGroup('dynamics') && !viewSeries && last14Dates.length >= 2 && (
+        {inGroup('dynamics') && !viewSeries && vbdLabels.length >= 2 && (
           <ChartSection
             title="Просмотры по дням"
             defaultSize="half"
@@ -877,14 +1075,15 @@ export function TgAnalytics({
                 label: 'Линия',
                 render: (
                   <>
-                    <LineChart values={vbdValues} labels={[last14Dates[0] ?? '', last14Dates[Math.floor(last14Dates.length / 2)] ?? '', last14Dates[last14Dates.length - 1] ?? '']} titles={vbdTitles} markAnomalies markExtremes ghost={vbdPrev} />
+                    {/* Лицо карточки — без числовых подписей (см. «Чистый прирост» выше). */}
+                    <LineChart values={vbdValues} labels={[vbdLabels[0] ?? '', vbdLabels[Math.floor(vbdLabels.length / 2)] ?? '', vbdLabels[vbdLabels.length - 1] ?? '']} axisLabels={vbdAxisLabels} titles={vbdTitles} markAnomalies ghost={vbdPrev} />
                   </>
                 ),
               },
               {
                 key: 'bar',
                 label: 'Столбцы',
-                render: <BarChart values={vbdValues} labels={last14Dates} titles={vbdTitles} />,
+                render: <BarChart values={vbdValues} labels={vbdLabels} axisLabels={vbdAxisLabels} titles={vbdTitles} />,
               },
             ]}
           />
@@ -929,11 +1128,11 @@ export function TgAnalytics({
               grainable: true,
               renderExpanded: (days, grain) => {
                 const w = capLineSeries(windowGraphSeries(viewSeries.values, interGroup.x, calendarWindowForDays(days), 'просмотров', { grain }));
-                return <LineChart values={w.values} labels={w.labels} titles={w.titles} markAnomalies markExtremes />;
+                return <LineChart values={w.values} labels={w.labels} axisLabels={w.axisLabels} titles={w.titles} markAnomalies markExtremes />;
               },
               renderExpandedBar: (days, grain) => {
                 const w = windowGraphSeries(viewSeries.values, interGroup.x, calendarWindowForDays(days), 'просмотров', { grain });
-                return <BarChart values={w.values} labels={w.labels} titles={w.titles} />;
+                return <BarChart values={w.values} labels={w.labels} axisLabels={w.axisLabels} titles={w.titles} />;
               },
               statsFor: (days, grain) => windowGraphSeries(viewSeries.values, interGroup.x, calendarWindowForDays(days), 'просмотров', { grain }).values,
             }}
@@ -952,11 +1151,11 @@ export function TgAnalytics({
               grainable: true,
               renderExpanded: (days, grain) => {
                 const w = capLineSeries(windowGraphSeries(shareSeries.values, interGroup.x, calendarWindowForDays(days), 'репостов', { grain }));
-                return <LineChart values={w.values} labels={w.labels} titles={w.titles} markAnomalies markExtremes />;
+                return <LineChart values={w.values} labels={w.labels} axisLabels={w.axisLabels} titles={w.titles} markAnomalies markExtremes />;
               },
               renderExpandedBar: (days, grain) => {
                 const w = windowGraphSeries(shareSeries.values, interGroup.x, calendarWindowForDays(days), 'репостов', { grain });
-                return <BarChart values={w.values} labels={w.labels} titles={w.titles} />;
+                return <BarChart values={w.values} labels={w.labels} axisLabels={w.axisLabels} titles={w.titles} />;
               },
               statsFor: (days, grain) => windowGraphSeries(shareSeries.values, interGroup.x, calendarWindowForDays(days), 'репостов', { grain }).values,
             }}
@@ -966,11 +1165,39 @@ export function TgAnalytics({
           />
         )}
 
-        {inGroup('audience') && vbsItems.length > 0 && (
-          <ChartSection title="Просмотры по источникам" drillTo="/metrics/tg-views-by-source" variants={breakdownVariants(vbsItems)} />
-        )}
-        {inGroup('audience') && nfsItems.length > 0 && (
-          <ChartSection title="Новые подписчики по источникам" drillTo="/metrics/tg-followers-by-source" variants={breakdownVariants(nfsItems)} />
+        {inGroup('audience') && (vbsItems.length > 0 || nfsItems.length > 0) && (
+          // id держит прежний ключ prefs-store («Просмотры по источникам»), чтобы сохранённые
+          // размер/цвет/порядок карточки не слетели от смены заголовка.
+          <ChartSection
+            id="Просмотры по источникам"
+            title="Источники"
+            drillTo={sourceMetric === 'views' ? '/metrics/tg-views-by-source' : '/metrics/tg-followers-by-source'}
+          >
+            {/* Переключатель — В ТЕЛЕ, а не в шапке (та же подача, что у «Статусов заказов» на
+                МойСкладе). В шапке он делит строку с заголовком, и на узком десктопе (1024 → тайл
+                215px) заголовок обрезался в «Исто…». Цена — одна строка списка: разбивка
+                показывает три источника из четырёх и «+1 ещё», полный список в «Развернуть». */}
+            <div className="mb-1 flex shrink-0 justify-end">
+              <SegmentedControl
+                ariaLabel="Метрика разбивки по источникам"
+                size="sm"
+                value={sourceMetric}
+                onChange={setSourceMetric}
+                options={[
+                  // Обе метрики есть не всегда: пустую вкладку не показываем вовсе, иначе
+                  // переключатель обещал бы данные, которых нет.
+                  // Родительный падеж не случаен: карточка называется «Источники», и вкладки
+                  // читаются как «источники просмотров / подписчиков». Именительный давал коллизию
+                  // — в разбивке просмотров ЕСТЬ строка «Подписчики» (просмотры от подписчиков), и
+                  // вкладка с тем же словом означала бы совсем другое.
+                  ...(vbsItems.length > 0 ? [{ value: 'views' as const, content: 'Просмотров' }] : []),
+                  ...(nfsItems.length > 0 ? [{ value: 'followers' as const, content: 'Подписчиков' }] : []),
+                ]}
+              />
+            </div>
+            {/* reserve = высота ряда переключателя (28px) + mb-1: столько тела уже занято. */}
+            <Breakdown items={sourceMetric === 'views' ? vbsItems : nfsItems} reserve={36} />
+          </ChartSection>
         )}
         {inGroup('audience') && langItems.length > 0 && (
           <ChartSection title="Языки аудитории" drillTo="/metrics/tg-languages" variants={breakdownVariants(langItems)} />
@@ -1001,9 +1228,8 @@ export function TgAnalytics({
         )}
 
         {inGroup('dynamics') && netGrowthPresent && (
-          // Single-variant (no type switcher) so the diverging bars render THROUGH the widget's
-          // fill context and fill the tile — as bare children they'd sit at the fixed ~120px and
-          // leave dead space. The «прирост» total stays as the caption below.
+          // Single accumulated curve: the card answers how the whole audience changed through the
+          // period instead of exposing a noisy collection of day-over-day plus/minus bars.
           <ChartSection
             // The window lives in the CAPTION, not the title (аудит: «(30д)» в заголовке читался
             // как хардкод рядом с управляемыми окнами соседей). The body now follows the page top
@@ -1021,7 +1247,7 @@ export function TgAnalytics({
         )}
 
         {inGroup('dynamics') && netGrowthPresent && (
-          <ChartSection title="Динамика оттока" drillTo="/metrics/tg-churn" periodControl variants={churnVariants}>
+          <ChartSection title="Динамика оттока" drillTo="/metrics/tg-churn" periodControl noStretch variants={churnVariants}>
             <FollowerFlowTotal graphs={graphs} />
           </ChartSection>
         )}
@@ -1037,10 +1263,12 @@ export function TgAnalytics({
         )}
 
         {inGroup('audience') && maxWdAvg > 0 && (
-          /* D6.3: секция — последняя в «Аудитории» и при нечётном числе плиток растягивается
-             на обе колонки; 7 столбиков с кэпом 48px по центру full-width ряда = «острова в
-             пустоте». max-w держит чарт компактным слева (в 1×-плитке кэп не срабатывает). */
-          <ChartSection title="Количество постов" drillTo="/metrics/tg-post-count" periodControl variants={postCountVariants} />
+          /* Секция — последняя в «Аудитории» и при нечётном числе плиток раньше растягивалась на
+             весь ряд: 7 столбиков с кэпом 48px оказывались «островами в пустоте» посреди 1110px.
+             noStretch оставляет карточку обычной третью ряда — ширины семи столбцам хватает, а
+             хвост ряда честно короткий. max-w/mx-auto внутри остаются для оверлея «Развернуть»,
+             где ширина свободная. */
+          <ChartSection title="Количество постов" drillTo="/metrics/tg-post-count" periodControl noStretch variants={postCountVariants} />
         )}
       </WidgetGroup>
     </div>
@@ -1052,13 +1280,16 @@ function TgAnalyticsSkeletons({ showSummary }: { showSummary: boolean }) {
   return (
     <div className="space-y-6">
       {showSummary && (
-        <div className="grid grid-cols-2 gap-x-6 gap-y-4 border-t border-border pt-4 sm:grid-cols-3 lg:grid-cols-6">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <div key={i}>
-              <Skeleton className="h-2.5 w-2/3" />
-              <Skeleton className="mt-2 h-5 w-1/2" />
-            </div>
-          ))}
+        <div className="rounded-2xl border border-border bg-card p-4 dark:border-white/6 sm:p-5">
+          <Skeleton className="h-3 w-40" />
+          <div className="mt-5 grid grid-cols-2 gap-x-6 gap-y-5 sm:grid-cols-3 lg:grid-cols-6">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div key={i}>
+                <Skeleton className="h-2.5 w-2/3" />
+                <Skeleton className="mt-2 h-5 w-1/2" />
+              </div>
+            ))}
+          </div>
         </div>
       )}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">

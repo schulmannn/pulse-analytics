@@ -6,7 +6,6 @@ import { PagePeriodProvider } from '@/lib/period';
 import { Skeleton } from '@/components/ui/skeleton';
 import { FeedBlock } from '@/panels/feed/useFeed';
 import { TgSectionLayout, TgPagePeriodControl } from '@/panels/TgFeed';
-import { Overview } from '@/panels/Overview';
 import { SourceIdentity } from '@/components/SourceIdentity';
 import { lazyWithReload } from '@/lib/lazyWithReload';
 
@@ -65,10 +64,10 @@ const IgContentPage = lazyFrom(igLoad, 'IgContentPage');
 const IgAudiencePage = lazyFrom(igLoad, 'IgAudiencePage');
 const IgPeriodControl = lazyFrom(igLoad, 'IgPeriodControl');
 
-// TG bodies split into their own chunks (bundle-size gate): Обзор stays eager (the entry route),
-// but Аналитика/Контент/Упоминания are heavier and off the first paint — each lazies into its own
-// chunk, so the entry bundle no longer carries the tabs/table/mentions code. FeedSectionPage
-// already wraps every Body in <Suspense>, so no extra scaffolding is needed here.
+// TG bodies split into their own chunks (bundle-size gate). Even Обзор is async: the protected
+// shell becomes interactive without parsing its chart stack, while FeedSectionPage immediately
+// starts the matched body behind a layout-stable skeleton. Other sections stay isolated too.
+const Overview = lazyFrom(() => import('@/panels/Overview'), 'Overview');
 const Analytics = lazyFrom(() => import('@/panels/AnalyticsTabs'), 'Analytics');
 const Posts = lazyFrom(() => import('@/panels/Posts'), 'Posts');
 const Mentions = lazyFrom(() => import('@/panels/Mentions'), 'Mentions');
@@ -181,6 +180,54 @@ const YM_PARTS: Record<string, SectionParts> = {
   '': { Body: YmOverview, HeaderRight: TgPagePeriodControl },
 };
 
+// «СДЭК Fulfillment» — свой lazy-чанк (bundle-гейт: TG/IG-пользователь его не платит).
+const CdekOverview = lazyFrom(() => import('@/panels/cdek/CdekOverview'), 'CdekOverview');
+const CdekOrders = lazyFrom(() => import('@/panels/cdek/CdekOrders'), 'CdekOrders');
+const CdekProducts = lazyFrom(() => import('@/panels/cdek/CdekProducts'), 'CdekProducts');
+const CdekImports = lazyFrom(() => import('@/panels/cdek/CdekImports'), 'CdekImports');
+
+/**
+ * Shell «СДЭК»: page-period провайдер + секционный Outlet. Провайдер стоит и здесь, хотя у
+ * «Загрузок» своего периода нет: он держит выбор периода при переходе на «Обзор» и обратно.
+ */
+function CdekShellRoute() {
+  return (
+    <PagePeriodProvider>
+      <Outlet />
+    </PagePeriodProvider>
+  );
+}
+
+const CDEK_PARTS: Record<string, SectionParts> = {
+  '': { Body: CdekOverview, HeaderRight: TgPagePeriodControl },
+  orders: { Body: CdekOrders, HeaderRight: TgPagePeriodControl },
+  products: { Body: CdekProducts, HeaderRight: TgPagePeriodControl },
+  // Период у «Загрузок» не показываем: страница отвечает на вопрос «что вообще залито», и окно
+  // 7/30/90 дней это вопрос сузило бы до бессмыслицы.
+  imports: { Body: CdekImports },
+};
+
+// «Rusender» — свой lazy-чанк (bundle-гейт: TG/IG-пользователь его не платит).
+const RusenderOverview = lazyFrom(() => import('@/panels/rusender/RusenderOverview'), 'RusenderOverview');
+
+/** Минимальный shell «Rusender»: page-period провайдер + секционный Outlet (у сети одна секция). */
+function RusenderShellRoute() {
+  return (
+    <PagePeriodProvider>
+      <Outlet />
+    </PagePeriodProvider>
+  );
+}
+
+const RusenderCampaigns = lazyFrom(() => import('@/panels/rusender/RusenderCampaigns'), 'RusenderCampaigns');
+const RusenderAudience = lazyFrom(() => import('@/panels/rusender/RusenderAudience'), 'RusenderAudience');
+
+const RUSENDER_PARTS: Record<string, SectionParts> = {
+  '': { Body: RusenderOverview, HeaderRight: TgPagePeriodControl },
+  campaigns: { Body: RusenderCampaigns, HeaderRight: TgPagePeriodControl },
+  audience: { Body: RusenderAudience, HeaderRight: TgPagePeriodControl },
+};
+
 /** Zip the network's nav (paths + labels — the single source of truth) with the body map. A nav
     row without a body is skipped defensively rather than crashing the whole feed. */
 function buildSections(net: Network, parts: Record<string, SectionParts>): FeedSectionDef[] {
@@ -197,6 +244,8 @@ export const FEEDS: Record<Network, NetworkFeedDef> = {
   ig: { Shell: IgShellRoute, sections: buildSections('ig', IG_PARTS) },
   ms: { Shell: MsShellRoute, sections: buildSections('ms', MS_PARTS) },
   ym: { Shell: YmShellRoute, sections: buildSections('ym', YM_PARTS) },
+  cdek: { Shell: CdekShellRoute, sections: buildSections('cdek', CDEK_PARTS) },
+  rusender: { Shell: RusenderShellRoute, sections: buildSections('rusender', RUSENDER_PARTS) },
 };
 
 /**

@@ -5,6 +5,7 @@ import { DetailShell } from '@/components/DetailShell';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { fmt } from '@/lib/format';
 import { pctDelta } from '@/lib/delta';
+import { KpiValue } from '@/components/chartWidget/KpiValue';
 import { DeltaPill } from '@/components/DeltaPill';
 import { observeSize } from '@/lib/observeSize';
 
@@ -21,6 +22,16 @@ export const ExpandedChartHeightContext = createContext<number | null>(null);
     around the widget body (and, via portal context flow, the expanded overlay); LineChart
     draws a dashed goal line at the value. null = no target — the default everywhere else. */
 export const WidgetTargetContext = createContext<number | null>(null);
+
+/**
+ * Заголовок карточки, внутри которой рисуется тело.
+ *
+ * Нужен ровно затем, чтобы тело не печатало подпись-ДУБЛЬ: на IG-обзоре карточка называлась
+ * «Охват», и над числом стояла вторая подпись «Охват» (аудит #554, D8). Это уже вторая серия
+ * одного дефекта — до неё так же дублировались «Просмотры» (аудит 11 августа), — поэтому чинится
+ * структурно: хост объявляет своё имя, тело сравнивает и не повторяет.
+ */
+export const ChartCardTitleContext = createContext<string | null>(null);
 
 /** Min/Max/Average reference lines for the expanded explorer. The overlay computes them from the
     visible `statsFor` values when the «Линии» toggle is on and provides them here; LineChart /
@@ -225,7 +236,7 @@ export function ChartExpandOverlay({ title, children, renderExpanded, renderExpa
           <CardTitle className="text-base text-foreground">{title}</CardTitle>
           {headline && (
             <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1 pt-1.5">
-              <span className="kpi-accent text-hero font-medium leading-none tabular-nums tracking-tight">{headline.value}</span>
+              <KpiValue text={headline.value} />
               <DeltaPill delta={headline.delta} />
               {headline.caption && <span className="text-2xs text-muted-foreground">{headline.caption}</span>}
             </div>

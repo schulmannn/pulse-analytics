@@ -18,26 +18,22 @@ import { SourceIdentity } from '@/components/SourceIdentity';
 
 import { Skeleton } from '@/components/ui/skeleton';
 import { serializeContentPeriod } from '@/lib/contentFilters';
-import { fmt } from '@/lib/format';
+import { fmt, timeAxisFromDayKeys } from '@/lib/format';
 import {
   buildMentionsTimeline,
+  capMentionsTimeline,
   type MentionDailyPoint,
   type MentionSourceOption,
 } from '@/lib/mentionsFilters';
 import { usePeriod, type PeriodDays } from '@/lib/period';
 import { useExplorerChartHeight } from '@/lib/useExplorerChartHeight';
-import { SegSelect } from '@/panels/MetricPage';
+import { SegSelect } from '@/components/metric/SegSelect';
 import { isMentionsMetricKey } from '@/panels/mentions/mentionsMetricKeys';
-import { AboutRow, MetricBackLink, MetricColumns, MetricDescriptor, WindowBarShell, RailSection } from '@/components/metric/shared';
+import { ComparisonDeltaRow, MetricColumns, MetricDescriptor, WindowBarShell, RailSection, MetricPageHeader} from '@/components/metric/shared';
 
 type ChartKind = 'line' | 'bar';
 type CompareMode = 'off' | 'prev';
 
-interface AboutDef {
-  formula: string;
-  included: string;
-  source: string;
-}
 
 /**
  * Dedicated graph pages for the Mentions surface. The daily timeline gets the full chart explorer
@@ -71,20 +67,18 @@ function MentionsMetricShell({
   backTo,
   term,
   descriptor,
-  about,
   comparison,
   children,
 }: {
   backTo: string;
   term: string;
   descriptor: string;
-  about: AboutDef;
   comparison: ReactNode;
   children: ReactNode;
 }) {
   return (
     <div className="space-y-5">
-      <MetricBackLink to={backTo}>Упоминания</MetricBackLink>
+      <MetricPageHeader back={{ to: backTo, label: 'Упоминания' }} />
 
       <div>
         <h1 className="text-2xl font-medium tracking-tight text-foreground">{term}</h1>
@@ -95,14 +89,8 @@ function MentionsMetricShell({
       <MetricColumns
         rail={
           <>
-            <RailSection title="Сравнение">{comparison}</RailSection>
-            <RailSection title="О метрике">
-              <dl className="space-y-3 text-sm">
-                <AboutRow label="Как считается" text={about.formula} />
-                <AboutRow label="Что учитывается" text={about.included} />
-                <AboutRow label="Источник" text={about.source} />
-              </dl>
-            </RailSection>
+            <RailSection title="Сравнение" mark="comparison">{comparison}</RailSection>
+            {/* «О метрике» убран — техническая информация не для конечного пользователя (владелец). */}
             <Link
               to={backTo}
               className="inline-flex items-center gap-1 text-xs font-medium text-primary transition-colors hover:text-primary/80"
@@ -180,6 +168,9 @@ function MentionsTimelinePage() {
       ),
     [daily, previousDaily, days, data?.scope?.current_to, scopeFrom, scopeTo],
   );
+  // Кап только рендера (канон CLAUDE.md): линия — pickIndexes/LTTB, столбцы — календарные недели;
+  // хедлайн окна и дельта ниже считаются от ПОЛНОГО timeline (кап чисто визуальный).
+  const chartTimeline = useMemo(() => capMentionsTimeline(timeline, kind), [timeline, kind]);
   const comparisonAvailable = timeline.ghost != null;
   const showComparison = comparisonAvailable && compare === 'prev';
   const currentTotal = timeline.values.reduce((sum, value) => sum + value, 0);
@@ -199,13 +190,6 @@ function MentionsTimelinePage() {
           ? 'Динамика упоминаний выбранного канала-источника за выбранное окно'
           : 'Динамика упоминаний бренда по календарным дням за выбранное окно'
       }
-      about={{
-        formula:
-          'Число найденных публикаций с упоминанием бренда за каждый календарный день. Дни без публикаций честно показаны нулём.',
-        included:
-          'При выбранном источнике весь ряд сужается на сервере до этого канала. Пунктир — непосредственно предыдущее равное окно, выровненное по порядковому дню.',
-        source: 'Сохранённый архив поиска упоминаний Telegram.',
-      }}
       comparison={
         archive.isPending && !data ? (
           <Skeleton className="h-24 w-full" />
@@ -238,14 +222,17 @@ function MentionsTimelinePage() {
                     {fmt.num(previousTotal ?? 0)}
                   </span>
                 </div>
-                <div className="flex items-baseline justify-between gap-3 border-t border-border pt-2">
-                  <span className="text-xs text-muted-foreground">Изменение</span>
-                  <span className="text-xs font-medium tabular-nums text-muted-foreground">
-                    {delta == null
-                      ? 'нет базы'
-                      : `${delta > 0 ? '+' : delta < 0 ? '−' : '±'}${Math.abs(delta).toFixed(1)}%`}
-                  </span>
-                </div>
+                {delta == null ? (
+                  <div className="flex items-baseline justify-between gap-3 border-t border-border pt-2">
+                    <span className="text-xs text-muted-foreground">Изменение</span>
+                    <span className="text-xs font-medium tabular-nums text-muted-foreground">нет базы</span>
+                  </div>
+                ) : (
+                  // Общая разметка рейла, но БЕЗ вердикта: объём упоминаний бренда сентимента не
+                  // несёт (та же причина, что у `DeltaLine` на /mentions — «never green/red»),
+                  // поэтому строка остаётся muted, как была до унификации.
+                  <ComparisonDeltaRow delta={delta} evaluative={false} />
+                )}
               </>
             )}
           </div>
@@ -297,23 +284,25 @@ function MentionsTimelinePage() {
           <EmptyState compact size="chart" title="За выбранный период упоминаний нет." />
         ) : kind === 'line' ? (
           <LineChart
-            values={timeline.values}
-            labels={timeline.labels}
-            titles={timeline.titles}
+            values={chartTimeline.values}
+            labels={chartTimeline.labels}
+            axisLabels={timeAxisFromDayKeys(chartTimeline.days)}
+            titles={chartTimeline.titles}
             yMin={0}
             markAnomalies
             markExtremes
-            showPoints={timeline.values.length <= 45}
-            ghost={showComparison ? timeline.ghost : undefined}
+            showPoints
+            ghost={showComparison ? chartTimeline.ghost : undefined}
             ghostLabel="Пред. период"
             legendToggle={false}
           />
         ) : (
           <BarChart
-            values={timeline.values}
-            labels={timeline.labels}
-            titles={timeline.titles}
-            ghost={showComparison ? timeline.ghost : undefined}
+            values={chartTimeline.values}
+            labels={chartTimeline.labels}
+            axisLabels={timeAxisFromDayKeys(chartTimeline.days)}
+            titles={chartTimeline.titles}
+            ghost={showComparison ? chartTimeline.ghost : undefined}
             ghostLabel="Пред. период"
             legendToggle={false}
           />
@@ -345,13 +334,6 @@ function MentionsSourcesPage() {
       backTo={backTo}
       term="Кто упоминает"
       descriptor="Каналы-источники, упорядоченные по числу упоминаний бренда за выбранное окно"
-      about={{
-        formula:
-          'Публикации с упоминанием группируются по каналу-источнику и ранжируются по числу найденных публикаций.',
-        included:
-          'Просмотры — сумма просмотров упомянувших публикаций, без дедупликации аудитории. Это потенциальные просмотры, а не охват.',
-        source: 'Сохранённый архив поиска упоминаний Telegram.',
-      }}
       comparison={
         <p className="text-xs leading-relaxed text-muted-foreground">
           Это распределение каналов за окно, а не одна метрика периода — сравнение с прошлым

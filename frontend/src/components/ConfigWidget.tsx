@@ -1,13 +1,12 @@
 import { memo, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useChannels } from '@/api/queries';
 import { ChartSection, PERIOD_WORD } from '@/components/ChartWidget';
 import { WidgetRenderer, WidgetSkeleton } from '@/components/WidgetRenderer';
 import { ConfigEditDialog } from '@/components/ConfigEditDialog';
 import { LEGACY_RENDER } from '@/components/legacyAdapters';
 import { ChannelScope, useSelectedChannel } from '@/lib/channel-context';
-import { getRememberedChannel } from '@/lib/channel';
-import { resolveHomeSourceChannel } from '@/lib/channelSource';
+import { useWidgetSourceChannel } from '@/lib/useWidgetSource';
+import { ErrorState } from '@/components/ErrorState';
 import { useWidgetData } from '@/lib/useWidgetData';
 import { useIgWidgetData } from '@/lib/useIgWidgetData';
 import { useMsWidgetData } from '@/lib/useMsWidgetData';
@@ -43,23 +42,19 @@ export const ConfigWidget = memo(function ConfigWidget({ config, homeKey }: { co
   const navigate = useNavigate();
   const metric = getMetric(config.metricId);
   const legacyKey = legacyKeyForMetricId(config.metricId);
-  const sourceNetwork =
-    metric?.source === 'ig' ? 'ig' : metric?.source === 'ms' ? 'ms' : metric?.source === 'ym' ? 'ym' : 'tg';
   // Metric widgets and legacy composites both drive the universal editor / explorer.
   const configurable = !!metric || !!legacyKey;
   const label = config.title || metric?.label || (legacyKey ? LEGACY_LABEL[legacyKey] : undefined) || 'Метрика';
   const { channelId: globalChannelId } = useSelectedChannel();
-  const channels = useChannels().data?.channels;
   // Канон Главной: карточка НЕ следует глобальному свитчеру. Без явного «Источника» карточка
   // на доске (homeKey) пинится к каналу СВОЕЙ сети — запомненному per-network либо первому
   // подходящему: глобальный выбор может быть каналом другой сети (например, МойСклад), и тогда
-  // TG/IG-виджет читал бы пустоту под чужой подписью. Вне Главной (превью/эксплорер/страницы)
-  // поведение прежнее — следовать активному каналу.
-  const effectiveSource = useMemo(() => {
-    if (config.source != null) return config.source;
-    if (!homeKey) return null;
-    return resolveHomeSourceChannel(channels ?? [], sourceNetwork, getRememberedChannel(sourceNetwork));
-  }, [config.source, homeKey, channels, sourceNetwork]);
+  // TG/IG-виджет читал бы пустоту под чужой подписью. Вне Главной (превью) поведение прежнее —
+  // следовать активному каналу. Полноэкранный эксплорер той же карточки резолвит источник ЭТИМ
+  // ЖЕ хуком (см. WidgetExplorer), иначе он расходился бы с карточкой, из которой открыт.
+  const { network: sourceNetwork, channelId: effectiveSource } = useWidgetSourceChannel(config, {
+    pinned: !!homeKey,
+  });
   // Drilldown (steep #9): only the six core TG metrics have a metric page (/metrics/:drillKey), so
   // only those cards' hero value + chart points navigate. Everything else (IG, breakdowns, legacy)
   // has no page → no drill. A card pinned to ДРУГОЙ канал (в т.ч. авто-пин Главной) is not
@@ -168,26 +163,50 @@ function LegacyWidgetBody({ legacyKey, config }: { legacyKey: LegacyKey; config:
   );
 }
 
+/**
+ * Тело виджета в состоянии сбоя. Отдельный компонент, потому что все четыре источника обязаны
+ * говорить об ошибке ОДИНАКОВО: раньше упавший запрос доходил до резолвера как пустые данные, и
+ * карточка печатала «Нет данных за период» — выдавала сбой сети за достоверный ответ, да ещё и
+ * без единого способа повторить. `size="chart"` держит тот же footprint, что скелетон и график,
+ * поэтому подмена состояния не дёргает высоту плитки.
+ */
+function WidgetErrorBody({ isRetrying, onRetry }: { isRetrying: boolean; onRetry: () => void }) {
+  return (
+    <ErrorState
+      compact
+      size="chart"
+      title="Не удалось загрузить"
+      reason="Данные источника не пришли — это сбой запроса, а не пустой период."
+      onRetry={onRetry}
+      retrying={isRetrying}
+    />
+  );
+}
+
 function TgWidgetBody({ config, onDrill, drillLabel }: { config: WidgetConfig; onDrill?: () => void; drillLabel?: string }) {
-  const { result, isLoading } = useWidgetData(config);
+  const { result, isLoading, isError, isRetrying, retry } = useWidgetData(config);
   if (isLoading) return <WidgetSkeleton viz={config.viz} />;
+  if (isError) return <WidgetErrorBody isRetrying={isRetrying} onRetry={retry} />;
   return <WidgetRenderer result={result} viz={config.viz} onDrill={onDrill} drillLabel={drillLabel} />;
 }
 
 function IgWidgetBody({ config }: { config: WidgetConfig }) {
-  const { result, isLoading } = useIgWidgetData(config);
+  const { result, isLoading, isError, isRetrying, retry } = useIgWidgetData(config);
   if (isLoading) return <WidgetSkeleton viz={config.viz} />;
+  if (isError) return <WidgetErrorBody isRetrying={isRetrying} onRetry={retry} />;
   return <WidgetRenderer result={result} viz={config.viz} />;
 }
 
 function MsWidgetBody({ config, onDrill, drillLabel }: { config: WidgetConfig; onDrill?: () => void; drillLabel?: string }) {
-  const { result, isLoading } = useMsWidgetData(config);
+  const { result, isLoading, isError, isRetrying, retry } = useMsWidgetData(config);
   if (isLoading) return <WidgetSkeleton viz={config.viz} />;
+  if (isError) return <WidgetErrorBody isRetrying={isRetrying} onRetry={retry} />;
   return <WidgetRenderer result={result} viz={config.viz} onDrill={onDrill} drillLabel={drillLabel} />;
 }
 
 function YmWidgetBody({ config, onDrill, drillLabel }: { config: WidgetConfig; onDrill?: () => void; drillLabel?: string }) {
-  const { result, isLoading } = useYmWidgetData(config);
+  const { result, isLoading, isError, isRetrying, retry } = useYmWidgetData(config);
   if (isLoading) return <WidgetSkeleton viz={config.viz} />;
+  if (isError) return <WidgetErrorBody isRetrying={isRetrying} onRetry={retry} />;
   return <WidgetRenderer result={result} viz={config.viz} onDrill={onDrill} drillLabel={drillLabel} />;
 }

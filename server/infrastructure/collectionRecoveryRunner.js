@@ -15,6 +15,8 @@
 
 'use strict';
 
+const { createIntervalRunner } = require('./intervalRunner');
+
 function createCollectionRecoveryRunner({
   log = () => {},
   jobTracker,
@@ -36,6 +38,10 @@ function createCollectionRecoveryRunner({
   // планировщиком/интервалом; внутри свой durable day-gate (реальная работа раз в день).
   // Optional (inert no-op) — pure-scheduler тесты и composition без ЯМ-вертикали не задеты.
   runYmCollectionPass = async () => ({ skipped: true }),
+  // Дневной сбор Rusender (jobs/rusenderCollectionJob) — независимый upstream, своя lane тем же
+  // планировщиком/интервалом; внутри свой durable day-gate (реальная работа раз в день).
+  // Optional (inert no-op) — pure-scheduler тесты и composition без Rusender-вертикали не задеты.
+  runRusenderCollectionPass = async () => ({ skipped: true }),
   igCap,
   tgCap,
   mediaCap,
@@ -47,29 +53,24 @@ function createCollectionRecoveryRunner({
   setTimeoutFn = setTimeout,
   clearTimeoutFn = clearTimeout,
 } = {}) {
-  let timer = null;
-  let running = false;   // in-process single-flight
-  let stopped = false;
-  let started = false;
-
-  // Один проход, защищённый in-process single-flight: перекрывающийся вызов (гонка таймера или
-  // ручной триггер) сразу выходит, не удваивая работу. Возвращается наружу (`runOnce`) — тестируемо
-  // и пригодно как ручной триггер.
-  async function runOnce() {
-    if (!enabled || stopped) return { skipped: true };
-    if (running) return { skipped: true };   // single-flight: не запускаем перекрывающийся проход
-    running = true;
-    try {
-      // jobTracker.run сам глотает ошибки задачи и во время дренажа отклоняет новую работу
-      // ({ accepted:false }) — тогда проход просто не выполняется. Дожидаемся, чтобы single-flight
-      // держался до конца реальной работы прохода.
-      const result = await jobTracker.run(async () => {
+  // Жизненный цикл — общий (createIntervalRunner): single-flight, обёртка в jobTracker, unref-таймеры,
+  // идемпотентные start/stop. Здесь остаётся только САМ ПРОХОД — то, чем бегунки и различаются
+  // (аудит #554: шестьдесят строк были побайтово одинаковы в обоих файлах).
+  const loop = createIntervalRunner({
+    jobTracker,
+    job: 'collection_recovery_pass',
+    intervalMs,
+    initialDelayMs,
+    enabled,
+    setTimeoutFn,
+    clearTimeoutFn,
+    pass: async () => {
         // IG, Telegram и МойСклад — независимые upstream'ы и идут параллельными lanes. Внутри
         // Telegram lane обычный QR-сбор и узкий central-media repair идут ПОСЛЕДОВАТЕЛЬНО: один
         // пользовательский session не получает два одновременных MTProto fan-out, а repair не
         // превращается в лишнюю конкурентную pipeline. Каждая lane изолирует свой сбой и
         // наследует общий lifecycle/gating.
-        const [ig, tgLane, msLane, ym] = await Promise.all([
+        const [ig, tgLane, msLane, ym, rusender] = await Promise.all([
           runIgCollectionPass({ cap: igCap })
             .catch((e) => { log('error', 'recovery_ig_pass_failed', { error: e.message }); return null; }),
           (async () => {
@@ -91,52 +92,18 @@ function createCollectionRecoveryRunner({
           // Метрика — независимый upstream (свои квоты), одна джоба — своя параллельная lane.
           runYmCollectionPass()
             .catch((e) => { log('error', 'recovery_ym_pass_failed', { error: e.message }); return null; }),
+          // Rusender — тоже независимый upstream со своей квотой (гейт параллелизма живёт внутри
+          // клиента), поэтому своя параллельная lane, а не хвост чужой.
+          runRusenderCollectionPass()
+            .catch((e) => { log('error', 'recovery_rusender_pass_failed', { error: e.message }); return null; }),
         ]);
         const { tg, media } = tgLane;
         const { ms, msOrders } = msLane;
-        log('info', 'collection_recovery_pass_done', { ig, tg, media, ms, msOrders, ym });
-      }, { job: 'collection_recovery_pass' });
-      if (result && result.accepted === false) return { skipped: true };
-      return { skipped: false };
-    } finally {
-      running = false;
-    }
-  }
+        log('info', 'collection_recovery_pass_done', { ig, tg, media, ms, msOrders, ym, rusender });
+    },
+  });
 
-  function schedule(delayMs) {
-    if (stopped) return;
-    timer = setTimeoutFn(tick, delayMs);
-    if (timer && typeof timer.unref === 'function') timer.unref();
-  }
-
-  async function tick() {
-    timer = null;
-    if (stopped) return;
-    await runOnce();
-    if (!stopped) schedule(intervalMs);   // перепланируем только если ещё не остановлены
-  }
-
-  // Стартует бегунок: один раз, не в DB-disabled режиме, не после stop(). Первый проход отложен.
-  function start() {
-    if (!enabled || started || stopped) return;
-    started = true;
-    schedule(initialDelayMs);
-  }
-
-  // Останавливает планирование новых проходов и гасит таймер. Идемпотентен. Уже сабмиченный в
-  // jobTracker проход дожидается сам tracker в waitForIdle.
-  function stop() {
-    stopped = true;
-    if (timer) { clearTimeoutFn(timer); timer = null; }
-  }
-
-  return {
-    start,
-    stop,
-    runOnce,
-    get isRunning() { return running; },
-    get isStopped() { return stopped; },
-  };
+  return loop;
 }
 
 module.exports = { createCollectionRecoveryRunner };

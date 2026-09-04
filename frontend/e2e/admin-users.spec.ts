@@ -39,8 +39,6 @@ async function bootAdmin(page: Page) {
     return r.fulfill({ status: 404, json: { error: 'not_available_in_test' } });
   });
   await page.addInitScript(() => {
-    localStorage.setItem('pulse_token', 'e2e-token');
-    localStorage.setItem('pulse_token_exp', String(Date.now() + 3_600_000));
   });
   await page.goto('/admin');
   await expect(page.getByRole('heading', { name: 'Управление пользователями' })).toBeVisible();

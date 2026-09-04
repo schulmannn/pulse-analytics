@@ -3,11 +3,10 @@
 # сети Railway через MTPROTO_URL (напр. http://mtproto.railway.internal:8001).
 # Часть сплита рантаймов: Python в этом образе НЕТ (см. Dockerfile.mtproto).
 
-# ── Stage 1: build the new frontend (Sprint 3F — Vite/React/TS SPA → static dist) ──
-# Post-catover (3F-3): this dist/ is the primary dashboard, served by Express at '/'; the
-# legacy public/index.html shell survives only at /legacy as a reversible escape hatch. If
-# this stage fails, the whole image fails — so `npm run build` is verified locally before
-# this Dockerfile change ships.
+# ── Stage 1: build the frontend (Vite/React/TS SPA → static dist) ──
+# Этот dist/ — ЕДИНСТВЕННАЯ HTML-поверхность приложения, Express отдаёт её с '/'. Прежняя
+# nonce-оболочка public/index.html вместе со своим CSP-контуром удалена (аудит #554, ТЗ-6).
+# Падение стадии валит весь образ — поэтому `npm run build` прогоняется локально до правки.
 FROM node:20-slim AS frontend
 WORKDIR /fe
 COPY frontend/package.json frontend/package-lock.json ./

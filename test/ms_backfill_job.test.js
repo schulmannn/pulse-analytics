@@ -12,6 +12,9 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { createMsBackfillEngine } = require('../server/jobs/msBackfillJob');
+const { anchor, dayKey } = require('./helpers/dates');
+// Якорь прогона — один на файл: см. test/helpers/dates.
+const T = anchor();
 
 const ACC = { channel_id: 7, ms_account_id: 'acc-1', org_name: 'ООО Ромашка', access_token_enc: 'enc1' };
 
@@ -380,7 +383,7 @@ test('доливка: done-каналу — окно последних 7 дне
   });
   const stats = await engine.runTopupPass();
   assert.deepEqual(stats, { channels: 1, orders: 1, errors: 0, skipped: 0 });
-  const day = new Date().toISOString().slice(0, 10);
+  const day = dayKey(T);
   assert.deepEqual(db.jobKeys, [`ms_orders_topup|7:acc-1:${day}`]);
   assert.deepEqual(windows, [[fmtDay(weekAgo), fmtDay(now)]]);
   assert.equal(db.upserts.length, 1);
@@ -388,7 +391,7 @@ test('доливка: done-каналу — окно последних 7 дне
 });
 
 test('доливка: day-gate skip и не-done каналы — без запросов к МС', async () => {
-  const day = new Date().toISOString().slice(0, 10);
+  const day = dayKey(T);
   const skipDb = makeDb({
     states: { 7: { channel_id: 7, status: 'done', updated_age_seconds: 86400 } },
     skipKeys: [`7:acc-1:${day}`],
@@ -560,7 +563,7 @@ test('доливка возвратов: done-каналу окно 7 дней �
   });
   const stats = await engine.runReturnsTopupPass();
   assert.deepEqual(stats, { channels: 1, returns: 1, errors: 0, skipped: 0 });
-  const day = new Date().toISOString().slice(0, 10);
+  const day = dayKey(T);
   assert.deepEqual(db.jobKeys, [`ms_returns_topup|7:acc-1:${day}`]);
   assert.deepEqual(windows, [[fmtDay(weekAgo), fmtDay(now)]]);
   assert.equal(db.returnsUpserts.length, 1);

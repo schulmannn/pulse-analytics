@@ -17,6 +17,87 @@ import type { Freshness } from '@/lib/freshness';
 
 export type HealthTone = 'error' | 'warn';
 
+export type OrbitHealthTone = 'ok' | HealthTone;
+
+export interface OrbitNetworkHealth {
+  health: OrbitHealthTone;
+  /** Short suffix for the orbit's existing status line and radio accessible name. */
+  reason: string | null;
+}
+
+export interface OrbitHealthInput {
+  telegram?: {
+    /** False for collector-only and a central channel owned by somebody else. */
+    managed: boolean;
+    connectionState?: string | null;
+  } | null;
+  instagram?: {
+    connected?: boolean | null;
+    envFallback?: boolean | null;
+    tokenExpiresAt?: string | null;
+  } | null;
+  /** MS/YM public status shapes currently expose connection identity only, no health signal. */
+  moysklad?: { connected?: boolean | null } | null;
+  metrika?: { connected?: boolean | null } | null;
+  now?: number;
+}
+
+export interface OrbitHealthMap {
+  telegram: OrbitNetworkHealth;
+  instagram: OrbitNetworkHealth;
+  moysklad: OrbitNetworkHealth;
+  metrika: OrbitNetworkHealth;
+  cdek: OrbitNetworkHealth;
+}
+
+const ORBIT_OK: OrbitNetworkHealth = { health: 'ok', reason: null };
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Health-only projection for /connect. Presence/availability remains the orbit's own three-state
+ * model; this function only colours an already-connected node and supplies its honest short reason.
+ * Keep the Telegram wording aligned with the canonical managed-session copy below.
+ */
+export function orbitHealth({ telegram, instagram, now = Date.now() }: OrbitHealthInput): OrbitHealthMap {
+  let telegramHealth = ORBIT_OK;
+  if (telegram?.managed && telegram.connectionState === 'reauth_required') {
+    telegramHealth = { health: 'error', reason: 'сессия недействительна' };
+  } else if (telegram?.managed && telegram.connectionState === 'degraded') {
+    telegramHealth = { health: 'warn', reason: 'временно недоступен' };
+  }
+
+  let instagramHealth = ORBIT_OK;
+  // The environment fallback has no per-channel OAuth token to diagnose. Preserve its existing
+  // healthy meaning even if a stale token-shaped field appears in a tolerant future response.
+  if (instagram?.connected && instagram.tokenExpiresAt) {
+    const expiresAt = Date.parse(instagram.tokenExpiresAt);
+    if (Number.isFinite(expiresAt)) {
+      const remainingMs = expiresAt - now;
+      if (remainingMs < 0) {
+        instagramHealth = { health: 'error', reason: 'токен истёк' };
+      } else if (remainingMs <= 7 * DAY_MS) {
+        instagramHealth = {
+          health: 'warn',
+          reason: `токен истекает ${Math.ceil(remainingMs / DAY_MS)} дн`,
+        };
+      }
+    }
+  }
+
+  return {
+    telegram: telegramHealth,
+    instagram: instagramHealth,
+    // Their current public schemas have no revoked/expired/degraded field. Do not infer health from
+    // names, channel rows or archive freshness: absence of a documented signal is honestly `ok`.
+    moysklad: ORBIT_OK,
+    metrika: ORBIT_OK,
+    // У СДЭКа нет ни токена, ни фонового сбора — ломаться нечему. «Данные устарели» здесь не
+    // health-сигнал, а свойство ручной загрузки: об этом честнее говорит календарь покрытия на
+    // самой странице источника, чем тревожная точка в орбите.
+    cdek: ORBIT_OK,
+  };
+}
+
 export interface HealthBanner {
   tone: HealthTone;
   message: string;

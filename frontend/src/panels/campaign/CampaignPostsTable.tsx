@@ -15,6 +15,7 @@ import {
 import { TableSkeleton } from '@/components/ui/dataSkeleton';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
+import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card';
 import {
   applyCampaignPostTableState,
   filterPostsByQuery,
@@ -30,6 +31,7 @@ import {
 import { fmt } from '@/lib/format';
 import { markdownToPlainText } from '@/lib/markdown';
 import { cn } from '@/lib/utils';
+import { useLiveList } from '@/lib/useLiveList';
 import type { CampaignPostsQuery } from '@/panels/campaign/campaignView';
 
 const postKey = (p: CampaignPost) => `${p.network}:${p.channel_id}:${p.post_ref}`;
@@ -130,6 +132,8 @@ function InteractivePostsTable({
   const [searchParams, setSearchParams] = useSearchParams();
   const tableState = useMemo(() => parseCampaignPostTableState(searchParams), [searchParams]);
   const { q: query, sort, order } = tableState;
+  // Живой список (волна C): сортировка/поиск/удаление перестраивают строки плавно.
+  const liveListRef = useLiveList<HTMLTableSectionElement>();
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   // Table view state (local, not URL-backed): which metric columns show + row density.
@@ -286,7 +290,7 @@ function InteractivePostsTable({
                     {canEdit && <th className="px-3 py-3 text-right last:pr-0"></th>}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-border">
+                <tbody ref={liveListRef} className="divide-y divide-border">
                   {rows.map((p) => {
                     const k = postKey(p);
                     const isOpen = k === openKey;
@@ -303,10 +307,11 @@ function InteractivePostsTable({
                         )}
                       >
                         {canEdit && (
-                          <td className="py-3 pl-0 pr-2" onClick={(e) => e.stopPropagation()}>
+                          <td className="py-3 pl-0 pr-2">
                             <Checkbox
                               aria-label="Выбрать публикацию"
                               checked={selected.has(k)}
+                              onClick={(event) => event.stopPropagation()}
                               onCheckedChange={() => toggle(p)}
                               data-testid="campaign-post-select"
                             />
@@ -321,10 +326,13 @@ function InteractivePostsTable({
                           {p.published_at ? fmt.date(p.published_at) : '—'}
                         </td>
                         {canEdit && (
-                          <td className="px-3 py-3 text-right last:pr-0" onClick={(e) => e.stopPropagation()}>
+                          <td className="px-3 py-3 text-right last:pr-0">
                             <button
                               type="button"
-                              onClick={() => onRemovePost(p)}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                onRemovePost(p);
+                              }}
                               disabled={removePending}
                               className="text-xs font-medium text-muted-foreground transition-colors hover:text-destructive disabled:opacity-50"
                             >
@@ -460,6 +468,8 @@ function SimplePostsTable({
   onRemovePost: (post: CampaignPost) => void;
   removePending: boolean;
 }) {
+  // Живой список (волна C): удаление поста из кампании схлопывает строку плавно.
+  const liveListRef = useLiveList<HTMLTableSectionElement>();
   return (
     <div className="data-table-surface data-table-scroll">
       <table className="data-table text-left text-sm" data-testid="campaign-posts-table">
@@ -475,7 +485,7 @@ function SimplePostsTable({
             {canEdit && <th className="px-3 py-3 text-right last:pr-0"></th>}
           </tr>
         </thead>
-        <tbody className="divide-y divide-border">
+        <tbody ref={liveListRef} className="divide-y divide-border">
           {posts.map((p) => (
             <tr key={postKey(p)} className="transition-colors hover:bg-hover-row">
               <SourceCell post={p} first />
@@ -528,19 +538,56 @@ function PostCell({ post: p, first = false, onOpen }: { post: CampaignPost; firs
   ) : (
     <span className="italic text-muted-foreground">Содержимое скрыто</span>
   );
+  // Hover-превью (shadcn Hover Card, выбор владельца): полный текст публикации + дата и главные
+  // числа БЕЗ клика — строка таблицы усечена до одной строки. Только там, где есть что открыть:
+  // недоступный пост честно остаётся «Содержимое скрыто» и превью не получает.
+  const primary = postPrimaryResult(p);
+  const interactions = postInteractions(p);
+  const trigger = onOpen ? (
+    <button
+      type="button"
+      onClick={onOpen}
+      data-campaign-post-open-trigger
+      className="block w-full max-w-md rounded text-left focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/45"
+    >
+      {body}
+    </button>
+  ) : (
+    body
+  );
   return (
     <td className={cn(first ? 'py-3 pl-0 pr-3' : 'px-3 py-3')}>
-      {onOpen ? (
-        <button
-          type="button"
-          onClick={onOpen}
-          data-campaign-post-open-trigger
-          className="block w-full max-w-md rounded text-left focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/45"
-        >
-          {body}
-        </button>
+      {p.accessible && p.caption ? (
+        <HoverCard>
+          <HoverCardTrigger asChild>{trigger}</HoverCardTrigger>
+          <HoverCardContent>
+            <div className="mb-2 flex items-center gap-2">
+              <NetworkBadge network={p.network} />
+              {p.published_at && (
+                <span className="text-2xs text-muted-foreground">{fmt.date(p.published_at)}</span>
+              )}
+            </div>
+            <p className="line-clamp-[8] whitespace-pre-line text-sm leading-relaxed text-foreground">
+              {markdownToPlainText(p.caption)}
+            </p>
+            <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 border-t border-border pt-2 text-2xs text-muted-foreground">
+              <span>
+                {primary.label}{' '}
+                <span className="font-medium tabular-nums text-foreground">
+                  {primary.value == null ? '—' : fmt.short(primary.value)}
+                </span>
+              </span>
+              <span>
+                {interactions.label}{' '}
+                <span className="font-medium tabular-nums text-foreground">
+                  {interactions.value == null ? '—' : fmt.short(interactions.value)}
+                </span>
+              </span>
+            </div>
+          </HoverCardContent>
+        </HoverCard>
       ) : (
-        body
+        trigger
       )}
     </td>
   );

@@ -187,8 +187,6 @@ async function boot(page: Page, path = '/campaigns/1') {
   });
 
   await page.addInitScript(() => {
-    localStorage.setItem('pulse_token', 'e2e-token');
-    localStorage.setItem('pulse_token_exp', String(Date.now() + 60 * 60 * 1000));
     localStorage.setItem('pulse_channel', '1');
     localStorage.setItem('pulse_theme', 'dark');
   });
@@ -303,9 +301,12 @@ test.describe('Смешанная кампания TG+IG', () => {
     await expect(table).toHaveAttribute('data-density', 'compact');
     await densityTrack.getByRole('button', { name: 'Свободно', exact: true }).click();
     await expect(table).toHaveAttribute('data-density', 'spacious');
-    // Трек — один tab-stop: стрелки водят фокус, Space коммитит (роль toolbar это и обещает).
+    // Трек — один tab-stop: Radix ставит физический фокус после стрелки в следующей задаче,
+    // затем Space коммитит (роль toolbar это и обещает).
+    const balancedDensity = densityTrack.getByRole('button', { name: 'Обычно', exact: true });
     await densityTrack.getByRole('button', { name: 'Свободно', exact: true }).focus();
     await page.keyboard.press('ArrowLeft');
+    await expect(balancedDensity).toBeFocused();
     await page.keyboard.press('Space');
     await expect(table).toHaveAttribute('data-density', 'balanced');
 
@@ -409,7 +410,8 @@ test.describe('Смешанная кампания TG+IG', () => {
     await page.locator('[data-drill-to*="/campaigns/1/metrics/formats"]').click();
     await expect.poll(() => new URL(page.url()).pathname).toBe('/campaigns/1/metrics/formats');
     await expect(page.getByRole('heading', { level: 1, name: 'Форматы кампании' })).toBeVisible();
-    await expect(page.getByRole('img', { name: 'Круговая диаграмма' })).toBeVisible();
+    // Форматы — составное полукольцо (RadialShare, выбор владельца): имя графики несёт итог+состав.
+    await expect(page.getByRole('img', { name: /^Всего .* публ\./ })).toBeVisible();
     await expect(page.getByRole('toolbar', { name: 'Тип графика' })).toHaveCount(0);
   });
 

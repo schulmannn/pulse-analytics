@@ -1,20 +1,22 @@
 import type { ReactNode } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { lttbDownsample } from '@/lib/downsample';
 import { CHART_MAX_POINTS } from '@/lib/msSeries';
-import { fmt } from '@/lib/format';
+import { fmt, timeAxisFromDayKeys, timeAxisLabels } from '@/lib/format';
 import { pctDelta, type MetricDelta } from '@/lib/delta';
 import { DeltaPill } from '@/components/DeltaPill';
 import { EmptyState } from '@/components/EmptyState';
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
-import { ChartCardBody, ChartSection as WidgetChartSection } from '@/components/ChartWidget';
-import { CompactStatHeadline } from '@/components/CompareStat';
+import { ChartBand } from '@/components/ChartBand';
+import { ChartCardBody, ChartSection as WidgetChartSection, seriesRange } from '@/components/ChartWidget';
+import { KpiValue } from '@/components/chartWidget/KpiValue';
+import { StackedStat, CompactStatHeadline } from '@/components/CompareStat';
 import { Sparkline } from '@/components/Sparkline';
 import type { WidgetSize } from '@/lib/widgetPrefsStore';
 import { fmtDay, pairDelta, windowIgSeries, type Point, type WindowPair } from '@/lib/igMetrics';
 import type { IgOverviewChart } from '@/lib/igWindowMetrics';
-import { calendarWindowForPeriod, periodDateTimestamp, splitCalendarRows } from '@/lib/period';
+import { calendarWindowForPeriod, periodDateTimestamp, splitCalendarRows, useCardShowsPeriod } from '@/lib/period';
 import type { WidgetPeriodValue } from '@/lib/period';
 import type { IgData } from '@/lib/useIgData';
 
@@ -81,19 +83,7 @@ export function KpiCard({ label, value, hint, trend, deltaText, deltaTone, onDri
       {/* Паритет с TG StatTile (аудит: «twin» расходился кеглем и базовой линией дельты). */}
       <div className="text-2xs tracking-wide text-muted-foreground">{label}</div>
       <div className="mt-1.5 flex items-baseline gap-2">
-        {onDrill ? (
-          <button
-            type="button"
-            aria-label={`Разбор: ${label}`}
-            title="Подробный разбор"
-            onClick={onDrill}
-            className="rounded text-left text-2xl font-medium tabular-nums tracking-tight transition-colors hover:text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40"
-          >
-            {value}
-          </button>
-        ) : (
-          <div className="text-2xl font-medium tabular-nums tracking-tight">{value}</div>
-        )}
+        <KpiValue size="small" text={value} onDrill={onDrill} drillLabel={label} />
         {deltaText ? (
           <span className={`shrink-0 text-xs font-medium tabular-nums ${deltaColor}`}>{deltaText}</span>
         ) : (
@@ -113,101 +103,60 @@ export function KpiHero({
   delta,
   series,
   drillTo,
+  viz = 'line',
+  windowDays,
 }: {
   label: string;
   value: string;
   delta?: MetricDelta | null;
   series?: Point[];
-  /** Route of the metric's explorer page (/metrics/ig-*). The ↗ Link is the semantic
-      (keyboard/AT) path; the whole chart block is a mouse convenience — the same drill
-      contract as widget cards, so the hero chart is never a dead end. */
+  /** Route of the metric's explorer page (/metrics/ig-*). ТОЛЬКО тихий клик по числу (паритет с
+      TG-твином FeaturedKpi): своя ↗-обёртка графика читалась дублем карточной (визуальный аудит). */
   drillTo?: string;
+  /** «Линия» / «Столбцы» из карусели вариантов карточки — паритет с TG-твином FeaturedKpi. */
+  viz?: 'line' | 'bar';
+  /** Длина активного окна в днях — короткое окно (≤ 8) метит ось буквами дней недели. */
+  windowDays?: number;
 }) {
   const navigate = useNavigate();
   const daily = (series ?? []).filter((p) => p.day !== 'total');
-  // Метки оси ровные: акцент-пилюля последней метки удалена продуктово (прод-фидбек по Обзору:
-  // читалась как залипший ховер) — см. компакт-метки в LineChart.
   // Кап длинной линии (канон CLAUDE.md): на «Всё» дневной архив уходил в чарт целиком —
-  // LTTB прореживает до CHART_MAX_POINTS, labels/titles строятся из тех же выбранных точек.
+  // LTTB прореживает до CHART_MAX_POINTS, labels строятся из тех же выбранных точек.
   const shown = lttbDownsample(daily, CHART_MAX_POINTS, (p) => p.value);
-  const chart = shown.length > 1 && (
-    <LineChart
-      values={shown.map((p) => p.value)}
-      labels={pickLabels(shown)}
-      titles={shown.map((p) => `${fmtDay(p.day)}: ${fmt.num(p.value)}`)}
-      height={112}
-    />
-  );
+  const axisLabels = timeAxisLabels(shown.map((p) => p.day), windowDays);
+  // Канон hero-карточки Обзора — безосевой area-Sparkline (TG-твин FeaturedKpi): ряд дат на лице
+  // не рисуем, значения по дням читаются hover-тултипом (caption обязателен — без него Sparkline
+  // не резервирует строку оси); полные оси живут на /metrics/ig-* (drillTo).
+  const chart =
+    shown.length > 1 &&
+    (viz === 'bar' ? (
+      <ChartBand className="h-full">
+        <BarChart
+          values={shown.map((p) => p.value)}
+          labels={shown.map((p) => fmtDay(p.day))}
+          axisLabels={axisLabels}
+          titles={shown.map((p) => `${fmtDay(p.day)}: ${fmt.num(p.value)}`)}
+          formatValue={fmt.num}
+        />
+      </ChartBand>
+    ) : (
+      <Sparkline
+        values={shown.map((p) => p.value)}
+        labels={shown.map((p) => fmtDay(p.day))}
+        axisLabels={axisLabels}
+        area
+        strokeWidth={2}
+        interactive
+        caption=""
+        formatValue={fmt.num}
+        className="h-full min-h-28 w-full"
+      />
+    ));
   // Steep anatomy (owner rule): label + number + delta bottom-left, the chart inset to the RIGHT.
   return (
-    <ChartCardBody hero label={label} value={value} delta={delta} onValueClick={drillTo ? () => navigate(drillTo) : undefined} drillLabel={label}>
-      {chart &&
-        (drillTo ? (
-          <div className="relative h-full">
-            <Link
-              to={drillTo}
-              aria-label={`Разбор: ${label}`}
-              title="Подробный разбор"
-              className="absolute right-1 top-1 z-10 rounded-full border border-transparent p-1 text-muted-foreground transition-colors hover:border-border hover:bg-background hover:text-foreground"
-            >
-              <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-                <path d="M7 17 17 7M9 7h8v8" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </Link>
-            {/* Mouse convenience only (no button role — the ↗ Link above is the semantic path). */}
-            <div className="h-full cursor-pointer" onClick={() => navigate(drillTo)}>
-              {chart}
-            </div>
-          </div>
-        ) : (
-          <div className="h-full">{chart}</div>
-        ))}
+    <ChartCardBody label={label} value={value} delta={delta} onValueClick={drillTo ? () => navigate(drillTo) : undefined} drillLabel={label}>
+      {chart && <div className="h-full">{chart}</div>}
     </ChartCardBody>
-  );
-}
-
-/** Daily gross-follows bars — full series in, resolved feed/Home calendar window out. */
-export function FollowsByDayCard({ data, drillTo, id, homeKey, title = 'Подписки по дням' }: { data: Point[]; drillTo?: string; id?: string; homeKey?: string; title?: string }) {
-  const pts = data.filter((p) => p.day !== 'total');
-  return (
-    <WidgetChartSection
-      id={id}
-      homeKey={homeKey}
-      title={title}
-      drillTo={drillTo}
-      periodControl
-      variants={(period: WidgetPeriodValue) => {
-        const selected = splitCalendarRows(
-          pts,
-          calendarWindowForPeriod(period),
-          (point) => periodDateTimestamp(point.day),
-        );
-        const w = selected.current;
-        const total = w.reduce((acc, p) => acc + p.value, 0);
-        const prev = selected.previous
-          ? selected.previous.reduce((acc, p) => acc + p.value, 0)
-          : null;
-        const delta = prev != null && prev > 0 ? pctDelta(total, prev) : null;
-        return [
-          {
-            key: 'bar',
-            label: 'Столбцы',
-            render:
-              w.length > 0 ? (
-                <ChartCardBody value={`+${fmt.kpi(total)}`} delta={delta} caption={delta ? 'к пред. периоду' : period.days === 0 ? 'за всё время' : undefined}>
-                  <BarChart
-                    values={w.map((d) => d.value)}
-                    labels={w.map((d) => fmtDay(d.day))}
-                    titles={w.map((d) => `${fmtDay(d.day)}: +${fmt.num(d.value)}`)}
-                  />
-                </ChartCardBody>
-              ) : (
-                <EmptyChart />
-              ),
-          },
-        ];
-      }}
-    />
   );
 }
 
@@ -228,9 +177,25 @@ export function pickLabels(series: Point[]): string[] {
   return [first?.day ?? '', mid?.day ?? '', last?.day ?? ''].map(fmtDay);
 }
 
-/** A daily line chart for reach/new followers. Feed top bar owns its calendar window; a Home copy
-    uses the same code with its independently saved period. */
-export function TrendCard({ title, series, drillTo, id, homeKey, defaultSize }: { title: string; series: Point[]; drillTo?: string; id?: string; homeKey?: string; defaultSize?: WidgetSize }) {
+/** A dated trend line. Flow series show a period sum; level series show the latest audience total
+    and compare it with the first point in the same window. */
+export function TrendCard({
+  title,
+  series,
+  drillTo,
+  id,
+  homeKey,
+  defaultSize,
+  seriesKind = 'flow',
+}: {
+  title: string;
+  series: Point[];
+  drillTo?: string;
+  id?: string;
+  homeKey?: string;
+  defaultSize?: WidgetSize;
+  seriesKind?: 'flow' | 'level';
+}) {
   const pts = series.filter((p) => p.day !== 'total');
   return (
     <WidgetChartSection
@@ -253,20 +218,31 @@ export function TrendCard({ title, series, drillTo, id, homeKey, defaultSize }: 
         const prev = selected.previous
           ? selected.previous.reduce((acc, p) => acc + p.value, 0)
           : null;
-        const delta = prev != null && prev > 0 ? pctDelta(total, prev) : null;
+        const first = w[0]?.value ?? 0;
+        const last = w[w.length - 1]?.value ?? 0;
+        const delta = seriesKind === 'level'
+          ? first > 0 ? pctDelta(last, first) : null
+          : prev != null && prev > 0 ? pctDelta(total, prev) : null;
+        const value = seriesKind === 'level' ? last : total;
+        const caption = seriesKind === 'level'
+          ? 'к началу периода'
+          : delta ? 'к пред. периоду' : period.days === 0 ? 'за всё время' : undefined;
         // Кап линии (канон CLAUDE.md): «Всё» отдаёт многосотневный дневной архив — итог/дельта
         // выше посчитаны от ПОЛНОГО окна, прореживается только рисуемая линия.
         const line = lttbDownsample(w, CHART_MAX_POINTS, (p) => p.value);
+        // Мин/макс — только у потоков: у уровневой серии сводка дублирует концы окна.
+        const range = seriesKind === 'flow' ? seriesRange(w.map((p) => p.value)) : null;
         return [
           {
             key: 'line',
             label: 'Линия',
             render:
               w.length > 1 ? (
-                <ChartCardBody value={fmt.kpi(total)} delta={delta} caption={delta ? 'к пред. периоду' : period.days === 0 ? 'за всё время' : undefined}>
+                <ChartCardBody value={fmt.kpi(value)} delta={delta} range={range} caption={caption}>
                   <LineChart
                     values={line.map((p) => p.value)}
                     labels={pickLabels(line)}
+                    axisLabels={timeAxisFromDayKeys(line.map((p) => p.day))}
                     titles={line.map((p) => `${fmtDay(p.day)}: ${fmt.num(p.value)}`)}
                   />
                 </ChartCardBody>
@@ -299,14 +275,14 @@ export function IgKpiBlock({ ig }: { ig: IgData }) {
     // TG KpiGrid composition: the hero sits straight on the card and the ledger splits off with
     // ONE quiet top hairline + spacing — no inner plate, no hairline mesh (the card is the frame).
     <div className="space-y-5">
-      {/* Без hero-drillTo: оба хоста («Показатели» на IG-Обзоре и IG·Показатели на Home) несут
-          drillTo на СЕКЦИИ — corner-↗ + whole-card клик + хедер-кнопка. Своя стрелка hero рядом
-          с карточной читалась дублем (визуальный аудит №1). */}
+      {/* Hero-drillTo — только тихий клик по числу (стрелки у hero нет — она читалась дублем
+          карточной, визуальный аудит №1); секционные corner-↗ и whole-card клик не меняются. */}
       <KpiHero
         label={`Охват · ${ig.window.days} дн.`}
         value={fmt.kpi(ig.pairs.reach.cur)}
         delta={pairDelta(ig.pairs.reach)}
         series={ig.series.reach.filter((p) => ig.inWindow(p.day))}
+        drillTo="/metrics/ig-reach"
       />
       <div className="grid grid-cols-2 gap-x-6 gap-y-4 border-t border-border pt-4 lg:grid-cols-4">
         <KpiCard
@@ -324,7 +300,9 @@ export function IgKpiBlock({ ig }: { ig: IgData }) {
         />
         <KpiCard
           label="Вовлечённость"
-          value={ig.erReach > 0 ? `${ig.erReach.toFixed(2)}%` : '—'}
+          // Единый формат абсолютного процента с TG (fmt.pctAbs): «25.1%», не «25.10%» — карточка
+          // и /metrics/ig-er обязаны печатать одно число одним форматом.
+          value={ig.erReach > 0 ? fmt.pctAbs(ig.erReach) : '—'}
           trend={erTrend}
           onDrill={() => navigate('/metrics/ig-er')}
         />
@@ -379,11 +357,22 @@ export function SubscriberMovement({
   ];
   return (
     <div className={compact ? 'space-y-2' : 'space-y-3'}>
-      <div className={`grid grid-cols-1 border-t border-border sm:grid-cols-3 ${compact ? 'gap-x-4 gap-y-2 pt-3' : 'gap-x-6 gap-y-4 pt-4'}`}>
+      {/* Компакт всегда в ТРИ колонки: одной колонкой три ячейки давали 201px в теле тайла на
+          174px, и «Чистый прирост» срезало нижней кромкой (гейт «нет внутренних скроллов»).
+          Полноразмерная подача (страница метрики) держит прежний перенос по sm. */}
+      <div
+        className={`grid border-t border-border ${
+          compact ? 'grid-cols-3 gap-x-3 gap-y-2 pt-3' : 'grid-cols-1 gap-x-6 gap-y-4 pt-4 sm:grid-cols-3'
+        }`}
+      >
         {cells.map((c) => (
           <div key={c.label} className={compact ? '' : 'py-1'}>
             <div className={`${compact ? 'text-2xs' : 'text-xs'} tracking-wide text-muted-foreground`}>{c.label}</div>
-            <div className={`${compact ? 'mt-1 text-2xl' : 'mt-2 text-3xl'} font-medium tabular-nums tracking-tight ${c.color}`}>{c.text}</div>
+            <KpiValue
+              size={compact ? 'small' : 'compact'}
+              text={c.text}
+              className={`${compact ? 'mt-1' : 'mt-2'} ${c.color}`}
+            />
             {c.label === 'Чистый прирост' && net.hasPrev && (
               <div className={`${compact ? 'mt-1 text-2xs' : 'mt-2 text-xs'} text-muted-foreground`}>пред. период: {signedNum(net.prev)}</div>
             )}
@@ -406,15 +395,20 @@ export function SubscriberMovement({
 // active window, never on previous-window coverage. Delta stays honest (absent when no previous
 // window). Below the required real daily samples the card keeps its headline and says so.
 
-/** «Охват» — the primary IG daily series (half width): area line + paired-window Δ. Section carries
-    the drill, so KpiHero has no own ↗ (a lone arrow next to the card's read as a dup — visual audit). */
-export function IgReachBody({ ig }: { ig: IgData }) {
+/** «Охват» — the primary IG daily series (half width): area line + paired-window Δ. Число дриллится
+    тихой кнопкой (TG-паритет FeaturedKpi); собственной ↗ у hero нет — она читалась дублем карточной. */
+export function IgReachBody({ ig, viz }: { ig: IgData; viz?: 'line' | 'bar' }) {
+  // См. useCardShowsPeriod: на ленте окно живёт в шапке страницы, дублировать его в подписи нечем.
+  const showPeriod = useCardShowsPeriod();
   return (
     <KpiHero
-      label={`Охват · ${ig.window.days} дн.`}
+      label={showPeriod ? `Охват · ${ig.window.days} дн.` : 'Охват'}
       value={fmt.kpi(ig.pairs.reach.cur)}
       delta={pairDelta(ig.pairs.reach)}
       series={ig.series.reach.filter((p) => ig.inWindow(p.day))}
+      drillTo="/metrics/ig-reach"
+      viz={viz}
+      windowDays={ig.window.days}
     />
   );
 }
@@ -439,32 +433,37 @@ export function IgAudienceBody({ ig }: { ig: IgData }) {
   const hasChart = level.length >= 2;
   return (
     <div className="flex h-full min-h-0 flex-col gap-4">
-      <div className="flex min-h-0 items-end gap-4">
-        <div className="flex shrink-0 flex-col items-start gap-1.5 pb-0.5">
-          <div className="text-xs tracking-wide text-muted-foreground">База · {ig.window.days} дн.</div>
-          <div className="flex items-baseline gap-2">
-            <div className="kpi-accent text-hero font-medium leading-none tabular-nums tracking-tight">{fmt.kpi(ig.followers)}</div>
-            {net.hasCur && net.cur !== 0 && (
+      {/* Анатомия истории берётся ЦЕЛИКОМ из ChartCardBody, а не собирается тут руками: раньше это
+          была копия его разметки, и копия отстала — число не морфилось при смене периода (не шло
+          через KpiNumber), а «сколько прибавилось» рисовалось голым span вместо канонной подачи.
+          Прибавка идёт в `valueAdornment`, а НЕ в `delta`: это подписчики штуками, а не оценённый
+          процент, и DeltaPill соврал бы про природу числа. */}
+      <div className="min-h-0 flex-1">
+        <ChartCardBody
+          label={`База · ${ig.window.days} дн.`}
+          value={fmt.kpi(ig.followers)}
+          valueAdornment={
+            net.hasCur && net.cur !== 0 ? (
               <span className="text-sm font-medium tabular-nums text-muted-foreground">
                 {signedNum(net.cur)}
               </span>
-            )}
-          </div>
-        </div>
-        {hasChart && (
-          <div className="min-h-0 min-w-0 flex-1 self-stretch">
+            ) : undefined
+          }
+        >
+          {hasChart ? (
             <Sparkline
               values={level.map((p) => p.value)}
               labels={level.map((p) => fmtDay(p.day))}
+              axisLabels={timeAxisLabels(level.map((p) => p.day), ig.window.days)}
               area
               strokeWidth={2}
               interactive
-              caption="по дням"
+              caption=""
               formatValue={(n) => fmt.num(Math.round(n))}
               className="h-full min-h-14 w-full"
             />
-          </div>
-        )}
+          ) : null}
+        </ChartCardBody>
       </div>
       <SubscriberMovement follows={ig.pairs.follows} unfollows={ig.pairs.unfollows} net={net} compact />
     </div>
@@ -487,6 +486,7 @@ function IgTrendStat({
   onDrill,
   drillLabel,
   hasValue = true,
+  viz = 'line',
 }: {
   value: number | null;
   delta?: MetricDelta | null;
@@ -495,20 +495,33 @@ function IgTrendStat({
   onDrill?: () => void;
   drillLabel?: string;
   hasValue?: boolean;
+  /** «Линия» / «Столбцы» из карусели вариантов карточки — паритет с TG-твином TgTrendStat. */
+  viz?: 'line' | 'bar';
 }) {
   const live = hasValue && value != null && Number.isFinite(value);
   const hasChart = live && chart.values.length >= 2;
   return (
     <div className="flex h-full min-h-0 flex-col justify-between gap-4">
       <CompactStatHeadline text={live ? format(value as number) : '—'} delta={delta} onDrill={onDrill} drillLabel={drillLabel} live={live} />
-      {hasChart ? (
+      {hasChart && viz === 'bar' ? (
+        <ChartBand>
+          <BarChart
+            values={chart.values}
+            labels={chart.labels}
+            axisLabels={chart.axisLabels}
+            titles={chart.values.map((v, i) => `${chart.labels[i] ?? ''}: ${format(v)}`)}
+            formatValue={format}
+          />
+        </ChartBand>
+      ) : hasChart ? (
         <Sparkline
           values={chart.values}
           labels={chart.labels}
+          axisLabels={chart.axisLabels}
           area
           strokeWidth={2}
           interactive
-          caption="по дням"
+          caption=""
           formatValue={format}
           className="h-full min-h-14 w-full"
         />
@@ -520,7 +533,7 @@ function IgTrendStat({
 }
 
 /** «Просмотры» (third): daily account views over the active window. */
-export function IgViewsBody({ ig }: { ig: IgData }) {
+export function IgViewsBody({ ig, viz }: { ig: IgData; viz?: 'line' | 'bar' }) {
   const navigate = useNavigate();
   const live = isLive(ig.pairs.views);
   return (
@@ -528,6 +541,7 @@ export function IgViewsBody({ ig }: { ig: IgData }) {
       value={live ? ig.pairs.views.cur : null}
       delta={live ? pairDelta(ig.pairs.views) : null}
       chart={ig.overviewCharts.views}
+      viz={viz}
       format={(n) => fmt.short(Math.round(n))}
       hasValue={live}
       onDrill={() => navigate('/metrics/ig-views')}
@@ -537,7 +551,7 @@ export function IgViewsBody({ ig }: { ig: IgData }) {
 }
 
 /** «Взаимодействия» (third): daily total interactions over the active window. */
-export function IgInteractionsBody({ ig }: { ig: IgData }) {
+export function IgInteractionsBody({ ig, viz }: { ig: IgData; viz?: 'line' | 'bar' }) {
   const navigate = useNavigate();
   const live = isLive(ig.pairs.ti);
   return (
@@ -545,6 +559,7 @@ export function IgInteractionsBody({ ig }: { ig: IgData }) {
       value={live ? ig.pairs.ti.cur : null}
       delta={live ? pairDelta(ig.pairs.ti) : null}
       chart={ig.overviewCharts.interactions}
+      viz={viz}
       format={(n) => fmt.short(Math.round(n))}
       hasValue={live}
       onDrill={() => navigate('/metrics/ig-interactions')}
@@ -553,22 +568,25 @@ export function IgInteractionsBody({ ig }: { ig: IgData }) {
   );
 }
 
-/** «Вовлечённость» (third): daily ER = 100·interactions ÷ reach, aligned by calendar day. */
+/** «Вовлечённость» (third): та же анатомия, что у соседей по ряду — число с дельтой слева,
+    пояснение внизу (аудит #554, D9; зеркало TG TgErBody). Дневная кривая ER снята
+    с карточки тем же решением — она остаётся на странице разбора /metrics/ig-er. Формат — единый
+    абсолютный процент fmt.pctAbs («25.1%», не «25.10%»), паритет с TG «28.9%». */
 export function IgEngagementBody({ ig }: { ig: IgData }) {
   const navigate = useNavigate();
   const erTrend =
     ig.erReach > 0 && ig.pairs.reach.hasCur && ig.pairs.reach.hasPrev && ig.erReachPrev > 0
       ? pctDelta(ig.erReach, ig.erReachPrev)
       : null;
+  const live = ig.erReach > 0;
   return (
-    <IgTrendStat
-      value={ig.erReach > 0 ? ig.erReach : null}
+    <StackedStat
+      text={live ? fmt.pctAbs(ig.erReach) : '—'}
       delta={erTrend}
-      chart={ig.overviewCharts.engagement}
-      format={(n) => `${n.toFixed(2)}%`}
-      hasValue={ig.erReach > 0}
       onDrill={() => navigate('/metrics/ig-er')}
       drillLabel="Вовлечённость"
+      live={live}
+      note="Взаимодействия к охвату аккаунта за период."
     />
   );
 }

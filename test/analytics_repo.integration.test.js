@@ -10,6 +10,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { createTestDatabase } = require('./testDatabase');
+const { anchor, dayKey } = require('./helpers/dates');
 
 const TEST_DB = process.env.TEST_DATABASE_URL;
 const skip = TEST_DB ? false : 'TEST_DATABASE_URL not set (integration suite runs on the local stand)';
@@ -22,7 +23,10 @@ const mail = (tag) => `${tag}.${seq++}.${nonce}@it.local`;
 let extSeq = 0;
 const usedExt = [];
 const extId = () => { const v = `991${(process.pid % 100000)}${extSeq++}`; usedExt.push(v); return v; };
-const today = new Date().toISOString().slice(0, 10);
+// Якорь прогона — один на файл (test/helpers/dates): «сегодня», посчитанное дважды по
+// разные стороны полуночи, давало бы два разных дня внутри одного теста.
+const T = anchor();
+const today = dayKey(T);
 
 const mkUser = (tag) => db.createUser({ email: mail(tag), pass_hash: 'x', role: 'user', status: 'active' });
 
@@ -292,4 +296,57 @@ test('finding 5 — ForActor gate: владелец видит данные, ч�
   assert.deepStrictEqual(await db.listIgDailyForActor(ch.id, { uid: stranger.id }, 30), [], 'чужой → [] (ig-daily)');
   assert.strictEqual(await db.getMentionsArchiveForActor(ch.id, { uid: stranger.id }), null, 'чужой → null (mentions-архив)');
   assert.deepStrictEqual(await db.getChannelHistoryForActor(ch.id, {}, 30), [], 'без uid → []');
+});
+
+/**
+ * ТОТ ЖЕ ГЕЙТ — НА ВСЕХ РИДЕРАХ, а не на пяти из двадцати двух.
+ *
+ * Проверка выше называет читателей поимённо, и это её слабость: ридер, добавленный без
+ * `allowed()`, в неё просто не попадёт — а именно так утечка и выглядит. Здесь список берётся
+ * из САМОГО репозитория, поэтому новый `*ForActor` проверяется в тот же день, когда появился.
+ *
+ * Утверждение одно и грубое: чужому актору ридер обязан вернуть ПУСТОЕ. Пустое — это [], null
+ * или объект, у которого все списки пусты и все числа нули (такова форма у географии). Ни одной
+ * строки данных чужого канала не выходит НИ ИЗ ОДНОГО.
+ */
+test('ForActor gate: ни один ридер не отдаёт чужому актору ни строки', { skip }, async () => {
+  const { u: owner, ch } = await chWithSource('fa-all', extId());
+  const stranger = await mkUser('fa-all-x');
+  // Данные, чтобы «пусто» означало «гейт сработал», а не «таблица пуста».
+  await db.upsertChannelDaily(ch.id, [{ day: today, subscribers: 321, joins: 0, leaves: 0, views: 0, forwards: 0, reactions: 0 }]);
+  await db.saveSnapshot(ch.id, { s: 1 });
+  await db.saveVelocity(ch.id, { v: 2 });
+  await db.upsertIgDaily(ch.id, [{ day: today, followers: 9, reach: 0, views: 0 }]);
+
+  const readers = Object.keys(db).filter((k) => k.endsWith('ForActor')).sort();
+  // Пустой обход прошёл бы зелёным ни на чём.
+  assert.ok(readers.length >= 22, `ридеров ForActor должно быть не меньше 22, найдено ${readers.length}`);
+
+  /**
+   * Не вышло ли НИ ОДНОЙ СТРОКИ чужого канала — рекурсивно и по СМЫСЛУ, а не по типу
+   * верхнего значения. Пустое бывает трёх форм: null, [], и объект-оболочка — география отдаёт
+   * { rows: [], total_orders: 0 }, разбивка СДЭКа — { grain: 'day', groups: [] }.
+   *
+   * Строка grain — ЭХО ЗАПРОСА, а не данные канала, поэтому судим по двум признакам
+   * утечки: непустой массив где-либо внутри или положительное число. Именно их и возвращают
+   * все эти ридеры: строки и итоги.
+   */
+  const leaks = (v) => {
+    if (Array.isArray(v)) return v.length > 0;
+    if (typeof v === 'number') return v > 0;
+    if (v && typeof v === 'object') return Object.values(v).some(leaks);
+    return false;
+  };
+  const isEmpty = (v) => !leaks(v);
+
+  for (const name of readers) {
+    const out = await db[name](ch.id, { uid: stranger.id });
+    assert.ok(isEmpty(out), `${name} отдал чужому актору данные: ${JSON.stringify(out).slice(0, 200)}`);
+    // И без uid тоже: анонимный actor — не «доступ по умолчанию».
+    assert.ok(isEmpty(await db[name](ch.id, {})), `${name} отдал данные актору без uid`);
+  }
+
+  // Контроль осмысленности: владелец на тех же ридерах данные ВИДИТ — иначе «пусто у всех»
+  // прошло бы зелёным и при сломанном чтении.
+  assert.ok((await db.getChannelHistoryForActor(ch.id, { uid: owner.id })).length > 0, 'владелец видит историю');
 });

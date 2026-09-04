@@ -1,18 +1,27 @@
-import { useState } from 'react';
-import { useYmGoals, useYmHourly, useYmSummary } from '@/api/queries';
+import { useMemo, useState } from 'react';
+import { KpiValue } from '@/components/chartWidget/KpiValue';
+import { useNavigate } from 'react-router-dom';
+import { useYmGoals, useYmHourly, useYmSummary } from '@/api/ym';
 import { PillSelect } from '@/components/PillSelect';
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
 import { ChartCardBody } from '@/components/chartWidget/ChartCardBody';
-import { LineChart } from '@/components/LineChart';
+import { ChartTooltip, useHeatmapTip } from '@/components/ChartTooltip';
+import { Sparkline } from '@/components/Sparkline';
+import { BarChart } from '@/components/BarChart';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { ChartSkeleton } from '@/components/ui/dataSkeleton';
+import { DeltaPill } from '@/components/DeltaPill';
 import { InlineSpark } from '@/components/InlineSpark';
+import { pctDelta, type MetricDelta } from '@/lib/delta';
 import { lttbDownsample } from '@/lib/downsample';
-import { fmt } from '@/lib/format';
-import { usePagePeriod } from '@/lib/period';
-import { useMsPagePeriod } from '@/lib/msPeriod';
+import { fmt, timeAxisFromDayKeys } from '@/lib/format';
+import { formatByRole } from '@/lib/metricNumber';
+import { usePagePeriod, useCardShowsPeriod } from '@/lib/period';
+import { msPreviousPeriod, useMsPagePeriod } from '@/lib/msPeriod';
 import { YM_BREAKDOWNS } from '@/panels/metrika/ymBreakdowns';
+import { WidgetGrid } from '@/components/widgets/WidgetGrid';
+import { BoardSkeleton } from '@/components/BoardSkeleton';
 
 /**
  * Обзор «Яндекс.Метрики» — веб-аналитика сайта рядом с аналитикой каналов. Все числа приходят
@@ -26,6 +35,72 @@ import { YM_BREAKDOWNS } from '@/panels/metrika/ymBreakdowns';
  * Каждая карточка тянет свои данные сама и (deferData) откладывает запрос, пока не подойдёт к
  * вьюпорту: раньше все 17 запросов летели на каждый вход в /metrika и на каждую смену периода.
  */
+
+/** Тело story-карточки Обзора Метрики — hero слева, дневной ряд справа, «Линия»/«Столбцы». */
+function YmStoryBody({
+  windowLabel,
+  title,
+  total,
+  delta,
+  caption,
+  values,
+  labels,
+  axisLabels,
+  onDrill,
+  viz = 'line',
+}: {
+  windowLabel?: string;
+  title: string;
+  total: number | null;
+  delta: MetricDelta | null;
+  caption?: string;
+  values: number[];
+  labels: string[];
+  /** Ось букв короткого дневного окна (канон timeAxisFromDayKeys). */
+  axisLabels?: string[];
+  onDrill: () => void;
+  viz?: 'line' | 'bar';
+}) {
+  return (
+    <ChartCardBody
+      label={windowLabel}
+      value={fmt.short(total)}
+      delta={delta}
+      caption={caption}
+      onValueClick={onDrill}
+      drillLabel={title}
+    >
+      {values.length <= 1 ? (
+        <EmptyState compact size="chart" title="Недостаточно дней для графика." />
+      ) : viz === 'bar' ? (
+        <div className="min-h-14 w-full flex-1">
+          <BarChart
+            values={values}
+            labels={labels}
+            axisLabels={axisLabels}
+            titles={values.map((v, i) => `${labels[i] ?? ''}: ${fmt.num(v)}`)}
+            formatValue={fmt.num}
+          />
+        </div>
+      ) : (
+        <Sparkline
+          values={values}
+          labels={labels}
+          axisLabels={axisLabels}
+          area
+          strokeWidth={2}
+          interactive
+          // caption включает hover-читалку «дата · значение · Δ» (Sparkline рисует её только
+          // при заданном caption) — значения по дням остаются читаемы прямо с карточки.
+          caption=""
+          formatValue={fmt.num}
+          className="h-full min-h-14 w-full"
+        />
+      )}
+    </ChartCardBody>
+  );
+}
+
 export function YmOverview() {
   const pp = usePagePeriod();
   const days = pp ? pp.days : 30;
@@ -33,6 +108,8 @@ export function YmOverview() {
   // хелпер): «Всё» (0) берёт серии из ym_daily, живые окна — 7/30/90/точный диапазон.
   const period = useMsPagePeriod();
   const windowLabel = pp?.range ? 'за выбранный период' : days === 0 ? 'за всё время' : `за ${days} дн.`;
+  // На ленте окно уже в шапке страницы — карточка его не повторяет (владелец).
+  const periodInLabel = useCardShowsPeriod() ? windowLabel : undefined;
   // Словарь целей нужен САМОЙ доске (опции синхронных селекторов), поэтому единственный разрез,
   // который остаётся на уровне страницы. Карточка «Цели» читает тот же ключ — второго запроса нет.
   const goals = useYmGoals(period);
@@ -49,7 +126,17 @@ export function YmOverview() {
   const selectedGoalId = validGoalValue !== '' ? Number(validGoalValue) : null;
 
   const summary = useYmSummary(period);
+  // Канон карточки-метрики: число + сравнение с ПРЕДЫДУЩИМ равным окном. Раньше карточки Метрики
+  // были единственными в продукте без дельты — «5.7k» без ответа на «больше или меньше, чем было».
+  // Окно берём тем же хелпером, что МойСклад (msPreviousPeriod); у «Всё» честного предшественника
+  // нет — запрос не уходит и дельта не показывается (как в rail'е /metrics/ym-*). ВАЖНО: при
+  // выключенном запросе fallback-ключ (previousPeriod ?? period) совпадает с текущим окном и
+  // previous.data вернул бы ТЕКУЩУЮ сводку из кэша — поэтому data читается только через
+  // previousPeriod != null (см. prev ниже), а не напрямую.
+  const previousPeriod = useMemo(() => msPreviousPeriod(period), [period]);
+  const previous = useYmSummary(previousPeriod ?? period, { enabled: previousPeriod != null });
   const hourly = useYmHourly(period);
+  const navigate = useNavigate();
   // Общие опции + рендер синхронного селектора цели (одинаковое value/handler на всех карточках,
   // card-specific aria-label). Показываем ТОЛЬКО при наличии целей — иначе UI как прежде.
   const goalOptions = [
@@ -70,14 +157,12 @@ export function YmOverview() {
     ) : undefined;
 
   if (summary.isPending) {
+    // Форма борда один в один: три метрики → полоса качества → часы → разрезы. Разрезы берём
+    // из того же источника, что и борд, — иначе число разъедется при первом же новом разрезе.
     return (
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-6">
-        {Array.from({ length: 2 }).map((_, i) => (
-          <div key={i} className="h-[264px] rounded-2xl border border-border bg-card p-5 lg:col-span-3">
-            <ChartSkeleton />
-          </div>
-        ))}
-      </div>
+      <BoardSkeleton
+        tiles={['half', 'half', 'half', 'strip', 'half', ...YM_BREAKDOWNS.map(() => 'half' as const)]}
+      />
     );
   }
 
@@ -115,30 +200,54 @@ export function YmOverview() {
 
   const { visits, users, pageviews } = summary.data;
   // Канон графиков: длинные серии (окно «Всё» после лет архива ym_daily) даунсэмплятся до ~140
-  // точек ПЕРЕД рендером; labels/titles строятся из той же выборки, чтобы тултипы совпадали с
-  // точками. Оконные 7/30/90 короче порога и проходят как есть.
+  // точек ПЕРЕД рендером; labels строятся из той же выборки, чтобы ховер совпадал с точками.
+  // Оконные 7/30/90 короче порога и проходят как есть.
+  //
+  // Грамматика карточки — ОБЩАЯ с Обзорами Telegram и Instagram (steep story card): подпись окна,
+  // крупное число, дельта к прошлому периоду и area-спарклайн без осей справа. Полные оси, точки,
+  // сравнение и статистика живут на своей поверхности — `/metrics/ym-*`, куда ведёт drillTo.
+  // `story` помечает ЕДИНСТВЕННУЮ тонированную карточку доски (канон: дефолт — нейтральная
+  // поверхность, цветная заливка — ручной инструмент одной истории; остальные карточки несут
+  // канонный iris-акцент на серии).
   const metricCard = (
     id: string,
     title: string,
+    story: boolean,
     block: { total: number | null; series: Array<{ day: string; value: number }> },
-    caption: string,
+    prevTotal: number | null | undefined,
+    caption?: string,
   ) => {
     const sampled = lttbDownsample(block.series, 140, (p) => p.value);
+    const delta =
+      block.total != null && prevTotal != null && prevTotal > 0
+        ? pctDelta(block.total, prevTotal)
+        : null;
+    // Одна карточка в двух подачах — данные объявляются РАЗ, иначе «Линия» и «Столбцы»
+    // разъедутся при следующей правке.
+    const storyProps = {
+      windowLabel: periodInLabel,
+      title,
+      total: block.total,
+      delta,
+      caption,
+      values: sampled.map((p) => p.value),
+      labels: sampled.map((p) => fmt.day(p.day)),
+      axisLabels: timeAxisFromDayKeys(sampled.map((p) => p.day)),
+      onDrill: () => navigate(`/metrics/${id}`),
+    };
     return (
-      <ChartWidget id={id} title={title} fixedSize="half" drillTo={`/metrics/${id}`}>
-        <ChartCardBody value={fmt.short(block.total)} caption={caption}>
-          {sampled.length > 1 ? (
-            <LineChart
-              values={sampled.map((p) => p.value)}
-              labels={sampled.map((p) => fmt.day(p.day))}
-              titles={sampled.map((p) => `${fmt.day(p.day)}: ${fmt.num(p.value)}`)}
-              yMin={0}
-            />
-          ) : (
-            <EmptyState compact size="chart" title="Недостаточно дней для графика." />
-          )}
-        </ChartCardBody>
-      </ChartWidget>
+      <ChartWidget
+        id={id}
+        title={title}
+        fixedSize="half"
+        defaultColor={story ? 1 : undefined}
+        defaultTinted={story}
+        drillTo={`/metrics/${id}`}
+        variants={[
+          { key: 'line', label: 'Линия', render: <YmStoryBody {...storyProps} /> },
+          { key: 'bar', label: 'Столбцы', render: <YmStoryBody {...storyProps} viz="bar" /> },
+        ]}
+      />
     );
   };
 
@@ -148,16 +257,25 @@ export function YmOverview() {
   // «Посетители» за окно теперь период-точные, когда сервер дал body.totals; при «Всё» без
   // живого токена подпись остаётся честной «сумма по дням».
   const exactTotals = meta?.exact_period_totals === true;
-  const usersCaption = exactTotals ? windowLabel : `${windowLabel} · сумма по дням`;
+  const usersCaption = exactTotals ? undefined : 'сумма по дням';
+  // Прошлое окно приходит своим запросом и может ещё грузиться — тогда дельты просто нет.
+  // Гейт по previousPeriod обязателен (см. комментарий у хука выше).
+  const prev = previousPeriod != null ? previous.data : undefined;
 
   return (
-    <div className="grid grid-cols-1 gap-6 lg:grid-cols-6">
-      {metricCard('ym-visits', 'Визиты', visits, windowLabel)}
-      {metricCard('ym-users', 'Посетители', users, usersCaption)}
-      {metricCard('ym-pageviews', 'Просмотры страниц', pageviews, windowLabel)}
+    <WidgetGrid className="grid grid-cols-1 gap-6 lg:grid-cols-6">
+      {metricCard('ym-visits', 'Визиты', true, visits, prev?.visits.total)}
+      {metricCard('ym-users', 'Посетители', false, users, prev?.users.total, usersCaption)}
+      {metricCard('ym-pageviews', 'Просмотры страниц', false, pageviews, prev?.pageviews.total)}
 
       {/* Качество трафика: отказы/длительность/глубина/новые/роботы — nullable, «—» когда недоступно. */}
-      <YmQualityStrip quality={quality} qualitySeries={qualitySeries} meta={meta} windowLabel={windowLabel} />
+      <YmQualityStrip
+        quality={quality}
+        qualitySeries={qualitySeries}
+        prevQuality={previousPeriod != null ? prev?.quality ?? null : null}
+        meta={meta}
+        windowLabel={windowLabel}
+      />
 
       {/* Трафик по часам: суточный heatmap-профиль визитов (ym:s:hour) — когда приходят посетители.
           Полные 24 клетки, подпись отмечает час пика. Визиты — своя единица, не TG/IG-метрики. */}
@@ -178,13 +296,15 @@ export function YmOverview() {
           <def.Body period={period} goalId={selectedGoalId} surface="board" />
         </ChartWidget>
       ))}
-    </div>
+    </WidgetGrid>
   );
 }
 
 /** Трафик по часам суток: доступная heatmap-сетка из 24 клеток (визиты по часу 0..23) + пик.
-    Насыщенность каждой клетки нормирована на максимум текущего окна; title/aria-label сохраняют
-    точные визиты и посетителей. Пустое окно — EmptyState, а не декоративная сетка нулей. */
+    Насыщенность каждой клетки нормирована на максимум текущего окна; aria-label сохраняет точные
+    визиты и посетителей, hover дублирует их канонным ChartTooltip (нативный HTML title убран —
+    нестилизуемый острый прямоугольник, вне канона скруглённых читалок). Пустое окно — EmptyState,
+    а не декоративная сетка нулей. */
 function YmHourlyCard({
   hourly,
   windowLabel,
@@ -194,6 +314,7 @@ function YmHourlyCard({
 }) {
   const padHour = (h: number): string => String(h).padStart(2, '0');
   const maxVisits = Math.max(0, ...(hourly.data?.rows ?? []).map((row) => row.visits));
+  const { wrapRef, tip } = useHeatmapTip();
   return (
     <ChartWidget id="ym-hourly" title="Трафик по часам" fixedSize="half" drillTo="/metrics/ym-hourly">
       {hourly.isPending ? (
@@ -213,7 +334,7 @@ function YmHourlyCard({
       ) : (
         <ChartCardBody
           label="Визиты"
-          value={fmt.short(hourly.data.visits_total)}
+          value={formatByRole(hourly.data.visits_total, 'headline')}
           caption={
             <span className="space-y-0.5">
               <span className="block">
@@ -225,21 +346,28 @@ function YmHourlyCard({
             </span>
           }
         >
+          <div ref={wrapRef} className="relative h-full">
           <div className="grid h-full grid-cols-12 content-center gap-x-1 gap-y-2">
             {hourly.data.rows.map((row) => {
-              const opacity = maxVisits > 0 ? Math.max(0.1, row.visits / maxVisits) : 0.08;
+              // Ноль — реальное отсутствие (канон п.8): час без визитов рисуется нейтральным
+              // треком, а не самой бледной СТУПЕНЬЮ брендовой шкалы — иначе «0» неотличим от «мало».
+              const zero = row.visits === 0;
+              const opacity = zero ? 1 : maxVisits > 0 ? Math.max(0.1, row.visits / maxVisits) : 0.08;
               const title = `${padHour(row.hour)}:00 — ${fmt.num(row.visits)} визитов, ${fmt.num(row.users)} посетителей`;
               return (
                 <div
                   key={row.hour}
                   role="img"
                   aria-label={title}
-                  title={title}
-                  className="min-w-0 text-center"
+                  data-heatmap-tip={title}
+                  className="min-w-0 cursor-crosshair text-center"
                 >
                   <div
-                    className="h-8 rounded-sm"
-                    style={{ backgroundColor: 'hsl(var(--brand-iris))', opacity }}
+                    className="h-8 rounded-sm transition-opacity dur-base ease-house"
+                    style={{
+                      backgroundColor: zero ? 'hsl(var(--border) / 0.3)' : 'hsl(var(--brand-iris))',
+                      opacity,
+                    }}
                   />
                   <span className="mt-1 block text-2xs tabular-nums text-muted-foreground">
                     {row.hour % 3 === 0 ? row.hour : '\u00a0'}
@@ -247,6 +375,8 @@ function YmHourlyCard({
                 </div>
               );
             })}
+          </div>
+          <ChartTooltip tip={tip} />
           </div>
         </ChartCardBody>
       )}
@@ -256,9 +386,9 @@ function YmHourlyCard({
 
 /** Форматтеры качества: nullable-aware, русская локаль. «—» — «нет данных», не «0». */
 const fmtQualityPct = (v: number | null | undefined): string =>
-  v == null ? '—' : `${v.toLocaleString('ru-RU', { maximumFractionDigits: 1 })}%`;
+  v == null ? '—' : fmt.pctFixed(v, 1);
 const fmtQualityNum = (v: number | null | undefined, digits = 2): string =>
-  v == null ? '—' : v.toLocaleString('ru-RU', { maximumFractionDigits: digits });
+  v == null ? '—' : fmt.numFixed(v, digits);
 /** Секунды → «м:сс» (или «с» под минутой). null → «—». */
 const fmtDuration = (v: number | null | undefined): string => {
   if (v == null) return '—';
@@ -288,6 +418,8 @@ interface YmQualityTile {
   value: string;
   /** Ключ дневной серии качества для тренд-спарклайна (тренд — по РЕАЛЬНЫМ точкам, null пропущены). */
   seriesKey: YmQualitySeriesKey;
+  /** Дельта к предыдущему окну — только у аддитивных потоков (новые, роботы-счётчик). */
+  delta?: MetricDelta | null;
 }
 
 /** Доля роботов + их число: «12,3% · 45». Оба null → «—»; показываем, а не исключаем молча. */
@@ -305,6 +437,7 @@ const fmtRobots = (pct: number | null | undefined, count: number | null | undefi
 function YmQualityStrip({
   quality,
   qualitySeries,
+  prevQuality,
   meta,
   windowLabel,
 }: {
@@ -318,6 +451,11 @@ function YmQualityStrip({
     robot_percentage?: number | null;
   } | null;
   qualitySeries: YmQualitySeries | null;
+  /** Качество ПРЕДЫДУЩЕГО равного окна (null при «Всё»/отсутствии) — дельты аддитивных тайлов. */
+  prevQuality: {
+    new_users: number | null;
+    robot_visits?: number | null;
+  } | null;
   meta: {
     exact_period_totals: boolean;
     all_time?: boolean;
@@ -328,16 +466,38 @@ function YmQualityStrip({
   } | null;
   windowLabel: string;
 }) {
+  // Дельты — только у АДДИТИВНЫХ потоков («Новые» и счётчик «Роботы»): доли/длительности/глубина
+  // сравниваются не процентом, а п.п./секундами — вне минимальной грамматики тайла.
   const tiles: YmQualityTile[] = [
     { key: 'bounce', label: 'Отказы', value: fmtQualityPct(quality?.bounce_rate), seriesKey: 'bounce_rate' },
     { key: 'dur', label: 'Средний визит', value: fmtDuration(quality?.avg_visit_duration_seconds), seriesKey: 'avg_visit_duration_seconds' },
     { key: 'depth', label: 'Глубина', value: fmtQualityNum(quality?.page_depth), seriesKey: 'page_depth' },
-    { key: 'new', label: 'Новые', value: fmt.short(quality?.new_users ?? null), seriesKey: 'new_users' },
+    {
+      key: 'new',
+      label: 'Новые',
+      value: fmt.short(quality?.new_users ?? null),
+      seriesKey: 'new_users',
+      delta:
+        quality?.new_users != null && prevQuality?.new_users != null && prevQuality.new_users > 0
+          ? pctDelta(quality.new_users, prevQuality.new_users)
+          : null,
+    },
     { key: 'pctnew', label: 'Доля новых', value: fmtQualityPct(quality?.percent_new_visitors), seriesKey: 'percent_new_visitors' },
-    { key: 'robots', label: 'Роботы', value: fmtRobots(quality?.robot_percentage, quality?.robot_visits), seriesKey: 'robot_percentage' },
+    {
+      key: 'robots',
+      label: 'Роботы',
+      value: fmtRobots(quality?.robot_percentage, quality?.robot_visits),
+      seriesKey: 'robot_percentage',
+      delta:
+        quality?.robot_visits != null && prevQuality?.robot_visits != null && prevQuality.robot_visits > 0
+          ? pctDelta(quality.robot_visits, prevQuality.robot_visits)
+          : null,
+    },
   ];
-  // Тренд-спарклайн: только РЕАЛЬНЫЕ дневные точки метрики (null = «нет данных» пропускаем), и
-  // только когда их ≥2 — иначе InlineSpark сам ничего не рисует, но экономим и пустой контейнер.
+  // Тренд-спарклайн: только РЕАЛЬНЫЕ дневные точки метрики. null-дни пропускаются ОСОЗНАННО — это
+  // ряд НАБЛЮДЕНИЙ (конвенция «Среднего чека» МС: день без данных = неопределённое наблюдение, не
+  // ноль и не разрыв замера), спарк декоративен (aria-hidden), значение уже дано числом. Рисуем
+  // только при ≥2 точках — иначе InlineSpark сам ничего не рисует, но экономим и пустой контейнер.
   const trendValues = (key: YmQualitySeriesKey): number[] => {
     const points = qualitySeries?.[key];
     if (!Array.isArray(points)) return [];
@@ -378,10 +538,19 @@ function YmQualityStrip({
           return (
             <div key={t.key} className="min-w-0">
               <div className="text-2xs tracking-wide text-muted-foreground">{t.label}</div>
-              <div className="mt-0.5 text-lg font-medium tabular-nums tracking-tight text-foreground">{t.value}</div>
+              <div className="mt-0.5 flex items-baseline gap-2">
+                {/* Рецепт крупного числа живёт в KpiValue — набирать его классами на месте значит
+                  завести пятую копию, которая разойдётся (аудит #554). */}
+                <KpiValue text={t.value} size="xs" morph={false} />
+                {/* DeltaPill сам скрывается при flat/null — отдельных веток не нужно. */}
+                <DeltaPill delta={t.delta} />
+              </div>
+              {/* 20px вместо 16: на 16 при домене от нуля искра «Качества трафика» вырождалась в
+                  зигзаг без формы (аудит #554, D17). Домен теперь по данным, а высота даёт размаху
+                  место. */}
               {trend.length >= 2 && (
-                <div className="mt-1 h-4">
-                  <InlineSpark values={trend} width={72} height={16} />
+                <div className="mt-1 h-5">
+                  <InlineSpark values={trend} width={72} height={20} />
                 </div>
               )}
             </div>

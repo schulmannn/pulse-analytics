@@ -148,10 +148,12 @@ test('invalid managed avatar falls through to the unchanged global photo proxy',
       getPublicTgChannelPhoto: async () => Buffer.from('not-jpeg').toString('base64'),
     },
     mtprotoFetch: async () => ({}),
-    fetchWithTimeout: async () => ({
-      ok: true,
-      buffer: async () => live,
-      headers: { get: () => 'image/jpeg' },
+    // Настоящий Response, а не самодельный объект с `buffer()`: прежний стаб моделировал
+    // node-fetch, которого в рантайме давно нет, и ровно поэтому прятал L-3 — живой фолбэк
+    // падал в проде и оставался зелёным в тесте.
+    fetchWithTimeout: async () => new Response(live, {
+      status: 200,
+      headers: { 'content-type': 'image/jpeg' },
     }),
   }).get('GET /api/tg/mtproto/channel/photo').at(-1);
 
@@ -307,6 +309,40 @@ test('successful QR reconnect immediately refreshes existing tracked QR channels
   // the collector channel, rows without a tg id, or visible workspace channels owned by somebody
   // else — reconnect may only write channels owned by the session owner.
   assert.deepEqual(events[1], ['refreshed', session, [centralCh, tracked]]);
+});
+test('/api/tg/qr/poll forwards the rotated login url so the browser re-renders a live QR', async () => {
+  // Telegram's login token dies in ~30s; mtproto re-mints it and reports the fresh url on every
+  // pending poll. Dropping it left the user staring at a dead code until the login went 'expired'.
+  const polls = [
+    { status: 'pending', url: 'tg://login?token=new', session: 'must-not-leak' },
+    { status: 'password', url: 'tg://login?token=stale' },
+  ];
+  const routes = tgHandlers({
+    db: { enabled: true },
+    mtprotoFetch: async () => ({}),
+    mtprotoPost: async (path) => {
+      if (path === '/qr/start') return { id: 'login-1', url: 'tg://login?token=first', expires_in: 60 };
+      if (path === '/qr/poll') return polls.shift();
+      throw new Error(`unexpected ${path}`);
+    },
+    tgCrypto: { configured: () => true },
+  });
+  const poll = () => invokeRoute(routes.get('POST /api/tg/qr/poll').at(-1), { body: { id: 'login-1' } });
+
+  await invokeRoute(routes.get('POST /api/tg/qr/start').at(-1));
+
+  const pending = await poll();
+  assert.equal(pending.statusCode, 200);
+  assert.equal(pending.body.status, 'pending');
+  assert.equal(pending.body.url, 'tg://login?token=new');
+  // Exactly the rotated url is added — the response must not widen into the rest of the mtproto body.
+  assert.deepEqual(Object.keys(pending.body).filter((k) => !['status', 'error', 'url'].includes(k)), []);
+
+  // Past the scan there is nothing left to re-render: the mtproto watcher stops rotating once the
+  // login needs a 2FA password, so a stale url must not travel with the non-pending statuses.
+  const password = await poll();
+  assert.equal(password.body.status, 'password');
+  assert.equal(password.body.url, undefined);
 });
 test('/api/tg/qr/start allows a cold Telegram service to start without changing other POSTs', async () => {
   const calls = [];
@@ -474,4 +510,104 @@ test('/api/tg/full uses the stats timeout for live posts when the archive is emp
   assert.deepEqual(res.body.posts, live);
   assert.equal(res.body.posts_source, 'live');
   assert.equal(calls.find((call) => call.path === '/posts').timeout, statsTimeout);
+});
+
+// ── Живой фолбэк публичных медиа: нативный Response, а не node-fetch (L-3, аудит #554) ─────────
+// Оба прокси читали тело через `r.buffer()` — метод node-fetch, которого у нативного Response нет.
+// TypeError ловил общий catch, и путь ВСЕГДА отдавал 503: фича была мертва, а не деградировала.
+// Стаб отдаёт настоящий `Response` из undici — ровно то, что вернёт `fetchWithTimeout` в проде.
+
+test('живой фолбэк /thumb отдаёт байты нативного Response, а не 503', async () => {
+  const jpeg = Buffer.from([0xff, 0xd8, 0x11, 0x22, 0x33]);
+  const handler = tgHandlers({
+    db: { enabled: false },
+    mtprotoFetch: async () => ({}),
+    fetchWithTimeout: async () => new Response(jpeg, {
+      status: 200,
+      headers: { 'content-type': 'image/jpeg' },
+    }),
+  }).get('GET /api/tg/mtproto/thumb/:id').at(-1);
+
+  const res = await invokeRoute(handler, { params: { id: '1241' }, query: {} });
+
+  assert.equal(res.statusCode, 200);
+  assert.ok(Buffer.isBuffer(res.body), 'в res.send уходит Buffer, а не ArrayBuffer');
+  assert.deepEqual(res.body, jpeg);
+  assert.equal(res.headers['Content-Type'], 'image/jpeg');
+  assert.equal(res.headers['Cache-Control'], 'public, max-age=86400');
+});
+
+test('живой фолбэк /channel/photo отдаёт байты нативного Response, а не 503', async () => {
+  const jpeg = Buffer.from([0xff, 0xd8, 0x44, 0x55]);
+  const handler = tgHandlers({
+    db: { enabled: false },
+    mtprotoFetch: async () => ({}),
+    fetchWithTimeout: async () => new Response(jpeg, {
+      status: 200,
+      headers: { 'content-type': 'image/jpeg' },
+    }),
+  }).get('GET /api/tg/mtproto/channel/photo').at(-1);
+
+  const res = await invokeRoute(handler);
+
+  assert.equal(res.statusCode, 200);
+  assert.ok(Buffer.isBuffer(res.body));
+  assert.deepEqual(res.body, jpeg);
+});
+
+// ── Текст исключения Telethon не доезжает до браузера (L-4, аудит #554) ────────────────────────
+// Фронт печатает `error` дословно (`setErr(r.error || …)`), поэтому наружу уходят только коды из
+// allow-list. Всё прочее теряет поле: у статусов error/expired у клиента уже есть свой русский
+// текст, а сообщение драйвера не говорит пользователю ничего и рассказывает лишнее постороннему.
+
+const TELETHON_LEAK = 'Server sent a very special error: [500] AUTH_KEY_UNREGISTERED '
+  + '(caused by ImportLoginTokenRequest at telethon/client/auth.py:412)';
+
+async function qrPollWith(upstream, { logs = [] } = {}) {
+  const routes = tgHandlers({
+    db: { enabled: true },
+    mtprotoFetch: async () => ({}),
+    mtprotoPost: async (path) => {
+      if (path === '/qr/start') return { id: 'login-1', url: 'tg://login', expires_in: 60 };
+      if (path === '/qr/poll' || path === '/qr/password') return upstream;
+      throw new Error(`unexpected ${path}`);
+    },
+    tgCrypto: { configured: () => true },
+    log: (level, event, meta) => logs.push({ level, event, meta }),
+  });
+  await invokeRoute(routes.get('POST /api/tg/qr/start').at(-1));
+  return routes;
+}
+
+test('/api/tg/qr/poll не пересказывает браузеру текст исключения Telethon', async () => {
+  const logs = [];
+  const routes = await qrPollWith({ status: 'error', error: TELETHON_LEAK }, { logs });
+  const res = await invokeRoute(routes.get('POST /api/tg/qr/poll').at(-1), { body: { id: 'login-1' } });
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.status, 'error', 'человеческий статус остаётся — он и есть ответ пользователю');
+  assert.equal(res.body.error, undefined, 'поле error теряется целиком, а не усекается');
+  assert.ok(!JSON.stringify(res.body).includes('AUTH_KEY_UNREGISTERED'));
+  assert.ok(!JSON.stringify(res.body).includes('telethon'));
+  // В лог веба тоже идёт только факт, без самого текста: приватный сервис уже записал исключение.
+  const masked = logs.find((l) => l.event === 'tg_qr_error_masked');
+  assert.ok(masked, 'маскировка не молчит');
+  assert.deepEqual(Object.keys(masked.meta), ['length']);
+});
+
+test('/api/tg/qr/password маскирует текст драйвера, но сохраняет код bad_password', async () => {
+  const leaked = await qrPollWith({ status: 'error', error: TELETHON_LEAK });
+  const bad = await invokeRoute(
+    (await qrPollWith({ status: 'password', error: 'bad_password' })).get('POST /api/tg/qr/password').at(-1),
+    { body: { id: 'login-1', password: 'hunter2' } },
+  );
+  const masked = await invokeRoute(leaked.get('POST /api/tg/qr/password').at(-1), {
+    body: { id: 'login-1', password: 'hunter2' },
+  });
+
+  // bad_password — единственный код, у которого на клиенте есть перевод («Неверный пароль»).
+  assert.equal(bad.body.status, 'password');
+  assert.equal(bad.body.error, 'bad_password');
+  assert.equal(masked.body.status, 'error');
+  assert.equal(masked.body.error, undefined);
 });

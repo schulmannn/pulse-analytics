@@ -2,7 +2,7 @@ import { useContext, useMemo, useState } from 'react';
 import { ShareTrack } from '@/components/ShareRows';
 import type { ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useMsCohorts, useMsCustomers, useMsRfm, useMsTopCustomers } from '@/api/queries';
+import { useMsCohorts, useMsCustomers, useMsRfm, useMsTopCustomers } from '@/api/ms';
 import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
 import { ChartCardBody } from '@/components/chartWidget/ChartCardBody';
@@ -12,10 +12,15 @@ import { SegmentedControl } from '@/components/SegmentedControl';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { ChartSkeleton, TableSkeleton } from '@/components/ui/dataSkeleton';
+import { DeltaPill } from '@/components/DeltaPill';
+import { RadialGauge } from '@/components/RadialGauge';
+import { Sparkline } from '@/components/Sparkline';
+import { pctDelta, type MetricDelta } from '@/lib/delta';
 import { lttbDownsample } from '@/lib/downsample';
-import { fmt, pluralRu } from '@/lib/format';
+import { fmt, pluralRu, timeAxisFromDayKeys } from '@/lib/format';
+import { formatMoney } from '@/lib/metricNumber';
 import { usePagePeriod, usePeriod } from '@/lib/period';
-import { useMsPagePeriod, type MsPeriod } from '@/lib/msPeriod';
+import { msPreviousPeriod, useMsPagePeriod, type MsPeriod } from '@/lib/msPeriod';
 import {
   bucketCustomerDays,
   customerMetricTotal,
@@ -26,6 +31,7 @@ import {
 } from '@/lib/msCustomerSeries';
 import { CHART_MAX_POINTS, type Grain } from '@/lib/msSeries';
 import { cohortCellValue, isMoneyCohortMode, type MsCohortCell, type MsCohortMode } from '@/lib/msCohortMode';
+import { WidgetGrid } from '@/components/widgets/WidgetGrid';
 
 /**
  * «Клиенты» МойСклада — покупательская аналитика АРХИВА заказов (ms_orders, слайс 3).
@@ -41,6 +47,10 @@ export function MsClients() {
   const period = useMsPagePeriod();
   const windowLabel = pp?.range ? 'за выбранный период' : days === 0 ? 'за всё время' : `за ${days} дн.`;
   const customers = useMsCustomers(period);
+  // Канон карточки-метрики: дельта к предыдущему равному окну (паттерн YmOverview/MsOverview).
+  // «Всё» предшественника не имеет — запрос не уходит, previous.data не читаем.
+  const previousPeriod = useMemo(() => msPreviousPeriod(period), [period]);
+  const previous = useMsCustomers(previousPeriod ?? period, { enabled: previousPeriod != null });
   const cohorts = useMsCohorts();
   const topCustomers = useMsTopCustomers(period);
   const rfm = useMsRfm(period);
@@ -59,20 +69,22 @@ export function MsClients() {
     return {
       count: sampled.length,
       labels: sampled.map((r) => fmt.day(r.day)),
-      newValues: sampled.map((r) => r.new_orders),
-      repeatValues: sampled.map((r) => r.repeat_orders),
+      axisLabels: timeAxisFromDayKeys(sampled.map((r) => r.day)),
+      // Лицо карточки — одна суммарная серия заказов (канон story card); разбивка «Новые /
+      // Повторные» с двумя линиями и датами живёт в MsCustomerExplorer (/metrics/ms-customers).
+      values: sampled.map((r) => r.new_orders + r.repeat_orders),
     };
   }, [series, period]);
 
   if (customers.isPending) {
     return (
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-6">
+      <WidgetGrid className="grid grid-cols-1 gap-6 lg:grid-cols-6">
         {Array.from({ length: 2 }).map((_, i) => (
           <div key={i} className="h-[264px] rounded-2xl border border-border bg-card p-5 lg:col-span-3">
             <ChartSkeleton />
           </div>
         ))}
-      </div>
+      </WidgetGrid>
     );
   }
 
@@ -88,29 +100,50 @@ export function MsClients() {
   }
 
   const { summary } = customers.data;
+  const prevCustomers = previousPeriod != null ? previous.data?.summary.customers : null;
+  const customersDelta =
+    prevCustomers != null && prevCustomers > 0 ? pctDelta(summary.customers, prevCustomers) : null;
   const repeatShare = summary.customers > 0 ? Math.round((summary.repeat_customers / summary.customers) * 100) : 0;
+  // Дельта доли повторных — относительное изменение той же формулы на прошлом окне (тот же
+  // prev-фетч, что у «Покупателей»).
+  const prevSummary = previousPeriod != null ? previous.data?.summary : undefined;
+  const prevRepeatShare =
+    prevSummary && prevSummary.customers > 0 ? (prevSummary.repeat_customers / prevSummary.customers) * 100 : null;
+  const repeatShareDelta =
+    prevRepeatShare != null && prevRepeatShare > 0 ? pctDelta(repeatShare, prevRepeatShare) : null;
   const everShare = summary.repeat_ever; // клиенты с ≥2 заказами за всю историю
   const repeatRevenueTotal = summary.sum_new + summary.sum_repeat;
   const repeatRevenueShare = repeatRevenueTotal > 0 ? (summary.sum_repeat / repeatRevenueTotal) * 100 : null;
 
   return (
-    <div className="grid grid-cols-1 gap-6 lg:grid-cols-6">
+    <WidgetGrid className="grid grid-cols-1 gap-6 lg:grid-cols-6">
       <ChartWidget
         id="ms-customers"
         title="Покупатели"
         fixedSize="half"
+        defaultColor={1}
+        defaultTinted
         drillTo="/metrics/ms-customers"
       >
-        <ChartCardBody value={fmt.num(summary.customers)} caption={windowLabel}>
+        <ChartCardBody
+          label={windowLabel}
+          value={fmt.num(summary.customers)}
+          delta={customersDelta}
+          caption="в графике — заказы по дням"
+          onValueClick={() => navigate('/metrics/ms-customers')}
+          drillLabel="Покупатели"
+        >
           {chart && chart.count > 1 ? (
-            <LineChart
-              values={chart.newValues}
-              ghost={chart.repeatValues}
-              primaryLabel="Новые"
-              comparisonDelta={false}
-              ghostLabel="Повторные"
+            <Sparkline
+              values={chart.values}
               labels={chart.labels}
-              yMin={0}
+              axisLabels={chart.axisLabels}
+              area
+              strokeWidth={2}
+              interactive
+              caption=""
+              formatValue={fmt.num}
+              className="h-full min-h-14 w-full"
             />
           ) : (
             <EmptyState compact size="chart" title="Недостаточно дней для графика." />
@@ -124,22 +157,25 @@ export function MsClients() {
         fixedSize="half"
         drillTo="/metrics/ms-repeat"
       >
+        {/* Radial-Text (выбор владельца): доля — настоящая часть целого (покупатели окна/истории),
+            дуга честная. Кольцо слева, честная разбивка Новые/Повторные — справа. */}
         {days === 0 && !pp?.range ? (
-          // На «Всё» окно совпадает с историей — «новых в окне» не бывает; честная метрика
-          // здесь — сколько клиентов вообще возвращалось.
-          <MsStatCardBody
-            value={`${summary.customers > 0 ? Math.round((everShare / summary.customers) * 100) : 0}%`}
-            caption={`возвращались: ${fmt.num(everShare)} из ${fmt.num(summary.customers)} клиентов`}
+          <MsRepeatGaugeBody
+            pct={summary.customers > 0 ? Math.round((everShare / summary.customers) * 100) : 0}
+            label="возвращались"
+            caption={`${fmt.num(everShare)} из ${fmt.num(summary.customers)} клиентов`}
           >
             <MsRepeatBreakdown summary={summary} repeatRevenueShare={repeatRevenueShare} allTime />
-          </MsStatCardBody>
+          </MsRepeatGaugeBody>
         ) : (
-          <MsStatCardBody
-            value={`${repeatShare}%`}
-            caption={`повторных покупателей ${windowLabel}`}
+          <MsRepeatGaugeBody
+            pct={repeatShare}
+            label="повторных"
+            caption={windowLabel}
+            delta={repeatShareDelta}
           >
             <MsRepeatBreakdown summary={summary} repeatRevenueShare={repeatRevenueShare} />
-          </MsStatCardBody>
+          </MsRepeatGaugeBody>
         )}
       </ChartWidget>
 
@@ -161,7 +197,7 @@ export function MsClients() {
       <MsTopCustomersCard state={topCustomers} windowLabel={windowLabel} />
 
       <MsCohortsCard state={cohorts} />
-    </div>
+    </WidgetGrid>
   );
 }
 
@@ -206,6 +242,8 @@ export function MsCustomerExplorer({
       primary: pairs.map((pair) => pair.primary),
       repeat: metric === 'repeatShare' ? undefined : pairs.map((pair) => pair.repeat ?? 0),
       labels: points.map((point) => fmt.day(point.day)),
+      // Временна́я ось (timeAxisCore): буквы короткого окна / EN-месяцы длинного.
+      axisLabels: timeAxisFromDayKeys(points.map((point) => point.day), { monthsOnly: grain !== 'day' }),
       titles: points.map((point, index) => {
         const pair = pairs[index];
         if (metric === 'repeatShare') return `${fmt.day(point.day)}: ${pair.primary?.toFixed(1) ?? '—'}%`;
@@ -236,17 +274,17 @@ export function MsCustomerExplorer({
     return <EmptyState compact size="chart" title="Недостаточно данных за выбранный период." />;
   }
 
-  const { primary, repeat, labels, titles, totals } = model;
+  const { primary, repeat, labels, axisLabels, titles, totals } = model;
   const headline = totals.value == null
     ? '—'
     : metric === 'orders'
       ? fmt.num(totals.value)
       : metric === 'revenue'
-        ? `${fmt.short(totals.value)} ₽`
+        ? `${formatMoney(totals.value, 'axis')}`
         : `${totals.value.toFixed(1)}%`;
   const caption = metric === 'repeatShare' ? 'доля повторной выручки' : 'новые и повторные покупки';
   const formatValue = (value: number) =>
-    metric === 'orders' ? fmt.num(value) : metric === 'revenue' ? `${fmt.short(value)} ₽` : `${value.toFixed(1)}%`;
+    metric === 'orders' ? fmt.num(value) : metric === 'revenue' ? `${formatMoney(value, 'axis')}` : `${value.toFixed(1)}%`;
 
   return (
     <ChartCardBody value={headline} caption={caption}>
@@ -259,6 +297,7 @@ export function MsCustomerExplorer({
           comparisonDelta={false}
           formatValue={formatValue}
           labels={labels}
+          axisLabels={axisLabels}
           titles={titles}
           height={expandedHeight ?? undefined}
         />
@@ -271,6 +310,7 @@ export function MsCustomerExplorer({
           comparisonDelta={false}
           formatValue={formatValue}
           labels={labels}
+          axisLabels={axisLabels}
           titles={titles}
           yMin={0}
           height={expandedHeight ?? undefined}
@@ -328,7 +368,7 @@ export function MsTopCustomersBody({ state }: { state: ReturnType<typeof useMsTo
           <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
             {fmt.num(row.orders)} {pluralRu(row.orders, ['заказ', 'заказа', 'заказов'])}
           </span>
-          <span className="w-28 shrink-0 text-right text-sm font-medium tabular-nums">{fmt.short(row.sum)} ₽</span>
+          <span className="w-28 shrink-0 text-right text-sm font-medium tabular-nums">{formatMoney(row.sum, 'axis')}</span>
         </li>
       ))}
     </ul>
@@ -337,12 +377,15 @@ export function MsTopCustomersBody({ state }: { state: ReturnType<typeof useMsTo
 
 type RfmMode = 'customers' | 'revenue';
 
+// Цвет = ИДЕНТИЧНОСТЬ сегмента (канон: зелёный/красный зарезервированы за оценённым изменением) —
+// категориальные акценты палитры графиков, а не «чемпионы хорошие / под риском плохие»: оценка
+// остаётся в label/action, читателю не навязывается светофор.
 export const RFM_SEGMENTS = {
-  champions: { label: 'Чемпионы', action: 'часто покупают, недавно и на крупную сумму', color: 'hsl(var(--chart-role-positive))' },
+  champions: { label: 'Чемпионы', action: 'часто покупают, недавно и на крупную сумму', color: 'hsl(var(--chart-1-accent))' },
   loyal: { label: 'Лояльные', action: 'стабильно возвращаются и приносят выручку', color: 'hsl(var(--chart-role-primary))' },
-  potential: { label: 'Потенциально лояльные', action: 'есть потенциал для следующей покупки', color: 'hsl(var(--chart-role-comparison))' },
+  potential: { label: 'Потенциально лояльные', action: 'есть потенциал для следующей покупки', color: 'hsl(var(--chart-3-accent))' },
   new: { label: 'Новые', action: 'покупали недавно, но пока редко', color: 'hsl(var(--chart-role-primary) / 0.65)' },
-  at_risk: { label: 'Под риском', action: 'раньше были ценными, но давно не покупали', color: 'hsl(var(--chart-role-negative))' },
+  at_risk: { label: 'Под риском', action: 'раньше были ценными, но давно не покупали', color: 'hsl(var(--chart-4-accent))' },
   hibernating: { label: 'Спящие', action: 'давно не покупали и были малоактивны', color: 'hsl(var(--muted-foreground) / 0.55)' },
 } as const;
 
@@ -410,9 +453,9 @@ export function MsRfmBody({
                 <span className="min-w-0 truncate text-foreground">{meta.label}</span>
                 <span className="shrink-0 tabular-nums text-muted-foreground">
                   <span className="font-medium text-foreground">
-                    {mode === 'customers' ? fmt.num(value) : `${fmt.short(value)} ₽`}
+                    {mode === 'customers' ? fmt.num(value) : `${formatMoney(value, 'axis')}`}
                   </span>{' '}
-                  · {share.toLocaleString('ru-RU', { maximumFractionDigits: 1 })}%
+                  · {fmt.pctFixed(share, 1)}
                 </span>
               </div>
               <div className="mt-1 flex" aria-hidden="true">
@@ -420,7 +463,7 @@ export function MsRfmBody({
               </div>
               {(detailed || expanded) && segment.customers > 0 && (
                 <p className="mt-1 text-2xs text-muted-foreground">
-                  {meta.action}; в среднем R {segment.average_recency_days == null ? '—' : segment.average_recency_days.toLocaleString('ru-RU', { maximumFractionDigits: 1 })} дн. · F {segment.average_frequency == null ? '—' : segment.average_frequency.toLocaleString('ru-RU', { maximumFractionDigits: 1 })} заказа · M {segment.average_monetary == null ? '—' : `${fmt.short(segment.average_monetary)} ₽`}.
+                  {meta.action}; в среднем R {fmt.numFixed(segment.average_recency_days, 1)} дн. · F {fmt.numFixed(segment.average_frequency, 1)} заказа · M {segment.average_monetary == null ? '—' : `${formatMoney(segment.average_monetary, 'axis')}`}.
                 </p>
               )}
             </>
@@ -458,20 +501,28 @@ export function MsRfmBody({
 /** Вертикальное тело карточки-статистики без графика: значение + подпись сразу под заголовком,
     строки ниже. Горизонтальный ChartCardBody прижимал число к левому низу, а строки — к правому
     верху, оставляя диагональную пустоту. */
-function MsStatCardBody({
-  value,
+/** Тело «Повторных покупок»: кольцевой прогресс (Radial-Text) слева + разбивка справа. Доля —
+    честная часть целого; дельта и подпись окна — под кольцом, разбивка сохраняет все числа. */
+function MsRepeatGaugeBody({
+  pct,
+  label,
   caption,
+  delta,
   children,
 }: {
-  value: string;
-  caption: ReactNode;
+  pct: number;
+  label: string;
+  caption: string;
+  delta?: MetricDelta | null;
   children: ReactNode;
 }) {
   return (
-    <div className="pt-1">
-      <div className="kpi-accent text-3xl font-medium leading-none tabular-nums tracking-tight">{value}</div>
-      <div className="mt-1.5 text-2xs text-muted-foreground">{caption}</div>
-      <div className="mt-3">{children}</div>
+    <div className="flex h-full min-h-0 items-center gap-6 pt-1">
+      <div className="flex shrink-0 flex-col items-center gap-1">
+        <RadialGauge fraction={pct / 100} value={`${pct}%`} label={label} size={124} caption={caption} />
+        {delta != null && <DeltaPill delta={delta} />}
+      </div>
+      <div className="min-w-0 flex-1">{children}</div>
     </div>
   );
 }
@@ -502,7 +553,7 @@ export function MsRepeatBreakdown({
       )}
       <p>
         Повторные заказы: <span className="font-medium tabular-nums text-foreground">{fmt.num(summary.orders_repeat)}</span>{' '}
-        на <span className="font-medium tabular-nums text-foreground">{fmt.short(summary.sum_repeat)} ₽</span>
+        на <span className="font-medium tabular-nums text-foreground">{formatMoney(summary.sum_repeat, 'axis')}</span>
       </p>
       <div className="pt-1">
         <div className="mb-1 flex items-center justify-between gap-3 text-2xs">
@@ -586,14 +637,14 @@ const COHORT_MODE_CAPTION: Record<MsCohortMode, string> = {
 /** Формат значения клетки: ретеншен — проценты, деньги — компактные рубли (клетка узкая). */
 function cohortCellLabel(value: number | null, mode: MsCohortMode): string {
   if (value == null) return '—';
-  return isMoneyCohortMode(mode) ? `${fmt.short(value)} ₽` : `${Math.round(value * 100)}%`;
+  return isMoneyCohortMode(mode) ? `${formatMoney(value, 'axis')}` : `${Math.round(value * 100)}%`;
 }
 
 /** Полная подсказка клетки (title/aria) — всегда точные числа, режим явно назван. */
 function cohortCellTitle(cell: MsCohortCell, size: number, value: number | null, mode: MsCohortMode): string {
   if (mode === 'retention') return `${fmt.num(cell.active)} из ${fmt.num(size)} клиентов`;
   if (value == null) return 'Сумма недоступна в точном числовом диапазоне';
-  const per = `${fmt.num(value)} ₽ на клиента (÷ ${fmt.num(size)} исходных)`;
+  const per = `${formatMoney(value, 'exact')} на клиента (÷ ${fmt.num(size)} исходных)`;
   return mode === 'revenue' ? `Выручка месяца: ${per}` : `Накопленная выручка (LTV): ${per}`;
 }
 

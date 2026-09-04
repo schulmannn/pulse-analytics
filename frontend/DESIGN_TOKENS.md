@@ -22,12 +22,55 @@ semantic token.
 | Canvas / ink | `--background` `--foreground` | warm paper `#faf9f6` / ink `#1a1a17` |
 | Panel surface | `--card` `--popover` | `#fff` panels used **sparingly** — sections are hairline-delimited |
 | Secondary/tertiary ink | `--muted-foreground` `--ink2` `--ink3` | text hierarchy by shade, not weight |
-| Accent (single hue) | `--primary` `--accent` `--accent-foreground` | `--accent-foreground` is AA-calibrated for ink on the blue tints |
-| Deltas | `--brand-verdant` (up) `--brand-ember` / `-strong` (down) | reserved for CHART roles (DivergingBars) and status surfaces; the ↑/↓ delta chips and card stats read **muted** (steep: direction lives in the arrow/sign, nothing screams) |
+| Accent (single hue) | `--primary` `--accent` `--accent-foreground` | `--primary` is link/action ink on neutral surfaces; selected chips with `bg-primary/10` use the deeper `--accent-foreground`, AA-gated on that composite tint |
+| Deltas | `--brand-verdant` (up) `--brand-ember` / `-strong` (down) | CHART roles (DivergingBars), status surfaces, and the evaluated Δ of the **metric explorer** (`/metrics/*`) — cards, tables and modals stay muted; see «One voice for deltas» below |
 | Status | `--status-warn` | risk / demo / stale collector |
 | Hairline | `--border` `--input` | decorative separators (the *only* borders in the system) |
 | Categorical series | `--chart-1 … --chart-6` | Muted/refined (Steep-noble), Okabe-Ito-ordered for colour-blind safety; light stays deep enough for non-text 3.0 on white, dark goes softer; series always carry a label too |
 | Identity chips | `--chip-{1..6}-{bg,ink}` | deterministic per channel-name hash |
+
+**One voice for deltas.** Direction always lives in the GLYPH (`↑ ↓` / `▲ ▼ ±` / `+ − ±`) **and, where
+the glyph is `aria-hidden`, in an `sr-only` word** — never in hue alone (WCAG 1.4.1). Colour is
+decoration on top of a sign that already reads without it.
+
+The one surface that takes that decoration is the **metric explorer** (`/metrics/*` of every
+vertical) — the drill-down whose entire job is «сравнить и оценить». Inside it, coloured TEXT in
+`verdant` / `ember`, never a tinted chip or filled pill (the old `DeltaBadge` is gone):
+
+- the comparison rail's period-vs-period row — `ComparisonDelta` / `ComparisonDeltaRow`
+  (`components/metric/shared.tsx`), the single component behind TG / IG / MS / Метрика / упоминания;
+- the same evaluated Δ when the page states it in prose instead of the rail («изменение за окно» in
+  the IG follows descriptor, `IgMetricPage.tsx`);
+- the pinned-point inspector's «К пред. дню / К пред. точке» (`PinnedDayPanel` hosts in
+  `MetricPage` / `IgMetricPage` / `YmMetricPage`);
+- `RankChart`'s baseline column — the rank viz's own form of that same comparison.
+
+Colour there is a **verdict**, so a metric that carries no sentiment opts out of it while keeping the
+same markup: `ComparisonDelta`/`ComparisonDeltaRow` take `evaluative={false}` and render the glyph and
+the spoken direction in muted ink. Brand-mention VOLUME is the standing case — more mentions is not
+self-evidently better (mirrors `DeltaLine` on `/mentions`: «never green/red — mention counts carry no
+sentiment»). Share the component, not the judgement.
+
+**Проверено аудитом #554 (D12) — исключение ПОДТВЕРЖДЕНО.** Аудит предложил «либо подтвердить,
+либо снять одним флагом». Флаг уже есть (`evaluative`), компонент один на все вертикали, направление
+читается без цвета (глиф + `sr-only`-слово), а место одно — разбор метрики. Снимать нечего: третьим
+«голосом» в аудите оказалась не дельта, а РАЗНЫЙ МАКЕТ рейла сравнения у TG и IG — это и починено.
+
+**Рейл сравнения — ОДНОГО ВИДА на всех вертикалях**: плоская секция (`RailSection` без
+варианта) с `mark="comparison"`, а итог окна — общий `RailWindowTotal` поверх `KpiValue`. Карточная
+подача была единственной копией (только TG) и снята.
+
+**Everything outside the explorer reads muted**, direction carried by the sign alone: card stats
+(`DeltaPill`, `StatTile`), the per-cell «к медиане» deltas in the content tables (four coloured
+percentages per row turned the densest surface into the loudest one) **and the same «к медиане» line
+in the post modal opened from that cell** — one comparison may not speak in two voices depending on
+which surface shows it. Zero is neutral (`±`, muted) everywhere.
+
+Known tail, NOT covered by this pass: the hashtag **lift** column in `components/instagram/content.tsx`
+still paints `verdant` / `ember` — it is a benchmark ratio, not a period Δ, and by this rule it should
+go muted; left alone here to keep the ticket's blast radius. The marketing `pages/Landing.tsx` mock is
+out of the app canon entirely. This rule NARROWS where verdant/ember may appear; it never licenses new
+colour.
 
 ### Chart series roles
 
@@ -42,16 +85,26 @@ positive/negative never lean on hue alone (diverging bars use position around ze
 | Role | Token | Aliases | Used by |
 |---|---|---|---|
 | Primary | `--chart-role-primary` | `--brand-iris` | line · area · points · bars · Breakdown fill · DivergingBars up |
-| Comparison | `--chart-role-comparison` | `--chart-2` | dashed previous-period / baseline ghost |
+| Comparison | `--chart-role-comparison` | `--chart-2` | previous-period / baseline ghost: **dashed, no fill** in every line host (incl. the metric explorer); bar hosts draw the ghost as a COLUMN at one shared alpha (`BarChart` `GHOST_ALPHA` = the line ghost's `0.8`, covering bars, hover highlight, legend and tooltip swatch) — an owner's decision, since a dash over bars mixes shape languages. The alpha is read straight out of `BarChart.tsx` by `scripts/contrast-tokens.mjs`: anything below non-text 3.0 on the light card fails the gate |
 | Positive | `--chart-role-positive` | `--brand-verdant` | gains / up emphasis (delta text) |
 | Negative | `--chart-role-negative` | `--brand-ember` | losses / down (DivergingBars down · delta text) |
 | Warning | `--chart-role-warning` | `--status-warn` | anomaly / caution markers |
 | Neutral | `--chart-role-neutral` | `--muted-foreground` | target line · «Прочее» pie slice |
 | Selection | `--chart-role-selection` | `--brand-iris` | hover point + crosshair (= the accent) |
+| Story card | `--accent-card` / `-deep` | `--chart-1-accent` / `-deep` | the accent of a card whose colour the USER never picked (the host's `defaultColor`) |
+
+**Story card vs picked card.** A widget's accent has two sources and they must not be confused.
+`prefs.color` is a deliberate choice — it stays on its numbered `--chart-N-accent` slot forever.
+`defaultColor` is the host saying "this is a story card", and that one rides `--accent-card`, which
+**follows the theme accent**. In the canon `--accent-card` is a plain alias of `--chart-1-accent`, so
+the default product looks exactly as before; pick an accent in the studio and every un-picked story
+card follows, while hand-coloured cards keep their hue. Split in `useChartSectionModel`
+(`chosenColor` vs `activeColor`); the dark tonal surface mixes the `-deep` companion, so both are
+solved together and gated (`contrast-tokens.mjs` → «dark · story card accent»).
 
 The categorical **`--chart-1 … --chart-6`** (Okabe-Ito) stay for MULTI-series charts (pie slices,
-multi-line); the roles above are the single-series semantic set. `DeltaPill` / `WidgetRenderer` keep
-the canonical text tokens (`verdant` / `ember` / `status-warn` / `primary`) — those ARE the text side
+multi-line); the roles above are the single-series semantic set. `ComparisonDelta` / `WidgetRenderer`
+keep the canonical text tokens (`verdant` / `ember` / `status-warn` / `primary`) — those ARE the text side
 of the positive / negative / warning / primary roles (tuned for AA 4.5 as text, with on-tint
 variants), so they read role-consistent without duplicating a stroke token.
 
@@ -68,14 +121,28 @@ widget's visualisation. Both live in **`src/lib/widgetSurface.ts`** (pure, unit-
   included) stays on a **neutral** surface *regardless of the saved accent*: a coloured wash behind many
   series or rows reads as status, not story. The accent still lives on the **series stroke** and the
   **hero number** (`--chart-role-primary`); only the card BACKGROUND is neutralised. Positive/negative
-  colour stays reserved for *evaluated deltas* (DeltaPill), never categorical series. Previous-period
-  comparison stays dashed/no-fill (`--chart-role-comparison`).
+  colour stays reserved for the *evaluated comparison Δ* (`ComparisonDelta`), never categorical series
+  and never the quiet card/table deltas. Previous-period
+  comparison stays dashed/no-fill in every LINE host (`--chart-role-comparison`); bars are the one
+  owner-sanctioned exception (see the Comparison row above).
   → `vizAllowsTonalSurface(viz)` / `effectiveTinted(viz, savedTinted)`.
   On the dark TINTED card the widget **title** also rides the accent (`.widget-title` rule in
   `index.css`) — title, number, line and surface share one hue (steep); a neutral or un-tinted card
   keeps the default ink title, and light keeps ink titles everywhere. The header icon affordances
   (⋯ / ↗ / ×) follow one quiet step lower — accent at 0.8 (`.widget-icon`, non-text 3.0-gated);
   their hover pops (`hover:text-foreground` / `hover:text-destructive`) stay untinted.
+- **Default surface = neutral; tint is a hand tool for ONE story per page.** An accented card
+  (`defaultColor`) renders **un-tinted by default** — a board of five different washes at once makes
+  colour mean nothing, while the canon says colour = series identity. A curated host may opt exactly
+  one lead card into the wash with `defaultTinted` (Обзор → «Просмотры», IG → «Охват», МойСклад →
+  «Выручка», Метрика → «Визиты», Покупатели → «Покупатели»); everything else keeps the canonical iris
+  accent on a neutral surface. A card whose **host** declares no accent is untouched — its
+  `--card-tint` radial is the baseline card surface, not a story. →
+  `defaultWidgetTint(defaultColor, defaultTinted)` / `resolveWidgetTint(savedTinted, …)`. Both read
+  the accent the **host declared in JSX**, never the card's effective accent: a default describes the
+  out-of-the-box card, so a colour the user picked himself must not silently strip the wash he had.
+  **Saved user prefs always win over the default** (`tinted` in `pulse_widget_prefs` is never
+  migrated): changing a default must not repaint a card someone has already coloured by hand.
 - **Width.** A temporal `line`/area cannot render at a **third** width — the x-axis collapses into
   sub-pixel mush (cf. the downsample note in `CLAUDE.md`). Such a viz is coerced UP to `half` rather
   than silently dropping points; compact vizzes (kpi hero, bar, donut) read fine at third.
@@ -83,17 +150,132 @@ widget's visualisation. Both live in **`src/lib/widgetSurface.ts`** (pure, unit-
   3 columns (50%), and `full` is 6 columns (100%). Editor labels and rendered widths must match.
   → `vizAllowsThirdWidth(viz)` / `coerceSizeForViz(viz, size)`.
 
+## User themes (the «Оформление» studio)
+
+The canon above is the **default**, not the only palette: `/settings?section=appearance` lets each
+account retune the theme. The whole subsystem is built so that the canon cannot be damaged by a
+choice — and so that the gates above stay authoritative.
+
+**The invariant.** Every knob has a `canon` value, and a fully-canon selection emits **nothing**. No
+`<style>` node, no overridden variable, `src/index.css` byte-for-byte. `contrast-tokens.mjs`, the axe
+gate and every screenshot spec therefore keep measuring the real default.
+
+**What a user can move, and how far.**
+
+| Knob | Tokens | Freedom |
+|---|---|---|
+| Accent | `--primary` `--ring` `--accent` `--accent-foreground` `--brand-iris(-soft)` `--blue-tint` `--card-tint` `--accent-card(-deep)` | 12 hues; **lightness is solved, not chosen** |
+| Base colour | `--background` `--card` `--popover` `--muted` `--secondary` `--border` `--input` `--hover-row` `--avatar` `--surface-table` + the ink scale | 6 neutrals; hue + saturation only — **the lightness ladder is the canon's** |
+| Chart palette | `--chart-1…6` `--chart-N-cat` `--chart-seq-1…5` | canon (Okabe-Ito) or one hue family in six solved steps |
+| Radius | `--radius` + `--radius-xl/2xl/3xl` | 0 / 4 / 8 / 12 / 16px — the whole ladder scales together, so the 4px default still yields today's 12/16/24 |
+| Font | `--font-sans` (+ a `body` rule) | Geist, a system stack, or one of 15 self-hosted families — loaded on demand |
+
+**What is deliberately NOT customisable**, because it carries meaning rather than taste:
+`--brand-verdant` / `--brand-ember` / `--status-warn` (evaluated up / down / risk), the `--chip-*`
+identity tints (hashed from the channel name) and `--chart-N-accent(-deep)` (a widget author picks
+those, and six distinct hues beat one family there — a non-canon chart palette pins them explicitly,
+in both themes).
+
+**Why contrast cannot drift.** Surfaces and ink keep the canon's lightness, so their ratios are the
+audited ones by construction. Where lightness *must* follow the hue — an accent, a series step;
+amber at blue's lightness is twice as bright — it is solved against the same thresholds the gate
+uses (text 4.5, stroke/ring 3.0). `src/lib/appearanceTheme.test.ts` then re-reads `index.css`,
+overlays the generated variables exactly as the browser cascade would (`var()` aliases included) and
+re-runs those pairs across the whole accent × base × chart × theme matrix. A hue that cannot hold AA
+fails there, before anyone sees it.
+
+**Cascade note.** The generated rules are injected **unlayered**, and the canon lives in
+`@layer base` / `@layer theme` — an unlayered declaration wins over any layered one regardless of
+specificity, so nothing needs re-specifying. The flip side: a colour token printed only in `:root`
+would also beat canon's `.dark`, so both blocks always print the same colour token set (asserted by
+the test). `.force-light` keeps the canon light palette — it declares those tokens on itself, and an
+element's own declaration outranks an inherited one.
+
+**Fonts.** Families ship as `@fontsource-variable/*` and are served from our own origin — CSP is
+`font-src 'self'`, and a third-party font host would mean both an extra origin and a leak of the
+visit. (This is also how shadcn's own registry ships fonts.) Every offered family carries a
+**Cyrillic** subset: the product UI is Russian, and a Latin-only face would leave nearly all text on
+the fallback, i.e. the choice would silently do nothing — that is why Outfit / Figtree / DM Sans /
+Space Grotesk are absent. `lib/appearanceFonts` holds a STATIC loader map (Vite cannot analyse a
+templated `import()` into node_modules), so each family is its own chunk: a user on Geist downloads
+nothing extra, and opening the font list pulls only the `@font-face` declarations — the browser
+fetches a woff2 only for the rows it actually paints. Family names are proper nouns and stay in
+Latin; only the group headers are translated.
+
+**Two hosts, one component.** `AppearanceStudio` renders both inside the settings dialog
+(`variant="settings"`, with a preview card and the full CSS snippet) and inside `AppearanceDock` —
+a left panel over the running app, opened from the account menu. The dock is deliberately **not** a
+modal: no scrim, no focus trap, because the point is to change a token and watch the charts behind
+it repaint (SVG reads `hsl(var(--chart-role-primary))`, so the repaint costs no re-render). While it
+is open the shell is **pushed right**, not covered — the sidebar lives exactly where the panel does,
+and navigating between sections is the reason the panel exists. Its open state is `localStorage`,
+not a URL param, so it survives those navigations; the trade-off is that the panel itself is not
+deep-linkable (the theme is, through the account).
+
+**Picker shape.** Every knob is a field-card — label, current value, sample glyph — that opens a
+menu (owner reference: `ui.shadcn.com/create`). A menu opened from inside a dialog must pass
+`layer="modal"` to `DropdownMenuContent`: the default `z-popover` (40) puts it **under** the dialog
+scrim (`z-modal`, 50) and it becomes unclickable. Do not try to pass `z-modal-popover` through
+`className` — tailwind-merge does not treat our scale's utility as a conflict for `z-popover`, and
+both survive into the markup.
+
+**Where the code lives.** `lib/appearanceStorage` (shell — keys + selection only) → `lib/appearance`
+(lazy — store, apply, persist) → `lib/appearanceTheme` (lazy — palettes, solvers, CSS). The computed
+CSS is cached in `localStorage` and re-injected pre-paint by `public/theme-boot.js`, versioned by
+`APPEARANCE_CSS_VERSION`: **bump it whenever the palette tables change**, in both files.
+
 ## Type scale
 
 **One** ladder, in the `@theme` block (`--text-*`). No magic `text-[Npx]` — the lint hard-fails on it.
 Keep ≲4 steps on a single screen.
 
+**The card headline is a component, not a class string.** The whole KPI number family — `text-hero` (44), `text-3xl` (30), `text-2xl` (24) — is rendered by one
+component, and `text-hero` may appear in exactly one
+place — `components/chartWidget/KpiValue`. It was copy-pasted into four (`ChartCardBody`,
+`CompareStat` twice, `ExpandableChart`) and the copies drifted: the canon had long fixed the line box
+to `leading-[1.15]` (the display face's glyph box is ~4px taller than a `leading-none` box and
+clipped digits inside a fixed tile) while two copies still carried `leading-none`. Same 44px,
+different baseline — the cards stop reading as one system. Gated by `kpi-number-recipe-retyped` in
+`design-motion-lint`, which now covers the second tier too (`text-3xl` + `tabular-nums`). A different headline size becomes a variant of that component, never a class
+string at the call site.
+
+Not yet folded in, on purpose: `KpiGrid`'s `DrillValue` (number + quiet unit is its own
+composition), `RadialShare`'s centre label (SVG `<text>`, which a `div`-based component cannot be)
+and the report title inputs (headings, not numbers). The `text-2xl` tier is therefore converted but
+not yet gated.
+
+Anatomy is a separate question from the recipe: `ChartCardBody` owns the canonical story face
+(label → value → delta → min/max → caption, plot to the right) and every widget card goes through
+it; `CompareStat` keeps its own centred/stacked arrangements on purpose. Both draw their number
+from `KpiValue`.
+
 `text-2xs` 11 (meta · axis ticks) · `text-xs` 12 (caption) · `text-sm` 14 (body/default) ·
 `text-base` 16 (card titles) · `text-lg` 18 (sub-heading, sparingly) · `text-2xl` 24 (page/modal
 titles) · `text-3xl` 30 (secondary metric) · `text-hero` 44 (primary KPI hero).
 
-Fonts: `font-sans` = Inter (everything); `font-mono` = Roboto Mono (scoped to timestamps / collector
-version / API status only).
+Fonts: `font-sans` = bundled `Geist Variable` from `@fontsource-variable/geist` (the whole modern
+app); `font-mono` = the local system monospace stack, scoped to timestamps / collector version / API
+status only. No screen depends on Google Fonts: the legacy shell uses system sans/serif stacks, and
+production CSP keeps `font-src 'self'` only. The two explicit `@font-face` rules ship only the
+RU/Cyrillic and Latin subsets; extended scripts intentionally fall back to the system stack.
+
+## Dates
+
+**One** date format across the whole app: **«13 июл.»** — `fmt.day` from `lib/format.ts`
+(`ru-RU`, `{ day:'numeric', month:'short' }`, with the dot the locale prints; May stays «18 мая»).
+Timestamps add the time through `fmt.date` («8 авг., 14:23»); a per-hour axis appends `HH:00` to
+`fmt.day`. No `dd.mm`, no hand-written month arrays, no `.replace('.', '')` "dotless" variants and
+no per-panel formatters — axes, tooltips, ledger facts, tables and captions all read the same.
+
+The **year is printed only where it carries meaning** — the boundaries of a compared window, which
+may sit on the other side of New Year («22 дек. 2026 г. — 31 дек. 2026 г., текущее 1 янв. 2027 г. —
+10 янв. 2027 г.»). That is `fmt.dayYear`, the same locale format plus `year:'numeric'` — not a
+numeric `10.06.2026`. Axes and tooltips never carry the year: the period bar already names it.
+
+A bare calendar key (`YYYY-MM-DD`) must go through `parseDayKey`/`fmt.day` (local midnight — UTC
+parsing shows the previous day west of UTC). **Daily breakdowns sort on `dayKeyToTs` (epoch-ms,
+with year inference for the API's year-less `DD.MM` keys) and are formatted only afterwards** —
+sorting the rendered label breaks across New Year and re-breaks on every format change.
 
 ## Radius
 
@@ -112,17 +294,58 @@ Hairlines are `--border`. Soft over-surface tints use a small, deliberate opacit
 arbitrary values: `foreground / 0.06` (hover wash), `ink3 / 0.25` (edit-mode card edge),
 `white / 0.06` (dark card edge). Keep to these; don't invent new alphas per component.
 
+**Never on ink.** The set above is for SURFACES. An invented alpha on TEXT quietly drops contrast
+below the gate that checks the token: `text-ink3/60` on the inactive sort arrow measured 2.43:1 in
+light and 2.70:1 in dark while `--ink3` itself passes 4.5 — the token was fine, the alpha was not.
+If ink must be quieter, pick a quieter ink token; there is no legal ink alpha.
+`e2e/contrast-rendered.spec.ts` now measures this on the rendered page.
+
 ## Icon buttons
 
 Header affordances (expand / menu / remove) share **one** quiet circular shape: `rounded-full` + hover
-surface, sized `h-8 w-8` (32px touch target) on mobile and the quieter `h-7 w-7` (28px) at ≥sm where a
+surface, sized `h-11 w-11` (44px touch target) on mobile and the quieter `h-7 w-7` (28px) at ≥sm where a
 cursor is precise. See the `iconBtn` string in `ChartWidget.tsx`.
 
-**Touch targets.** On mobile every primary control clears **32px** — icon buttons and the per-widget
+**Touch targets.** On mobile every primary control clears **44px** — icon buttons, shared tabs and the per-widget
 period filter pills grow their hit area below `sm` (the compact desktop look returns at ≥sm). Gated by
-`e2e/mobile-nav.spec.ts` at 360 / 390 / 430px (also asserts no horizontal page scroll). Inline text
+the mandatory phone CI job through `e2e/mobile-nav.spec.ts` at 360 / 390 / 430px (also asserts no horizontal page scroll). Inline text
 links / ⓘ keep their text size — their tap area is the text and the same action has a full-size path in
 the detail overlay.
+
+## Page navigation (second level)
+
+**One control per role.** A page's second level of navigation — the sections of a route (`Динамика /
+Форматы / Аудитория / Сравнение` on /analytics, `Публикации / Кампании` on /posts and its IG mirror) —
+is always the shared `Tabs` component in its **`line`** variant (`TabsList variant="line"`): quiet
+labels with a 2px `--primary` underline on the active one. `pill` / `segmented` (the `default` variant
+and `SegmentedControl`) stays for switching the **representation of data inside a card** — viz type,
+comparison, breakdown. Never mix the two roles: a segmented control at the top of a page reads as a
+filter, and line tabs inside a card read as navigation away from it.
+
+**Sticky.** That tab row pins under the page header on **md+** (`PAGE_SUBNAV_SHELL` in
+`lib/pageChrome.ts`) inside the element scroller `[data-dashboard-scroll]` — so a reader deep inside a
+tab keeps both the orientation and the path to the neighbouring sections. Its `top` is the header's
+REAL height, published as `--feed-header-h` by a single `ResizeObserver` in `FeedBlock` (the header
+wraps to two rows on narrow desktops, so a constant would be wrong). The strip is opaque
+(`bg-background`) and carries a permanent bottom hairline — a hairline toggled on stick would change
+the strip height and cost CLS. Exactly **one** sticky second layer per page: nested control rows
+(the campaign scope row inside «Форматы») scroll away as before, and `<md` the whole page is unchanged.
+
+**Settings preferences.** `/settings` is a MODAL overlay above the app, not a page: the route stays
+(deep-links `?section=` keep working), `ProtectedApp` renders the opener's page behind it via a
+background location (Главная on a direct load), and closing steps back through history. Inside the
+dialog the master-detail rule keys on the DIALOG container: a vertical section rail at ≥`44rem`, the
+canonical line-tab row narrower (phones get the full-screen sheet). Only one detail section is
+mounted at a time. The dialog chrome draws NO horizontal hairlines — the single structural line is
+the rail's vertical `border-r`; the section header moment (`text-2xl` title, muted description, an
+optional right-aligned quiet meta readout — a counter the page already has in cache, never a new
+fetch) is separated by air, not a rule. Setting groups are TONAL panels — `bg-card` + hairline +
+`rounded-2xl` (the card radius family), whose `divide-y` is the single source of row hairlines;
+children do not add competing outer separators, and nested surfaces inside a panel (plan cards, key
+rows, icon tiles) recess to `bg-background` one radius step tighter. Group titles are uppercase
+`text-2xs` kickers so row titles stay the loudest text inside a panel. Keep the detail column narrow
+and align row controls to one right edge. A settings view has at most one solid-primary action,
+while rare or destructive flows stay behind quiet or destructive controls.
 
 ## Content density (card ↔ detail)
 
@@ -171,8 +394,8 @@ Rules:
   `z-modal-popover`; a tooltip (`z-tooltip`) stays legible even over a dialog. A page menu must never
   out-rank a dialog.
 - **Sticky < nav**: a scrolled sticky header slides *under* the fixed rail, never over it.
-- Escape / outside-click dismissal is owned per-overlay (`useFocusTrap` + capture-phase Escape in
-  `DetailShell`); the z-scale governs paint order only, not closing.
+- Escape / outside-click dismissal is owned by the shared Radix Dialog layer (including advanced
+  `DialogSurface` sheets); the z-scale governs paint order only, not closing.
 
 ## Motion
 
@@ -182,17 +405,18 @@ duration/easing.
 
 | Token | Value | Use |
 |---|---|---|
-| `--ease-standard` | `cubic-bezier(0.2, 0.7, 0.3, 1)` | the house entrance / settle ease-out |
-| `--ease-exit` | `cubic-bezier(0.7, 0, 0.8, 0.3)` | the house curve **mirrored** — exits accelerate away instead of settling. An element leaving should not decelerate into its own disappearance; ease-out on an exit reads as hesitation |
+| `--ease-standard` | `cubic-bezier(0.23, 1, 0.32, 1)` | the house entrance / settle **strong** ease-out. Both control points ride the ceiling, so ~90% of the distance is covered in the first third of the duration and the rest is settle. Perceived speed is set by that first third, not by the total — which is why the previous half-strength `cubic-bezier(0.2, 0.7, 0.3, 1)` read as hesitation at the same durations |
+| `--ease-exit` | `cubic-bezier(0.68, 0, 0.77, 0)` | the house curve **mirrored** — exits accelerate away instead of settling. An element leaving should not decelerate into its own disappearance; ease-out on an exit reads as hesitation |
 | `--ease-chart-morph` | `cubic-bezier(0.25, 0.1, 0.25, 1)` | Recharts `ease` parity for point-to-point chart updates |
 | `--motion-track` | 100ms | smoothing for a transform the JS rewrites every pointermove frame (dock magnification on Connect) — **not** a general «fast» rung |
+| `--motion-exit` | 120ms | overlay **dismissal**, ~0.8× the 150ms enter. `--ease-exit` gave exits an accelerating curve, but every overlay still left over exactly as many milliseconds as it took to arrive — so a dismissal had to be waited out. An entrance may take its time (it carries new content); a thing the user has decided to be rid of should be gone before it is missed |
 | `--motion-press` | 140ms | tactile press feedback (button dip) |
 | `--motion-fast` | 200ms | quick opacity / colour fades |
 | `--motion-base` | 240ms | standard control transition (mode swap · icon · hover→active) |
 | `--motion-glide` | 260ms | FLIP reorder glide · icon stroke draw-on |
 | `--motion-reveal` | 300ms | larger reveals (add-widget rise) |
 | `--motion-entrance` | 300ms | card mount rise (was 350ms — over both the <300ms UI ceiling and the playbook's 200-300ms band for entering elements). Shares a value with `--motion-reveal` but stays a separate rung: mounting a card and revealing a panel are different intents and will drift apart again |
-| `--motion-morph` | 700ms | point interpolation after a data-window change (see note below) |
+| `--motion-morph` | 700ms | point interpolation after a data-window change (see note below). **Deliberately above the <300ms UI ceiling** — that ceiling governs *interface* motion, where the animation sits between the user and their goal. A shape morph is *explanatory*: the movement itself carries the comparison («this is the same series, re-windowed»), so it is read rather than waited out. Cutting it to 300ms turns the reading into a flicker. Interruptibility is what keeps it honest — a signature change mid-flight retargets from the currently visible values instead of restarting, so rapid period-flipping never queues a backlog of animation |
 
 ### Reaching the ladder from a component
 
@@ -205,6 +429,7 @@ the gap — defined in `src/index.css`, enforced by `scripts/design-motion-lint.
 |---|---|---|
 | `dur-track` · `dur-press` · `dur-fast` · `dur-base` · `dur-reveal` | `transition-duration` | the matching `--motion-*` |
 | `anim-dur-fast` | `animation-duration` | `--motion-fast` (tailwindcss-animate enter/exit on dialogs) |
+| `anim-dur-exit` | `animation-duration` | `--motion-exit` — pair with `data-[state=closed]:`. Animation-duration, not transition-duration: the Radix overlays leave through tailwindcss-animate keyframes, which `dur-*` cannot reach |
 | `ease-house` | `transition-timing-function` + `animation-timing-function` | `--ease-standard` |
 | `ease-exit` | same two properties | `--ease-exit` — reach for it on a close/leave state (`data-[state=closed]:ease-exit`) |
 
@@ -229,7 +454,18 @@ layout cost is a visible decision rather than a side effect.
 CSS custom props resolve inside inline `style.transition` too, so JS-driven transitions use
 `var(--motion-glide) var(--ease-standard)` (see the reorder FLIP in `ChartWidget.tsx`).
 
-**Chart motion.** The full-size `LineChart` (line + area, primary and comparison) and shared `Sparkline`
+**The six `layout-anim-ok` sites were re-audited (2026-08-11) and all six stand.** The tempting one
+is `.sidebar-actions`, which tweens `height` and `margin-inline` — but neither converts to a
+transform. The height goes `1.75rem → 3.75rem` because the rail STACKS the two actions, and that
+height is what reserves the space the source card below moves into; a transform would slide the
+actions over it and leave a hole. The `margin-inline` step positions the well so both actions land
+on the 32px rail axis, and the toggle is anchored to the well's right EDGE — translating the
+container would drag it off the panel edge it exists to track. Decisive point: the parent
+`.sidebar-shell` tweens `width` in the same beat, which is irreducible for a rail that pushes rather
+than overlays, so the frame does a full layout pass regardless. Converting the smaller half buys
+nothing measurable. Don't re-raise this without a profile showing otherwise.
+
+**Chart motion.** The full-size `LineChart` (primary line + area, comparison line) and shared `Sparkline`
 follow the shadcn/Recharts update model: after a period or filter change, old point coordinates are
 proportionally matched to the new point count and interpolated into the target shape. This is a real
 **shape morph**, not a clip wipe or cross-fade. Isolated `MorphingSeries` / `SparklineSeries` layers own
@@ -260,11 +496,41 @@ The shared `ChartTooltip` fades in and glides between points via a tokenised
 `transform` transition (`--motion-base`, never `left`/`top`) — one `[data-chart-tooltip]` rule owns it
 for default/rhea/comparison alike.
 
+**A pressable control dips while held.** The shared `Button` carries `active:scale-[0.97]` over
+`--motion-press` on its five SURFACE variants; `link` is text and does not depress. A control that
+reacts to the finger feels connected to it, while one that only changes colour on release reads as a
+picture of a button. Under `prefers-reduced-motion` the dip is dropped outright
+(`motion-reduce:active:scale-100`) rather than left to the global 0.01ms net, which would turn it into
+a teleport — the reduced-motion rule is «keep the colour half, drop the transform half», the same split
+as the hover gate below. Disabled buttons never reach `:active` (`disabled:pointer-events-none`).
+Bespoke controls that predate this (`edit-toggle`, `add-widget-trigger`) keep their own `scale(0.98)`
+— same band, and they are not `Button` instances. `report-control` is different: it is a LEXICON laid
+over real `Button`s inside `.report-rhea` (radius 1rem plus a `translateY(1px)` press), so those
+buttons keep their variant — including `contrast` — and add only what belongs to the report.
+Gated by `e2e/press-and-exit.spec.ts`, which measures computed `scale` under a held pointer: a
+class-name assertion would pass even if the rule lost a specificity tie.
+
+**Exits are shorter than entrances.** Every `data-[state=closed]` overlay carries
+`anim-dur-exit` alongside `ease-exit`, so it leaves in 120ms against the 150ms it took to arrive.
+Applied to all eight animated surfaces (dialog, alert-dialog, dropdown, context-menu, select,
+popover, tooltip, hover-card). The `data-*` variant compiles to an attribute selector, so the exit
+duration outranks a plain `anim-dur-fast` on the same element without `!important`.
+
+**Hover motion needs a real pointer.** A `:hover` rule that moves something must be gated to
+`@media (hover: hover) and (pointer: fine)`: on a touch screen the browser leaves a synthetic hover on
+the last-tapped element, so the transform sticks there until something else is tapped. Hand-written CSS
+writes the media query directly (see the sidebar toggle glyph / tooltip); Tailwind utilities use the
+**`hover-fine:` / `group-hover-fine:`** variants declared at the top of `index.css`. This covers motion
+ONLY — colour and ink hovers keep the plain `hover:` variant, whose v3-parity override stays in place
+for the staged phone migration, because a stuck tint is invisible. Same split as reduced motion: keep
+the opacity/colour half, drop the transform half. An affordance whose *reveal* is the opacity change
+(the IG row chevron) gates only its slide, so touch still gets the hint.
+
 **Reduced motion.** A global safety net in `index.css` collapses every animation/transition to 0.01ms
 under `prefers-reduced-motion: reduce`, so token-driven rules never need a per-rule guard. Infinite
 loops (reorder jiggle, starfield twinkle) and readability-critical reveals additionally carry explicit
-`animation: none`. JS motion gates in-component: framer uses `useReducedMotion`, while
-`MorphingSeries` checks the media query and renders the final path without scheduling RAF work.
+`animation: none`. JS motion gates in-component: the landing's count/typewriter loop and
+`MorphingSeries` both check the media query and render the final state without scheduling RAF work.
 
 **Desktop sidebar.** The persistent column remains layout-pushing in both modes (`240px` expanded,
 `64px` rail). Both directions share **one edge-led beat** — `--motion-reveal` on the width, the
@@ -274,6 +540,31 @@ staged copy delay: labels ride the same beat instead of lagging a disconnected e
 occupy a fixed `40px` first track centred on the rail axis; only the second-track copy is
 masked/faded/translated. The global reduced-motion net collapses the duration to ~0, and since no rule
 carries a transition-delay the mode switch is immediate.
+
+**The frequency sweep beyond Ctrl+B (2026-08-11) came back clean.** Every control a user touches
+dozens of times a day was checked for MOTION, not for animation in general — colour is exempt, since
+a tint that lingers costs nothing and reads as nothing. The per-widget period pills carry no
+transition at all. Sidebar nav rows, the panel toggle and the source switcher rows carry
+`transition-colors` only. The single piece of motion on a high-frequency control is the tab glider,
+and it stays: the movement IS the mode indicator, which is a stated reason to animate rather than a
+decoration. `Ctrl+B` was the one real violation and it was fixed in #434. Re-run this sweep when a
+new frequent control ships — the question is «does it MOVE», not «does it transition».
+
+**Rapid re-open does not restart a keyframe mid-flight (measured 2026-08-11).** The concern was that
+`animate-in` / `animate-out` are keyframes, which resume from 0% instead of picking up where they
+were. Frame sampling on the account dropdown: the exit falls monotonically 1.00 → 0.00 over ~95ms,
+the node UNMOUNTS, and a re-open is a fresh mount fading in from zero. Radix does not hand the same
+node back mid-exit, so there is no backwards jump to see and no reason to convert these to
+transitions.
+
+**Frequency gate: the keyboard path does not animate.** `Ctrl+B` snaps the sidebar to its new width;
+only the pointer toggle plays the 300ms gesture. A shortcut is used dozens of times a day by whoever
+learned it, and at that frequency an animation stops reading as polish and becomes latency the user
+waits out — the same reasoning that keeps motion off any other high-frequency, keyboard-initiated
+action. `Sidebar.tsx` writes `data-instant` on the shell for exactly the one commit that changes the
+width and clears it on the next painted frame; the `.sidebar-shell[data-instant]` rule zeroes the
+duration for that frame only. Gated by `e2e/smoke.spec.ts` («Ctrl+B snaps the sidebar…»), which also
+asserts the pointer path is still mid-flight two frames in.
 
 The **toggle** rides the sidebar's moving outer edge — pinned to the panel's right edge when open,
 sliding back onto the `32px` rail axis as it collapses (Search holds the left axis, dropping below the
@@ -285,14 +576,14 @@ carrying the Russian label and discrete `Ctrl`/`B` key chips.
 
 **Bespoke (not canon).** Illustration loops keep their own timings on purpose and are allow-listed by
 the lint: cartograph (error/404/empty), the `/connect` orbital hub + starfield, and the reorder jiggle.
-Framer on the public landing is its own system (`EASE` constant + per-variant durations).
+The public landing's CSS-native entrance/draw/bob choreography is its own system.
 
 **Overlays & mobile sheets.** Dialogs are borders-only (no shadow): a `bg-background/70` backdrop fades
 in (`.detail-backdrop-in`, `--motion-press`) while the panel appears. On mobile the card **detail**
 (`DetailShell` `panel`) drops its inset to a full-height, edge-to-edge sheet (`p-0 sm:p-4`,
 `rounded-none sm:rounded`), and the **source switcher** opens as a bottom sheet that slides up
-(`.sheet-in`, `--motion-reveal`) — both portal-rendered above the bottom nav, focus-trapped
-(`useFocusTrap`), Escape/backdrop-dismissable, and bottom-padded with `env(safe-area-inset-bottom)` so
+(`.sheet-in`, `--motion-reveal`) — both portal-rendered above the bottom nav, focus-managed
+by the shared Radix Dialog layer, Escape/backdrop-dismissable, and bottom-padded with `env(safe-area-inset-bottom)` so
 the last row clears the home indicator (the fixed bottom nav uses the same pad). Gated by
 `e2e/mobile-nav.spec.ts`.
 
@@ -312,11 +603,17 @@ Run from `frontend/`:
 
 - `node scripts/contrast-tokens.mjs` — WCAG contrast for the colour tokens (text 4.5 / non-text 3.0;
   hairlines warn-only). Pairs with the axe `e2e/a11y-contrast.spec.ts` gate (rendered text).
+- `e2e/contrast-rendered.spec.ts` — the same question asked of the RENDERED page, both themes,
+  14 routes. It exists because axe has two structural blind spots: it skips `aria-hidden` elements
+  entirely (visible affordance glyphs are never checked) and it reports `incomplete` — not a
+  violation — when the background is translucent, which the axe spec silently drops. Here the
+  background is composited through a canvas (Tailwind emits `oklab(...)` for alpha utilities, which
+  no naive parser reads), so a translucent surface gets a real verdict instead of a shrug.
 - `npm run lint:motion` (`node scripts/design-motion-lint.mjs`) — **gated in CI** (the `frontend` job,
   ahead of the suite). Hard-fails on an inlined house easing, magic `text-[Npx]`, arbitrary
   `duration-[…]/ease-[…]/delay-[…]`, off-ladder `duration-300`/`ease-out`, `transition-all`,
   arbitrary `z-[N]`, or a transition on a layout-triggering property. The public marketing landing
-  (`pages/Landing.tsx`, its own framer system) and `pages/Legal.tsx` (long-form prose) are exempt
+  (`pages/Landing.tsx`, its own CSS-native motion system) and `pages/Legal.tsx` (long-form prose) are exempt
   from the **type-scale** rule only — the motion rules apply everywhere. Migrating those two
   surfaces onto the scale is a separate, deliberate task.
 

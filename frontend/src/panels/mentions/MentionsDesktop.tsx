@@ -4,10 +4,11 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { useMentionSettings, useMentions, useMentionsArchive } from '@/api/queries';
 import { usePagePeriod } from '@/lib/period';
 import { serializeContentPeriod } from '@/lib/contentFilters';
+import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card';
 import {
   applyMentionsFilters,
   buildMentionsTimeline,
-  ddmmFromIso,
+  capMentionsTimeline,
   filterMentionRows,
   mentionsDelta,
   mentionsInsights,
@@ -20,7 +21,8 @@ import {
   type MentionsFilters,
   type MentionsSort,
 } from '@/lib/mentionsFilters';
-import { fmt } from '@/lib/format';
+import { fmt, timeAxisFromDayKeys } from '@/lib/format';
+import { TwoLineDate } from '@/components/TwoLineDate';
 import { cn } from '@/lib/utils';
 import { BarChart } from '@/components/BarChart';
 import { Button } from '@/components/ui/button';
@@ -33,6 +35,7 @@ import { ErrorState } from '@/components/ErrorState';
 import { Icon } from '@/components/nav-icons';
 import { Skeleton } from '@/components/ui/skeleton';
 import { MentionNotifyDialog } from '@/components/mentions/MentionNotifyDialog';
+import { useLiveList } from '@/lib/useLiveList';
 import { MentionRulesDialog } from '@/components/mentions/MentionRulesDialog';
 
 /**
@@ -135,6 +138,8 @@ export function MentionsDesktop() {
   const notifyDialog = notifyOpen ? <MentionNotifyDialog onClose={() => setNotifyOpen(false)} /> : null;
 
   const data = archive.data;
+  const quota = data?.quota ?? null;
+  const skipped = data?.skipped ?? [];
   const sourceOptions: MentionSourceOption[] = data?.source_options ?? [];
   const selectedSource = filters.source
     ? sourceOptions.find((option) => option.channel_id === filters.source) ?? null
@@ -162,12 +167,18 @@ export function MentionsDesktop() {
   const scopeTo = data?.scope?.to ?? null;
   const timeline = useMemo(
     () =>
-      buildMentionsTimeline(
-        daily,
-        previousDaily,
-        pageDays,
-        data?.scope?.current_to ?? Date.now(),
-        scopeFrom && scopeTo ? { from: scopeFrom, to: scopeTo } : null,
+      // Кап длинного окна перед рендером (канон CLAUDE.md): «Всё» = до 365 дневных баров, кастомный
+      // диапазон не ограничен вовсе — capMentionsTimeline честно сворачивает их в календарные
+      // недели (bar-ветка), сохраняя ghost теми же корзинами. KPI выше читают totals из data.
+      capMentionsTimeline(
+        buildMentionsTimeline(
+          daily,
+          previousDaily,
+          pageDays,
+          data?.scope?.current_to ?? Date.now(),
+          scopeFrom && scopeTo ? { from: scopeFrom, to: scopeTo } : null,
+        ),
+        'bar',
       ),
     [daily, previousDaily, pageDays, data?.scope?.current_to, scopeFrom, scopeTo],
   );
@@ -325,7 +336,19 @@ export function MentionsDesktop() {
             )}
           </div>
           {settings?.configured && settings.can_edit && (
-            <span className="text-2xs text-muted-foreground">Поиск запускается вручную и расходует ограниченную квоту Telegram.</span>
+            // Остаток квоты ЧИСЛОМ, а не фразой «ограниченную»: мобильная поверхность печатает
+            // «квота: N/M бесплатных», и десктоп знал о своих лимитах меньше телефона. Числа нет
+            // только до первого ответа архива — тогда остаётся прежняя формулировка.
+            <span className="text-2xs text-muted-foreground">
+              {quota
+                ? <>Поиск запускается вручную · осталось <span className="tabular-nums text-foreground">{quota.remains ?? '—'}</span> из {quota.total ?? '—'} бесплатных запросов Telegram.</>
+                : 'Поиск запускается вручную и расходует ограниченную квоту Telegram.'}
+            </span>
+          )}
+          {/* Пропущенные по квоте источники — та же честность, что на телефоне: без этой строки
+              пустой результат по каналу читался бы как «упоминаний нет». */}
+          {skipped.length > 0 && (
+            <span className="text-2xs text-destructive/90">пропущено по квоте: {skipped.join(', ')}</span>
           )}
           {settings && !settings.can_edit && (
             <span className="text-2xs text-muted-foreground">Поиск может запускать владелец или администратор.</span>
@@ -383,16 +406,21 @@ export function MentionsDesktop() {
             id="mentions-timeline"
             title={!hasRange && pageDays === 0 ? 'Упоминания по дням · последние 365 дней' : 'Упоминания по дням'}
             fixedSize="full"
+            // Полноширинная карточка авто-высотная, а её тело — `flex-1 min-h-0` в колонке без высоты:
+            // графику доставалось 60px из 164px карточки — гребёнка у нижнего края (аудит #554, D15).
+            // 320px — полтора фикс-тайла 264px: годовой дневной ряд на всю ширину заслуживает больше
+            // высоты, чем треть-карточка, но не должен выталкивать таблицу за первый экран.
+            chartHeight={320}
             drillTo={`/metrics/mentions-timeline${metricQuery}`}
             expand={{
               renderExpandedBar: () => (
-                <BarChart values={timeline.values} labels={timeline.labels} titles={timeline.titles} ghost={timeline.ghost} ghostLabel="Предыдущий период" />
+                <BarChart values={timeline.values} labels={timeline.labels} axisLabels={timeAxisFromDayKeys(timeline.days)} titles={timeline.titles} ghost={timeline.ghost} ghostLabel="Предыдущий период" />
               ),
               statsFor: () => timeline.values,
             }}
           >
             {timeline.values.length > 0 ? (
-              <BarChart values={timeline.values} labels={timeline.labels} titles={timeline.titles} ghost={timeline.ghost} ghostLabel="Предыдущий период" />
+              <BarChart values={timeline.values} labels={timeline.labels} axisLabels={timeAxisFromDayKeys(timeline.days)} titles={timeline.titles} ghost={timeline.ghost} ghostLabel="Предыдущий период" />
             ) : (
               <EmptyState compact size="chart" title="За выбранный период упоминаний нет." />
             )}
@@ -547,7 +575,7 @@ function PeriodContext({
   const items: { label: string; value: string }[] = [];
   if (insights.peak) items.push({
     label: sourceFiltered ? 'Пик выбранного канала' : 'Пик упоминаний',
-    value: `${ddmmFromIso(insights.peak.day)} · ${fmt.num(insights.peak.mentions)}`,
+    value: `${fmt.day(insights.peak.day)} · ${fmt.num(insights.peak.mentions)}`,
   });
   if (insights.topSourceLabel && insights.topSourceMentionShare != null) {
     items.push({
@@ -598,6 +626,7 @@ function MentionsTable({
   hasArchive: boolean;
   hasPeriodRows: boolean;
 }) {
+  const liveListRef = useLiveList<HTMLTableSectionElement>();
   const toggleSort = (key: MentionsSort) =>
     onUpdate(
       key === filters.sort
@@ -687,7 +716,9 @@ function MentionsTable({
                 <th className="w-10 py-2.5 pl-3 pr-0 text-right"></th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-border">
+            {/* Живой список (волна C): сортировка/фильтры/приход fresh-упоминаний перестраивают
+                строки плавно (auto-animate на токенах, reduced-motion гасится библиотекой). */}
+            <tbody ref={liveListRef} className="divide-y divide-border">
               {rows.map((r, idx) => (
                 <tr key={`${r.channel_id ?? ''}-${r.msg_id ?? idx}`} className="group transition-colors hover:bg-hover-row">
                   <td className="py-2.5 pl-0 pr-3 align-top">
@@ -698,7 +729,28 @@ function MentionsTable({
                   </td>
                   <td className="px-3 py-2.5 align-top">
                     {r.snippet ? (
-                      <span className="line-clamp-2 text-sm leading-relaxed text-muted-foreground">{r.snippet}</span>
+                      // Hover-превью (shadcn Hover Card, выбор владельца): полный сниппет без
+                      // клика — строка усечена до двух строк.
+                      <HoverCard>
+                        <HoverCardTrigger asChild>
+                          <span className="line-clamp-2 text-sm leading-relaxed text-muted-foreground">{r.snippet}</span>
+                        </HoverCardTrigger>
+                        <HoverCardContent className="w-96">
+                          <div className="mb-2 flex items-baseline justify-between gap-3">
+                            <span className="min-w-0 truncate text-xs font-medium text-foreground">
+                              {r.username ? `@${r.username}` : r.title || 'Канал'}
+                            </span>
+                            {r.views != null && (
+                              <span className="shrink-0 text-2xs tabular-nums text-muted-foreground">
+                                {fmt.num(r.views)} просм.
+                              </span>
+                            )}
+                          </div>
+                          <p className="line-clamp-[10] whitespace-pre-line text-sm leading-relaxed text-foreground">
+                            {r.snippet}
+                          </p>
+                        </HoverCardContent>
+                      </HoverCard>
                     ) : (
                       <span className="text-sm italic text-muted-foreground/60">Без текста</span>
                     )}
@@ -716,7 +768,7 @@ function MentionsTable({
                         target="_blank"
                         rel="noopener noreferrer"
                         title="Открыть в Telegram"
-                        className="inline-flex size-7 items-center justify-center rounded-full text-primary transition-colors hover:bg-primary/10"
+                        className="inline-flex size-7 items-center justify-center rounded-full text-primary transition-colors hover:bg-primary/10 hover:text-accent-foreground"
                         aria-label="Открыть упоминание в Telegram"
                       >
                         <Icon name="external" className="size-4" />
@@ -733,17 +785,6 @@ function MentionsTable({
         </div>
       )}
     </div>
-  );
-}
-
-/** Дата максимум в две строки («20 июн.» / «06:01»): узкая колонка не должна ломать дату на три. */
-function TwoLineDate({ iso }: { iso: string }) {
-  const [day, time] = fmt.date(iso).split(', ');
-  return (
-    <span className="inline-flex flex-col items-end">
-      <span className="whitespace-nowrap">{day}</span>
-      {time && <span className="whitespace-nowrap">{time}</span>}
-    </span>
   );
 }
 
@@ -771,7 +812,7 @@ function SortButton({
       )}
     >
       {label}
-      <span aria-hidden="true" className={cn('text-2xs', !active && 'text-ink3/60')}>
+      <span aria-hidden="true" className={cn('text-2xs', !active && 'text-ink3')}>
         {active ? (order === 'desc' ? '↓' : '↑') : '↕'}
       </span>
     </button>

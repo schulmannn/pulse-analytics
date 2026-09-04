@@ -1,7 +1,8 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useSearchParams } from 'react-router-dom';
-import { ChevronDown, ChevronRight, X } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, Download } from 'lucide-react';
+import { IconMorph, useMorphFlash } from '@/components/ui/icon-morph';
 import {
   WorkspaceInspector,
   WorkspaceMetadataItem,
@@ -13,6 +14,7 @@ import { useIgTags, useRemoveCampaignPosts } from '@/api/queries';
 import { ChartSection } from '@/components/ChartWidget';
 import { PillSelect } from '@/components/PillSelect';
 import { SearchField } from '@/components/SearchField';
+import { FilterChip } from '@/components/FilterChip';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -21,6 +23,7 @@ import {
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { WidgetGroup } from '@/components/widgets/WidgetGroup';
 import { Section } from '@/components/instagram/shared';
 import {
@@ -38,11 +41,13 @@ import { ErrorState } from '@/components/ErrorState';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Skeleton } from '@/components/ui/skeleton';
 import { RichText } from '@/components/RichText';
+import { TwoLineDate } from '@/components/TwoLineDate';
+import { Icon, type IconName } from '@/components/nav-icons';
 import { exportIgPosts } from '@/lib/igExport';
 import { exportFilename } from '@/lib/analyticsExport';
 import { fmt } from '@/lib/format';
 import { MEDIA_TYPE_LABEL } from '@/lib/igMetrics';
-import { compareToMedian, medianDeltaLabel, periodMedian, MEDIAN_MIN_SAMPLE } from '@/lib/postMedian';
+import { compareToMedian, medianDeltaLabel, medianDeltaShort, periodMedian, MEDIAN_MIN_SAMPLE } from '@/lib/postMedian';
 import {
   IG_SECONDARY_VIEWS,
   applyIgContentFilters,
@@ -62,6 +67,8 @@ import {
 } from '@/lib/igContentFilters';
 import { cn } from '@/lib/utils';
 import { useIgScopedPosts, toCampaignItems } from '@/panels/instagram/igContentScope';
+import { useLiveList } from '@/lib/useLiveList';
+import { useScrollEdgeFade } from '@/lib/useScrollEdgeFade';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Desktop — shadcn-style Publications table with an adjacent inspector and removable active-filter
@@ -166,7 +173,7 @@ interface TableViewportGeometry {
   maxWidth: number;
 }
 
-export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) {
+export function IgContentDesktop({ ig }: { ig: IgData }) {
   const [params, setParams] = useSearchParams();
   const paramsRef = useRef(params);
   const { channelId, campaignId, campaignPostsQ, posts, formatItems } = useIgScopedPosts(ig);
@@ -186,8 +193,10 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
   // Current 1-based page — only material once the result set exceeds one page (see PAGE_SIZE).
   const [page, setPage] = useState(1);
   const tableShellRef = useRef<HTMLDivElement>(null);
+  const tableFadeRef = useScrollEdgeFade(tableShellRef);
   const tableRef = useRef<HTMLTableElement>(null);
   const tableHeaderRef = useRef<HTMLTableSectionElement>(null);
+  const liveListRef = useLiveList<HTMLTableSectionElement>();
   const [stickyHeader, setStickyHeader] = useState<StickyHeaderGeometry | null>(null);
   const [tableViewport, setTableViewport] = useState<TableViewportGeometry | null>(null);
 
@@ -237,6 +246,8 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
   const scope = posts;
   const visible = filterIgPosts(scope, { q: filters.q, format: filters.format });
   const rows = sortIgPosts(visible, filters.sort, filters.order);
+  // Морф Download→Check после выгрузки CSV (кнопочная моторика 2026-08-18).
+  const [exported, flashExported] = useMorphFlash();
 
   // Pagination is conditional: ≤ PAGE_SIZE rows render whole with no footer. Past that, slice a page
   // and clamp the current page so filter/scope changes that shrink the set never leave an empty view.
@@ -397,13 +408,12 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
 
   const toolbar = (
     <>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        {tabs}
+      <div className="flex flex-wrap items-center justify-end gap-3">
         <Button
           type="button"
           variant="outline"
           size="sm"
-          onClick={() =>
+          onClick={() => {
             exportIgPosts(
               rows,
               exportFilename({
@@ -413,13 +423,21 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
                 from: ig.window.since,
                 to: ig.window.until,
               }),
-            )
-          }
+            );
+            flashExported();
+          }}
           disabled={rows.length === 0}
           aria-label="Экспорт показанных публикаций в CSV"
           title={rows.length === 0 ? 'Нет публикаций для экспорта' : `CSV: ${rows.length} показанных публикаций`}
-          className="text-muted-foreground"
+          className="gap-1.5 text-muted-foreground"
         >
+          {/* Морф Download→Check — подтверждение выгрузки (кнопочная моторика 2026-08-18). */}
+          <IconMorph
+            active={exported}
+            a={<Download className="size-3.5" />}
+            b={<Check className="size-3.5" />}
+            className="size-3.5"
+          />
           Экспорт таблицы
         </Button>
       </div>
@@ -493,27 +511,6 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
           </DropdownMenu>
         </div>
       </div>
-      {/* Активные фильтры — снимаемые чипы на общем Badge; модель уже в URL (igContentFilters),
-          чипы лишь визуализируют её и снимают по одному. */}
-      {hasContentFilters && (
-        <div className="flex flex-wrap items-center gap-1.5" data-testid="ig-filter-chips">
-          {filters.q.trim() !== '' && (
-            <RemovableFilterChip
-              label={`Поиск: «${filters.q.trim()}»`}
-              removeLabel="Убрать поиск"
-              onRemove={() => update({ q: '' })}
-            />
-          )}
-          {filters.format !== 'all' && (
-            <RemovableFilterChip
-              variant="secondary"
-              label={`Формат: ${FORMAT_OPTIONS.find((option) => option.value === filters.format)?.label ?? filters.format}`}
-              removeLabel="Убрать фильтр формата"
-              onRemove={() => update({ format: 'all' })}
-            />
-          )}
-        </div>
-      )}
     </>
   );
 
@@ -539,35 +536,43 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
   );
 
   const secondaryBlock = (
+    <Tabs
+      value={secondary}
+      onValueChange={(next) => setSecondary(next as IgSecondaryView)}
+      asChild
+    >
     <section className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-2xs text-muted-foreground">Разборы</span>
-        <div className="flex flex-wrap gap-1" role="tablist" aria-label="Дополнительные разборы контента">
+        <TabsList
+          aria-label="Дополнительные разборы контента"
+          variant="line"
+          className="flex-wrap justify-start"
+        >
           {IG_SECONDARY_VIEWS.map((key) => (
-            <button
+            <TabsTrigger
               key={key}
-              type="button"
-              role="tab"
-              aria-selected={secondary === key}
-              onClick={() => setSecondary(key)}
-              className={cn(
-                'btn-pill px-3 py-1 text-xs font-medium transition-colors',
-                secondary === key ? 'bg-primary/15 text-foreground' : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
-              )}
+              value={key}
+              className="text-xs"
             >
               {SECONDARY_LABEL[key]}
-            </button>
+            </TabsTrigger>
           ))}
-        </div>
+        </TabsList>
       </div>
-      <IgSecondaryBody
-        view={secondary}
-        ig={ig}
-        posts={scope}
-        formatItems={formatItems}
-        campaignId={campaignId}
-      />
+      {IG_SECONDARY_VIEWS.map((key) => (
+        <TabsContent key={key} value={key} className="mt-0">
+          <IgSecondaryBody
+            view={key}
+            ig={ig}
+            posts={scope}
+            formatItems={formatItems}
+            campaignId={campaignId}
+          />
+        </TabsContent>
+      ))}
     </section>
+    </Tabs>
   );
   const campaignDataBlocked = campaignId != null && (campaignPostsQ.isPending || campaignPostsQ.isError);
 
@@ -576,7 +581,7 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
       ref={floating ? undefined : tableHeaderRef}
       aria-hidden={!floating && stickyHeader != null ? true : undefined}
     >
-      <tr className="text-2xs font-semibold tracking-wide text-foreground">
+      <tr>
         <th className="w-10 pl-4 pr-2 sm:pl-5">
           <Checkbox
             aria-label="Выбрать все видимые публикации"
@@ -605,7 +610,9 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
         >
           <SortButton label="Дата" active={filters.sort === 'date'} order={filters.order} onClick={() => toggleSort('date')} />
         </th>
-        <th aria-hidden="true" className="sticky right-0 ig-sticky-action-head w-10 bg-surface-table px-2"></th>
+        <th scope="col" className="sticky right-0 ig-sticky-action-head w-10 bg-surface-table px-2">
+          <span className="sr-only">Действия</span>
+        </th>
       </tr>
     </thead>
   );
@@ -617,6 +624,32 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
           className="fixed z-sticky overflow-hidden border-b border-border/75 bg-surface-table shadow-sm"
           style={{ top: stickyHeader.top, left: stickyHeader.left, width: stickyHeader.width }}
         >
+          {/* Активные фильтры показываются ЗДЕСЬ, а не в тулбаре: в тулбаре рядом стоят поле поиска
+              и селект формата, которые уже несут те же значения и умеют их снимать, — чип там был
+              бы повтором. В прокрученной таблице тулбара на экране нет, и это единственное место,
+              где видно, чем сужена выдача; снять фильтр можно тут же. */}
+          {hasContentFilters && (
+            <div
+              className="flex flex-wrap items-center gap-1.5 border-b border-border/60 px-3 py-1.5"
+              data-testid="ig-filter-chips"
+            >
+              {filters.q.trim() !== '' && (
+                <FilterChip
+                  label={`Поиск: «${filters.q.trim()}»`}
+                  removeLabel="Убрать поиск"
+                  onRemove={() => update({ q: '' })}
+                />
+              )}
+              {filters.format !== 'all' && (
+                <FilterChip
+                  variant="secondary"
+                  label={`Формат: ${FORMAT_OPTIONS.find((option) => option.value === filters.format)?.label ?? filters.format}`}
+                  removeLabel="Убрать фильтр формата"
+                  onRemove={() => update({ format: 'all' })}
+                />
+              )}
+            </div>
+          )}
           <table
             aria-label="Закреплённые заголовки таблицы публикаций"
             className="data-table ig-content-table text-left text-sm"
@@ -649,7 +682,12 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
             size="sm"
             onClick={() => setAddItems(selectedItems)}
             data-testid="add-to-campaign"
-            className="bg-foreground text-surface-table hover:bg-foreground/90 focus-visible:ring-foreground/35"
+            variant="contrast"
+            // Чернила по МЕСТНОЙ плите, и это единственное намеренное отличие от варианта:
+            // кнопка стоит на bg-surface-table, а в тёмной теме --surface-table (#0D0D0F) и
+            // --background (#080808) расходятся на 2% светлоты (гейт ig-content.spec:302
+            // сверяет цвет кнопки именно с плитой таблицы, и сверяет в тёмной теме).
+            className="text-surface-table"
           >
             Добавить в кампанию
           </Button>
@@ -722,16 +760,16 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
     cardBody = (
       <>
       <div
-        ref={tableShellRef}
+        ref={tableFadeRef}
         className={cn(
-          'mx-4 overflow-x-auto overflow-y-hidden overscroll-x-contain rounded-xl border border-border/75 bg-surface-table [contain:paint] sm:mx-5',
+          'scroll-fade-x mx-4 overflow-x-auto overflow-y-hidden overscroll-x-contain rounded-xl border border-border/75 bg-surface-table [contain:paint] sm:mx-5',
           paginated ? 'mb-3 sm:mb-3.5' : 'mb-4 sm:mb-5',
         )}
         data-ig-content-table
       >
         <table ref={tableRef} className="data-table ig-content-table text-left text-sm">
           {renderTableHeader()}
-          <tbody>
+          <tbody ref={liveListRef}>
             {pagedRows.map((post, idx) => {
               const clickable = post.id != null;
               const isOpen = post.id != null && post.id === openId;
@@ -753,11 +791,12 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
                         : 'hover:bg-muted/40',
                   )}
                 >
-                  <td className="pl-4 pr-2 sm:pl-5" onClick={(e) => e.stopPropagation()}>
+                  <td className="pl-4 pr-2 sm:pl-5">
                     {post.id != null && (
                       <Checkbox
                         aria-label="Выбрать публикацию"
                         checked={selected.has(post.id)}
+                        onClick={(event) => event.stopPropagation()}
                         onCheckedChange={() => toggleSelect(post.id!)}
                         data-testid="ig-post-select"
                         className={IG_SELECT_CHECKBOX_CLASS}
@@ -799,7 +838,7 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
                     );
                   })}
                   <td className="px-3 pr-4 text-right text-xs tabular-nums text-muted-foreground sm:pr-5">
-                    {post.timestamp ? fmt.date(post.timestamp) : <span className="text-muted-foreground/40">—</span>}
+                    {post.timestamp ? <TwoLineDate iso={post.timestamp} /> : <span className="text-muted-foreground/40">—</span>}
                   </td>
                   <td className="sticky right-0 ig-sticky-action-cell w-10 border-l border-border/0 bg-inherit px-2 text-center transition-colors group-hover:border-border/40">
                     {clickable && (
@@ -810,7 +849,10 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
                           'mx-auto size-4 transition-[opacity,transform,color] dur-fast ease-house',
                           isOpen
                             ? 'text-primary opacity-100'
-                            : 'translate-x-1 text-muted-foreground opacity-0 group-hover:translate-x-0 group-hover:opacity-100 group-focus-within:translate-x-0 group-focus-within:opacity-100',
+                            // Only the slide is pointer-gated: the opacity reveal IS the affordance
+                            // («эта строка открывается»), so on a touch tablet it still appears —
+                            // just without the 4px nudge that would otherwise stick after a tap.
+                            : 'translate-x-1 text-muted-foreground opacity-0 group-hover:opacity-100 group-hover-fine:translate-x-0 group-focus-within:translate-x-0 group-focus-within:opacity-100',
                         )}
                       />
                     )}
@@ -870,31 +912,7 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
  * Снимаемый чип активного фильтра: тот же Badge, что несут NetworkBadge и статусы, плюс кнопка
  * снятия с честным русским `aria-label` (Astryx-токен подписывал её английским «Remove …»).
  */
-function RemovableFilterChip({
-  label,
-  removeLabel,
-  onRemove,
-  variant = 'default',
-}: {
-  label: string;
-  removeLabel: string;
-  onRemove: () => void;
-  variant?: 'default' | 'secondary';
-}) {
-  return (
-    <Badge variant={variant} className="max-w-full gap-1 pr-1">
-      <span className="truncate">{label}</span>
-      <button
-        type="button"
-        aria-label={removeLabel}
-        onClick={onRemove}
-        className="-mr-0.5 inline-flex size-4 shrink-0 items-center justify-center rounded-full opacity-70 transition-opacity hover:opacity-100 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40"
-      >
-        <X className="size-3" aria-hidden="true" />
-      </button>
-    </Badge>
-  );
-}
+
 
 /**
  * The adjacent desktop inspector — a focused, read-first summary of the row selected in the table,
@@ -932,7 +950,12 @@ function IgPostInspector({
               type="button"
               size="xs"
               onClick={() => onOpenFull(post.id!)}
-              className="bg-foreground text-surface-table hover:bg-foreground/90 focus-visible:ring-foreground/35"
+              variant="contrast"
+            // Чернила по МЕСТНОЙ плите, и это единственное намеренное отличие от варианта:
+            // кнопка стоит на bg-surface-table, а в тёмной теме --surface-table (#0D0D0F) и
+            // --background (#080808) расходятся на 2% светлоты (гейт ig-content.spec:302
+            // сверяет цвет кнопки именно с плитой таблицы, и сверяет в тёмной теме).
+            className="text-surface-table"
             >
               Открыть подробнее
             </Button>
@@ -1047,7 +1070,7 @@ function SortButton({ label, active, order, onClick }: { label: string; active: 
     <button
       type="button"
       onClick={onClick}
-      className="group ml-auto inline-flex items-center gap-1 font-semibold tabular-nums text-foreground transition-colors hover:text-foreground/80"
+      className="group ml-auto inline-flex items-center gap-1 tabular-nums text-foreground transition-colors hover:text-foreground/80"
     >
       {label}
       <span
@@ -1056,7 +1079,7 @@ function SortButton({ label, active, order, onClick }: { label: string; active: 
           'text-2xs transition-opacity',
           active
             ? 'text-foreground'
-            : 'text-ink3/60 opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100',
+            : 'text-ink3 opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100',
         )}
       >
         {active ? (order === 'desc' ? '↓' : '↑') : '↕'}
@@ -1078,9 +1101,16 @@ function IgFormatTag({ post }: { post: IgPost }) {
 }
 
 /**
- * A metric cell with explicit comparable-period median context. Value is always shown; the «±N% к
- * медиане» delta appears only when periodMedian cleared the min-sample gate (never a faked
- * benchmark). Missing value → «—». Colour is reserved for the signal column (reach).
+ * A metric cell with explicit comparable-period median context. Value is always shown; the delta
+ * appears only when periodMedian cleared the min-sample gate (never a faked benchmark). Missing
+ * value → «—». The delta reads MUTED (канон дельт, зеркало Posts.tsx): direction is carried by the
+ * sign, and verdant/ember stay reserved for the one evaluated period-vs-period Δ of a comparison
+ * rail. `tone` only picks the value ink.
+ *
+ * Подпись КОРОТКАЯ («+44%», полная формулировка — в title), как в таблице Telegram: «+44% к
+ * медиане» не помещалась в колонку метрики (73–113 px) и переносилась на две строки, а «на уровне
+ * медианы» — на три, раздувая ряд с 67 до 81 px (аудит #554, D10). `whitespace-nowrap` держит
+ * инвариант: колонка расширится, но подпись не сломается.
  */
 function MedianCell({
   value,
@@ -1095,41 +1125,65 @@ function MedianCell({
 }) {
   if (value == null) return <span className="text-muted-foreground/40">—</span>;
   const cmp = compareToMedian(value, median);
-  const deltaColor =
-    tone === 'signal' && cmp
-      ? cmp.dir === 'above'
-        ? 'text-verdant'
-        : cmp.dir === 'below'
-          ? 'text-ember'
-          : 'text-muted-foreground'
-      : 'text-muted-foreground';
   return (
     <>
       <span className={cn('block font-medium tabular-nums', tone === 'signal' ? 'text-foreground' : 'text-muted-foreground')}>{format(value)}</span>
-      {cmp && <span className={cn('block text-2xs', deltaColor)}>{medianDeltaLabel(cmp)}</span>}
+      {cmp && (
+        <span className="block whitespace-nowrap text-2xs tabular-nums text-muted-foreground" title="к медиане за период">
+          {medianDeltaShort(cmp)}
+        </span>
+      )}
     </>
   );
 }
 
-/** Small square preview for a table row; neutral word-fallback on missing/broken cover. */
+/**
+ * Small square preview for a table row. На отсутствующей/битой обложке — ПИКТОГРАММА формата, как в
+ * таблице Telegram: словом формат назван рядом (`IgFormatTag` в колонке «Публикация», бейдж в
+ * инспекторе), а в квадрат 40 px слово не влезало — «Альбом» рисовался на 45 px и обрезался
+ * (аудит #554, D10). Точный формат остаётся доступен ховером через `title`.
+ */
 function IgPostThumb({ post }: { post: IgPost }) {
   const [brokenSrc, setBrokenSrc] = useState<string | null>(null);
   const [loadedSrc, setLoadedSrc] = useState<string | null>(null);
+  const imageRef = useRef<HTMLImageElement>(null);
   const isVideo = post.media_type === 'VIDEO' || post.media_product_type === 'REELS';
   const originalCover = post.thumbnail_url || (!isVideo ? post.media_url : null) || null;
   const proxyFailed = post.table_thumbnail_url != null && brokenSrc === post.table_thumbnail_url;
   const cover = proxyFailed ? originalCover : post.table_thumbnail_url || originalCover;
   const broken = cover != null && brokenSrc === cover;
   const loaded = cover != null && loadedSrc === cover;
-  const label = classifyIgFormat(post) === 'reels' ? 'Reels' : classifyIgFormat(post) === 'video' ? 'Видео' : classifyIgFormat(post) === 'carousel' ? 'Альбом' : 'Фото';
+  const bucket = classifyIgFormat(post);
+  const label = igFormatLabel(post);
+  const glyph: IconName = bucket === 'carousel' ? 'carousel' : bucket === 'photo' ? 'image' : 'playCircle';
+  useEffect(() => {
+    const image = imageRef.current;
+    if (!image || !cover || broken) return;
+    const handleLoad = () => setLoadedSrc(cover);
+    const handleError = () => setBrokenSrc(cover);
+    image.addEventListener('load', handleLoad);
+    image.addEventListener('error', handleError);
+    // Cached images may complete before the passive effect attaches.
+    if (image.complete) {
+      if (image.naturalWidth > 0) handleLoad();
+      else handleError();
+    }
+    return () => {
+      image.removeEventListener('load', handleLoad);
+      image.removeEventListener('error', handleError);
+    };
+  }, [cover, broken]);
 
   return (
-    <div className="relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border/40 bg-muted">
-      {(!cover || broken || !loaded) && (
-        <span className="px-0.5 text-center text-2xs font-medium leading-tight text-muted-foreground">{label}</span>
-      )}
+    <div
+      data-ig-content-thumb={label}
+      title={!cover || broken ? label : undefined}
+      className="relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border/40 bg-muted"
+    >
+      {(!cover || broken || !loaded) && <Icon name={glyph} className="size-4 text-muted-foreground" />}
       {cover && !broken ? (
         <img
+          ref={imageRef}
           loading="lazy"
           decoding="async"
           fetchPriority="low"
@@ -1139,8 +1193,6 @@ function IgPostThumb({ post }: { post: IgPost }) {
           src={cover}
           alt=""
           referrerPolicy="no-referrer"
-          onLoad={() => setLoadedSrc(cover)}
-          onError={() => setBrokenSrc(cover)}
           className={cn('absolute inset-0 h-full w-full object-cover', loaded ? 'opacity-100' : 'opacity-0')}
         />
       ) : null}
@@ -1227,7 +1279,7 @@ export function IgContentTableSkeleton({ metricCount = METRIC_COLS.length }: { m
     >
       <table aria-hidden="true" className="data-table ig-content-table text-left text-sm">
         <thead>
-          <tr className="text-2xs font-semibold tracking-wide text-foreground">
+          <tr>
             <th className="w-10 pl-4 pr-2 sm:pl-5"><Skeleton className="h-4 w-4 rounded" /></th>
             <th className="w-12 pl-0 pr-3" />
             <th className="min-w-[240px] px-3"><Skeleton className="h-3 w-24" /></th>

@@ -3,7 +3,8 @@
 // React component so the label/formatting logic is unit-testable (the component itself is just
 // wiring the charts). No React here.
 
-import { fmt } from '@/lib/format';
+import { fmt, timeAxisFromDayKeys } from '@/lib/format';
+import { formatMetricNumber, type NumberRole } from '@/lib/metricNumber';
 import type { MetricUnit, WidgetViz } from '@/lib/widgetMetrics';
 import type { WidgetResult } from '@/lib/resolveWidgetMetric';
 
@@ -34,37 +35,48 @@ export const VIZ_LABEL: Record<WidgetViz, string> = {
 
 /** The number formatter for a unit: percent → «6.5%», views → compact (fmt.short),
  *  currency → «1.2 млн ₽» (рубли МойСклада), else fmt.num. */
-export function unitFormat(unit: MetricUnit): (n: number) => string {
-  if (unit === 'percent') return (n) => `${n.toFixed(1)}%`;
-  if (unit === 'views') return (n) => fmt.short(n);
-  if (unit === 'currency') return (n) => `${fmt.short(n)} ₽`;
-  return (n) => fmt.num(n); // number / posts
+export function unitFormat(unit: MetricUnit, role: NumberRole = 'axis'): (n: number) => string {
+  // Правило одно и живёт в lib/metricNumber — здесь только выбор роли по умолчанию: значения
+  // виджета печатаются рядом с графиком, где места мало, поэтому `axis`.
+  return (n) => formatMetricNumber(n, unit, role);
 }
 
 export interface ChartSeries {
-  values: number[];
+  /** `null` = пропуск измерения: линия рвётся, столбец не рисуется. Не путать с нулём. */
+  values: Array<number | null>;
   labels: string[];
   titles: string[];
+  /** Ось короткого дневного окна: однобуквенные дни недели (канон timeAxisLabels) —
+      только подписи оси, тултипы (`titles`) держат полные даты. */
+  axisLabels?: string[];
 }
 
 /** Adapt a WidgetResult's series into the {values,labels,titles} the chart components take. */
 export function seriesToChart(result: WidgetResult): ChartSeries {
   const series = result.series ?? [];
-  const f = unitFormat(result.unit);
+  const f = unitFormat(result.seriesUnit ?? result.unit);
   // Недельная агрегация (длинные бары): дата точки — понедельник корзины, без « · неделя»
   // тултип «18 июл.: N» читался бы как один день.
-  const suffix = result.meta?.seriesGrain === 'week' ? ' · неделя' : '';
+  const week = result.meta?.seriesGrain === 'week';
+  const suffix = week ? ' · неделя' : '';
   const labels = series.map((p) => bucketLabel(p.date));
   const values = series.map((p) => p.value);
-  const titles = series.map((p, i) => `${labels[i]}: ${f(p.value)}${suffix}`);
-  return { values, labels, titles };
+  // Пропуск подписывается словами, а не «0»: тултип обязан отличать «сбор не прошёл» от нуля.
+  const titles = series.map((p, i) =>
+    p.value == null ? `${labels[i]}: данных нет` : `${labels[i]}: ${f(p.value)}${suffix}`,
+  );
+  // Временна́я ось (timeAxisCore): буквы дней у короткого окна, EN-месяцы у длинного. Недельные
+  // ключи проходят (буквы у них невозможны по размаху, месяц якоря-понедельника честный);
+  // месячные/квартальные корзины отсекает axisKeyToDate — ось остаётся датами.
+  const axisLabels = timeAxisFromDayKeys(series.map((p) => p.date), { monthsOnly: week });
+  return { values, labels, titles, axisLabels };
 }
 
 /** Compact series stats for the story-card footer (S12): «Макс · Среднее» — the density steep puts
  *  beside a chart so a line reads as numbers too, not just a shape. Empty for <2 points (nothing to
  *  summarise beyond the hero). Formatted by the metric unit. */
 export function seriesStats(result: WidgetResult): { label: string; value: string }[] {
-  const f = unitFormat(result.unit);
+  const f = unitFormat(result.seriesUnit ?? result.unit);
   // result.stats — от ПОЛНОЙ серии до визуального капа (LTTB сохраняет экстремумы и смещает
   // среднее по выборке вверх); пересчёт по series — фолбэк для путей мимо resolveWidgetMetric.
   if (result.stats) {
@@ -73,7 +85,9 @@ export function seriesStats(result: WidgetResult): { label: string; value: strin
       { label: 'Среднее', value: f(Math.round(result.stats.avg)) },
     ];
   }
-  const vals = (result.series ?? []).map((p) => p.value);
+  const vals = (result.series ?? [])
+    .map((p) => p.value)
+    .filter((value): value is number => value != null);
   if (vals.length < 2) return [];
   const max = Math.max(...vals);
   const avg = vals.reduce((a, b) => a + b, 0) / vals.length;

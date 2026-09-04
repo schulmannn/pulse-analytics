@@ -9,6 +9,8 @@
 
 'use strict';
 
+const { readRetryAfterHeader, parseRetryAfterSeconds } = require('../lib/retryAfter');
+
 const { fetchWithTimeout } = require('../lib/http');
 
 // "Instagram API with Instagram Login" (no Facebook Page): the IG user access token works
@@ -33,20 +35,23 @@ const IG_RATE_LIMIT_CODES = new Set([4, 17, 32, 613]);
 // malformed/contradictory Graph payload happens to mark them transient.
 const IG_NON_RETRYABLE_CODES = new Set([10, 100, 190, 200]);
 
-// Retry-After may be an integer number of seconds or an HTTP-date; return whole seconds (≥0) or
-// null when absent/unparseable. `nowMs` is injected so the HTTP-date branch is deterministic.
-function parseRetryAfterSeconds(headerValue, nowMs) {
-  if (headerValue == null) return null;
-  const s = String(headerValue).trim();
-  if (s === '') return null;
-  if (/^\d+$/.test(s)) {
-    const seconds = Number(s);
-    return Number.isSafeInteger(seconds) ? seconds : null;
-  }
-  const t = Date.parse(s);
-  if (!Number.isFinite(t)) return null;
-  return Math.max(0, Math.ceil((t - nowMs) / 1000));
+// ── «Токен умер» как отдельное состояние продукта ────────────────────────────────────────────────
+// Протухший long-lived токен — это не «апстрим сломался» (502), а состояние аккаунта: его надо
+// переподключить, и пока этого не сделали, повторять запрос бессмысленно. Даём различимый статус и
+// машинный код, чтобы клиент показал экран «переподключите» вместо вечного скелетона.
+// 401 намеренно НЕ используем: клиент трактует его как конец СОБСТВЕННОЙ сессии и разлогинивает.
+const IG_REAUTH_STATUS = 409;
+const IG_REAUTH_CODE = 'ig_reauth';
+const IG_REAUTH_MESSAGE = 'Токен Instagram истёк — переподключите';
+// Только код 190 и явный текст истёкшей сессии: прочие OAuthException (нет прав, 10/200) — это не
+// «переподключите», а другой разговор, и подменять их этим состоянием было бы враньём.
+function isIgReauthError(graphError, code, graphType) {
+  if (graphType !== 'OAuthException') return false;
+  if (code === 190) return true;
+  const message = graphError && typeof graphError.message === 'string' ? graphError.message : '';
+  return /session has (?:expired|been invalidated)/i.test(message);
 }
+
 
 // X-App-Usage / X-Business-Use-Case-Usage are JSON blobs; return the parsed object only when it is
 // genuinely an object, otherwise undefined (a malformed header must never crash the read).
@@ -146,7 +151,7 @@ function createInstagramClient({ db, log, igCrypto, defaultToken, inflight, fetc
     err.transient = transient;
     err.upstreamStatus = status;
 
-    const retryAfter = parseRetryAfterSeconds(res.headers && res.headers.get('retry-after'), clock());
+    const retryAfter = parseRetryAfterSeconds(readRetryAfterHeader(res), clock());
     if (retryAfter != null) err.retryAfter = retryAfter;
     if (graphError) {
       err.graph = {
@@ -158,6 +163,11 @@ function createInstagramClient({ db, log, igCrypto, defaultToken, inflight, fetc
       if (err.graph.code != null) err.igCode = err.graph.code;
       if (err.graph.subcode != null) err.igSubcode = err.graph.subcode;
       err.igTransient = err.graph.is_transient;
+      if (isIgReauthError(graphError, code, graphType)) {
+        err.status = IG_REAUTH_STATUS;
+        err.code = IG_REAUTH_CODE;
+        err.message = IG_REAUTH_MESSAGE;
+      }
     }
     const appUsage = parseUsageHeader(res.headers && res.headers.get('x-app-usage'));
     if (appUsage) err.appUsage = appUsage;
@@ -248,11 +258,22 @@ function createInstagramClient({ db, log, igCrypto, defaultToken, inflight, fetc
         grant_type: 'ig_refresh_token', access_token: token }).toString());
       const j = await r.json();
       if (j && j.access_token && j.expires_in) {
+        const nextExpiry = new Date(now + j.expires_in * 1000);
         // Провал персиста — actionable (рефреш будет повторяться на каждом чтении): логируем, не глотаем.
-        await db.updateIgToken(channelId, igCrypto.encrypt(j.access_token), new Date(now + j.expires_in * 1000))
+        await db.updateIgToken(channelId, igCrypto.encrypt(j.access_token), nextExpiry)
           .catch((e) => log('warn', 'ig_token_persist_failed', { channelId, error: e.message }));
+        log('info', 'ig_token_refreshed', { channelId, expiresAt: nextExpiry.toISOString() });
         return j.access_token;
       }
+      // Graph ответил, но без нового токена (истёкшая сессия, отозванный доступ, ошибка приложения).
+      // Раньше эта ветка молчала: аккаунт доезжал до истечения без единой строки в логах, и первым
+      // сигналом становился пустой экран у пользователя. Токен и тело ответа в лог не идут — только код.
+      log('warn', 'ig_token_refresh_rejected', {
+        channelId,
+        httpStatus: Number(r && r.status) || 0,
+        graphCode: (j && j.error && j.error.code) ?? null,
+        graphType: (j && j.error && j.error.type) ?? null,
+      });
     } catch (e) { log('warn', 'ig_token_refresh_failed', { channelId, error: e.message }); }
     return token;
   }

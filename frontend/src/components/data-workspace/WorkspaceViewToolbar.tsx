@@ -26,7 +26,7 @@ export interface WorkspaceColumnOption {
 /**
  * Reusable table view toolbar: optional-column visibility (shadcn DropdownMenu with checkbox items —
  * the same multi-select grammar the Instagram «Колонки» control uses) + row density (the shared
- * SegmentedControl). The band is a labelled `group`, not a `toolbar`: each control owns its own
+ * SegmentedControl). The band is a labelled `fieldset`, not a `toolbar`: each control owns its own
  * keyboard model (menu button; roving-tabindex segment track), so announcing one flat arrow-key
  * surface over both would be a lie. Presentation-only — the consumer owns which columns exist and
  * what visibility/density mean for its own rows.
@@ -58,8 +58,9 @@ export function WorkspaceViewToolbar({
   const extra = selected.length > 1 ? `+${selected.length - 1}` : null;
 
   return (
-    <div role="group" aria-label={label} className="flex min-h-7 flex-wrap items-center justify-between gap-2 px-3 py-2">
-      <span className="text-xs leading-5 text-muted-foreground">{label}</span>
+    <fieldset className="m-0 flex min-h-7 min-w-0 flex-wrap items-center justify-between gap-2 border-0 px-3 py-2">
+      <legend className="sr-only">{label}</legend>
+      <span aria-hidden="true" className="text-xs leading-5 text-muted-foreground">{label}</span>
       <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-2">
         <div className="flex items-center gap-1.5">
           <span className="text-xs leading-5 text-muted-foreground">{columnsLabel}</span>
@@ -109,6 +110,6 @@ export function WorkspaceViewToolbar({
           />
         </div>
       </div>
-    </div>
+    </fieldset>
   );
 }

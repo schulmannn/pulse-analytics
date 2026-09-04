@@ -18,8 +18,8 @@ function createAuth(options = {}) {
     return `${body}.${signature}`;
   }
 
-  function signSession({ uid, role, exp, tokenVersion = 0 }) {
-    return sign({ uid, role, exp, ver: tokenVersion });
+  function signSession({ uid, role, exp, maxExp = exp, tokenVersion = 0 }) {
+    return sign({ uid, role, exp, max: maxExp, ver: tokenVersion });
   }
 
   // Accounts only: a valid token always carries a numeric uid. Anything else —
@@ -34,12 +34,21 @@ function createAuth(options = {}) {
       if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) return null;
       const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
       if (!payload || !Number.isInteger(payload.uid)) return null;
-      if (!payload.exp || payload.exp <= Date.now()) return null;
+      if (!Number.isFinite(payload.exp) || payload.exp <= Date.now()) return null;
+      // Sessions issued before the absolute-lifetime rollout have no `max`. Keep
+      // them valid until their original exp, but never let a sliding refresh
+      // extend them past it. The one-time migration bridge turns those old
+      // browser tokens into a fresh, bounded cookie session.
+      const legacyAbsolute = !Number.isFinite(payload.max);
+      const maxExp = legacyAbsolute ? payload.exp : payload.max;
+      if (maxExp <= Date.now() || payload.exp > maxExp) return null;
       return {
         uid: payload.uid,
         role: payload.role || 'user',
         tokenVersion: Number.isInteger(payload.ver) ? payload.ver : 0,
         exp: payload.exp, // caller uses this to slide the session (re-issue past half-life)
+        maxExp,
+        legacyAbsolute,
       };
     } catch (_) {
       return null;
@@ -90,17 +99,17 @@ function rateLimitKey(session, ip) {
 }
 
 // Sliding-session staleness: true once a token is past its half-life, so requireAuth can hand the
-// client a fresh full-TTL token and an active user is never logged out mid-work. Pure + exported so
-// the exact predicate is unit-guarded. A token without a numeric exp is treated as not-stale (no-op).
+// browser a fresh cookie inside the session's absolute lifetime. Pure + exported so the exact
+// predicate is unit-guarded. A token without a numeric exp is treated as not-stale (no-op).
 function isSessionStale(exp, now, ttl) {
   return typeof exp === 'number' && exp - now < ttl / 2;
 }
 
-// ── Cookie-транспорт сессии (cookie-auth, фаза 1) ────────────────────────────
-// Тот же stateless-HMAC-токен, но доставленный HttpOnly-cookie. Header-путь
-// (X-Session-Token) остаётся каноном для SPA/legacy; cookie читается ТОЛЬКО когда
-// заголовка нет. Хелперы чистые + экспортированы, чтобы точный контракт (парсинг,
-// атрибуты Set-Cookie, CSRF-предикат) был unit-заперт — как isSessionStale выше.
+// ── Cookie-only транспорт сессии ────────────────────────────────────────────
+// Stateless-HMAC-токен доставляется только HttpOnly-cookie. X-Session-Token
+// принимается единственным одноразовым migration route и никогда обычным API.
+// Хелперы чистые + экспортированы, чтобы точный контракт (парсинг, атрибуты
+// Set-Cookie, CSRF-предикат) был unit-заперт — как isSessionStale выше.
 const SESSION_COOKIE = 'pulse_session';
 
 // Значение cookie из сырого заголовка Cookie (без cookie-parser — как cookieValue в
@@ -136,8 +145,8 @@ function serializeSessionCookie(token, { secure, maxAgeMs }) {
 // CSRF-предикат для мутаций, аутентифицированных через cookie: браузер шлёт cookie сам,
 // поэтому требуем доказательство same-origin — Origin равен origin запроса; при
 // отсутствии Origin допустим Referer с тем же origin; иначе false (403). Присутствующий,
-// но чужой Origin НЕ падает на Referer-фоллбек. Header-аутентифицированные запросы сюда
-// не заходят вовсе: кастомный заголовок сам по себе CSRF-барьер.
+// но чужой Origin НЕ падает на Referer-фоллбек. Тот же предикат использует
+// одноразовый migration bridge перед приёмом старого заголовочного токена.
 function isCsrfSafe({ origin, referer, requestOrigin }) {
   if (origin) return origin === requestOrigin;
   if (referer) {

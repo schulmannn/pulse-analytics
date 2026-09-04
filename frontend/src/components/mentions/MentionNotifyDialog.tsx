@@ -1,5 +1,5 @@
-import { useEffect, useId, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+import { useEffect, useId, useState } from 'react';
+import { LoaderDots } from '@/components/ui/loader';
 import { toast } from 'sonner';
 import {
   useMentionNotifyLink,
@@ -8,9 +8,9 @@ import {
   useSetMentionNotify,
   useUnbindMentionNotify,
 } from '@/api/queries';
-import { Icon } from '@/components/nav-icons';
 import { Button } from '@/components/ui/button';
-import { useFocusTrap } from '@/lib/useFocusTrap';
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
+import { Snippet } from '@/components/ui/snippet';
 import { cn } from '@/lib/utils';
 
 const DAY_LABELS: Array<[number, string]> = [
@@ -27,8 +27,6 @@ const DAY_LABELS: Array<[number, string]> = [
  */
 export function MentionNotifyDialog({ onClose }: { onClose: () => void }) {
   const titleId = useId();
-  const panelRef = useRef<HTMLDivElement>(null);
-  useFocusTrap(panelRef);
 
   const [linkOpened, setLinkOpened] = useState(false);
   const status = useMentionNotifyStatus(linkOpened);
@@ -36,22 +34,6 @@ export function MentionNotifyDialog({ onClose }: { onClose: () => void }) {
   const toggle = useSetMentionNotify();
   const unbind = useUnbindMentionNotify();
   const testRun = useRunMentionNotify();
-
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.stopPropagation();
-        onClose();
-      }
-    };
-    document.addEventListener('keydown', onKey, true);
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.removeEventListener('keydown', onKey, true);
-      document.body.style.overflow = previousOverflow;
-    };
-  }, [onClose]);
 
   const data = status.data;
   const bound = !!data?.binding.bound;
@@ -82,13 +64,6 @@ export function MentionNotifyDialog({ onClose }: { onClose: () => void }) {
   // регулярно гасится блокировщиком попапов, поэтому открытие — best-effort, а ссылку показываем
   // рядом: её всегда можно открыть или скопировать руками.
   const botUrl = link.data?.url ?? null;
-  const [copied, setCopied] = useState(false);
-  const copyBotUrl = (url: string) => {
-    navigator.clipboard.writeText(url).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
-  };
 
   const connectBot = async () => {
     const res = await link.mutateAsync().catch(() => null);
@@ -125,37 +100,17 @@ export function MentionNotifyDialog({ onClose }: { onClose: () => void }) {
     (testRun.error instanceof Error ? testRun.error.message : null) ??
     (status.isError ? (status.error instanceof Error ? status.error.message : 'Ошибка запроса') : null);
 
-  return createPortal(
-    <div
-      className="fixed inset-0 z-modal flex items-start justify-center overflow-y-auto bg-background/75 p-8 backdrop-blur-xs backdrop-grayscale"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby={titleId}
-      onClick={onClose}
-    >
-      <div
-        ref={panelRef}
-        tabIndex={-1}
-        className="my-auto w-full max-w-lg rounded-lg border border-border bg-card shadow-2xl focus:outline-hidden"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <header className="flex items-start justify-between gap-6 border-b border-border px-6 py-5">
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-w-lg gap-0 overflow-y-auto rounded-lg p-0 shadow-2xl">
+        <header className="border-b border-border px-6 py-5 pr-12">
           <div>
-            <h2 id={titleId} className="text-base font-medium text-foreground">Уведомления в Telegram</h2>
-            <p className="mt-1 text-xs leading-5 text-muted-foreground">
+            <DialogTitle className="pr-0 text-base leading-normal">Уведомления в Telegram</DialogTitle>
+            <DialogDescription className="mt-1 text-xs leading-5">
               Раз в день бот присылает в личку новые упоминания выбранного канала. Поиск идёт через
               вашу Telegram-сессию и тратит вашу квоту searchPosts.
-            </p>
+            </DialogDescription>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Закрыть уведомления"
-            title="Закрыть"
-            className="flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
-          >
-            <Icon name="close" className="size-4" />
-          </button>
         </header>
 
         <div className="space-y-5 px-6 py-5">
@@ -196,7 +151,7 @@ export function MentionNotifyDialog({ onClose }: { onClose: () => void }) {
                     {link.isPending ? 'Готовим ссылку…' : 'Привязать бота'}
                   </Button>
                   {botUrl && (
-                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs">
+                    <div className="space-y-2 text-xs">
                       <a
                         href={botUrl}
                         target="_blank"
@@ -205,21 +160,14 @@ export function MentionNotifyDialog({ onClose }: { onClose: () => void }) {
                       >
                         Открыть чат с ботом
                       </a>
-                      <button
-                        type="button"
-                        onClick={() => copyBotUrl(botUrl)}
-                        className="btn-pill border border-border px-3 py-1 font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                      >
-                        {copied ? 'Скопировано' : 'Копировать ссылку'}
-                      </button>
-                      <span role="status" className="sr-only">{copied ? 'Скопировано' : ''}</span>
+                      <Snippet value={botUrl} copyLabel="Копировать ссылку" />
                     </div>
                   )}
                   <p className="text-xs leading-5 text-muted-foreground">
                     {botUrl ? (
-                      <>Если чат не открылся сам — откройте ссылку выше и нажмите в боте <b>Start</b>. Ссылка действует 15 минут.</>
+                      <>Если чат не открылся сам — откройте ссылку выше и нажмите в боте <b className="font-medium text-foreground">Start</b>. Ссылка действует 15 минут.</>
                     ) : (
-                      <>Откроется чат с ботом — нажмите в нём <b>Start</b>. Ссылка действует 15 минут.</>
+                      <>Откроется чат с ботом — нажмите в нём <b className="font-medium text-foreground">Start</b>. Ссылка действует 15 минут.</>
                     )}
                     {linkOpened && ' Ждём подтверждение из Telegram…'}
                   </p>
@@ -265,7 +213,8 @@ export function MentionNotifyDialog({ onClose }: { onClose: () => void }) {
                 <div className="space-y-3 border-t border-border pt-4">
                   <div className="flex items-center justify-between gap-4">
                     <span className="text-xs font-medium text-muted-foreground">Дни отправки</span>
-                    <div role="group" aria-label="Дни отправки" className="flex gap-1">
+                    <fieldset className="m-0 flex min-w-0 gap-1 border-0 p-0">
+                      <legend className="sr-only">Дни отправки</legend>
                       {DAY_LABELS.map(([day, label]) => {
                         const active = sendDays.includes(day);
                         return (
@@ -278,7 +227,7 @@ export function MentionNotifyDialog({ onClose }: { onClose: () => void }) {
                             className={cn(
                               'rounded-full border px-2 py-1 text-xs transition-colors disabled:pointer-events-none disabled:opacity-50',
                               active
-                                ? 'border-primary/40 bg-primary/10 font-medium text-primary'
+                                ? 'border-primary/40 bg-primary/10 font-medium text-accent-foreground'
                                 : 'border-border text-muted-foreground hover:bg-muted/50',
                             )}
                           >
@@ -286,7 +235,7 @@ export function MentionNotifyDialog({ onClose }: { onClose: () => void }) {
                           </button>
                         );
                       })}
-                    </div>
+                    </fieldset>
                   </div>
                   <div className="flex items-center justify-between gap-4">
                     <label htmlFor={`${titleId}-hour`} className="text-xs font-medium text-muted-foreground">
@@ -327,7 +276,14 @@ export function MentionNotifyDialog({ onClose }: { onClose: () => void }) {
                       disabled={testRun.isPending}
                       className="btn-pill border border-border bg-background px-3.5 py-1.5 text-xs font-medium text-foreground hover:bg-hover-row disabled:opacity-50"
                     >
-                      {testRun.isPending ? 'Прогоняем…' : 'Прислать сейчас'}
+                      {testRun.isPending ? (
+                        <span className="inline-flex items-center gap-1.5">
+                          <LoaderDots />
+                          Прогоняем…
+                        </span>
+                      ) : (
+                        'Прислать сейчас'
+                      )}
                     </button>
                   </div>
                   {testResult && <p role="status" className="text-xs text-verdant">{testResult}</p>}
@@ -354,8 +310,7 @@ export function MentionNotifyDialog({ onClose }: { onClose: () => void }) {
 
           {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
         </div>
-      </div>
-    </div>,
-    document.body,
+      </DialogContent>
+    </Dialog>
   );
 }

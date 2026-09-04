@@ -42,7 +42,7 @@ import {
 } from '@/panels/TgAnalytics';
 import { deriveWeekdayReach, deriveFormatViews } from '@/panels/Compare';
 import { deriveHashtags } from '@/panels/Hashtags';
-import { AboutRow, MetricBackLink, MetricColumns, MetricDescriptor, WindowBarShell, RailSection } from '@/components/metric/shared';
+import { MetricColumns, MetricDescriptor, WindowBarShell, RailSection, MetricPageHeader} from '@/components/metric/shared';
 
 /**
  * Полностраничные «дополнительные» графики Telegram — `/metrics/tg-*`. Это те карточки вкладок
@@ -82,32 +82,24 @@ export { isTgExtraMetricKey };
 
 // ── Shared shell ─────────────────────────────────────────────────────────────────────────────
 
-interface AboutDef {
-  formula: string;
-  included?: string;
-  source: string;
-}
-
 /** Тихая шапка + две колонки (главный блок + rail «О метрике»/сравнение), как у `/metrics/ig-reach`.
     Назад ведёт на конкретную вкладку Аналитики, откуда карточка засеяла drillTo. */
 function TgMetricShell({
   back,
   term,
   descriptor,
-  about,
   aside,
   children,
 }: {
   back: { to: string; label: string };
   term: string;
   descriptor?: string;
-  about: AboutDef;
   aside?: ReactNode;
   children: ReactNode;
 }) {
   return (
     <div className="space-y-5">
-      <MetricBackLink to={back.to}>{back.label}</MetricBackLink>
+      <MetricPageHeader back={back} />
 
       <div>
         <h1 className="text-2xl font-medium tracking-tight text-foreground">{term}</h1>
@@ -119,13 +111,9 @@ function TgMetricShell({
         rail={
           <>
             {aside}
-            <RailSection title="О метрике">
-              <dl className="space-y-3 text-sm">
-                <AboutRow label="Как считается" text={about.formula} />
-                {about.included && <AboutRow label="Что учитывается" text={about.included} />}
-                <AboutRow label="Источник" text={about.source} />
-              </dl>
-            </RailSection>
+            {/* «О метрике» убран — техническая информация не для конечного пользователя (владелец,
+                #401). Этот файл появился за три дня до той зачистки и в неё не попал: блок жил
+                только у Telegram, а тексты во всех источниках остались в коде нерисуемыми. */}
             <Link
               to={back.to}
               className="inline-flex items-center gap-1 text-xs font-medium text-primary transition-colors hover:text-primary/80"
@@ -167,13 +155,6 @@ function TgHeatmapPage() {
       back={{ to: '/analytics?tab=audience', label: 'Аналитика · Аудитория' }}
       term="Тепловая карта активности"
       descriptor="Когда посты собирают вовлечённость — сетка 7×24 по среднему ERV слота за выбранное окно"
-      about={{
-        formula:
-          'Для каждого слота (день недели × час публикации) — средний ERV постов слота (реакции + репосты + ответы ÷ просмотры). Насыщенность нормирована на максимум окна; рамкой отмечен лучший слот.',
-        included:
-          'ERV — вовлечённость на просмотр, не абсолют. Часы — в часовом поясе браузера (как в дате поста). Пустые края суток скрываются, чтобы узкое окно не тонуло в мёртвых клетках.',
-        source: 'Посты канала (архив Telegram) за выбранное окно.',
-      }}
     >
       <TgReportCard id="tg-page-heatmap" title="По дням недели и часам">
         <WidgetPeriodProvider value={widgetPeriodValue(days, range)}>
@@ -202,13 +183,6 @@ function TgVelocityPage() {
       back={{ to: '/analytics?tab=dynamics', label: 'Аналитика · Динамика' }}
       term="Скорость набора просмотров"
       descriptor="Как быстро пост добирает свои просмотры — накопленная доля по суткам после публикации"
-      about={{
-        formula:
-          'Для каждого поста доля итоговых просмотров, набранная к N-м суткам жизни; кривая — среднее по постам. «80% за K дн» — когда накоплено 80% просмотров.',
-        included:
-          'Это профиль ЖИЗНИ поста (сутки после публикации), а не календарная динамика. Считается по постам с достаточной историей просмотров.',
-        source: 'Дневная история просмотров постов канала (Telegram).',
-      }}
     >
       <TgReportCard
         id="tg-page-velocity"
@@ -255,13 +229,6 @@ function TgContentOpportunityPage() {
       back={{ to: backTo, label: 'Аналитика · Форматы' }}
       term="Карта возможностей контента"
       descriptor="Какие форматы публикуются реже других, но дают охват выше среднего"
-      about={{
-        formula:
-          'Ось X — доля публикаций формата в выбранном окне. Ось Y — средний охват формата относительно среднего охвата всех публикаций окна. Верхняя левая зона отмечает форматы с охватом выше среднего и редким использованием.',
-        included:
-          'Точка строится только для формата с публикациями в текущем источнике, окне и выбранной кампании. Малая выборка отмечается отдельно; карта — наблюдение, не прогноз результата.',
-        source: 'Публикации канала из архива Telegram за выбранное окно.',
-      }}
       aside={
         <TgNoComparison text="Это двухмерная карта состава текущего окна, а не временной ряд — Line/Bar и baseline прошлого периода здесь были бы ложными." />
       }
@@ -373,7 +340,6 @@ interface TgBreakdownDef {
   term: string;
   descriptor: string;
   cardTitle: string;
-  about: AboutDef;
   /** Which payload gates loading/error — posts (period-scoped) vs graphs (fixed Telegram window). */
   source: 'posts' | 'graphs';
   /** Post-derived cards follow the seeded window; graphs cards are period-agnostic (no window bar). */
@@ -414,7 +380,6 @@ function TgBreakdownPage({ def }: { def: TgBreakdownDef }) {
       back={back}
       term={def.term}
       descriptor={def.descriptor}
-      about={def.about}
       aside={<TgNoComparison text={def.comparison} />}
     >
       <TgReportCard id={def.cardId} title={def.cardTitle}>
@@ -453,7 +418,6 @@ interface TgCategoryDef {
   term: string;
   descriptor: string;
   cardTitle: string;
-  about: AboutDef;
   source: 'posts' | 'graphs';
   periodControl: boolean;
   comparison: string;
@@ -482,7 +446,6 @@ function TgCategorySeriesPage({ def }: { def: TgCategoryDef }) {
       back={def.back}
       term={def.term}
       descriptor={def.descriptor}
-      about={def.about}
       aside={<TgNoComparison text={def.comparison} />}
     >
       <TgReportCard
@@ -528,19 +491,16 @@ function TgChurnPage() {
   const graphs = useTgGraphs();
   const flow = deriveFollowerFlows(graphs.data, calendarWindowForPeriod({ days: window.days, range: window.range }));
   const flowTotal = flow.joinedTotal + flow.leftTotal;
-  const rowDisplay = (value: number) =>
-    flowTotal > 0 ? `${fmt.num(value)} · ${Math.round((value / flowTotal) * 100)}%` : fmt.num(value);
+  // Доля — тем же слоем, что и у остальных разбивок-частей целого (lib/breakdownShare через
+  // `share` у Breakdown): один формат «значение · доля» на всё приложение, без локального
+  // Math.round, который округлял по своим правилам и расходился с соседней страницей.
+  const rowShare = (value: number) => (flowTotal > 0 ? value / flowTotal : undefined);
 
   return (
     <TgMetricShell
       back={BACK.dynamics}
       term="Динамика оттока"
       descriptor="Сколько подписалось и отписалось за выбранное окно"
-      about={{
-        formula: 'Из дневных потоков подписок/отписок канала — суммы «подписалось» и «отписалось» за окно; доли считаются от их суммы.',
-        included: 'Отписки Telegram отдаёт дневным потоком (как и подписки). Это не уровень базы — уровень живёт в «Истории подписчиков».',
-        source: 'Дневные потоки подписчиков канала (Telegram graphs) за выбранное окно.',
-      }}
       aside={<TgNoComparison text={LIST_COMPARISON} />}
     >
       <TgReportCard id="tg-page-churn" title="Подписки и отписки за окно">
@@ -554,8 +514,18 @@ function TgChurnPage() {
           <>
             <Breakdown
               items={[
-                { label: 'Отписалось', value: flow.leftTotal, display: rowDisplay(flow.leftTotal) },
-                { label: 'Подписалось', value: flow.joinedTotal, display: rowDisplay(flow.joinedTotal) },
+                {
+                  label: 'Отписалось',
+                  value: flow.leftTotal,
+                  display: fmt.num(flow.leftTotal),
+                  share: rowShare(flow.leftTotal),
+                },
+                {
+                  label: 'Подписалось',
+                  value: flow.joinedTotal,
+                  display: fmt.num(flow.joinedTotal),
+                  share: rowShare(flow.joinedTotal),
+                },
               ]}
             />
             <div className="mt-3 text-xs font-medium text-muted-foreground">{fmt.num(flowTotal)} всего</div>
@@ -588,10 +558,6 @@ const BREAKDOWN_DEFS: Record<BreakdownKey, TgBreakdownDef> = {
     term: 'По форматам (просмотры)',
     descriptor: 'Суммарные просмотры публикаций по формату за выбранное окно',
     cardTitle: 'Просмотры по форматам',
-    about: {
-      formula: 'Публикации окна группируются по формату (текст/фото/видео/файл/альбом); строка — суммарные просмотры формата и число публикаций.',
-      source: 'Публикации канала (архив Telegram) за выбранное окно.',
-    },
     source: 'posts',
     periodControl: true,
     campaignScoped: false,
@@ -605,11 +571,6 @@ const BREAKDOWN_DEFS: Record<BreakdownKey, TgBreakdownDef> = {
     term: 'Влияние хэштегов на ERV',
     descriptor: 'Насколько тег поднимает вовлечённость против постов без тегов',
     cardTitle: 'Хэштеги по приросту ERV',
-    about: {
-      formula: 'Для каждого тега (≥2 постов окна) — средний ERV его постов и множитель к базе «без тегов». Топ-10 по множителю (иначе по среднему ERV).',
-      included: 'ERV — вовлечённость на просмотр. Зелёный множитель ≥1 — тег поднимает ERV, янтарный <1 — опускает.',
-      source: 'Публикации канала (архив Telegram) за выбранное окно; при выбранной кампании — только её публикации из этого источника.',
-    },
     source: 'posts',
     periodControl: true,
     campaignScoped: true,
@@ -620,7 +581,7 @@ const BREAKDOWN_DEFS: Record<BreakdownKey, TgBreakdownDef> = {
       if (baseAvg === null) return null;
       return (
         <div className="mt-3 text-xs font-medium text-muted-foreground">
-          база без тегов: <strong className="text-foreground">{baseAvg.toFixed(1)}%</strong> ERV
+          база без тегов: <strong className="font-medium text-foreground">{baseAvg.toFixed(1)}%</strong> ERV
         </div>
       );
     },
@@ -632,16 +593,12 @@ const BREAKDOWN_DEFS: Record<BreakdownKey, TgBreakdownDef> = {
     term: 'Реакции по эмодзи',
     descriptor: 'Какие эмодзи-реакции собирают публикации за выбранное окно',
     cardTitle: 'Реакции по эмодзи',
-    about: {
-      formula: 'Суммарное число реакций каждого эмодзи по публикациям окна; топ-8 по количеству.',
-      source: 'Реакции публикаций канала (архив Telegram) за выбранное окно; при выбранной кампании — только её публикации.',
-    },
     source: 'posts',
     periodControl: true,
     campaignScoped: true,
     comparison: LIST_COMPARISON,
     derive: (ctx) =>
-      deriveEmojis(ctx.full, ctx.period.inRange, ctx.keep).map((e) => ({ label: e.label, value: e.value, display: fmt.num(e.value) })),
+      deriveEmojis(ctx.full, ctx.period.inRange, ctx.keep).map((e) => ({ label: e.label, value: e.value, display: fmt.num(e.value), share: e.share })),
     empty: { title: 'Нет реакций за период' },
   },
   'tg-engagement-mix': {
@@ -650,10 +607,6 @@ const BREAKDOWN_DEFS: Record<BreakdownKey, TgBreakdownDef> = {
     term: 'Состав вовлечённости',
     descriptor: 'Как распределяется вовлечённость публикаций окна',
     cardTitle: 'Состав вовлечённости',
-    about: {
-      formula: 'Суммы реакций, репостов и комментариев по публикациям окна.',
-      source: 'Публикации канала (архив Telegram) за окно; при выбранной кампании — только её публикации (не общий свод канала).',
-    },
     source: 'posts',
     periodControl: true,
     campaignScoped: true,
@@ -664,6 +617,7 @@ const BREAKDOWN_DEFS: Record<BreakdownKey, TgBreakdownDef> = {
         value: c.value,
         display: fmt.num(c.value),
         color: c.color,
+        share: c.share,
       })),
     empty: { title: 'Нет вовлечённости за период' },
   },
@@ -673,10 +627,6 @@ const BREAKDOWN_DEFS: Record<BreakdownKey, TgBreakdownDef> = {
     term: 'Ср. охват по типу',
     descriptor: 'Средние просмотры публикации по типу за выбранное окно',
     cardTitle: 'Средний охват по типу',
-    about: {
-      formula: 'Средние просмотры публикации по типу медиа (фото/видео/текст/…) по публикациям окна.',
-      source: 'Публикации канала (архив Telegram) за окно; при выбранной кампании — только её публикации (не общий свод канала).',
-    },
     source: 'posts',
     periodControl: true,
     campaignScoped: true,
@@ -691,10 +641,6 @@ const BREAKDOWN_DEFS: Record<BreakdownKey, TgBreakdownDef> = {
     term: 'Вовлечённость по формату',
     descriptor: 'Средний ERV публикации по формату за выбранное окно',
     cardTitle: 'ERV по формату',
-    about: {
-      formula: 'Средний ERV (вовлечённость на просмотр) по типу медиа среди публикаций окна.',
-      source: 'Публикации канала (архив Telegram) за окно; при выбранной кампании — только её публикации.',
-    },
     source: 'posts',
     periodControl: true,
     campaignScoped: true,
@@ -713,11 +659,6 @@ const BREAKDOWN_DEFS: Record<BreakdownKey, TgBreakdownDef> = {
     term: 'Просмотры по источникам',
     descriptor: 'Откуда пришли просмотры публикаций канала',
     cardTitle: 'Просмотры по источникам',
-    about: {
-      formula: 'Группировка просмотров по источнику показа (подписчики/ссылки/поиск/каналы/…).',
-      included: 'Это разрез статистики канала за доступное окно Telegram — он не сужается локальным окном страницы.',
-      source: 'Статистика канала (Telegram graphs, views_by_source).',
-    },
     source: 'graphs',
     periodControl: false,
     campaignScoped: false,
@@ -731,11 +672,6 @@ const BREAKDOWN_DEFS: Record<BreakdownKey, TgBreakdownDef> = {
     term: 'Новые подписчики по источникам',
     descriptor: 'Откуда пришли новые подписчики канала',
     cardTitle: 'Новые подписчики по источникам',
-    about: {
-      formula: 'Группировка новых подписчиков по источнику (подписчики/ссылки/поиск/каналы/…).',
-      included: 'Разрез статистики канала за доступное окно Telegram — не сужается локальным окном страницы.',
-      source: 'Статистика канала (Telegram graphs, new_followers_by_source).',
-    },
     source: 'graphs',
     periodControl: false,
     campaignScoped: false,
@@ -749,11 +685,6 @@ const BREAKDOWN_DEFS: Record<BreakdownKey, TgBreakdownDef> = {
     term: 'Языки аудитории',
     descriptor: 'Языки интерфейса подписчиков канала',
     cardTitle: 'Языки аудитории',
-    about: {
-      formula: 'Группировка аудитории по языку интерфейса Telegram; топ-8 по величине.',
-      included: 'Разрез статистики канала за доступное окно Telegram — не сужается локальным окном страницы.',
-      source: 'Статистика канала (Telegram graphs, languages).',
-    },
     source: 'graphs',
     periodControl: false,
     campaignScoped: false,
@@ -767,11 +698,6 @@ const BREAKDOWN_DEFS: Record<BreakdownKey, TgBreakdownDef> = {
     term: 'Тональность реакций',
     descriptor: 'Соотношение положительных и отрицательных реакций',
     cardTitle: 'Тональность реакций',
-    about: {
-      formula: 'Группировка реакций по тональности (положительные/прочие/отрицательные).',
-      included: 'Разрез статистики канала за доступное окно Telegram — не сужается локальным окном страницы.',
-      source: 'Статистика канала (Telegram graphs, reactions_sentiment).',
-    },
     source: 'graphs',
     periodControl: false,
     campaignScoped: false,
@@ -790,10 +716,6 @@ const CATEGORY_DEFS: Record<CategoryKey, TgCategoryDef> = {
     term: 'Охват по дням недели',
     descriptor: 'Средний охват публикации по дню недели за выбранное окно',
     cardTitle: 'Средний охват по дням недели',
-    about: {
-      formula: 'Для каждого дня недели — СРЕДНИЙ охват публикации этого дня за окно (не сумма). День берётся в UTC, как в дневных графиках.',
-      source: 'Публикации канала (архив Telegram) за выбранное окно.',
-    },
     source: 'posts',
     periodControl: true,
     comparison: 'Среднее по дням недели за окно — распределение, а не метрика периода; сравнение с прошлым периодом не рассчитывается.',
@@ -813,10 +735,6 @@ const CATEGORY_DEFS: Record<CategoryKey, TgCategoryDef> = {
     term: 'По дням недели',
     descriptor: 'Средние просмотры публикации по дню недели за выбранное окно',
     cardTitle: 'Средние просмотры по дням недели',
-    about: {
-      formula: 'Для каждого дня недели — СРЕДНИЕ просмотры публикации этого дня за окно (не сумма).',
-      source: 'Публикации канала (архив Telegram) за выбранное окно.',
-    },
     source: 'posts',
     periodControl: true,
     comparison: 'Среднее по дням недели за окно — распределение, а не метрика периода; сравнение с прошлым периодом не рассчитывается.',
@@ -833,7 +751,7 @@ const CATEGORY_DEFS: Record<CategoryKey, TgCategoryDef> = {
       if (!bestWdLabel) return null;
       return (
         <div className="mt-3 text-xs font-medium text-muted-foreground">
-          лучший день: <strong className="text-foreground">{bestWdLabel}</strong>
+          лучший день: <strong className="font-medium text-foreground">{bestWdLabel}</strong>
         </div>
       );
     },
@@ -845,10 +763,6 @@ const CATEGORY_DEFS: Record<CategoryKey, TgCategoryDef> = {
     term: 'Количество постов',
     descriptor: 'Сколько публикаций выходит по дням недели за выбранное окно',
     cardTitle: 'Публикации по дням недели',
-    about: {
-      formula: 'Число публикаций окна по дню недели.',
-      source: 'Публикации канала (архив Telegram) за выбранное окно.',
-    },
     source: 'posts',
     periodControl: true,
     comparison: 'Распределение публикаций по дням недели за окно — не метрика периода; сравнение с прошлым периодом не рассчитывается.',
@@ -868,11 +782,6 @@ const CATEGORY_DEFS: Record<CategoryKey, TgCategoryDef> = {
     term: 'Активность по часам',
     descriptor: 'Суточный профиль активности аудитории канала',
     cardTitle: 'Активность по часам суток',
-    about: {
-      formula: 'Распределение активности по часу суток из статистики канала.',
-      included: 'Разрез статистики канала за доступное окно Telegram — не сужается локальным окном страницы.',
-      source: 'Статистика канала (Telegram graphs, top_hours).',
-    },
     source: 'graphs',
     periodControl: false,
     comparison: GRAPHS_COMPARISON,

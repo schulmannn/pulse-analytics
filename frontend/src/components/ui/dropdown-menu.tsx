@@ -26,8 +26,9 @@ const DropdownMenuSubTrigger = React.forwardRef<
 >(({ className, inset, children, ...props }, ref) => (
   <DropdownMenuPrimitive.SubTrigger
     ref={ref}
+    data-mobile-touch-target=""
     className={cn(
-      'flex cursor-default select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-hidden focus:bg-accent data-[state=open]:bg-accent [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0',
+      'flex min-h-11 cursor-default select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-hidden focus:bg-accent data-[state=open]:bg-accent sm:min-h-0 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0',
       inset && 'pl-8',
       className,
     )}
@@ -47,7 +48,7 @@ const DropdownMenuSubContent = React.forwardRef<
   <DropdownMenuPrimitive.SubContent
     ref={ref}
     className={cn(
-      'z-popover min-w-32 overflow-hidden rounded-xl border border-border bg-popover p-1 text-popover-foreground data-[state=open]:animate-in data-[state=open]:ease-house data-[state=closed]:animate-out data-[state=closed]:ease-exit data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 motion-reduce:duration-0 origin-(--radix-dropdown-menu-content-transform-origin)',
+      'z-popover min-w-32 overflow-hidden rounded-xl border border-border bg-popover p-1 text-popover-foreground data-[state=open]:animate-in data-[state=open]:ease-house data-[state=closed]:animate-out data-[state=closed]:ease-exit data-[state=closed]:anim-dur-exit data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 motion-reduce:duration-0 origin-(--radix-dropdown-menu-content-transform-origin)',
       className,
     )}
     {...props}
@@ -56,17 +57,27 @@ const DropdownMenuSubContent = React.forwardRef<
 DropdownMenuSubContent.displayName =
   DropdownMenuPrimitive.SubContent.displayName;
 
+/**
+ * Слой меню. `page` (по умолчанию) — обычное меню над содержимым страницы; `modal` поднимает его на
+ * ступень `z-modal-popover` (55) для меню, открытого ИЗ ДИАЛОГА: на дефолтных 40 список уезжает под
+ * затемнение диалога и становится некликабельным. Ровно на этой ступени по той же причине живут
+ * ui/select и ui/popover. Прокидывать `z-…` через className нельзя: tailwind-merge не считает
+ * `z-modal-popover` (утилита из нашей шкалы) конфликтом для `z-popover`, и в разметке остаются оба.
+ */
+type MenuLayer = 'page' | 'modal';
+
 const DropdownMenuContent = React.forwardRef<
   React.ElementRef<typeof DropdownMenuPrimitive.Content>,
-  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Content>
->(({ className, sideOffset = 4, ...props }, ref) => (
+  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Content> & { layer?: MenuLayer }
+>(({ className, sideOffset = 4, layer = 'page', ...props }, ref) => (
   <DropdownMenuPrimitive.Portal>
     <DropdownMenuPrimitive.Content
       ref={ref}
       sideOffset={sideOffset}
       className={cn(
-        'z-popover max-h-(--radix-dropdown-menu-content-available-height) min-w-32 overflow-y-auto overflow-x-hidden rounded-xl border border-border bg-popover p-1 text-popover-foreground',
-        'data-[state=open]:animate-in data-[state=open]:ease-house data-[state=closed]:animate-out data-[state=closed]:ease-exit data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 motion-reduce:duration-0 origin-(--radix-dropdown-menu-content-transform-origin)',
+        layer === 'modal' ? 'z-modal-popover' : 'z-popover',
+        'max-h-(--radix-dropdown-menu-content-available-height) min-w-32 overflow-y-auto overflow-x-hidden rounded-xl border border-border bg-popover p-1 text-popover-foreground',
+        'data-[state=open]:animate-in data-[state=open]:ease-house data-[state=closed]:animate-out data-[state=closed]:ease-exit data-[state=closed]:anim-dur-exit data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 motion-reduce:duration-0 origin-(--radix-dropdown-menu-content-transform-origin)',
         className,
       )}
       {...props}
@@ -83,8 +94,9 @@ const DropdownMenuItem = React.forwardRef<
 >(({ className, inset, ...props }, ref) => (
   <DropdownMenuPrimitive.Item
     ref={ref}
+    data-mobile-touch-target=""
     className={cn(
-      'relative flex cursor-default select-none items-center gap-2 rounded px-2.5 py-1.5 text-sm text-foreground outline-hidden transition-colors focus:bg-hover-row/60 data-disabled:pointer-events-none data-disabled:opacity-50 [&>svg]:size-4 [&>svg]:shrink-0',
+      'relative flex min-h-11 cursor-default select-none items-center gap-2 rounded px-2.5 py-1.5 text-sm text-foreground outline-hidden transition-colors focus:bg-hover-row/60 data-disabled:pointer-events-none data-disabled:opacity-50 sm:min-h-0 [&>svg]:size-4 [&>svg]:shrink-0',
       inset && 'pl-8',
       className,
     )}
@@ -99,8 +111,9 @@ const DropdownMenuCheckboxItem = React.forwardRef<
 >(({ className, children, checked, ...props }, ref) => (
   <DropdownMenuPrimitive.CheckboxItem
     ref={ref}
+    data-mobile-touch-target=""
     className={cn(
-      'relative flex cursor-default select-none items-center rounded-sm py-1.5 pl-8 pr-2 text-sm outline-hidden transition-colors focus:bg-accent focus:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-50',
+      'relative flex min-h-11 cursor-default select-none items-center rounded-sm py-1.5 pl-8 pr-2 text-sm outline-hidden transition-colors focus:bg-accent focus:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-50 sm:min-h-0',
       className,
     )}
     checked={checked}
@@ -123,8 +136,9 @@ const DropdownMenuRadioItem = React.forwardRef<
 >(({ className, children, ...props }, ref) => (
   <DropdownMenuPrimitive.RadioItem
     ref={ref}
+    data-mobile-touch-target=""
     className={cn(
-      'relative flex cursor-default select-none items-center rounded-sm py-1.5 pl-8 pr-2 text-sm outline-hidden transition-colors focus:bg-accent focus:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-50',
+      'relative flex min-h-11 cursor-default select-none items-center rounded-sm py-1.5 pl-8 pr-2 text-sm outline-hidden transition-colors focus:bg-accent focus:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-50 sm:min-h-0',
       className,
     )}
     {...props}
@@ -148,7 +162,7 @@ const DropdownMenuLabel = React.forwardRef<
   <DropdownMenuPrimitive.Label
     ref={ref}
     className={cn(
-      'px-2 py-1.5 text-sm font-semibold',
+      'px-2 py-1.5 text-sm font-medium',
       inset && 'pl-8',
       className,
     )}

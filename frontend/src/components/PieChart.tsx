@@ -1,7 +1,9 @@
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { EmptyState } from '@/components/EmptyState';
 import { fmt } from '@/lib/format';
+import { formatShare } from '@/lib/breakdownShare';
 import { observeSize } from '@/lib/observeSize';
+import { useMorphValues } from '@/lib/useMorphValues';
 import { ChartTooltip } from '@/components/ChartTooltip';
 import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
 
@@ -12,6 +14,11 @@ interface PieChartProps {
   titles?: string[];
   /** Per-slice colour (an `hsl(...)` string). Missing entries cycle --chart-1..6. */
   colors?: (string | undefined)[];
+  /** Доли строк (0..1) от ПОЛНОЙ суммы разбивки — когда список урезан топ-N, знаменатель шире
+      переданных `values`. Заданные доли печатаются вместо `value / Σvalues`, поэтому круговая и
+      список показывают ОДНО число (см. lib/breakdownShare). Геометрия кольца не меняется —
+      дольки по-прежнему доли видимой суммы. */
+  shares?: (number | undefined)[];
   height?: number;
 }
 
@@ -74,8 +81,11 @@ function arcPath(cx: number, cy: number, rOuter: number, rInner: number, from: n
  * overlay, tokens only (works on the near-black canvas), no shadows. Slices below 2% fold into
  * «Прочее». Hover reads out label · value · %.
  */
-export function PieChart({ values, labels, titles, colors, height = 200 }: PieChartProps) {
+export function PieChart({ values, labels, titles, colors, shares, height = 200 }: PieChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const donutRef = useRef<HTMLDivElement>(null);
+  const svgRef = useRef<SVGSVGElement>(null);
+  const legendRef = useRef<HTMLUListElement>(null);
   const [hover, setHover] = useState<Hover | null>(null);
   const [width, setWidth] = useState(600);
   const expanded = useContext(ChartExpandedContext);
@@ -106,13 +116,47 @@ export function PieChart({ values, labels, titles, colors, height = 200 }: PieCh
   const positive = (values ?? []).map((v) => (Number.isFinite(v) && v > 0 ? v : 0));
   const total = positive.reduce((s, v) => s + v, 0);
 
-  if (!values || values.length === 0 || total <= 0) {
-    return <EmptyState compact size="chart" title="Нет данных за период" />;
-  }
+  // Slice/legend hover only changes emphasis and a duplicate readout; the persistent legend already
+  // exposes every shown value. Delegate pointer events without making passive paths/list rows into
+  // controls or adding them to the keyboard order.
+  useEffect(() => {
+    const donut = donutRef.current;
+    const svg = svgRef.current;
+    const legend = legendRef.current;
+    if (!donut || !svg || !legend) return;
+    const indexFromTarget = (target: EventTarget | null, attribute: string) => {
+      if (!(target instanceof Element)) return null;
+      const item = target.closest<HTMLElement>(`[${attribute}]`);
+      const raw = item?.getAttribute(attribute);
+      if (raw == null) return null;
+      const index = Number(raw);
+      return Number.isInteger(index) ? index : null;
+    };
+    const handleSliceMove = (event: globalThis.MouseEvent) => {
+      const i = indexFromTarget(event.target, 'data-pie-index');
+      if (i == null) return;
+      setHover((prev) => (prev && prev.i === i ? prev : { i }));
+    };
+    const handleLegendMove = (event: globalThis.MouseEvent) => {
+      const i = indexFromTarget(event.target, 'data-pie-legend-index');
+      setHover((prev) => (i == null ? null : prev && prev.i === i ? prev : { i }));
+    };
+    const clearHover = () => setHover(null);
+    svg.addEventListener('mousemove', handleSliceMove);
+    legend.addEventListener('mousemove', handleLegendMove);
+    donut.addEventListener('mouseleave', clearHover);
+    legend.addEventListener('mouseleave', clearHover);
+    return () => {
+      svg.removeEventListener('mousemove', handleSliceMove);
+      legend.removeEventListener('mousemove', handleLegendMove);
+      donut.removeEventListener('mouseleave', clearHover);
+      legend.removeEventListener('mouseleave', clearHover);
+    };
+  }, [total]);
 
   // Keep the six largest slices (each a distinct hue: the item's own colour, else a --chart token
   // by rank), fold every remaining slice into one muted «Прочее» — collision-free by construction.
-  type Slice = { label: string; value: number; color: string; title: string };
+  type Slice = { label: string; value: number; color: string; title: string; share?: number };
   const ranked = positive
     .map((v, i) => ({ v, i }))
     .filter((s) => s.v > 0)
@@ -122,12 +166,32 @@ export function PieChart({ values, labels, titles, colors, height = 200 }: PieCh
     value: s.v,
     color: colors?.[s.i] ?? `hsl(var(--chart-${(pos % 6) + 1}-cat))`,
     title: titles?.[s.i] ?? `${labels?.[s.i] ?? ''}: ${fmt.num(s.v)}`,
+    share: shares?.[s.i],
   }));
-  const otherValue = ranked.slice(MAX_COLORS).reduce((sum, s) => sum + s.v, 0);
+  const folded = ranked.slice(MAX_COLORS);
+  const otherValue = folded.reduce((sum, s) => sum + s.v, 0);
+  // «Прочее» наследует СУММУ долей схлопнутых долек — иначе строка врала бы, что она весь остаток.
+  const otherShare = folded.some((s) => shares?.[s.i] != null)
+    ? folded.reduce((sum, s) => sum + (shares?.[s.i] ?? 0), 0)
+    : undefined;
   const slices: Slice[] =
     otherValue > 0
-      ? [...big, { label: 'Прочее', value: otherValue, color: 'hsl(var(--chart-role-neutral))', title: `Прочее: ${fmt.num(otherValue)}` }]
+      ? [...big, { label: 'Прочее', value: otherValue, color: 'hsl(var(--chart-role-neutral))', title: `Прочее: ${fmt.num(otherValue)}`, share: otherShare }]
       : big;
+
+  // UPDATE-морф долек (канон Chart motion): на смене периода/фильтра значения ПЕРЕТЕКАЮТ
+  // (index-режим — новая долька растёт с нуля), доли считаются по кадру от текущей суммы, так что
+  // кольцо всегда полно. Тексты (центр «всего», легенда, тултип) снапают на target. Хук ДО раннего
+  // return (React #310); сигнатура — метки+значения состава.
+  const tweened = useMorphValues(
+    slices.map((s) => s.value),
+    slices.map((s) => `${s.label}:${s.value}`).join('|'),
+    'index',
+  );
+
+  if (!values || values.length === 0 || total <= 0) {
+    return <EmptyState compact size="chart" title="Нет данных за период" />;
+  }
 
   const chartHeight = ctxHeight ?? height;
   // In a FIXED tile (ctxHeight set) the donut sits LEFT and the legend RIGHT so nothing scrolls
@@ -154,16 +218,23 @@ export function PieChart({ values, labels, titles, colors, height = 200 }: PieCh
   const rOuter = size / 2 - 4;
   const rInner = rOuter * DONUT_RATIO;
 
-  // Cumulative fractions per slice.
+  // Cumulative fractions per slice — from the TWEENED values so the wedges flow; text stays target.
+  const tweenedTotal = tweened.reduce((sum, v) => sum + v, 0) || total;
   let acc = 0;
-  const arcs = slices.map((s) => {
+  const arcs = slices.map((s, i) => {
     const from = acc;
-    acc += s.value / total;
+    acc += (tweened[i] ?? s.value) / tweenedTotal;
     return { ...s, from, to: acc, mid: (from + acc) / 2 };
   });
 
-  const pct = (v: number) => `${((v / total) * 100).toFixed(1)}%`;
-  const tipText = (i: number) => `${arcs[i]?.title ?? ''} · ${pct(arcs[i]?.value ?? 0)}`;
+  // Доля дольки: явная (знаменатель = полная сумма разбивки до среза топ-N) или своя, от суммы
+  // видимых значений. Формат — общий с «значение · доля» в списках (lib/breakdownShare).
+  const pct = (s: { value: number; share?: number }) =>
+    formatShare(s.share ?? (total > 0 ? s.value / total : 0));
+  const tipText = (i: number) => {
+    const a = arcs[i];
+    return a ? `${a.title} · ${pct(a)}` : '';
+  };
 
   // Legend: full in the overlay; in a fixed tile capped by how many rows fit the donut height so
   // the list never scrolls off NOR clips (the tile is overflow-hidden) — «следить чтобы не съезжали»;
@@ -191,12 +262,12 @@ export function PieChart({ values, labels, titles, colors, height = 200 }: PieCh
     <div ref={containerRef} className="relative w-full">
       <div className={containerCls}>
         <div
+          ref={donutRef}
           className="relative shrink-0"
           style={{ width: donutWidth, maxWidth: size }}
-          onMouseLeave={() => setHover(null)}
-          onPointerLeave={() => setHover(null)}
         >
           <svg
+            ref={svgRef}
             className="block w-full"
             height={size}
             viewBox={`0 0 ${size} ${size}`}
@@ -206,13 +277,13 @@ export function PieChart({ values, labels, titles, colors, height = 200 }: PieCh
             {arcs.map((a, i) => (
               <path
                 key={i}
+                data-pie-index={i}
                 d={arcPath(cx, cy, rOuter, rInner, a.from, a.to)}
                 fill={a.color}
                 stroke="hsl(var(--card))"
                 strokeWidth="1.5"
                 className="cursor-crosshair transition-opacity"
                 opacity={hover ? (hover.i === i ? 1 : 0.55) : 0.9}
-                onMouseMove={() => setHover((prev) => (prev && prev.i === i ? prev : { i }))}
               />
             ))}
             {/* Total in the hole — a quiet anchor, not a headline. */}
@@ -251,13 +322,12 @@ export function PieChart({ values, labels, titles, colors, height = 200 }: PieCh
 
         {/* Legend: hairline rows (colour dot + label + value·%), reusing the ValueLedger idiom.
             Inline it flows under the ring; in the overlay it sits beside it. */}
-        <ul className={legendCls}>
+        <ul ref={legendRef} className={legendCls}>
           {legendRows.map((a, i) => (
             <li
               key={i}
+              data-pie-legend-index={i}
               className="flex items-baseline justify-between gap-3 border-b border-border py-1.5 last:border-b-0"
-              onMouseEnter={() => setHover({ i })}
-              onMouseLeave={() => setHover(null)}
             >
               <span className="flex min-w-0 items-center gap-1.5 truncate text-xs text-muted-foreground">
                 <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: a.color }} aria-hidden="true" />
@@ -266,7 +336,7 @@ export function PieChart({ values, labels, titles, colors, height = 200 }: PieCh
               <span className="shrink-0 text-sm font-medium tabular-nums text-foreground">
                 {fmt.num(a.value)}
                 {' '}
-                <span className="ml-1.5 text-2xs font-normal text-muted-foreground">{pct(a.value)}</span>
+                <span className="ml-1.5 text-2xs font-normal text-muted-foreground">{pct(a)}</span>
               </span>
             </li>
           ))}

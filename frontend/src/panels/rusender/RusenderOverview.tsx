@@ -1,0 +1,364 @@
+import { useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { ChartSection as ChartWidget } from '@/components/ChartWidget';
+import { ChartCardBody } from '@/components/chartWidget/ChartCardBody';
+import { BarChart } from '@/components/BarChart';
+import { ChartBand } from '@/components/ChartBand';
+import { Sparkline } from '@/components/Sparkline';
+import { EmptyState } from '@/components/EmptyState';
+import { ErrorState } from '@/components/ErrorState';
+import { ChartSkeleton } from '@/components/ui/dataSkeleton';
+import { useRusenderStatus, useRusenderSummary, type RusenderPoint } from '@/api/rusender';
+import { useGatedSurfaces } from '@/components/layout/nav';
+import { useSelectedChannel } from '@/lib/channel-context';
+import { lttbDownsample } from '@/lib/downsample';
+import { CHART_MAX_POINTS } from '@/lib/msSeries';
+import { fmt, timeAxisFromDayKeys } from '@/lib/format';
+import { formatByRole } from '@/lib/metricNumber';
+import { usePagePeriod, useCardShowsPeriod } from '@/lib/period';
+import { msPreviousPeriod, useMsPagePeriod } from '@/lib/msPeriod';
+import { pctDelta, type MetricDelta } from '@/lib/delta';
+import { WidgetGrid } from '@/components/widgets/WidgetGrid';
+
+/**
+ * «Обзор» Rusender — email-рассылки рядом с аналитикой каналов.
+ *
+ * ГЛАВНОЕ УСТРОЙСТВО СТРАНИЦЫ — две НЕСМЕШИВАЕМЫЕ группы величин:
+ *
+ *   • «События периода» — открытия и клики, которые СЛУЧИЛИСЬ в окне. Сюда попадают открытия
+ *     писем, отправленных до окна: письмо живёт неделями. Это единственный настоящий временной
+ *     ряд источника, и только он рисуется графиком.
+ *   • «Рассылки периода» — итоги кампаний, ЗАПУЩЕННЫХ в окне: отправлено, доставлено, отписки.
+ *     Это кумулятивные счётчики кампаний, а не события дня, поэтому графиком они не рисуются —
+ *     разложить их по дням честно нельзя.
+ *
+ * Эти числа НЕ обязаны совпадать и никогда не складываются — тот же канон, что «Просмотры
+ * канала» ≠ «Просмотры публикаций» у Telegram. Подписи карточек проговаривают разницу словами,
+ * а не оставляют её на догадку.
+ *
+ * База контактов — снимок, а не поток: истории размера базы у Rusender API нет, мы копим её сами
+ * с момента подключения. Поэтому у линии базы честный разрыв в днях без снимка (NULL), а не ноль.
+ */
+
+/**
+ * Тело story-карточки: крупное число + дневной ряд.
+ *
+ * Пропуски (null) НЕ приводятся к нулю: у базы контактов день без снимка — это дыра в сборе, а
+ * не обнулившаяся база. BarChart рисует такой день штриховкой, Sparkline разрывает линию.
+ */
+function RusenderStory({
+  value,
+  caption,
+  delta,
+  series,
+  viz,
+  drillTo,
+  drillLabel,
+}: {
+  value: string;
+  caption?: string;
+  /** Дельта к предыдущему равному окну — канон карточки-метрики (МойСклад/Метрика). */
+  delta?: MetricDelta | null;
+  series: Array<{ day: string; value: number | null }>;
+  viz: 'line' | 'bar';
+  /** Полноэкранная метрика карточки: число кликабельно и ведёт туда же, что «Развернуть». */
+  drillTo: string;
+  drillLabel: string;
+}) {
+  const navigate = useNavigate();
+  const model = useMemo(() => {
+    // Даунсэмпл ПАРАМИ (день + значение): дели их порознь, подписи оси разъехались бы с рядом.
+    const shown = lttbDownsample(series, CHART_MAX_POINTS, (r) => r.value ?? 0);
+    return { values: shown.map((r) => r.value), days: shown.map((r) => r.day) };
+  }, [series]);
+
+  // Считаем ДНИ С НАБЛЮДЕНИЕМ, а не длину окна. Окно всегда плотное (90 точек), но снимок базы
+  // существует только с момента подключения: на проде карточка «База контактов» показывала
+  // ПУСТОЕ место вместо графика — Sparkline получал 89 пропусков и одно значение, линии не
+  // выходило, а место под неё занималось. Тот же случай я уже чинил в «Базе», а здесь пропустил.
+  const observed = model.values.filter((v) => v != null).length;
+  if (observed <= 1) {
+    return (
+      <ChartCardBody
+        value={value}
+        caption={caption}
+        delta={delta}
+        onValueClick={() => navigate(drillTo)}
+        drillLabel={drillLabel}
+      >
+        <EmptyState
+          compact
+          size="chart"
+          title={observed ? 'Пока одна точка — графика ещё нет.' : 'За период данных нет.'}
+        />
+      </ChartCardBody>
+    );
+  }
+  const labels = model.days.map((d) => fmt.day(d));
+  const axisLabels = timeAxisFromDayKeys(model.days);
+  const titles = model.values.map((v, i) => `${labels[i] ?? ''}: ${v == null ? 'данных нет' : fmt.num(v)}`);
+
+  return (
+    <ChartCardBody
+      value={value}
+      caption={caption}
+      delta={delta}
+      onValueClick={() => navigate(drillTo)}
+      drillLabel={drillLabel}
+    >
+      {viz === 'bar' ? (
+        // ChartBand без флекс-КОЛОНКИ-родителя не ограничен ничем и переполняет фикс-тайл
+        // (урок карточек СДЭКа) — колонка во всю высоту слота даёт полосе честный остаток.
+        <div className="flex h-full min-h-0 flex-col">
+          <ChartBand>
+            <BarChart values={model.values} labels={labels} axisLabels={axisLabels} titles={titles} />
+          </ChartBand>
+        </div>
+      ) : (
+        <Sparkline
+          values={model.values}
+          labels={labels}
+          axisLabels={axisLabels}
+          area
+          strokeWidth={2}
+          interactive
+          caption=""
+          formatValue={fmt.num}
+          // Тот же класс, что у искр МойСклада: без него полотно не берёт высоту слота и линия
+          // жмётся к низу карточки — источники выглядели бы по-разному.
+          className="h-full min-h-14 w-full"
+        />
+      )}
+    </ChartCardBody>
+  );
+}
+
+export function RusenderOverview() {
+  const { channelId } = useSelectedChannel();
+  const { rusenderSurfaces } = useGatedSurfaces();
+  const status = useRusenderStatus(channelId);
+  const pp = usePagePeriod();
+  const days = pp ? pp.days : 30;
+  // Тот же сериализатор окна, что у МойСклада/Метрики/СДЭКа: пресеты 7/30/90/«Всё» и точный
+  // диапазон топбара приводятся к одному контракту, а не пересчитываются в каждом источнике.
+  const period = useMsPagePeriod();
+  const summary = useRusenderSummary(channelId, period, rusenderSurfaces);
+  // Дельта к ПРЕДЫДУЩЕМУ равному окну — канон карточки-метрики (МойСклад/Метрика). Один prev-фетч
+  // кормит все карточки. У «Всё» предшественника нет: msPreviousPeriod отдаёт null, запрос не
+  // уходит, дельта не показывается.
+  const previousPeriod = useMemo(() => msPreviousPeriod(period), [period]);
+  const previous = useRusenderSummary(
+    channelId,
+    previousPeriod ?? period,
+    rusenderSurfaces && previousPeriod != null,
+  );
+
+  const connected = status.data?.connected ?? false;
+  const missing = status.data?.missing_scopes ?? [];
+  const windowLabel = days === 0 ? 'за всё время' : `за ${days} дн.`;
+  const periodInLabel = useCardShowsPeriod() ? windowLabel : undefined;
+
+  // Разрешения могли отозвать уже ПОСЛЕ подключения — источник жив, но собирать ему нечем.
+  // Это отдельная беда от «не подключён», и она заслуживает отдельного текста.
+  if (connected && missing.length) {
+    return (
+      <EmptyState
+        title="Ключу не хватает разрешений"
+        reason={`Rusender не отдаёт данные: у ключа нет ${missing.join(', ')}. Выдай их ключу в кабинете Rusender и подключи источник заново.`}
+        action={{ to: '/connect', label: 'К подключению' }}
+      />
+    );
+  }
+
+  if (status.isSuccess && !connected) {
+    return (
+      <EmptyState
+        title="Rusender не подключён"
+        reason="Подключи аккаунт по API-ключу — после этого сюда приедут рассылки, открытия и размер базы."
+        action={{ to: '/connect', label: 'Подключить Rusender' }}
+      />
+    );
+  }
+
+  // Витрины за фичефлагом: пока он выключен, роутов данных для клиента НЕ существует. Показываем
+  // честное состояние сбора вместо пустых осей, которые читались бы как «рассылок нет».
+  if (!rusenderSurfaces) {
+    return (
+      <EmptyState
+        title="Источник подключён, собираем данные"
+        reason={
+          <>
+            {status.data?.account_email ? `Аккаунт ${status.data.account_email}. ` : ''}
+            Архив рассылок и дневная активность уже копятся. Витрины включатся, когда числа
+            сверены с живыми данными Rusender.
+          </>
+        }
+      />
+    );
+  }
+
+  if (summary.isError) return <ErrorState onRetry={() => void summary.refetch()} />;
+
+  const data = summary.data;
+  const ev = data?.events;
+  const cm = data?.campaigns;
+  const contacts = data?.contacts;
+  const series: RusenderPoint[] = data?.series ?? [];
+
+  // Пустой архив: сбор ещё не проходил (джоб ходит раз в сутки). Это не «нет рассылок».
+  if (summary.isSuccess && !series.length && !(cm?.campaigns ?? 0)) {
+    return (
+      <EmptyState
+        title="Сбор ещё не проходил"
+        reason="Первый дневной проход заберёт рассылки и размер базы. Дневная активность копится с момента подключения — истории у Rusender API нет."
+      />
+    );
+  }
+
+  // ГРАБЛИ prev-периода: при выключенном запросе ключ совпал бы с текущим окном и `.data` отдал
+  // бы ТЕКУЩИЙ кэш — дельта вышла бы нулевой. Читаем только когда прошлое окно существует.
+  const prev = previousPeriod != null ? previous.data : undefined;
+  const opensDelta = prev ? pctDelta(ev?.opens ?? 0, prev.events.opens) : null;
+  const clicksDelta = prev ? pctDelta(ev?.clicks ?? 0, prev.events.clicks) : null;
+  // База — УРОВЕНЬ: сравниваем снимок с снимком прошлого окна, а не суммы.
+  const baseDelta = prev && prev.contacts?.contacts_total != null && contacts?.contacts_total != null
+    ? pctDelta(contacts.contacts_total, prev.contacts.contacts_total)
+    : null;
+  const campaignsDelta = prev ? pctDelta(cm?.campaigns ?? 0, prev.campaigns.campaigns) : null;
+
+  const openRate = cm && cm.delivered > 0 ? (cm.opens / cm.delivered) * 100 : null;
+  const clickRate = cm && cm.delivered > 0 ? (cm.clicks / cm.delivered) * 100 : null;
+  const pending = summary.isPending;
+
+  return (
+    // Сетка доски — та же, что у Обзоров МойСклада/Метрики/СДЭКа. Без неё `fixedSize="half"`
+    // (он ставит карточке lg:col-span-3) ни на что не влияет: у блочного родителя нет колонок,
+    // и все карточки растягиваются на всю ширину в одну колонку.
+    <WidgetGrid className="grid grid-cols-1 gap-6 lg:grid-cols-6">
+      {/* СОБЫТИЯ ПЕРИОДА — единственный настоящий временной ряд, поэтому только он с графиком.
+          Столбцы, а не линия: открытия и клики — дискретные счётные события дня (канон bar). */}
+      <ChartWidget
+        id="rusender-opens"
+        title="Открытия"
+        fixedSize="half"
+        defaultColor={1}
+        defaultTinted
+        drillTo="/metrics/rusender-opens"
+      >
+        {pending ? (
+          <ChartSkeleton />
+        ) : (
+          <RusenderStory
+            value={formatByRole(ev?.opens ?? 0, 'headline')}
+            caption={`События окна ${periodInLabel ?? ''}`.trim()}
+            series={series.map((p) => ({ day: p.day, value: p.opens }))}
+            viz="bar"
+            drillTo="/metrics/rusender-opens"
+            drillLabel="Открытия"
+            delta={opensDelta}
+          />
+        )}
+      </ChartWidget>
+
+      <ChartWidget id="rusender-clicks" title="Клики" fixedSize="half" drillTo="/metrics/rusender-clicks">
+        {pending ? (
+          <ChartSkeleton />
+        ) : (
+          <RusenderStory
+            value={formatByRole(ev?.clicks ?? 0, 'headline')}
+            caption={`События окна ${periodInLabel ?? ''}`.trim()}
+            series={series.map((p) => ({ day: p.day, value: p.clicks }))}
+            viz="bar"
+            drillTo="/metrics/rusender-clicks"
+            drillLabel="Клики"
+            delta={clicksDelta}
+          />
+        )}
+      </ChartWidget>
+
+      {/* БАЗА КОНТАКТОВ — снимок, а не поток: линия, и с честным разрывом в днях без снимка. */}
+      <ChartWidget
+        id="rusender-base"
+        title="База контактов"
+        fixedSize="half"
+        noStretch
+        drillTo="/metrics/rusender-contacts"
+      >
+        {pending ? (
+          <ChartSkeleton />
+        ) : (
+          <RusenderStory
+            value={contacts?.contacts_total != null ? formatByRole(contacts.contacts_total, 'headline') : '—'}
+            caption={contacts?.day ? `Снимок на ${fmt.date(contacts.day)}` : 'Снимок ещё не снят'}
+            series={series.map((p) => ({ day: p.day, value: p.contacts_total }))}
+            viz="line"
+            drillTo="/metrics/rusender-contacts"
+            drillLabel="Размер базы"
+            delta={baseDelta}
+          />
+        )}
+      </ChartWidget>
+
+      {/* РАССЫЛКИ ПЕРИОДА — кумулятивные итоги кампаний, запущенных в окне. Графика СОЗНАТЕЛЬНО
+          нет: разложить итог рассылки по дням честно нельзя, а нарисованная «линия доставок»
+          выглядела бы как поток, которым не является. */}
+      <ChartWidget id="rusender-campaigns-window" title="Рассылки периода" fixedSize="half" noStretch>
+        {pending ? (
+          <ChartSkeleton />
+        ) : (
+          <ChartCardBody
+            value={formatByRole(cm?.campaigns ?? 0, 'headline')}
+            delta={campaignsDelta}
+            caption={`Запущено ${periodInLabel ?? ''}`.trim()}
+          >
+            {/* Тот же потолок ширины, что у «Состава базы»: иначе метка и значение разъезжаются
+                на всю карточку. */}
+            <dl className="grid max-w-xl grid-cols-2 gap-x-6 gap-y-2 text-sm">
+              <Row label="Отправлено" value={fmt.kpi(cm?.total ?? 0)} />
+              <Row label="Доставлено" value={fmt.kpi(cm?.delivered ?? 0)} />
+              <Row label="Открытий" value={fmt.kpi(cm?.opens ?? 0)} sub={openRate != null ? `${openRate.toFixed(1)}%` : undefined} />
+              <Row label="Кликов" value={fmt.kpi(cm?.clicks ?? 0)} sub={clickRate != null ? `${clickRate.toFixed(1)}%` : undefined} />
+              <Row label="Отписок" value={fmt.kpi(cm?.unsubscribes ?? 0)} />
+              <Row label="Жалоб" value={fmt.kpi(cm?.complaints ?? 0)} />
+            </dl>
+          </ChartCardBody>
+        )}
+      </ChartWidget>
+
+      {/* Объяснение живёт ПОД карточками, а не в их подписях. Колонка с числом у ChartCardBody —
+          `shrink-0`, а график `flex-1`: длинная подпись физически вытесняет плот в правый край
+          (поймано на проде — карточка «Открытия» с подписью в 210 символов рисовала столбцы
+          полоской у самого края). Подписи карточек поэтому короткие, а разница двух семей
+          величин — которую всё равно нужно проговорить словами — стоит здесь, где есть место. */}
+      {!pending && (
+        <p className="col-span-full text-xs text-muted-foreground">
+          «События окна» и «Рассылки периода» — <b className="font-medium text-foreground">разные величины</b> и
+          совпадать не обязаны. События считаются по дню, когда письмо открыли: сюда попадают открытия
+          писем, отправленных раньше. Итоги рассылок — кумулятивные и относятся к кампаниям, запущенным
+          в окне. При этом Rusender ведёт дневной ряд лишь 11 дней от отправки, поэтому более поздние
+          открытия видны только в итогах рассылки.
+        </p>
+      )}
+    </WidgetGrid>
+  );
+}
+
+/** Строка сводки: величина + необязательная доля от доставленных. */
+function Row({ label, value, sub }: { label: string; value: string; sub?: string }) {
+  return (
+    <div className="flex min-w-0 items-baseline justify-between gap-2">
+      <dt className="truncate text-muted-foreground">{label}</dt>
+      <dd className="shrink-0 tabular-nums text-foreground">
+        {value}
+        {/* Разделитель ОБЯЗАТЕЛЕН: на проде «134» и «14.9%» стояли через margin и читались
+            одним числом «13414.9%». */}
+        {sub && (
+          <span className="ml-1.5 text-xs text-muted-foreground">
+            <span aria-hidden="true" className="mr-1.5">·</span>
+            {sub}
+          </span>
+        )}
+      </dd>
+    </div>
+  );
+}

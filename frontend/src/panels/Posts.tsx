@@ -1,5 +1,7 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { Check, Download } from 'lucide-react';
+import { IconMorph, useMorphFlash } from '@/components/ui/icon-morph';
 import { useCampaignPosts, useChannels, useRemoveCampaignPosts, useTgFull } from '@/api/queries';
 import type { CampaignPostInput } from '@/api/schemas';
 import { normalizeTgPosts, type NormalizedPost } from '@/lib/posts';
@@ -17,8 +19,9 @@ import { exportFilename } from '@/lib/analyticsExport';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Checkbox } from '@/components/ui/checkbox';
 import { RichText } from '@/components/RichText';
+import { TwoLineDate } from '@/components/TwoLineDate';
 import { PostDetailModal } from '@/components/PostDetailModal';
-import { MEDIAN_MIN_SAMPLE, compareToMedian, medianDeltaLabel, periodMedian } from '@/lib/postMedian';
+import { MEDIAN_MIN_SAMPLE, compareToMedian, medianDeltaLabel, medianDeltaShort, periodMedian } from '@/lib/postMedian';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { membershipKey, useCampaignFilter, useMembershipSet } from '@/lib/campaignFilter';
 import { AddToCampaignDialog } from '@/components/campaigns/AddToCampaignDialog';
@@ -26,7 +29,9 @@ import { CampaignFilterControl } from '@/components/campaigns/CampaignFilterCont
 import { PillSelect } from '@/components/PillSelect';
 import { SearchField } from '@/components/SearchField';
 import { Button } from '@/components/ui/button';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { lazyWithReload } from '@/lib/lazyWithReload';
+import { useLiveList } from '@/lib/useLiveList';
 import {
   CONTENT_SORT_COLUMNS,
   applyContentFilters,
@@ -69,32 +74,29 @@ export function Posts() {
     );
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap gap-1" role="tablist" aria-label="Раздел контента">
+    <Tabs
+      value={view}
+      onValueChange={(next) => setView(next as 'posts' | 'campaigns')}
+      className="space-y-6"
+    >
+      {/* Второй уровень страницы — line-табы, тот же контрол и тот же вид, что «Разделы аналитики»
+          (pill/segmented остаётся переключателем представления данных ВНУТРИ карточки). */}
+      <TabsList aria-label="Раздел контента" variant="line" className="justify-start">
         {([['posts', 'Публикации'], ['campaigns', 'Кампании']] as const).map(([key, label]) => (
-          <button
-            key={key}
-            type="button"
-            role="tab"
-            aria-selected={view === key}
-            onClick={() => setView(key)}
-            className={cn(
-              'btn-pill px-3 py-1 text-xs font-medium transition-colors',
-              view === key ? 'bg-primary/15 text-foreground' : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
-            )}
-          >
+          <TabsTrigger key={key} value={key}>
             {label}
-          </button>
+          </TabsTrigger>
         ))}
-      </div>
-      {view === 'campaigns' ? (
+      </TabsList>
+      <TabsContent value="campaigns" className="mt-0">
         <Suspense fallback={<div className="py-8"><Skeleton className="h-40 w-full" /></div>}>
           <CampaignsView />
         </Suspense>
-      ) : (
+      </TabsContent>
+      <TabsContent value="posts" className="mt-0">
         <PostsContent />
-      )}
-    </div>
+      </TabsContent>
+    </Tabs>
   );
 }
 
@@ -138,6 +140,7 @@ function PostsTable({ allPosts, loadedCount }: { allPosts: NormalizedPost[]; loa
   const pp = usePagePeriod();
   const { channelId } = useSelectedChannel();
   const { data: channelsData } = useChannels();
+  const liveListRef = useLiveList<HTMLTableSectionElement>();
 
   // The four non-period Content filters read straight from the URL (single source of truth); the
   // period is owned by the page-period context (header chips) and mirrored below.
@@ -233,7 +236,9 @@ function PostsTable({ allPosts, loadedCount }: { allPosts: NormalizedPost[]; loa
   // only the currently loaded rows, never a full historical archive. Window bounds name the file.
   const channel = channelsData?.channels.find((c) => c.id === channelId);
   const exportWindow = calendarWindowForPeriod({ days: pageDays, range: pageRange });
-  const onExport = () =>
+  // Морф Download→Check после выгрузки (кнопочная моторика 2026-08-18).
+  const [exported, flashExported] = useMorphFlash();
+  const onExport = () => {
     downloadCsv(
       exportFilename({
         network: 'telegram',
@@ -244,6 +249,8 @@ function PostsTable({ allPosts, loadedCount }: { allPosts: NormalizedPost[]; loa
       }),
       tgContentRows(rows),
     );
+    flashExported();
+  };
   // Preserve the pre-redesign mobile list contract: reach-desc, top 25, unaffected by desktop-only
   // search/format/sort controls. Mobile layout and controls remain outside this task.
   const mobileRows = sortPosts(scope, 'reach', 'desc').slice(0, 25);
@@ -294,7 +301,9 @@ function PostsTable({ allPosts, loadedCount }: { allPosts: NormalizedPost[]; loa
           <CampaignFilterControl />
           {/* Desktop-only filters: text search + media format (mobile keeps the untouched list). */}
           <SearchField
-            className="hidden w-56 md:block"
+            /* w-56 минус pl-9 под лупу оставляли ~176px — ровно в длину плейсхолдера, и подсказка
+               обрезалась многоточием. w-72 держит строку целиком (IG-зеркало уже в этом диапазоне). */
+            className="hidden w-72 md:block"
             value={filters.q}
             onChange={(q) => update({ q })}
             placeholder="Поиск по тексту и хэштегам"
@@ -319,8 +328,15 @@ function PostsTable({ allPosts, loadedCount }: { allPosts: NormalizedPost[]; loa
             disabled={rows.length === 0}
             aria-label="Экспорт показанных публикаций в CSV"
             title={rows.length === 0 ? 'Нет публикаций для экспорта' : `CSV: ${rows.length} показанных публикаций`}
-            className="hidden text-muted-foreground md:inline-flex"
+            className="hidden gap-1.5 text-muted-foreground md:inline-flex"
           >
+            {/* Морф Download→Check — подтверждение выгрузки (кнопочная моторика 2026-08-18). */}
+            <IconMorph
+              active={exported}
+              a={<Download className="size-3.5" />}
+              b={<Check className="size-3.5" />}
+              className="size-3.5"
+            />
             Экспорт таблицы
           </Button>
         </div>
@@ -462,7 +478,9 @@ function PostsTable({ allPosts, loadedCount }: { allPosts: NormalizedPost[]; loa
                 />
               </th>
               <th className="w-12 py-2.5 pl-0 pr-3 text-center"></th>
-              <th className="min-w-[240px] px-3 py-2.5">Пост</th>
+              {/* w-full: колонка заголовка забирает всю ширину, которую не заняли числовые
+                  — табличный эквивалент minmax(0, 1fr) (аудит #554, D11). */}
+              <th className="w-full min-w-[240px] px-3 py-2.5">Пост</th>
               {CONTENT_SORT_COLUMNS.filter((c) => c.key !== 'date').map((c) => {
                 const active = c.key === filters.sort;
                 return (
@@ -493,7 +511,7 @@ function PostsTable({ allPosts, loadedCount }: { allPosts: NormalizedPost[]; loa
               </th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-border">
+          <tbody ref={liveListRef} className="divide-y divide-border">
             {rows.map((post, idx) => {
               const isClickable = post.id != null;
               return (
@@ -502,12 +520,14 @@ function PostsTable({ allPosts, loadedCount }: { allPosts: NormalizedPost[]; loa
                   onClick={isClickable ? () => setOpenId(post.id) : undefined}
                   className={`group transition-colors hover:bg-hover-row ${isClickable ? 'cursor-pointer' : ''}`}
                 >
-                  {/* Чекбокс не должен открывать модалку — гасим всплытие на ячейке. */}
-                  <td className="py-2.5 pl-0 pr-2" onClick={(e) => e.stopPropagation()}>
+                  {/* Чекбокс не должен открывать модалку — гасим его собственный click, оставляя
+                      табличную ячейку неинтерактивной. */}
+                  <td className="py-2.5 pl-0 pr-2">
                     {post.id != null && (
                       <Checkbox
                         aria-label="Выбрать публикацию"
                         checked={selected.has(post.id)}
+                        onClick={(event) => event.stopPropagation()}
                         onCheckedChange={() => toggleSelect(post.id!)}
                         data-testid="post-select"
                       />
@@ -523,7 +543,7 @@ function PostsTable({ allPosts, loadedCount }: { allPosts: NormalizedPost[]; loa
                       <button
                         type="button"
                         onClick={() => setOpenId(post.id)}
-                        className="block w-full max-w-sm space-y-1 text-left md:max-w-md lg:max-w-lg"
+                        className="block w-full space-y-1 text-left"
                       >
                         <span className={cn('line-clamp-1 font-medium', post.caption ? 'text-foreground' : 'italic text-muted-foreground')}>
                           {post.caption ? markdownToPlainText(post.caption) : 'Без подписи'}
@@ -534,7 +554,7 @@ function PostsTable({ allPosts, loadedCount }: { allPosts: NormalizedPost[]; loa
                         </span>
                       </button>
                     ) : (
-                      <div className="max-w-sm space-y-1 md:max-w-md lg:max-w-lg">
+                      <div className="space-y-1">
                         <div className="line-clamp-1 font-medium text-foreground">
                           {post.caption ? <RichText text={post.caption} /> : <span className="italic text-muted-foreground">Без подписи</span>}
                         </div>
@@ -655,21 +675,10 @@ function SortButton({
       className={cn('ml-auto inline-flex items-center gap-1 tabular-nums transition-colors', active ? 'text-primary' : 'hover:text-foreground')}
     >
       {label}
-      <span aria-hidden="true" className={cn('text-2xs', !active && 'text-ink3/60')}>
+      <span aria-hidden="true" className={cn('text-2xs', !active && 'text-ink3')}>
         {active ? (order === 'desc' ? '↓' : '↑') : '↕'}
       </span>
     </button>
-  );
-}
-
-/** Дата максимум в две строки («20 июн.» / «06:01»): узкая колонка не должна ломать дату на три. */
-function TwoLineDate({ iso }: { iso: string }) {
-  const [day, time] = fmt.date(iso).split(', ');
-  return (
-    <span className="inline-flex flex-col items-end">
-      <span className="whitespace-nowrap">{day}</span>
-      {time && <span className="whitespace-nowrap">{time}</span>}
-    </span>
   );
 }
 
@@ -685,7 +694,9 @@ function FormatTag({ post }: { post: NormalizedPost }) {
  * A metric cell with explicit comparable-period median context. The value is always shown; the
  * delta appears only when periodMedian cleared the min-sample gate (never a faked benchmark). In
  * the dense table the delta is SHORT («+28%», full wording in the title tooltip) — repeating
- * «к медиане» in every cell is noise. One colour rule for every metric column (`dir` → green/red);
+ * «к медиане» in every cell is noise. The delta reads MUTED (канон дельт): direction lives in the
+ * +/−/± sign, and verdant/ember stay reserved for the one evaluated period-vs-period Δ of a
+ * comparison rail — four coloured percentages per row made the densest surface the loudest one.
  * `tone` only picks the value ink (primary signal column vs muted secondary).
  */
 function MedianCell({
@@ -701,23 +712,14 @@ function MedianCell({
 }) {
   if (value == null) return <span className="text-muted-foreground/40">—</span>;
   const cmp = compareToMedian(value, median);
-  const deltaColor = cmp
-    ? cmp.dir === 'above'
-      ? 'text-verdant'
-      : cmp.dir === 'below'
-        ? 'text-ember'
-        : 'text-muted-foreground'
-    : 'text-muted-foreground';
-  const deltaShort = cmp
-    ? cmp.dir === 'at' ? '±0%' : `${cmp.pct > 0 ? '+' : '−'}${Math.abs(Math.round(cmp.pct))}%`
-    : null;
+  const deltaShort = cmp ? medianDeltaShort(cmp) : null;
   return (
     <>
       <span className={cn('block font-medium tabular-nums', tone === 'signal' ? 'text-foreground' : 'text-muted-foreground')}>
         {format(value)}
       </span>
       {cmp && (
-        <span className={cn('block text-2xs tabular-nums', deltaColor)} title="к медиане за период">
+        <span className="block text-2xs tabular-nums text-muted-foreground" title="к медиане за период">
           {deltaShort}
         </span>
       )}
@@ -742,6 +744,16 @@ function PostThumb({
   icon?: boolean;
 }) {
   const [broken, setBroken] = useState(false);
+  const imageRef = useRef<HTMLImageElement>(null);
+  useEffect(() => {
+    const image = imageRef.current;
+    if (!image || broken) return;
+    const handleError = () => setBroken(true);
+    image.addEventListener('error', handleError);
+    // Cached failures can settle before the passive effect attaches.
+    if (image.complete && image.naturalWidth === 0) handleError();
+    return () => image.removeEventListener('error', handleError);
+  }, [thumb, broken]);
   const label =
     mediaType === 'video' ? 'Видео' : mediaType === 'photo' ? (albumSize > 1 ? `${albumSize} фото` : 'Фото') : 'Текст';
   return (
@@ -751,11 +763,11 @@ function PostThumb({
     >
       {thumb && !broken ? (
         <img
+          ref={imageRef}
           loading="lazy"
           src={thumb}
           alt=""
           referrerPolicy="no-referrer"
-          onError={() => setBroken(true)}
           className="h-full w-full object-cover"
         />
       ) : icon ? (

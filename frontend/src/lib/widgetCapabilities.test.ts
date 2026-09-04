@@ -13,9 +13,13 @@ describe('editorSpec — capability model (U6)', () => {
     expect(s.filterDims.map((d) => d.id)).toContain('tg.format');
   });
 
-  it('a value/KPI metric enables none of the series controls', () => {
+  // Ряд-специфичные контролы у метрики-числа выключены, а ЦЕЛЬ — нет: «хочу ER 45%» такой же
+  // понятный ориентир, как цель по просмотрам, и именно она даёт числу честное кольцо прогресса
+  // (RadialGauge рисуется для kpi-виджета с целью).
+  it('a value/KPI metric enables the goal but none of the series controls', () => {
     const s = editorSpec(cfg('tg.er')); // value, supportedViz [kpi], no dims
-    expect(s.capabilities).toMatchObject({ viz: false, grain: false, comparison: false, target: false, filter: false });
+    expect(s.capabilities).toMatchObject({ viz: false, grain: false, comparison: false, filter: false });
+    expect(s.capabilities.target).toBe(true);
   });
 
   it('a breakdown metric enables viz (list/bar/donut) but not grain/comparison/target', () => {
@@ -37,10 +41,10 @@ describe('editorSpec — capability model (U6)', () => {
     expect(capabilitiesFor(cfg('legacy:kpi'))).toEqual({ metric: false, viz: false, grain: false, comparison: false, target: false, filter: false });
   });
 
-  it('a chart legacy widget exposes only its supported presentation switch', () => {
+  it('subscriber history exposes only its canonical total-audience curve', () => {
     const s = editorSpec(cfg('legacy:history'));
-    expect(s.supportedViz).toEqual(['line', 'bar']);
-    expect(s.capabilities).toEqual({ metric: false, viz: true, grain: false, comparison: false, target: false, filter: false });
+    expect(s.supportedViz).toEqual(['line']);
+    expect(s.capabilities).toEqual({ metric: false, viz: false, grain: false, comparison: false, target: false, filter: false });
     expect(s.filterDims).toEqual([]);
   });
 
@@ -49,12 +53,12 @@ describe('editorSpec — capability model (U6)', () => {
   });
 
   it('a value metric carries a disabled-reason for every off control (shown disabled, not hidden)', () => {
-    const s = editorSpec(cfg('tg.er')); // value: viz/grain/comparison/target/filter all off
+    const s = editorSpec(cfg('tg.er')); // value: viz/grain/comparison/filter off, goal ON
     expect(s.disabledReasons?.grain).toBeTruthy();
     expect(s.disabledReasons?.comparison).toBeTruthy();
-    expect(s.disabledReasons?.target).toBeTruthy();
     expect(s.disabledReasons?.viz).toBeTruthy();
     expect(s.disabledReasons?.filter).toBeTruthy();
+    expect(s.disabledReasons?.target).toBeUndefined(); // цель доступна — причины отключения нет
   });
 
   it('a fully-enabled series metric has no disabled reasons', () => {

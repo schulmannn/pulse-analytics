@@ -27,8 +27,9 @@ describe('buildIgInsights', () => {
     const out = buildIgInsights({ erReach: 1.8, erReachPrev: 2.4 });
     expect(out[0].tone).toBe('down');
     expect(out[0].text).toContain('снизилась');
-    expect(out[0].evidence).toContain('1.80%');
-    expect(out[0].evidence).toContain('2.40%');
+    // Единый абсолютный процент fmt.pctAbs (2026-08-14): «1.8%», не «1.80%» — паритет с TG.
+    expect(out[0].evidence).toContain('1.8%');
+    expect(out[0].evidence).toContain('2.4%');
   });
 
   it('names the component that drove an engagement rise (attribution)', () => {

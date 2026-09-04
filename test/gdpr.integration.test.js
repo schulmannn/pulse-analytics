@@ -72,13 +72,17 @@ async function mkWorkspace(ownerUid, name) {
   return w.id;
 }
 
-async function mkSource(externalId) {
+async function mkNetworkSource(network, externalId, { username = null, title = null } = {}) {
   const { rows: [s] } = await pool.query(
-    `INSERT INTO external_sources (network, external_id) VALUES ('tg', $1)
-     ON CONFLICT (network, external_id) DO UPDATE SET external_id = EXCLUDED.external_id
-     RETURNING id`, [externalId]);
+    `INSERT INTO external_sources (network, external_id, username, title) VALUES ($1, $2, $3, $4)
+     ON CONFLICT (network, external_id) DO UPDATE SET
+       username = COALESCE(EXCLUDED.username, external_sources.username),
+       title = COALESCE(EXCLUDED.title, external_sources.title)
+     RETURNING id`, [network, externalId, username, title]);
   return s.id;
 }
+
+const mkSource = (externalId) => mkNetworkSource('tg', externalId);
 
 async function mkChannel(ownerUid, workspaceId, sourceId, username) {
   const { rows: [c] } = await pool.query(
@@ -93,19 +97,33 @@ async function seedRichUser(tag) {
   const uid = await mkUser(tag);
   const ws = await mkWorkspace(uid, `ws-${tag}-${nonce}`);
   const src = await mkSource(`${nonce}-${tag}`);
+  // Production connect always canonicalises these integrations into external_sources. On a normal
+  // TG/collector channel they are referenced only by the account row (channels.source_id remains TG).
+  const msSrc = await mkNetworkSource('ms', `${nonce}-${tag}-ms`, { title: `MS ${tag}` });
+  const ymSrc = await mkNetworkSource('ym', `${nonce}-${tag}-counter`, {
+    username: `https://${tag}.example`,
+    title: `Counter ${tag}`,
+  });
   const ch = await mkChannel(uid, ws, src, `chan_${nonce}_${tag}`);
   await pool.query(`INSERT INTO user_prefs (uid, prefs) VALUES ($1, '{"h":1}'::jsonb)`, [uid]);
   await pool.query(
     `INSERT INTO tg_sessions (uid, tg_user_id, username, session_enc) VALUES ($1, 1, $2, 'iv:tag:SECRET_TG_SESSION')`,
     [uid, tag]);
   await pool.query(
+    `UPDATE tg_sessions
+        SET connection_state='degraded', last_attempt_at=now(),
+            last_error_code='upstream', last_error_at=now()
+      WHERE uid=$1`,
+    [uid]);
+  await pool.query(
     `INSERT INTO reports (uid, name, config) VALUES ($1, $2, '{"blocks":[]}'::jsonb)`,
     [uid, `report-${nonce}-${tag}`]);
   await pool.query(
     `INSERT INTO channel_daily (channel_id, day, views) VALUES ($1, CURRENT_DATE, 100)`, [ch]);
+  const postId = nextPostId++;
   await pool.query(
     `INSERT INTO posts (post_id, channel_id, date_published, views) VALUES ($1, $2, now(), 50)`,
-    [nextPostId++, ch]);
+    [postId, ch]);
   await pool.query(
     `INSERT INTO ig_accounts (channel_id, ig_user_id, username, access_token_enc)
      VALUES ($1, $2, $2, 'iv:tag:SECRET_IG_TOKEN')`, [ch, `ig_${nonce}_${tag}`]);
@@ -124,11 +142,87 @@ async function seedRichUser(tag) {
      VALUES ($1, $2, now(), 5000, $3, 'Personal customer')`,
     [ch, `${nonce}-${tag}-return`, `${nonce}-${tag}-agent`]);
   await pool.query(
+    `INSERT INTO ms_accounts (channel_id, ms_account_id, org_name, access_token_enc, source_id)
+     VALUES ($1, $2, $3, 'iv:tag:SECRET_MS_TOKEN', $4)`,
+    [ch, `${nonce}-${tag}-ms`, `MS ${tag}`, msSrc]);
+  await pool.query(
+    `INSERT INTO ms_daily (channel_id, day, revenue_kopecks, orders_count, orders_sum_kopecks)
+     VALUES ($1, CURRENT_DATE, 12500, 2, 15000)`,
+    [ch]);
+  await pool.query(
     `INSERT INTO channel_mention_settings
        (channel_id, include_terms, exclude_terms, exclude_sources, match_mode, updated_by)
      VALUES ($1, ARRAY['brand'], ARRAY['spam'], ARRAY['noise'], 'word', $2)`,
     [ch, uid]);
-  return { uid, ws, src, ch };
+  await pool.query(
+    `INSERT INTO mention_notify_subscriptions (channel_id, uid, enabled, send_days, send_hour)
+     VALUES ($1, $2, true, ARRAY[1, 3], 11)`,
+    [ch, uid]);
+  await pool.query(
+    `INSERT INTO ym_accounts
+       (channel_id, counter_id, counter_name, site, counter_created_day, access_token_enc, source_id)
+     VALUES ($1, $2, $3, $4, CURRENT_DATE - 30, 'iv:tag:SECRET_YM_TOKEN', $5)`,
+    [ch, `${nonce}-${tag}-counter`, `Counter ${tag}`, `https://${tag}.example`, ymSrc]);
+  await pool.query(
+    `INSERT INTO ym_daily
+       (channel_id, day, visits, users, pageviews, bounce_rate, avg_visit_duration_seconds,
+        page_depth, new_users, percent_new_visitors, robot_visits, robot_percentage)
+     VALUES ($1, CURRENT_DATE, 100, 80, 140, 12.5, 61.5, 2.4, 20, 25, 3, 3)`,
+    [ch]);
+  await pool.query(
+    `INSERT INTO raw_snapshots (channel_id, source, kind, day, payload)
+     VALUES ($1, 'tg', 'graphs', CURRENT_DATE, jsonb_build_object('owner_marker', $2::text))`,
+    [ch, `raw-${nonce}-${tag}`]);
+  await pool.query(
+    `INSERT INTO channel_snapshots (channel_id, data)
+     VALUES ($1, jsonb_build_object(
+       'subscribers', 42,
+       'owner_marker', $2::text,
+       'channel_photo', $3::text
+     ))`,
+    [ch, `snapshot-${nonce}-${tag}`, `data:image/jpeg;base64,SECRET_CHANNEL_PHOTO_${tag}`]);
+  await pool.query(
+    `INSERT INTO api_keys (channel_id, key_hash, key_prefix, label)
+     VALUES ($1, $2, $3, $4)`,
+    [ch, `SECRET_API_KEY_HASH_${nonce}_${tag}`, `pa_${tag}`, `Collector ${tag}`]);
+  const { rows: [auditEvent] } = await pool.query(
+    `INSERT INTO audit_events (uid, channel_id, action, request_id, ip_hash, metadata)
+     VALUES ($1, $2, $3, $4, $5, jsonb_build_object('private_marker', $6::text))
+     RETURNING id`,
+    [
+      uid, ch, `it.${nonce}.${tag}`, `SECRET_REQUEST_${tag}`, `SECRET_IP_HASH_${tag}`,
+      `SECRET_AUDIT_METADATA_${tag}`,
+    ]);
+  const { rows: [campaign] } = await pool.query(
+    `INSERT INTO campaigns
+       (workspace_id, name, description, color, status, start_date, end_date, created_by)
+     VALUES ($1, $2, $3, '#123456', 'active', CURRENT_DATE - 1, CURRENT_DATE + 1, $4)
+     RETURNING id`,
+    [ws, `Campaign ${nonce} ${tag}`, `Description ${tag}`, uid]);
+  await pool.query(
+    `INSERT INTO campaign_posts
+       (campaign_id, workspace_id, network, channel_id, post_ref, published_at, media_type,
+        caption, added_by)
+     VALUES ($1, $2, 'tg', $3, $4, now(), 'post', $5, $6)`,
+    [campaign.id, ws, ch, String(postId), `caption-${nonce}-${tag}`, uid]);
+  const { rows: [aiChat] } = await pool.query(
+    `INSERT INTO ai_chats (user_id, title) VALUES ($1, $2) RETURNING id`,
+    [uid, `AI ${tag}`]);
+  await pool.query(
+    `INSERT INTO ai_chat_messages
+       (chat_id, role, content, tool_trace, model, input_tokens, output_tokens)
+     VALUES
+       ($1, 'user', $2, NULL, NULL, 5, 0),
+       ($1, 'assistant', $3, '{"tools":["overview"]}'::jsonb, 'test-model', 5, 7)`,
+    [aiChat.id, `question-${nonce}-${tag}`, `answer-${nonce}-${tag}`]);
+  await pool.query(
+    `INSERT INTO ai_usage_daily (user_id, day, messages, input_tokens, output_tokens)
+     VALUES ($1, CURRENT_DATE, 1, 5, 7)`,
+    [uid]);
+  return {
+    uid, ws, src, msSrc, ymSrc, ch, postId, aiChat: aiChat.id,
+    campaign: campaign.id, auditEvent: auditEvent.id,
+  };
 }
 
 // posts.post_id is a global BIGINT PK (TG message ids in prod) — synthesize unique ones per run.
@@ -147,14 +241,25 @@ test('erasure: deleteUserAccount removes every user-linked row, spares neighbour
     `INSERT INTO workspace_members (workspace_id, uid, role) VALUES ($1, $2, 'member')`, [a.ws, b.uid]);
   const srcForeign = await mkSource(`${nonce}-era-foreign`);
   const foreignCh = await mkChannel(b.uid, a.ws, srcForeign, `chan_${nonce}_era_foreign`);
+  const parkedPostRef = `${nonce}-era-parked-foreign`;
+  // Composite FK (channel_id,workspace_id) used to block the pre-null UPDATE on foreignCh. The
+  // contribution belongs to the dying campaign/workspace, so erasure must remove it first.
+  await pool.query(
+    `INSERT INTO campaign_posts
+       (campaign_id, workspace_id, network, channel_id, post_ref, added_by)
+     VALUES ($1, $2, 'tg', $3, $4, $5)`,
+    [a.campaign, a.ws, foreignCh, parkedPostRef, b.uid]);
 
   // A SHARED source: B's second channel claims A's source too — it must survive the sweep.
   const sharedCh = await mkChannel(b.uid, b.ws, a.src, `chan_${nonce}_era_shared`);
 
   // An audit row pointing at A with identifying metadata (the tg.session.connected shape):
-  // erasure must keep the row but anonymize BOTH uid (SET NULL) and metadata (wipe).
+  // erasure must keep the row but wipe every direct/correlatable identifier.
   const { rows: [ev] } = await pool.query(
-    `INSERT INTO audit_events (uid, action, metadata) VALUES ($1, $2, '{"username":"personal_tg_handle"}'::jsonb) RETURNING id`,
+    `INSERT INTO audit_events (uid, action, request_id, ip_hash, metadata)
+     VALUES ($1, $2, 'stable-request-id', 'stable-ip-hmac',
+             '{"username":"personal_tg_handle"}'::jsonb)
+     RETURNING id`,
     [a.uid, `it.${nonce}.era`]);
 
   assert.strictEqual(await db.deleteUserAccount(a.uid), true, 'reports the deletion');
@@ -171,11 +276,24 @@ test('erasure: deleteUserAccount removes every user-linked row, spares neighbour
     ['channel_daily', `SELECT count(*) FROM channel_daily WHERE channel_id=$1`, [a.ch]],
     ['posts', `SELECT count(*) FROM posts WHERE channel_id=$1`, [a.ch]],
     ['channel_mention_settings', `SELECT count(*) FROM channel_mention_settings WHERE channel_id=$1`, [a.ch]],
+    ['mention_notify_subscriptions', `SELECT count(*) FROM mention_notify_subscriptions WHERE uid=$1`, [a.uid]],
     ['ig_accounts', `SELECT count(*) FROM ig_accounts WHERE channel_id=$1`, [a.ch]],
     ['ig_daily', `SELECT count(*) FROM ig_daily WHERE channel_id=$1`, [a.ch]],
+    ['ms_accounts', `SELECT count(*) FROM ms_accounts WHERE channel_id=$1`, [a.ch]],
+    ['ms_daily', `SELECT count(*) FROM ms_daily WHERE channel_id=$1`, [a.ch]],
+    ['ym_accounts', `SELECT count(*) FROM ym_accounts WHERE channel_id=$1`, [a.ch]],
+    ['ym_daily', `SELECT count(*) FROM ym_daily WHERE channel_id=$1`, [a.ch]],
+    ['raw_snapshots', `SELECT count(*) FROM raw_snapshots WHERE channel_id=$1`, [a.ch]],
+    ['channel_snapshots', `SELECT count(*) FROM channel_snapshots WHERE channel_id=$1`, [a.ch]],
+    ['api_keys', `SELECT count(*) FROM api_keys WHERE channel_id=$1`, [a.ch]],
     ['chart_annotations', `SELECT count(*) FROM chart_annotations WHERE channel_id=$1`, [a.ch]],
     ['ms_orders', `SELECT count(*) FROM ms_orders WHERE channel_id=$1`, [a.ch]],
     ['ms_returns', `SELECT count(*) FROM ms_returns WHERE channel_id=$1`, [a.ch]],
+    ['campaigns', `SELECT count(*) FROM campaigns WHERE id=$1`, [a.campaign]],
+    ['campaign_posts', `SELECT count(*) FROM campaign_posts WHERE campaign_id=$1`, [a.campaign]],
+    ['ai_chats', `SELECT count(*) FROM ai_chats WHERE user_id=$1`, [a.uid]],
+    ['ai_chat_messages', `SELECT count(*) FROM ai_chat_messages WHERE chat_id=$1`, [a.aiChat]],
+    ['ai_usage_daily', `SELECT count(*) FROM ai_usage_daily WHERE user_id=$1`, [a.uid]],
   ]) {
     assert.strictEqual(await count(sql, params), 0, `${label}: erased`);
   }
@@ -187,6 +305,8 @@ test('erasure: deleteUserAccount removes every user-linked row, spares neighbour
   assert.ok(fc, 'foreign channel in the dying workspace survives');
   assert.strictEqual(fc.workspace_id, null, 'foreign channel falls back to the legacy NULL-workspace path');
   assert.strictEqual(fc.owner_uid, b.uid, 'foreign channel keeps its owner');
+  assert.strictEqual(await count(`SELECT count(*) FROM campaign_posts WHERE post_ref=$1`, [parkedPostRef]), 0,
+    'dying-workspace campaign membership no longer blocks the foreign channel pre-null');
 
   // Source claimed by a SURVIVOR = shared identity → survives. Source referenced by NOBODY
   // after the cascade (srcForeign belongs to the surviving foreign channel; B's own src too) —
@@ -196,12 +316,23 @@ test('erasure: deleteUserAccount removes every user-linked row, spares neighbour
     'source still claimed by a survivor is shared identity and survives');
   assert.strictEqual(await count(`SELECT count(*) FROM channels WHERE id=$1`, [sharedCh]), 1,
     'survivor channel on the shared source is intact');
+  assert.strictEqual(await count(`SELECT count(*) FROM external_sources WHERE id=$1`, [b.msSrc]), 1,
+    'live neighbour MoySklad canonical source survives the global orphan sweep');
+  assert.strictEqual(await count(`SELECT count(*) FROM external_sources WHERE id=$1`, [b.ymSrc]), 1,
+    'live neighbour Metrika canonical source survives the global orphan sweep');
+  assert.strictEqual(await count(`SELECT count(*) FROM external_sources WHERE id=$1`, [a.msSrc]), 0,
+    'erased user orphaned MoySklad canonical source is swept');
+  assert.strictEqual(await count(`SELECT count(*) FROM external_sources WHERE id=$1`, [a.ymSrc]), 0,
+    'erased user orphaned Metrika canonical source is swept');
 
-  // Audit row: survives, anonymized in BOTH columns.
-  const { rows: [after] } = await pool.query(`SELECT uid, metadata FROM audit_events WHERE id=$1`, [ev.id]);
+  // Audit row survives, but no stable pseudonymous join key remains.
+  const { rows: [after] } = await pool.query(
+    `SELECT uid, metadata, request_id, ip_hash FROM audit_events WHERE id=$1`, [ev.id]);
   assert.ok(after, 'audit row survives erasure');
   assert.strictEqual(after.uid, null, 'audit row is anonymized (SET NULL)');
   assert.deepStrictEqual(after.metadata, {}, 'identifying metadata is wiped');
+  assert.strictEqual(after.request_id, null, 'request correlation id is wiped');
+  assert.strictEqual(after.ip_hash, null, 'stable IP HMAC is wiped');
 });
 
 test('erasure: a source claimed ONLY by the erased user (private channel) is swept away', { skip }, async () => {
@@ -209,6 +340,8 @@ test('erasure: a source claimed ONLY by the erased user (private channel) is swe
   assert.strictEqual(await db.deleteUserAccount(a.uid), true);
   assert.strictEqual(await count(`SELECT count(*) FROM external_sources WHERE id=$1`, [a.src]), 0,
     'orphaned source (its username/title can identify a private channel owner) is erased');
+  assert.strictEqual(await count(`SELECT count(*) FROM external_sources WHERE id IN ($1,$2)`, [a.msSrc, a.ymSrc]), 0,
+    'orphaned integration identities are erased too');
 });
 
 test('export: streamUserExport carries the archive but never credentials or foreign channels', { skip }, async () => {
@@ -229,26 +362,203 @@ test('export: streamUserExport carries the archive but never credentials or fore
   assert.strictEqual(data.account.avatar_url, 'data:image/png;base64,AVATAR', 'avatar (personal photo) exported');
   assert.strictEqual(data.channels.length, 1, 'only owned channels are exported');
   assert.strictEqual(data.channels[0].id, a.ch);
+  assert.strictEqual(data.channels[0].workspace_id, a.ws, 'channel workspace identity included');
+  assert.strictEqual(data.channels[0].status, 'active', 'channel lifecycle status included');
   assert.strictEqual(data.channels[0].archive.daily.length, 1, 'daily archive included');
   assert.strictEqual(data.channels[0].archive.posts.length, 1, 'posts archive included');
+  assert.strictEqual(data.channels[0].archive.ms_daily.length, 1, 'MoySklad daily archive included');
+  assert.strictEqual(data.channels[0].archive.ms_daily[0].revenue_kopecks, '12500');
   assert.strictEqual(data.channels[0].archive.ms_orders.length, 1, 'MoySklad orders archive included');
   assert.strictEqual(data.channels[0].archive.ms_returns.length, 1, 'MoySklad returns archive included');
   assert.strictEqual(data.channels[0].archive.ms_returns[0].agent_name, 'Personal customer');
+  assert.strictEqual(data.channels[0].archive.ym_daily.length, 1, 'Yandex Metrika history included');
+  assert.strictEqual(data.channels[0].archive.ym_daily[0].visits, '100');
+  assert.strictEqual(data.channels[0].archive.raw_snapshots.length, 1, 'raw provider archive included');
+  assert.strictEqual(data.channels[0].archive.raw_snapshots[0].payload.owner_marker, `raw-${nonce}-exp-a`);
+  assert.deepStrictEqual(data.channels[0].snapshot.data, {
+    subscribers: 42,
+    owner_marker: `snapshot-${nonce}-exp-a`,
+  }, 'current snapshot included without channel_photo');
+  assert.strictEqual(data.channels[0].moysklad.ms_account_id, `${nonce}-exp-a-ms`,
+    'MoySklad non-secret account identity included');
+  assert.strictEqual(data.channels[0].moysklad.org_name, 'MS exp-a');
+  assert.deepStrictEqual(
+    data.channels[0].api_keys.map((k) => ({ prefix: k.key_prefix, label: k.label })),
+    [{ prefix: 'pa_exp-a', label: 'Collector exp-a' }],
+    'API key metadata included without key_hash',
+  );
+  assert.strictEqual(data.channels[0].yandex_metrika.counter_id, `${nonce}-exp-a-counter`,
+    'Yandex Metrika non-secret identity included');
   assert.deepStrictEqual(data.channels[0].mention_settings.include_terms, ['brand'], 'mention rules included');
   assert.strictEqual(data.channels[0].mention_settings.match_mode, 'word');
+  assert.deepStrictEqual(data.mention_notify_subscriptions.map((s) => s.channel_id), [a.ch],
+    'personal mention subscription included at the top level');
   assert.ok(data.channels[0].instagram, 'ig profile included');
   assert.strictEqual(data.channels[0].instagram.daily.length, 1, 'ig daily included');
   assert.ok(data.telegram_session, 'tg connection presence included');
+  assert.strictEqual(data.telegram_session.connection_state, 'degraded', 'TG health state included');
+  assert.strictEqual(data.telegram_session.last_error_code, 'upstream', 'allow-listed TG health code included');
   assert.deepStrictEqual(data.prefs, { h: 1 }, 'prefs included');
+  assert.deepStrictEqual(data.workspaces.map((w) => ({ id: w.id, kind: w.kind })),
+    [{ id: a.ws, kind: 'personal' }], 'only owned workspace rows, with kind');
+  assert.ok(data.workspaces.every((w) => !('members' in w)), 'foreign workspace roster is not exported');
+  assert.deepStrictEqual(
+    data.workspace_memberships.map((m) => ({ id: m.workspace_id, kind: m.workspace_kind })),
+    [
+      { id: a.ws, kind: 'personal' },
+      { id: b.ws, kind: 'personal' },
+    ].sort((x, y) => x.id - y.id),
+    'only the user’s own membership rows include owned + shared workspaces',
+  );
+  assert.deepStrictEqual(data.campaigns.map((c) => c.id), [a.campaign], 'only campaigns created by the user');
+  assert.deepStrictEqual(data.campaign_posts.map((p) => p.campaign_id), [a.campaign],
+    'only campaign-post operations added by the user');
+  assert.deepStrictEqual(Object.keys(data.campaign_posts[0]).sort(),
+    ['added_at', 'campaign_id', 'channel_id', 'network', 'post_ref'].sort(),
+    'campaign post safe projection excludes content and other actors');
+  assert.deepStrictEqual(data.audit_events.map((e) => e.id), [a.auditEvent], 'own audit trail included');
+  assert.deepStrictEqual(Object.keys(data.audit_events[0]).sort(),
+    ['action', 'channel_id', 'created_at', 'id'].sort(), 'audit safe projection only');
+  assert.deepStrictEqual(data.ai_chats.map((c) => c.id), [a.aiChat], 'personal AI chats included');
+  assert.deepStrictEqual(data.ai_chat_messages.map((m) => m.chat_id), [a.aiChat, a.aiChat],
+    'messages are exported only through the user-owned chat');
+  assert.deepStrictEqual(data.ai_usage_daily.map((d) => d.messages), [1], 'personal AI usage included');
 
   // The credential blacklist: nothing that smells like a secret may appear ANYWHERE in the JSON.
   const flat = res.body();
-  for (const secret of ['SECRET_TG_SESSION', 'SECRET_IG_TOKEN', 'pass_hash', 'session_enc', 'access_token_enc', 'token_version']) {
+  for (const secret of [
+    'SECRET_TG_SESSION', 'SECRET_IG_TOKEN', 'SECRET_MS_TOKEN', 'SECRET_YM_TOKEN',
+    `SECRET_API_KEY_HASH_${nonce}_exp-a`, 'SECRET_CHANNEL_PHOTO_exp-a',
+    'SECRET_REQUEST_exp-a', 'SECRET_IP_HASH_exp-a', 'SECRET_AUDIT_METADATA_exp-a',
+    `caption-${nonce}-exp-a`,
+    'pass_hash', 'session_enc', 'access_token_enc', 'token_version', 'key_hash',
+    'request_id', 'ip_hash',
+  ]) {
     assert.ok(!flat.includes(secret), `export must not contain ${secret}`);
   }
 
   const exportedIds = data.channels.map((c) => c.id);
   assert.ok(!exportedIds.includes(b.ch), 'membership channel (foreign data) excluded');
+  assert.ok(!flat.includes(`raw-${nonce}-exp-b`), 'foreign raw snapshot payload excluded');
+  assert.ok(!flat.includes(`question-${nonce}-exp-b`), 'foreign AI conversation excluded');
+  assert.ok(!flat.includes(`Campaign ${nonce} exp-b`), 'foreign campaign excluded');
+  assert.ok(!flat.includes('pa_exp-b'), 'foreign API key metadata excluded');
+});
+
+test('export: disconnected Instagram keeps owned history and never leaks a foreign channel', { skip }, async () => {
+  const a = await seedRichUser('ig-off-a');
+  const b = await seedRichUser('ig-off-b');
+  await pool.query(
+    `INSERT INTO workspace_members (workspace_id, uid, role) VALUES ($1, $2, 'member')`,
+    [b.ws, a.uid]);
+  await pool.query(`DELETE FROM ig_accounts WHERE channel_id=$1`, [a.ch]);
+  await pool.query(
+    `INSERT INTO ig_media_daily (channel_id, media_id, day, reach)
+     VALUES ($1, $2, CURRENT_DATE, 71)`,
+    [a.ch, `${nonce}-owned-media`]);
+  await pool.query(
+    `INSERT INTO ig_media_daily (channel_id, media_id, day, reach)
+     VALUES ($1, $2, CURRENT_DATE, 999)`,
+    [b.ch, `${nonce}-foreign-media`]);
+
+  const { outcome, res, json: data } = await runExport(a.uid, { pageSize: 1 });
+  assert.strictEqual(outcome, 'ok');
+  assert.deepStrictEqual(data.channels.map((c) => c.id), [a.ch], 'only the owned channel is present');
+  const instagram = data.channels[0].instagram;
+  assert.ok(instagram, 'historical section survives removal of ig_accounts');
+  assert.strictEqual(instagram.ig_user_id, null);
+  assert.strictEqual(instagram.username, null);
+  assert.strictEqual(instagram.daily.length, 1, 'owned daily history remains portable');
+  assert.deepStrictEqual(instagram.media_daily.map((m) => m.media_id), [`${nonce}-owned-media`]);
+  assert.ok(!res.body().includes(`${nonce}-foreign-media`), 'foreign Instagram history is absent');
+});
+
+test('export: campaigns/posts require own authorship plus current workspace access', { skip }, async () => {
+  const a = await seedRichUser('camp-a');
+  const b = await seedRichUser('camp-b');
+  await pool.query(
+    `INSERT INTO workspace_members (workspace_id, uid, role) VALUES ($1, $2, 'member')`,
+    [b.ws, a.uid]);
+
+  // A creates a campaign in B's workspace while A is a member.
+  const { rows: [cross] } = await pool.query(
+    `INSERT INTO campaigns (workspace_id, name, description, created_by)
+     VALUES ($1, $2, 'cross workspace', $3) RETURNING id`,
+    [b.ws, `Cross ${nonce}`, a.uid]);
+  await pool.query(
+    `INSERT INTO campaign_posts
+       (campaign_id, workspace_id, network, channel_id, post_ref, caption, added_by)
+     VALUES
+       ($1, $2, 'tg', $3, $4, 'A private caption', $5),
+       ($1, $2, 'tg', $3, $6, 'B colleague caption', $7)`,
+    [cross.id, b.ws, b.ch, `${nonce}-cross-by-a`, a.uid, `${nonce}-cross-by-b`, b.uid]);
+  // A also adds one membership operation to B's campaign. The campaign metadata is not A's, but
+  // A's own operation is portable while current workspace access exists.
+  await pool.query(
+    `INSERT INTO campaign_posts
+       (campaign_id, workspace_id, network, channel_id, post_ref, caption, added_by)
+     VALUES ($1, $2, 'ig', $3, $4, 'foreign campaign caption', $5)`,
+    [b.campaign, b.ws, b.ch, `${nonce}-b-campaign-by-a`, a.uid]);
+
+  const withAccess = (await runExport(a.uid, { pageSize: 1 })).json;
+  assert.deepStrictEqual(
+    withAccess.campaigns.map((c) => c.id),
+    [a.campaign, cross.id].sort((x, y) => x - y),
+    'A-created campaigns are exported in every currently accessible workspace',
+  );
+  assert.ok(!withAccess.campaigns.some((c) => c.id === b.campaign), 'B-created campaign metadata excluded');
+  assert.deepStrictEqual(
+    withAccess.campaign_posts.map((p) => p.post_ref).sort(),
+    [String(a.postId), `${nonce}-cross-by-a`, `${nonce}-b-campaign-by-a`].sort(),
+    'only A-added campaign membership operations are exported',
+  );
+  assert.ok(!withAccess.campaign_posts.some((p) => p.post_ref === `${nonce}-cross-by-b`),
+    'colleague-added post excluded');
+  assert.ok(!JSON.stringify(withAccess.campaign_posts).includes('caption'),
+    'campaign post content is outside safe projection');
+
+  // created_by/added_by are historical pointers, not an access bypass: after membership removal,
+  // every row in B's workspace disappears from A's export.
+  await pool.query(`DELETE FROM workspace_members WHERE workspace_id=$1 AND uid=$2`, [b.ws, a.uid]);
+  const afterRemoval = (await runExport(a.uid, { pageSize: 1 })).json;
+  assert.deepStrictEqual(afterRemoval.campaigns.map((c) => c.id), [a.campaign]);
+  assert.deepStrictEqual(afterRemoval.campaign_posts.map((p) => p.post_ref), [String(a.postId)]);
+  assert.deepStrictEqual(afterRemoval.workspace_memberships.map((m) => m.workspace_id), [a.ws]);
+});
+
+test('export: a subscriber gets their shared-channel subscription without foreign channel data', { skip }, async () => {
+  const owner = await seedRichUser('sub-owner');
+  const member = await seedRichUser('sub-member');
+  await pool.query(
+    `INSERT INTO workspace_members (workspace_id, uid, role) VALUES ($1, $2, 'member')`,
+    [owner.ws, member.uid]);
+  await pool.query(
+    `INSERT INTO mention_notify_subscriptions
+       (channel_id, uid, enabled, send_days, send_hour, last_error)
+     VALUES ($1, $2, true, ARRAY[2, 4], 17, 'search_failed')`,
+    [owner.ch, member.uid]);
+
+  const { outcome, res, json: data } = await runExport(member.uid, { pageSize: 1 });
+  assert.strictEqual(outcome, 'ok');
+  assert.deepStrictEqual(data.channels.map((c) => c.id), [member.ch],
+    'owner-only channel export does not pull in the shared channel');
+  assert.deepStrictEqual(
+    data.mention_notify_subscriptions.map((s) => s.channel_id),
+    [member.ch, owner.ch].sort((a, b) => a - b),
+    'own + shared subscriptions cross pageSize=1 without omission or duplication',
+  );
+
+  const sharedSubscription = data.mention_notify_subscriptions.find((s) => s.channel_id === owner.ch);
+  assert.ok(sharedSubscription, 'the member’s personal subscription to the shared channel is exported');
+  assert.deepStrictEqual(sharedSubscription.send_days, [2, 4]);
+  assert.strictEqual(sharedSubscription.send_hour, 17);
+  assert.strictEqual(sharedSubscription.last_error, 'search_failed');
+
+  const flat = res.body();
+  assert.ok(!flat.includes(`chan_${nonce}_sub-owner`), 'shared channel username/title is not exported');
+  assert.ok(!flat.includes(`${nonce}-sub-owner-counter`), 'shared channel integration identity is not exported');
+  assert.ok(!flat.includes('Counter sub-owner'), 'shared channel Metrika metadata is not exported');
+  assert.ok(!flat.includes('SECRET_YM_TOKEN'), 'shared channel credential is never exported');
 });
 
 test('export: keyset pages tile the archive with no duplication/omission, incl. equal timestamps', { skip }, async () => {
@@ -260,6 +570,18 @@ test('export: keyset pages tile the archive with no duplication/omission, incl. 
   for (let n = 1; n <= 4; n++) {
     await pool.query(`INSERT INTO channel_daily (channel_id, day, views) VALUES ($1, ${day(n)}, $2)`, [a.ch, n]);
     await pool.query(`INSERT INTO ig_daily (channel_id, day, reach) VALUES ($1, ${day(n)}, $2)`, [a.ch, n]);
+    await pool.query(
+      `INSERT INTO ym_daily (channel_id, day, visits, users, pageviews)
+       VALUES ($1, ${day(n)}, $2, $2, $2)`,
+      [a.ch, n]);
+    await pool.query(
+      `INSERT INTO ms_daily (channel_id, day, revenue_kopecks, orders_count, orders_sum_kopecks)
+       VALUES ($1, ${day(n)}, $2, $3, $4)`,
+      [a.ch, n, n, n]);
+    await pool.query(
+      `INSERT INTO raw_snapshots (channel_id, source, kind, day, payload)
+       VALUES ($1, 'tg', 'graphs', ${day(n)}, jsonb_build_object('n', $2::int))`,
+      [a.ch, n]);
     await pool.query(
       `INSERT INTO ig_media_daily (channel_id, media_id, day, reach) VALUES ($1, $2, ${day(n)}, $3)`,
       [a.ch, `media-${n}`, n]);
@@ -283,7 +605,10 @@ test('export: keyset pages tile the archive with no duplication/omission, incl. 
   const big = (await runExport(a.uid, { pageSize: 1000 })).json.channels[0].archive;
   const small = (await runExport(a.uid, { pageSize: 2 })).json.channels[0].archive;
 
-  for (const arr of ['daily', 'posts', 'mentions', 'velocity', 'annotations', 'ms_orders', 'ms_returns']) {
+  for (const arr of [
+    'daily', 'posts', 'mentions', 'velocity', 'annotations', 'ms_daily', 'ms_orders',
+    'ms_returns', 'ym_daily', 'raw_snapshots',
+  ]) {
     assert.deepStrictEqual(small[arr], big[arr], `${arr}: paged read equals single-shot read`);
   }
   // Every post present exactly once (no dupes, no holes) despite the shared timestamp + page split.
@@ -348,4 +673,91 @@ test('erasure: deleting one user twice is a clean false, not an error', { skip }
   const uid = await mkUser('era-twice');
   assert.strictEqual(await db.deleteUserAccount(uid), true);
   assert.strictEqual(await db.deleteUserAccount(uid), false, 'second delete reports nothing to erase');
+});
+
+// ── L-5: экспорт и стирание знают все шесть источников ────────────────────────────────────────────
+test('export: архивы СДЭКа и Rusender попадают в файл', { skip }, async () => {
+  const uid = await mkUser('cdekexp');
+  const ws = await mkWorkspace(uid, `ws-cdekexp-${nonce}`);
+  const cdekSrc = await mkNetworkSource('cdek', `${nonce}-cdek`, { title: 'Склад' });
+  const ch = await mkChannel(uid, ws, cdekSrc, `chan_${nonce}_cdek`);
+  await pool.query(`INSERT INTO cdek_sources (channel_id, warehouse_code, tz, source_id) VALUES ($1,'19821','Europe/Moscow',$2)`, [ch, cdekSrc]);
+  const { rows: [imp] } = await pool.query(
+    `INSERT INTO cdek_imports (channel_id, uploaded_by, filename, file_sha256, file_bytes, status, rows_total, orders_total)
+     VALUES ($1,$2,'выгрузка.xlsx','deadbeef', decode('504b0304','hex'), 'done', 2, 2) RETURNING id`, [ch, uid]);
+  for (const [orderId, ts] of [['O-1', '2026-08-01T10:00:00Z'], ['O-2', '2026-08-02T10:00:00Z']]) {
+    await pool.query(
+      `INSERT INTO cdek_orders (channel_id, order_id, created_ts, status, kind, import_id) VALUES ($1,$2,$3,'complete','sale',$4)`,
+      [ch, orderId, ts, imp.id]);
+    await pool.query(
+      `INSERT INTO cdek_order_items (channel_id, order_id, product_id, unit_price_kopecks, qty, import_id) VALUES ($1,$2,$3,375000,1,$4)`,
+      [ch, orderId, `P-${orderId}`, imp.id]);
+  }
+  for (const pid of ['P-O-1', 'P-O-2']) {
+    await pool.query(`INSERT INTO cdek_products (channel_id, product_id, title) VALUES ($1,$2,$3)`, [ch, pid, `Товар ${pid}`]);
+  }
+
+  const ruSrc = await mkNetworkSource('rusender', `${nonce}-ru`, { title: 'Рассылки' });
+  const ruCh = await mkChannel(uid, ws, ruSrc, `chan_${nonce}_ru`);
+  await pool.query(`INSERT INTO rusender_accounts (channel_id, account_id, api_key_enc, source_id) VALUES ($1, 777, 'iv:tag:SECRET_RUSENDER_KEY', $2)`, [ruCh, ruSrc]);
+  for (const day of ['2026-08-01', '2026-08-02']) {
+    await pool.query(`INSERT INTO rusender_daily (channel_id, day, contacts_total) VALUES ($1,$2,1000)`, [ruCh, day]);
+  }
+  for (const id of [11, 22]) {
+    await pool.query(`INSERT INTO rusender_campaigns (channel_id, campaign_id, name, delivered) VALUES ($1,$2,$3,500)`, [ruCh, id, `Рассылка ${id}`]);
+    await pool.query(`INSERT INTO rusender_campaign_activity (channel_id, campaign_id, day, opens, clicks) VALUES ($1,$2,'2026-08-01',10,2)`, [ruCh, id]);
+  }
+
+  // Страница нарочно меньше числа строк — заодно проверяем, что новые keyset'ы тайлят без потерь.
+  const { outcome, json } = await runExport(uid, { pageSize: 1 });
+  assert.strictEqual(outcome, 'ok');
+  const byId = Object.fromEntries(json.channels.map((c) => [c.id, c]));
+  const cdek = byId[ch].archive;
+  assert.strictEqual(cdek.cdek_imports.length, 1);
+  assert.strictEqual(cdek.cdek_orders.length, 2);
+  assert.strictEqual(cdek.cdek_order_items.length, 2);
+  assert.strictEqual(cdek.cdek_products.length, 2);
+  assert.deepStrictEqual(cdek.cdek_orders.map((o) => o.order_id), ['O-1', 'O-2'], 'страницы склеены по порядку, без дублей');
+  const ru = byId[ruCh].archive;
+  assert.strictEqual(ru.rusender_daily.length, 2);
+  assert.strictEqual(ru.rusender_campaigns.length, 2);
+  assert.strictEqual(ru.rusender_campaign_activity.length, 2);
+
+  const body = JSON.stringify(json);
+  assert.ok(!body.includes('SECRET_RUSENDER_KEY'), 'ключ Rusender не покидает сервер');
+  assert.ok(!body.includes('file_bytes'), 'сырой файл импорта в экспорт не идёт');
+
+  // Повторный вызов стабилен (экспорт — чистое чтение).
+  const again = await runExport(uid, { pageSize: 1 });
+  assert.deepStrictEqual(again.json.channels.map((c) => c.id).sort(), json.channels.map((c) => c.id).sort());
+});
+
+test('erasure: свип не сносит источник соседа и убирает приглашения со стёртым email', { skip }, async () => {
+  const victim = await mkUser('erasecdek');
+  const neighbour = await mkUser('neighcdek');
+  const vWs = await mkWorkspace(victim, `ws-erasecdek-${nonce}`);
+  const nWs = await mkWorkspace(neighbour, `ws-neighcdek-${nonce}`);
+
+  // ОДИН external_sources на двоих: у обоих каналов свой cdek_sources с тем же source_id.
+  const shared = await mkNetworkSource('cdek', `${nonce}-shared-cdek`, { title: 'Общий склад' });
+  const vCh = await mkChannel(victim, vWs, shared, `chan_${nonce}_vcdek`);
+  const nCh = await mkChannel(neighbour, nWs, shared, `chan_${nonce}_ncdek`);
+  await pool.query(`INSERT INTO cdek_sources (channel_id, tz, source_id) VALUES ($1,'Europe/Moscow',$2)`, [vCh, shared]);
+  await pool.query(`INSERT INTO cdek_sources (channel_id, tz, source_id) VALUES ($1,'Europe/Moscow',$2)`, [nCh, shared]);
+
+  // Приглашение стираемого лежит в ЧУЖОМ воркспейсе: каскад по users его не трогает.
+  const { rows: [vRow] } = await pool.query(`SELECT email FROM users WHERE id=$1`, [victim]);
+  await pool.query(
+    `INSERT INTO workspace_invites (workspace_id, email, role, token_hash, invited_by, expires_at)
+     VALUES ($1, $2, 'member', $3, $4, now() + interval '7 days')`,
+    [nWs, vRow.email.toUpperCase(), `${nonce}-invite-hash`, neighbour]);
+
+  assert.strictEqual(await db.deleteUserAccount(victim), true);
+
+  const survives = await pool.query(`SELECT 1 FROM external_sources WHERE id=$1`, [shared]);
+  assert.strictEqual(survives.rowCount, 1, 'источник соседа пережил стирание (FK у cdek_sources без ON DELETE)');
+  const neighbourSource = await pool.query(`SELECT 1 FROM cdek_sources WHERE channel_id=$1`, [nCh]);
+  assert.strictEqual(neighbourSource.rowCount, 1, 'строка источника соседа на месте');
+  const invites = await pool.query(`SELECT 1 FROM workspace_invites WHERE lower(email)=lower($1)`, [vRow.email]);
+  assert.strictEqual(invites.rowCount, 0, 'приглашение с адресом стёртого пользователя удалено');
 });

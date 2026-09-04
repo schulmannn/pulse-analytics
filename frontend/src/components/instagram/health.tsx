@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from 'react';
+import { Link } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { Icon } from '@/components/nav-icons';
 import { Button } from '@/components/ui/button';
@@ -71,6 +72,71 @@ export function IgDataHealth({ accountName, lastSync, isMock }: { accountName?: 
 }
 
 /**
+ * Токен Instagram истёк — состояние продукта, а не сбой запроса. До этого экрана истёкший токен
+ * выглядел вечным скелетоном: сервер деградировал insights до пустого 200, и «ошибкой» кластер это
+ * не считал. Чинится реконнектом, поэтому здесь нет кнопки «Повторить» — только путь к /connect.
+ */
+export function IgReauthState({ expiresAt }: { expiresAt?: string | null }) {
+  const connect = useConnectIg();
+  const status = useIgOauthStatus();
+  const serverReady = status.data?.server_ready ?? false;
+  const connectError = connect.error instanceof Error ? connect.error.message : null;
+  // «истёк N дней назад» честнее даты: пользователь сравнивает с «когда я последний раз смотрел».
+  const since = (() => {
+    if (!expiresAt) return null;
+    const ts = Date.parse(expiresAt);
+    if (!Number.isFinite(ts)) return null;
+    const days = Math.floor((Date.now() - ts) / 86_400_000);
+    if (days < 1) return 'сегодня';
+    if (days === 1) return 'вчера';
+    return `${days} дн. назад`;
+  })();
+  return (
+    <Card className="border-destructive/40 bg-destructive/4">
+      <CardContent className="p-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="flex items-start gap-3">
+            <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-destructive/15 text-destructive">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4" aria-hidden="true">
+                <circle cx="12" cy="12" r="9" />
+                <path d="M12 8v4.5M12 16h.01" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </span>
+            <div>
+              <h3 className="text-sm font-medium text-foreground">
+                Доступ к Instagram истёк{since ? ` — ${since}` : ''}
+              </h3>
+              <p className="mt-1 max-w-prose text-sm text-muted-foreground">
+                Instagram выдаёт доступ на 60 дней. Пока он не продлён, свежие охваты, аудитория и публикации
+                не приходят — на экране остаются только ранее сохранённые дни.
+              </p>
+              {connectError && <p className="mt-2 text-sm text-destructive">{connectError}</p>}
+            </div>
+          </div>
+          <div className="flex shrink-0 flex-col items-stretch gap-1.5">
+            <Button
+              type="button"
+              onClick={() => connect.mutate()}
+              pending={connect.isPending}
+              disabled={connect.isPending || (status.isSuccess && !serverReady)}
+              className="px-3.5"
+            >
+              {connect.isPending ? 'Открываю Instagram…' : 'Переподключить'}
+            </Button>
+            <Link
+              to="/connect?source=instagram"
+              className="text-center text-2xs text-muted-foreground underline decoration-muted-foreground/40 underline-offset-2 transition-colors hover:text-foreground"
+            >
+              Все источники
+            </Link>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+/**
  * Connect panel for the demo / not-connected state. The primary button starts the real OAuth flow
  * (POST /api/ig/oauth/start → top-level redirect to Instagram). When the server isn't configured for
  * connecting (no app credentials / encryption key / DB), the button is disabled with a plain-language
@@ -106,8 +172,13 @@ export function IgConnectPanel() {
               </svg>
             </span>
             <div>
+              {/* Заголовок называет СВОЮ причину, а не режим: «Демо-режим» уже объявлен глобальным
+                  баннером оболочки (DashboardLayout.DemoBanner) — на IG-страницах два одинаковых
+                  заголовка шли подряд (аудит #554, D18). Панель к тому же поднимается по `isMock`,
+                  то есть и у реального пользователя без подключённого Instagram — для него слово
+                  «демо-режим» было просто неправдой. Честность цифр остаётся на чипе рядом. */}
               <div className="flex items-center gap-2">
-                <h3 className="text-sm font-medium text-foreground">Демо-режим</h3>
+                <h3 className="text-sm font-medium text-foreground">Instagram не подключён</h3>
                 <span className="rounded-full bg-status-warn/15 px-1.5 py-0.5 text-2xs font-medium text-status-warn">
                   примерные данные
                 </span>
@@ -122,6 +193,7 @@ export function IgConnectPanel() {
             <Button
               type="button"
               onClick={() => connect.mutate()}
+              pending={connect.isPending}
               disabled={connect.isPending || notReady}
               className="px-3.5"
             >

@@ -1,5 +1,7 @@
-import { useId, useState } from 'react';
 import type { ReactNode } from 'react';
+import { useContext } from 'react';
+import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
+import { useMediaQuery } from '@/lib/useMediaQuery';
 import { fmt } from '@/lib/format';
 
 /**
@@ -7,10 +9,9 @@ import { fmt } from '@/lib/format';
  * статусы и каналы МоегоСклада, площадки упоминаний, разбивки кампаний) — до него идиома была
  * скопирована девять раз в семи файлах и всюду расходилась.
  *
- * Форма — горизонтальный ряд с shadcn/charts (bar): подпись, дорожка, значение снаружи справа
- * (`position="right"`), плюс тултип со свотчем оттуда же (charts/tooltip). Одна строка вместо двух
- * (подпись сверху, полоса под ней) — на развороте в тридцать строк это половина высоты, и полоса
- * перестаёт быть украшением под текстом.
+ * Форма — горизонтальный ряд с shadcn/charts (bar): подпись, дорожка, значение и доля снаружи
+ * справа (`position="right"`). На узком экране дорожка переносится под текстовую строку: значение
+ * не выдавливает подпись и не создаёт горизонтальный overflow.
  *
  * Приём shadcn «label insideLeft» (подпись ВНУТРИ полосы) пробовали и отвергли на реальных данных:
  * он рассчитан на короткие подписи и длинные полосы («January»), а у нас подписи русские и длинные
@@ -37,6 +38,7 @@ export function ShareTrack({
   color,
   height = 'h-2',
   muted = false,
+  ariaLabel,
 }: {
   /** Доля ОТ ЦЕЛОГО в процентах (не от максимума — см. шапку файла). */
   pct: number;
@@ -44,16 +46,48 @@ export function ShareTrack({
   color?: string;
   height?: string;
   muted?: boolean;
+  /**
+   * Доступное имя полосы. `undefined` даёт каноническое «Доля 12.3%», `null` скрывает
+   * декоративный дубль там, где процент уже написан рядом.
+   */
+  ariaLabel?: string | null;
 }) {
-  return (
-    <div className={`${height} min-w-0 flex-1 overflow-hidden rounded-full bg-muted/70`}>
+  // Визуальная шкала конечна: отрицательное/NaN/Infinity не должны попадать в CSS, а значение
+  // >100% не может растянуть layout. Сам исходный конечный процент остаётся в доступном имени —
+  // это честнее, чем молча назвать противоречивые 150% сотней.
+  const finitePct = Number.isFinite(pct) ? Math.max(0, pct) : 0;
+  const widthPct = Math.min(100, finitePct);
+  const defaultLabel = `Доля ${finitePct.toFixed(1)}%${
+    finitePct > 100 ? ', визуальная шкала ограничена 100%' : ''
+  }`;
+  const fill = (
+    <div
+      className="h-full rounded-full transition-[width] dur-base ease-house"
+      style={{
+        width: `${widthPct}%`,
+        backgroundColor: color ?? `hsl(var(--chart-role-primary) / ${muted ? '0.4' : '0.75'})`,
+      }}
+    />
+  );
+  if (ariaLabel === null) {
+    return (
       <div
-        className="h-full rounded-full transition-[width] dur-base ease-house"
-        style={{
-          width: `${Math.max(1.5, Math.min(100, pct))}%`,
-          backgroundColor: color ?? `hsl(var(--chart-role-primary) / ${muted ? '0.4' : '0.75'})`,
-        }}
-      />
+        className={`${height} min-w-0 flex-1 overflow-hidden rounded-full bg-muted/70`}
+        aria-hidden="true"
+        data-share-percent={finitePct}
+      >
+        {fill}
+      </div>
+    );
+  }
+  return (
+    <div
+      className={`${height} min-w-0 flex-1 overflow-hidden rounded-full bg-muted/70`}
+      role="img"
+      aria-label={ariaLabel ?? defaultLabel}
+      data-share-percent={finitePct}
+    >
+      {fill}
     </div>
   );
 }
@@ -88,6 +122,13 @@ export interface ShareRowsProps {
 }
 
 
+// Шаг строки списка. На ширине ≥640px строка однострочная, ниже — двухколоночная и занимает
+// две линии (см. grid-классы <li> ниже), поэтому шаг там вдвое больше.
+const ROW_PITCH_WIDE = 26;
+const ROW_PITCH_NARROW = 48;
+// Строка хвоста «ещё N» и сноска — не строки списка, но место занимают.
+const TAIL_H = 18;
+
 export function ShareRows({
   rows,
   total,
@@ -98,42 +139,70 @@ export function ShareRows({
   cumulative = false,
   footnote = null,
 }: ShareRowsProps) {
-  const tipId = useId();
-  const [hover, setHover] = useState<string | null>(null);
-
-  // Сервер уже сортирует по убыванию; пересортировка — страховка стабильности вида.
-  const ranked = [...rows].sort((a, b) => b.value - a.value || a.key.localeCompare(b.key));
-  const denom = Math.max(1, total);
-  const pctOf = (v: number) => (Math.max(0, v) / denom) * 100;
+  // Сервер уже сортирует по убыванию; пересортировка — страховка стабильности вида. Невалидное
+  // число не превращается ни в отрицательную полосу, ни в «NaN»: для part-to-whole это ноль.
+  const ranked = rows
+    .map((row) => ({
+      ...row,
+      value: Number.isFinite(row.value) ? Math.max(0, row.value) : 0,
+    }))
+    .sort((a, b) => b.value - a.value || a.key.localeCompare(b.key));
+  const ctxHeight = useContext(ExpandedChartHeightContext);
+  const expandedCtx = useContext(ChartExpandedContext);
+  const wideRow = useMediaQuery('(min-width: 640px)');
+  const safeTotal = Number.isFinite(total) && total >= 0 ? total : null;
+  const denom = safeTotal != null && safeTotal > 0 ? safeTotal : null;
+  const pctOf = (v: number) => (denom == null ? null : (v / denom) * 100);
+  const pctText = (pct: number | null) => (pct == null ? '—' : `${pct.toFixed(1)}%`);
 
   // Хвост сворачивается ТОЛЬКО в компакте. Разворот — полный список по построению: страница
   // разреза для того и открывается, и прятать там строки значило бы отвечать не на заданный
   // вопрос. Длинный список делает читаемым не сокрытие, а доля от целого и накопленный процент.
-  const head = expanded ? ranked : ranked.slice(0, compactRows);
+  // Сколько строк показать — СЧИТАЕМ ОТ ВЫСОТЫ ТЕЛА ТАЙЛА, а не от фикс-числа.
+  //
+  // Фикс-число переполняло карточку там, где строка выше: на мобиле гейт «нет внутренних
+  // скроллов» ловил это на тринадцати разрезах Метрики разом (+28px каждый). Но бюджет умел
+  // только СЖИМАТЬ ниже compactRows — вырасти до того, что тайл реально вмещает, не мог. На борде
+  // Метрики это четыре строки в теле на 181px, куда влезает шесть, — пустая нижняя половина
+  // карточки при том, что данные есть и прячутся в хвост «ещё N» (аудит #554, D16).
+  //
+  // Теперь бюджет — авторитет в ОБЕ стороны, а compactRows остаётся подсказкой для тех мест, где
+  // высота не опубликована (страница разреза, оверлей «Развернуть»). Переполнить тайл рост не может:
+  // строк ровно floor(бюджет / шаг), а хвост вычтен из бюджета заранее.
+  const budget = ctxHeight == null ? null : ctxHeight - (ranked.length > compactRows || footnote != null ? TAIL_H : 0);
+  const fitRows =
+    budget == null || expandedCtx
+      ? compactRows
+      : Math.max(1, Math.floor(budget / (wideRow ? ROW_PITCH_WIDE : ROW_PITCH_NARROW)));
+  const head = expanded ? ranked : ranked.slice(0, fitRows);
   const tail = ranked.slice(head.length);
   const tailValue = tail.reduce((acc, r) => acc + Math.max(0, r.value), 0);
 
   let running = 0;
   return (
-    <div className={expanded ? 'space-y-1.5 pt-1' : 'space-y-1'}>
-      {head.map((r) => {
-        const pct = pctOf(r.value);
-        running += pct;
-        const active = hover === r.key;
-        return (
-          <div
-            key={r.key}
-            className="relative"
-            onMouseEnter={() => setHover(r.key)}
-            onMouseLeave={() => setHover((h) => (h === r.key ? null : h))}
-          >
-            <div className="flex items-center gap-2.5">
+    <div>
+      <ul
+        aria-label={
+          safeTotal == null
+            ? `Распределение: ${tailWord}`
+            : `Распределение, всего ${format(safeTotal)} ${tailWord}`
+        }
+        className={expanded ? 'space-y-1.5 pt-1' : 'space-y-1'}
+      >
+        {head.map((r) => {
+          const pct = pctOf(r.value);
+          if (pct != null) running += pct;
+          return (
+            <li
+              key={r.key}
+              className="grid min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-center gap-x-2 gap-y-1 sm:grid-cols-[minmax(7rem,42%)_minmax(3rem,1fr)_auto] sm:gap-x-2.5"
+            >
               {/* Подпись — СВОЯ колонка, а не внутрь полосы. Приём shadcn «label insideLeft» верен
                   для коротких подписей и длинных полос; у нас подписи русские и длинные, а доли
                   малые, поэтому подпись то не влезает, то висит в пустоте посреди дорожки — и
                   читается чипом-кнопкой. Колонка держит левый край ровным: список сканируется
                   сверху вниз, чего ради он и существует. */}
-              <span className="flex w-[42%] min-w-0 max-w-56 shrink-0 items-center gap-1.5 text-xs text-foreground">
+              <span className="col-start-1 row-start-1 flex min-w-0 items-center gap-1.5 text-xs text-foreground sm:max-w-56">
                 {r.dot && (
                   <span
                     aria-hidden="true"
@@ -146,55 +215,63 @@ export function ShareRows({
                   <span className="shrink-0 text-2xs text-muted-foreground">{r.labelSuffix}</span>
                 )}
               </span>
-              <ShareTrack pct={pct} color={active ? 'hsl(var(--chart-role-primary))' : undefined} />
-              {/* Значение снаружи справа (shadcn: position="right") — колонка чисел выровнена. */}
-              <span className="shrink-0 text-xs tabular-nums">
-                <span className="font-medium text-foreground">{format(r.value)}</span>
-                {r.note != null && <span className="text-muted-foreground"> · {r.note}</span>}
-              </span>
-              {cumulative && (
-                <span className="w-9 shrink-0 text-right text-2xs tabular-nums text-muted-foreground">
-                  {running.toFixed(0)}%
-                </span>
-              )}
-            </div>
-
-            {/* Тултип по наведению: цветной свотч, доля, значение (shadcn → charts/tooltip). До
-                этого у списков разрезов hover-читалки не было вовсе — доля нигде не называлась. */}
-            {active && (
-              <div
-                role="tooltip"
-                id={`${tipId}-${r.key}`}
-                className="pointer-events-none absolute -top-1 left-2 z-30 -translate-y-full rounded-md border border-border bg-popover px-2 py-1.5 text-2xs shadow-md"
-              >
-                <div className="flex items-center gap-1.5 whitespace-nowrap">
-                  <span
-                    aria-hidden="true"
-                    className="h-2.5 w-2.5 shrink-0 rounded-[2px]"
-                    style={{ backgroundColor: 'hsl(var(--chart-role-primary))' }}
-                  />
-                  <span className="text-muted-foreground">{r.label}</span>
-                  <span className="font-medium tabular-nums text-foreground">{format(r.value)}</span>
-                  <span className="tabular-nums text-muted-foreground">{pct.toFixed(1)}%</span>
-                </div>
+              <div className="col-span-2 row-start-2 flex min-w-0 sm:col-span-1 sm:col-start-2 sm:row-start-1">
+                <ShareTrack pct={pct ?? 0} ariaLabel={null} />
               </div>
-            )}
-          </div>
-        );
-      })}
+              {/* Значение и ТОЧНАЯ доля постоянно видны: hover больше не является единственным
+                  способом прочитать процент на touch, с клавиатуры или скринридером.
 
-      {tail.length > 0 && (
-        <div
-          className="flex w-full items-center gap-2.5 text-left text-2xs text-muted-foreground"
-        >
-          <span className="w-[42%] max-w-56 shrink-0 truncate">Прочее · {tail.length}</span>
-          <ShareTrack pct={pctOf(tailValue)} color="hsl(var(--muted-foreground) / 0.3)" />
-          <span className="shrink-0 tabular-nums">
-            Ещё {format(tailValue)} {tailWord} из {format(total)}
-          </span>
-        </div>
-      )}
+                  ДВЕ строки, а не один переносимый ряд. Раньше значение, примечание и доля лежали
+                  в одном `flex-wrap`: в узкой карточке хвост переносился, «· 47.0%» оставался
+                  сиротой на второй строке, и высота росла ТОЛЬКО у тех строк, где случился
+                  перенос — столбик полосок терял ритм (аудит #554, D6). Теперь первая строка —
+                  число и доля, она не переносится никогда; длинное примечание («1 596 чел. ·
+                  24.6% отказов») уезжает во вторую, вторичным кеглем. */}
+              <span className="col-start-2 row-start-1 flex min-w-0 flex-col items-end text-right text-xs tabular-nums sm:col-start-3">
+                <span className="flex items-baseline gap-x-1 whitespace-nowrap">
+                  <span className="font-medium text-foreground">{format(r.value)}</span>
+                  <span role="img" className="text-muted-foreground" aria-label={`Доля ${pctText(pct)}`}>
+                    · {pctText(pct)}
+                  </span>
+                  {cumulative && pct != null && (
+                    <span
+                      role="img"
+                      className="text-2xs text-muted-foreground"
+                      aria-label={`Накопленная доля ${pctText(running)}`}
+                    >
+                      · Σ {pctText(running)}
+                    </span>
+                  )}
+                </span>
+                {r.note != null && (
+                  <span className="min-w-0 max-w-full truncate text-2xs text-muted-foreground">
+                    {r.note}
+                  </span>
+                )}
+              </span>
+            </li>
+          );
+        })}
 
+        {tail.length > 0 && (
+          <li className="grid min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-center gap-x-2 gap-y-1 text-left text-2xs text-muted-foreground sm:grid-cols-[minmax(7rem,42%)_minmax(3rem,1fr)_auto] sm:gap-x-2.5">
+            <span className="col-start-1 row-start-1 min-w-0 truncate sm:max-w-56">Прочее · {tail.length}</span>
+            <div className="col-span-2 row-start-2 flex min-w-0 sm:col-span-1 sm:col-start-2 sm:row-start-1">
+              <ShareTrack
+                pct={pctOf(tailValue) ?? 0}
+                color="hsl(var(--muted-foreground) / 0.3)"
+                ariaLabel={null}
+              />
+            </div>
+            <span className="col-start-2 row-start-1 min-w-0 text-right tabular-nums sm:col-start-3">
+              Ещё {format(tailValue)} {tailWord}
+              {safeTotal != null && <> из {format(safeTotal)}</>}
+              {' · '}
+              <span role="img" aria-label={`Доля ${pctText(pctOf(tailValue))}`}>{pctText(pctOf(tailValue))}</span>
+            </span>
+          </li>
+        )}
+      </ul>
       {footnote != null && <p className="pt-0.5 text-2xs text-muted-foreground">{footnote}</p>}
     </div>
   );

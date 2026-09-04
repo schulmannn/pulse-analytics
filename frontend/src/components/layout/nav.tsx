@@ -1,7 +1,7 @@
 import { useLocation } from 'react-router-dom';
+import { useMe } from '@/api/queries';
 import type { IconName } from '@/components/nav-icons';
-import { getMetric } from '@/lib/widgetMetrics';
-import { networkByKey, type Network } from '@/lib/networks';
+import { NETWORKS, networkByKey, type Network } from '@/lib/networks';
 import { useNetworkSelection } from '@/lib/networkStore';
 
 export interface NavLinkDef {
@@ -9,6 +9,7 @@ export interface NavLinkDef {
   label: string;
   icon: IconName;
   end?: boolean;
+  gate?: 'rusenderSurfaces';
 }
 
 // Per-network feed sections live in the NETWORK REGISTRY (lib/networks) — the shell never
@@ -35,7 +36,21 @@ export function useActiveNetwork(): Network {
     sidebar's icon rail AND the mobile bottom bar (same routes, denser form). Both nets are 6 tabs
     wide today (MobileBottomNav's grid-cols follows nav.length). */
 export function useActiveNetworkNav(): NavLinkDef[] {
-  return [HOME_NAV, ...networkByKey(useActiveNetwork()).nav, ...AGNOSTIC_NAV];
+  const net = networkByKey(useActiveNetwork());
+  // Фичефлаги разделов приезжают тем же bootstrap-запросом /api/auth/me, что и гейт AI: тянуть
+  // ради одного булева ленивый модуль источника в оболочку нельзя (бюджет бандла шелла), а
+  // api/queries шелл и так статически импортирует (AccountMenu, SourceSwitcher).
+  // Пока флаг не приехал (первый рендер / ошибка), гейтованные строки СКРЫТЫ: показать раздел и
+  // тут же его убрать — хуже, чем показать чуть позже.
+  const surfaces = useGatedSurfaces();
+  const visible = net.nav.filter((link) => !link.gate || surfaces[link.gate]);
+  return [HOME_NAV, ...visible, ...AGNOSTIC_NAV];
+}
+
+/** Состояние фичефлагов разделов. Одна точка правды: и нав, и сами страницы читают её. */
+export function useGatedSurfaces(): Record<NonNullable<NavLinkDef['gate']>, boolean> {
+  const me = useMe();
+  return { rusenderSurfaces: !!me.data?.rusender_surfaces };
 }
 
 export const TITLES: Record<string, string> = {
@@ -45,7 +60,6 @@ export const TITLES: Record<string, string> = {
   '/posts': 'Контент',
   '/mentions': 'Упоминания',
   '/reports': 'Отчёты',
-  '/settings': 'Настройки',
   '/admin': 'Админ',
   '/bugs': 'Баги',
   '/connect': 'Подключение данных',
@@ -54,35 +68,47 @@ export const TITLES: Record<string, string> = {
 /** Feed routes open with their own header (the block header on TG; the «Instagram · @handle»
     account header + block headers on IG) — a topbar h1 there reads twice (the name in the corner
     AND on the page), so these routes render no topbar title. Covers both feeds' section paths. */
-export const FEED_ROUTES = [
-  // Home renders its own «Главная» header, so suppress the topbar h1 (a duplicate otherwise).
-  '/home',
-  '/',
-  '/analytics',
-  '/posts',
-  '/mentions',
-  '/instagram',
-  '/instagram/analytics',
-  '/instagram/content',
-  '/instagram/audience',
-  // «МойСклад» analysis pages render their own FeedBlock header exactly like TG/IG, so the layout
-  // must NOT also mount its Atlavue topbar + divider over them (it did, because these routes were
-  // absent here — the shared shell fell through to the default Topbar and rendered twice).
-  '/sklad',
-  '/sklad/clients',
-  '/sklad/channels',
-  // «Метрика» — тот же FeedBlock-заголовок, что у остальных сетей.
-  '/metrika',
-];
+/**
+ * Поверхности, которые НЕСУТ СОБСТВЕННЫЙ заголовок, поэтому общий topbar над ними не монтируется.
+ *
+ * Здесь только то, что не принадлежит ни одной сети: префиксная часть выводится из реестра (см.
+ * isFeedRoute). Ручной список и был багом — TG/IG в нём были, «МойСклад» дописали после того, как
+ * дубль уехал в прод, «Метрику» после этого, а СДЭК повторил всё заново: над «Обзором» висела
+ * надпись «Atlavue» с полосой (владелец, скриншот). Новый источник теперь закрыт самим фактом
+ * регистрации префикса.
+ */
+export const OWN_HEADER_ROUTES = ['/home', '/connect', '/settings'];
 
-/** Topbar h1 for the current route; metric pages resolve to the metric's display name. */
+/** Ленты сети БЕЗ префикса (Telegram — сеть по умолчанию, её страницы живут в корне). */
+export const DEFAULT_FEED_ROUTES = ['/', '/analytics', '/posts', '/mentions'];
+
+/** Совокупный список — остаётся экспортом ради читаемости тестов и отладки. */
+export const FEED_ROUTES = [...OWN_HEADER_ROUTES, ...DEFAULT_FEED_ROUTES];
+
+/**
+ * Страница сама рисует свой заголовок? Тогда общий topbar (h1 + hairline) не нужен.
+ * Любой путь под префиксом зарегистрированной сети считается её лентой.
+ */
+export function isFeedRoute(pathname: string): boolean {
+  if (FEED_ROUTES.includes(pathname)) return true;
+  return NETWORKS.some(
+    (net) => 'prefix' in net && (pathname === net.prefix || pathname.startsWith(`${net.prefix}/`)),
+  );
+}
+
+/**
+ * Topbar h1 для текущего маршрута.
+ *
+ * СТРАНИЦЫ МЕТРИК СВОЙ ЗАГОЛОВОК НЕ ОТДАЮТ СЮДА: топбар на них не монтируется вовсе
+ * (DashboardLayout, isDesktopExplorerRoute — на md+ его нет, а ниже md вместо него MobileHeader,
+ * который routeTitle не читает). Раньше эта ветка звала getMetric и тянула ВЕСЬ каталог метрик
+ * (4.4KB gzip) в чанк оболочки — ради строки, которую никто не рисует. Заголовок метрики рисует
+ * сама страница, из своего реестра.
+ */
 export function routeTitle(pathname: string): string {
   const exact = TITLES[pathname];
   if (exact) return exact;
-  if (pathname.startsWith('/metrics/')) {
-    const key = pathname.split('/')[2];
-    return getMetric(`tg.${key}`)?.label ?? 'Метрика';
-  }
+  if (pathname.startsWith('/metrics/') || pathname.startsWith('/widgets/')) return 'Метрика';
   if (pathname.startsWith('/reports/')) return 'Отчёт';
   if (pathname.startsWith('/campaigns/')) return 'Кампания';
   return pathname.startsWith('/instagram') ? 'Instagram' : 'Atlavue';

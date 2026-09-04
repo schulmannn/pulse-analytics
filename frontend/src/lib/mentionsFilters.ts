@@ -1,5 +1,8 @@
 import { fmt } from '@/lib/format';
 import { parseContentPeriod, serializeContentPeriod } from '@/lib/contentFilters';
+import { lttbDownsample } from '@/lib/downsample';
+import { bucketKeyOf } from '@/lib/metricSeries';
+import { CHART_MAX_POINTS, pickIndexes } from '@/lib/msSeries';
 import type { PeriodDays } from '@/lib/period';
 import type { SortOrder } from '@/lib/contentFilters';
 
@@ -116,6 +119,10 @@ export interface MentionsTimeline {
   ghost?: number[];
   labels: string[];
   titles: string[];
+  /** ISO-дни точек текущего окна (нужны недельным корзинам capMentionsTimeline). */
+  days: string[];
+  /** Потенциальные просмотры по дням — той же длины, что values (кормят недельные тултипы). */
+  views: number[];
 }
 
 function localIsoDay(ms: number): string {
@@ -131,12 +138,6 @@ function shiftIsoDay(day: string, delta: number): string {
   if (!match) return day;
   const shifted = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]) + delta));
   return shifted.toISOString().slice(0, 10);
-}
-
-/** «DD.MM» label from a YYYY-MM-DD ISO day. */
-export function ddmmFromIso(iso: string): string {
-  const parts = iso.split('-');
-  return parts.length === 3 ? `${parts[2]}.${parts[1]}` : iso;
 }
 
 /**
@@ -173,11 +174,13 @@ export function buildMentionsTimeline(
     return {
       values: curDays.map((d) => curMap.get(d)?.mentions ?? 0),
       ghost: prevDays.map((d) => prevMap.get(d)?.mentions ?? 0),
-      labels: curDays.map(ddmmFromIso),
+      labels: curDays.map((d) => fmt.day(d)),
       titles: curDays.map((d) => {
         const c = curMap.get(d);
-        return `${ddmmFromIso(d)}: ${fmt.num(c?.mentions ?? 0)} упом · ${fmt.short(c?.views ?? 0)} просм`;
+        return `${fmt.day(d)}: ${fmt.num(c?.mentions ?? 0)} упом · ${fmt.short(c?.views ?? 0)} просм`;
       }),
+      days: curDays,
+      views: curDays.map((d) => curMap.get(d)?.views ?? 0),
     };
   }
 
@@ -185,8 +188,10 @@ export function buildMentionsTimeline(
     const sorted = [...daily].sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : 0));
     return {
       values: sorted.map((p) => p.mentions),
-      labels: sorted.map((p) => ddmmFromIso(p.day)),
-      titles: sorted.map((p) => `${ddmmFromIso(p.day)}: ${fmt.num(p.mentions)} упом · ${fmt.short(p.views)} просм`),
+      labels: sorted.map((p) => fmt.day(p.day)),
+      titles: sorted.map((p) => `${fmt.day(p.day)}: ${fmt.num(p.mentions)} упом · ${fmt.short(p.views)} просм`),
+      days: sorted.map((p) => p.day),
+      views: sorted.map((p) => p.views),
     };
   }
 
@@ -204,11 +209,82 @@ export function buildMentionsTimeline(
   return {
     values: curDays.map((d) => curMap.get(d)?.mentions ?? 0),
     ghost: prevDays.map((d) => prevMap.get(d)?.mentions ?? 0),
-    labels: curDays.map(ddmmFromIso),
+    labels: curDays.map((d) => fmt.day(d)),
     titles: curDays.map((d) => {
       const c = curMap.get(d);
-      return `${ddmmFromIso(d)}: ${fmt.num(c?.mentions ?? 0)} упом · ${fmt.short(c?.views ?? 0)} просм`;
+      return `${fmt.day(d)}: ${fmt.num(c?.mentions ?? 0)} упом · ${fmt.short(c?.views ?? 0)} просм`;
     }),
+    days: curDays,
+    views: curDays.map((d) => curMap.get(d)?.views ?? 0),
+  };
+}
+
+/**
+ * Кап длинного таймлайна ПЕРЕД рендером (канон CLAUDE.md: серии длиннее CHART_MAX_POINTS не
+ * рисуются сырыми; хедлайны/дельты считаются от полного таймлайна ДО капа — он чисто визуальный).
+ *
+ * Линия — визуальная децимация: при ghost'е точки отбираются pickIndexes (ЕДИНЫЕ индексы для
+ * обеих серий — LTTB выбрал бы разные и рассинхронизировал base↔current, канон msSeries), без
+ * ghost'а форму держит LTTB. Столбцы децимировать нельзя — пропущенные дни в барах врут, —
+ * поэтому дневная серия честно схлопывается в Monday-anchored календарные недели (упоминания и
+ * просмотры — потоки, суммы корзин), а ghost агрегируется ТЕМИ ЖЕ индексными корзинами текущего
+ * окна: cur/ghost выровнены по порядковому дню, значит корзина сохраняет выравнивание by
+ * construction (в отличие от capResultSeries, где ghost дневной и отбрасывается). Маркер
+ * « · неделя» в тултипе — та же честность подписи, что у seriesGrain:'week'.
+ */
+export function capMentionsTimeline(timeline: MentionsTimeline, kind: 'line' | 'bar'): MentionsTimeline {
+  const n = timeline.values.length;
+  if (n <= CHART_MAX_POINTS) return timeline;
+
+  if (kind === 'line') {
+    if (timeline.ghost && timeline.ghost.length === n) {
+      const idx = pickIndexes(n, CHART_MAX_POINTS);
+      return {
+        values: idx.map((i) => timeline.values[i]),
+        ghost: idx.map((i) => timeline.ghost![i]),
+        labels: idx.map((i) => timeline.labels[i]),
+        titles: idx.map((i) => timeline.titles[i]),
+        days: idx.map((i) => timeline.days[i]),
+        views: idx.map((i) => timeline.views[i]),
+      };
+    }
+    const idx = timeline.values.map((_, i) => i);
+    const sampled = lttbDownsample(idx, CHART_MAX_POINTS, (i) => timeline.values[i]);
+    return {
+      values: sampled.map((i) => timeline.values[i]),
+      labels: sampled.map((i) => timeline.labels[i]),
+      titles: sampled.map((i) => timeline.titles[i]),
+      days: sampled.map((i) => timeline.days[i]),
+      views: sampled.map((i) => timeline.views[i]),
+    };
+  }
+
+  // Столбцы: индексные корзины по календарной неделе дня точки (Monday-anchored).
+  const bucketOf = new Map<string, number[]>();
+  const order: string[] = [];
+  timeline.days.forEach((day, i) => {
+    const ts = Date.parse(`${day}T00:00:00Z`);
+    const key = Number.isFinite(ts) ? bucketKeyOf(ts, 'week') : day;
+    const bucket = bucketOf.get(key);
+    if (bucket) bucket.push(i);
+    else {
+      bucketOf.set(key, [i]);
+      order.push(key);
+    }
+  });
+  const sum = (arr: number[] | undefined, idx: number[]): number =>
+    arr ? idx.reduce((acc, i) => acc + (arr[i] ?? 0), 0) : 0;
+  const hasGhost = !!timeline.ghost && timeline.ghost.length === n;
+  return {
+    values: order.map((key) => sum(timeline.values, bucketOf.get(key)!)),
+    ghost: hasGhost ? order.map((key) => sum(timeline.ghost, bucketOf.get(key)!)) : timeline.ghost,
+    labels: order.map((key) => fmt.day(key)),
+    titles: order.map((key) => {
+      const idx = bucketOf.get(key)!;
+      return `${fmt.day(key)} · неделя: ${fmt.num(sum(timeline.values, idx))} упом · ${fmt.short(sum(timeline.views, idx))} просм`;
+    }),
+    days: order,
+    views: order.map((key) => sum(timeline.views, bucketOf.get(key)!)),
   };
 }
 

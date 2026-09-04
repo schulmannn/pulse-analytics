@@ -16,8 +16,9 @@ const SelectTrigger = React.forwardRef<
 >(({ className, children, ...props }, ref) => (
   <SelectPrimitive.Trigger
     ref={ref}
+    data-mobile-touch-target=""
     className={cn(
-      'flex h-8 w-full items-center justify-between gap-1 whitespace-nowrap rounded-full border border-border bg-background px-3 text-xs font-medium text-foreground ring-offset-background data-placeholder:text-muted-foreground focus:outline-hidden focus:ring-2 focus:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-50 [&>span]:line-clamp-1',
+      'flex h-8 min-h-11 w-full items-center justify-between gap-1 whitespace-nowrap rounded-full border border-border bg-background px-3 text-xs font-medium text-foreground ring-offset-background data-placeholder:text-muted-foreground focus:outline-hidden focus:ring-2 focus:ring-primary/40 disabled:pointer-events-none disabled:opacity-50 sm:min-h-0 [&>span]:line-clamp-1',
       className,
     )}
     {...props}
@@ -73,7 +74,7 @@ const SelectContent = React.forwardRef<
     <SelectPrimitive.Content
       ref={ref}
       className={cn(
-        'relative z-modal-popover max-h-[min(var(--radix-select-content-available-height),60vh)] min-w-32 overflow-y-auto overflow-x-hidden rounded-xl border border-border bg-popover text-popover-foreground data-[state=open]:animate-in data-[state=open]:ease-house data-[state=closed]:animate-out data-[state=closed]:ease-exit data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 motion-reduce:duration-0 origin-(--radix-select-content-transform-origin)',
+        'relative z-modal-popover max-h-[min(var(--radix-select-content-available-height),60vh)] min-w-32 overflow-y-auto overflow-x-hidden rounded-xl border border-border bg-popover text-popover-foreground data-[state=open]:animate-in data-[state=open]:ease-house data-[state=closed]:animate-out data-[state=closed]:ease-exit data-[state=closed]:anim-dur-exit data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 motion-reduce:duration-0 origin-(--radix-select-content-transform-origin)',
         position === 'popper' &&
           'data-[side=bottom]:translate-y-1 data-[side=left]:-translate-x-1 data-[side=right]:translate-x-1 data-[side=top]:-translate-y-1',
         className,
@@ -103,7 +104,7 @@ const SelectLabel = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <SelectPrimitive.Label
     ref={ref}
-    className={cn('px-2 py-1.5 text-sm font-semibold', className)}
+    className={cn('px-2 py-1.5 text-sm font-medium', className)}
     {...props}
   />
 ));
@@ -115,8 +116,9 @@ const SelectItem = React.forwardRef<
 >(({ className, children, ...props }, ref) => (
   <SelectPrimitive.Item
     ref={ref}
+    data-mobile-touch-target=""
     className={cn(
-      'relative flex w-full cursor-default select-none items-center rounded py-1.5 pl-2.5 pr-8 text-xs text-muted-foreground outline-hidden focus:bg-muted focus:text-foreground data-[state=checked]:bg-primary/10 data-[state=checked]:font-medium data-[state=checked]:text-foreground data-disabled:pointer-events-none data-disabled:opacity-50',
+      'relative flex min-h-11 w-full cursor-default select-none items-center rounded py-1.5 pl-2.5 pr-8 text-xs text-muted-foreground outline-hidden focus:bg-muted focus:text-foreground data-[state=checked]:bg-primary/10 data-[state=checked]:font-medium data-[state=checked]:text-foreground data-disabled:pointer-events-none data-disabled:opacity-50 sm:min-h-0',
       className,
     )}
     {...props}

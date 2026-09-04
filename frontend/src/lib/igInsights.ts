@@ -2,6 +2,8 @@
 // takeaways. Each insight carries the numbers behind it and a confidence level, so the UI reads
 // like an analyst's note ("here's the claim, here's the proof, here's how sure we are"), not a
 // generic AI summary. Pure + testable: the panel gathers inputs, this decides what's worth saying.
+import { fmt } from '@/lib/format';
+
 export type Confidence = 'high' | 'medium' | 'low';
 
 export interface IgInsightInput {
@@ -57,7 +59,7 @@ export function buildIgInsights(i: IgInsightInput): IgInsight[] {
     if (net < 0) {
       out.push({
         tone: 'down',
-        text: 'Канал теряет подписчиков — отписок больше, чем подписок.',
+        text: 'Аккаунт теряет подписчиков — отписок больше, чем подписок.',
         evidence: [`чистый прирост −${fmtInt(Math.abs(net))} за период`, ev].filter(Boolean).join(' · '),
         confidence: 'high',
         priority: 95,
@@ -65,7 +67,7 @@ export function buildIgInsights(i: IgInsightInput): IgInsight[] {
     } else if (net > 0) {
       out.push({
         tone: 'up',
-        text: 'Канал растёт по подписчикам.',
+        text: 'Аккаунт растёт по подписчикам.',
         evidence: [`чистый прирост +${fmtInt(net)} за период`, ev].filter(Boolean).join(' · '),
         confidence: 'high',
         priority: 90,
@@ -93,7 +95,7 @@ export function buildIgInsights(i: IgInsightInput): IgInsight[] {
       out.push({
         tone: up ? 'up' : 'down',
         text: `Вовлечённость ${up ? 'выросла' : 'снизилась'}.`,
-        evidence: `ER по охвату ${i.erReach.toFixed(2)}% (было ${i.erReachPrev.toFixed(2)}%)${driver}`,
+        evidence: `ER по охвату ${fmt.pctAbs(i.erReach)} (было ${fmt.pctAbs(i.erReachPrev)})${driver}`,
         confidence: n >= 5 ? 'high' : 'medium',
         priority: 80,
       });
@@ -101,7 +103,7 @@ export function buildIgInsights(i: IgInsightInput): IgInsight[] {
       out.push({
         tone: 'neutral',
         text: 'Вовлечённость держится стабильно.',
-        evidence: `ER по охвату ${i.erReach.toFixed(2)}%`,
+        evidence: `ER по охвату ${fmt.pctAbs(i.erReach)}`,
         confidence: n >= 5 ? 'medium' : 'low',
         priority: 40,
       });
@@ -112,7 +114,10 @@ export function buildIgInsights(i: IgInsightInput): IgInsight[] {
   if (i.bestFormat && i.bestFormat.total > 0 && i.bestFormat.sharePct >= 40) {
     out.push({
       tone: 'up',
-      text: `${i.bestFormat.label} собирают больше всего взаимодействий.`,
+      // Подпись формата — существительное в единственном числе («Лента», «Карусель», «Reels»),
+      // поэтому фраза строится вокруг слова «Формат»: подстановка в подлежащее давала «Лента
+      // собирают». Раньше огреха пряталась за limit=1 на Обзоре, теперь строка видна в топ-3.
+      text: `Формат «${i.bestFormat.label}» собирает больше всего взаимодействий.`,
       evidence: `${i.bestFormat.sharePct.toFixed(0)}% (${fmtInt(i.bestFormat.interactions)} из ${fmtInt(i.bestFormat.total)})`,
       confidence: i.bestFormat.total >= 1000 ? 'high' : 'medium',
       priority: 70,

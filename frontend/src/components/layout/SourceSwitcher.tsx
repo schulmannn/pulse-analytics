@@ -1,12 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 import type { ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useChannels } from '@/api/queries';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { getRememberedChannel, setRememberedChannel } from '@/lib/channel';
-import { useFocusTrap } from '@/lib/useFocusTrap';
 import { useLayerBack } from '@/lib/useLayerBack';
 import { fmt, pluralRu } from '@/lib/format';
 import { cn } from '@/lib/utils';
@@ -14,6 +12,14 @@ import { NETWORKS, NetworkGlyph, networkByKey, routeNetworkOwner, type Network }
 import { setActiveNetwork } from '@/lib/networkStore';
 import { Icon } from '@/components/nav-icons';
 import { ChannelAvatar } from '@/components/ChannelAvatar';
+import {
+  Dialog,
+  DialogOverlay,
+  DialogPortal,
+  DialogSurface,
+  DialogTitle,
+  useRestoreOpenerFocus,
+} from '@/components/ui/dialog';
 import { useActiveNetwork } from './nav';
 import { useDismiss } from './useDismiss';
 
@@ -76,6 +82,7 @@ export function SourceSwitcher({ rail = false, mobile = false }: { rail?: boolea
   const [query, setQuery] = useState('');
   const cardRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
   // Previous active network, so the reconcile effect can tell a genuine NETWORK SWITCH (restore the
   // destination network's remembered source) from an in-place channel/list change (keep the current
   // channel while it stays eligible).
@@ -160,6 +167,10 @@ export function SourceSwitcher({ rail = false, mobile = false }: { rail?: boolea
   const totalRows = channels.length * NETWORKS.length;
   const showSearch = totalRows > 8;
 
+  useEffect(() => {
+    if (open && showSearch && !mobile) searchRef.current?.focus();
+  }, [mobile, open, showSearch]);
+
   const pick = (row: SourceRow) => {
     // Persist BOTH halves of the source (network, channel) BEFORE navigating. Set the network first
     // so `setChannelId` records the channel under the DESTINATION network's memory (setChannelId
@@ -200,7 +211,8 @@ export function SourceSwitcher({ rail = false, mobile = false }: { rail?: boolea
           const rows = filtered(net);
           if (rows.length === 0) return null;
           return (
-            <div key={net} role="group" aria-label={p.name} className="pt-1 first:pt-0">
+            <fieldset key={net} className="m-0 min-w-0 border-0 p-0 pt-1 first:pt-0">
+              <legend className="sr-only">{p.name}</legend>
               <p aria-hidden="true" className="px-2 pb-1 text-2xs font-medium uppercase tracking-wide text-ink3">
                 {p.name}
               </p>
@@ -235,7 +247,7 @@ export function SourceSwitcher({ rail = false, mobile = false }: { rail?: boolea
                   </button>
                 );
               })}
-            </div>
+            </fieldset>
           );
         })}
         {/* «Подключить источник» — add a channel / connect IG lives on the connect flow. */}
@@ -260,9 +272,9 @@ export function SourceSwitcher({ rail = false, mobile = false }: { rail?: boolea
 
   const searchInput = showSearch ? (
     <input
-      // Desktop dropdown autofocuses the filter; the mobile sheet does NOT — autofocus there pops the
-      // on-screen keyboard over the list before the user has even scanned it.
-      autoFocus={!mobile}
+      // Desktop dropdown focuses the filter after it mounts; the mobile sheet does NOT, so it
+      // never pops the on-screen keyboard over the list before the user has scanned it.
+      ref={searchRef}
       aria-label="Поиск источника"
       value={query}
       onChange={(e) => setQuery(e.target.value)}
@@ -348,57 +360,49 @@ export function SourceSwitcher({ rail = false, mobile = false }: { rail?: boolea
 
 /**
  * Mobile bottom sheet for the source switcher (<md). A portaled dialog: a fade-in backdrop (tap to
- * close) + a slide-up panel pinned to the bottom edge, focus-trapped (useFocusTrap restores the
- * trigger on close), Escape-dismissable, body-scroll-locked, with a bottom safe-area pad so the last
+ * close) + a slide-up panel pinned to the bottom edge. Radix restores the trigger on close,
+ * handles Escape and body-scroll lock, with a bottom safe-area pad so the last
  * row clears the home indicator. z-50 sits above the fixed bottom nav (z-30). The desktop sidebar
  * keeps its absolute dropdown — this is the phone-reachable variant the Mobile-nav card calls for.
  */
 function SourceSheet({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
-  const sheetRef = useRef<HTMLDivElement>(null);
-  useFocusTrap(sheetRef);
+  const restoreOpener = useRestoreOpenerFocus();
   // The phone's back gesture closes the sheet instead of leaving the page (its whole audience is <md).
   useLayerBack(onClose);
-  useEffect(() => {
-    // Capture-phase Escape (mirrors DetailShell): close THIS sheet before any nested handler runs.
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.stopPropagation();
-        onClose();
-      }
-    };
-    document.addEventListener('keydown', onKey, true);
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.removeEventListener('keydown', onKey, true);
-      document.body.style.overflow = prevOverflow;
-    };
-  }, [onClose]);
 
-  return createPortal(
-    <div className="fixed inset-0 z-50 flex flex-col justify-end" role="dialog" aria-modal="true" aria-label={title}>
-      <div className="detail-backdrop-in absolute inset-0 bg-background/70 backdrop-blur-xs backdrop-grayscale" onClick={onClose} aria-hidden="true" />
-      <div
-        ref={sheetRef}
-        tabIndex={-1}
-        className="sheet-in relative z-10 flex max-h-[85vh] w-full flex-col overflow-hidden rounded-t-xl border-t border-border bg-popover pb-[env(safe-area-inset-bottom)] focus:outline-hidden"
-      >
-        <div className="flex shrink-0 items-center justify-between gap-2 px-3 pb-1 pt-2.5">
-          <span className="text-2xs font-medium uppercase tracking-wide text-ink3">Источник</span>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Закрыть"
-            className="-mr-1 flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-hover-row hover:text-foreground"
-          >
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
-        <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">{children}</div>
-      </div>
-    </div>,
-    document.body,
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogPortal>
+        <DialogOverlay className="detail-backdrop-in" />
+        <DialogSurface
+          aria-label={title}
+          onCloseAutoFocus={restoreOpener}
+          onEscapeKeyDown={(event) => event.stopPropagation()}
+          onPointerDown={(event) => {
+            if (event.target === event.currentTarget) onClose();
+          }}
+          className="fixed inset-0 z-modal flex flex-col justify-end"
+        >
+          <div className="sheet-in pointer-events-auto relative z-10 flex max-h-[85vh] w-full flex-col overflow-hidden rounded-t-xl border-t border-border bg-popover pb-[env(safe-area-inset-bottom)]">
+            <div className="flex shrink-0 items-center justify-between gap-2 px-3 pb-1 pt-2.5">
+              <DialogTitle className="text-2xs font-medium uppercase tracking-wide text-ink3">
+                Источник
+              </DialogTitle>
+              <button
+                type="button"
+                onClick={onClose}
+                aria-label="Закрыть"
+                className="-mr-1 flex h-11 w-11 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-hover-row hover:text-foreground sm:h-8 sm:w-8"
+              >
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">{children}</div>
+          </div>
+        </DialogSurface>
+      </DialogPortal>
+    </Dialog>
   );
 }

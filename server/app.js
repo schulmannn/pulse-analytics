@@ -20,7 +20,7 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const { requestContext } = require('./lib/observability');
-const { legacyCspHeader, setAppHeaders, setHtmlSecurityHeaders } = require('./lib/securityHeaders');
+const { setApiHeaders, setAppHeaders } = require('./lib/securityHeaders');
 const { assetCacheControl } = require('./lib/staticAssets');
 const { registerCollectorRoutes } = require('./routes/collector');
 const { registerAuthRoutes } = require('./routes/auth');
@@ -35,7 +35,10 @@ const { registerIgOauthRoutes } = require('./routes/ig-oauth');
 const { registerIgRoutes } = require('./routes/ig');
 const { registerMsRoutes } = require('./routes/moysklad');
 const { registerYmRoutes } = require('./routes/metrika');
+const { registerCdekRoutes } = require('./routes/cdek');
+const { registerRusenderRoutes } = require('./routes/rusender');
 const { registerAccountRoutes } = require('./routes/account');
+const { registerTeamRoutes } = require('./routes/team');
 const { registerHistoryRoutes } = require('./routes/history');
 const { registerAiRoutes } = require('./routes/ai');
 
@@ -51,10 +54,12 @@ function createApp(deps) {
     requireAuth, requireSuper, setSessionCookie, clearSessionCookie,
     resolveChannel, audit, getDbReady, getDraining,
     limiter, authLimiter, mediaLimiter,
-    hashPassword, verifyPassword, DUMMY_HASH, signSession, SESSION_TTL, GOOGLE_CLIENT_ID,
-    appBase, sha256, newToken, VERIFY_TTL, RESET_TTL, sendEmail, emailShell, emailBtn, escHtml,
+    hashPassword, verifyPassword, DUMMY_HASH, signSession, SESSION_TTL,
+    SESSION_ABSOLUTE_TTL, GOOGLE_CLIENT_ID,
+    appBase, sha256, newToken, VERIFY_TTL, RESET_TTL, INVITE_TTL,
+    sendEmail, sendEmailDetailed, emailConfigured, emailShell, emailBtn, escHtml,
     igFetch, refreshIgIfNeeded, igConfigured, igCrypto, igMock, msCrypto, msFetch, msBackfill,
-    ymCrypto, ymFetch, nearestOf,
+    ymCrypto, ymFetch, rusenderCrypto, rusenderFetch, rusenderSurfaces, cdekImport, nearestOf,
     cacheGet, cacheSet, cache, IG_ACCOUNT, IG_TOKEN, IG_GRAPH, AUTH_SECRET,
     tgCrypto, collectQrChannelsNow, collectManagedPostStatsNow, TG_TOKEN, TG_CHANNEL,
     tgBot, tgBotWebhookSecret, runMentionNotifyTest,
@@ -96,34 +101,24 @@ function createApp(deps) {
   app.use((req, res, next) => {
     if (req.path === '/api/collector/ingest'
       || req.path === '/api/me/avatar'   // own 1mb parser — a 100KB-400KB data URL is a valid avatar
+      || req.path === '/api/cdek/import' // raw file upload — own 10mb express.raw parser
       || /\/screenshot$/.test(req.path)) return next();
     jsonSmall(req, res, next);
   });
-  // ── App shell + strict nonce-CSP ──────────────────────────────────
-  // index.html is the only HTML surface that renders collector-snapshot data.
-  // A per-request nonce on its inline <script> tags + `script-src 'nonce-…'`
-  // (no 'unsafe-inline') means an injected <script> or inline event handler can't
-  // execute — closes the snapshot self-XSS class (defence-in-depth on top of the
-  // server-side escape/Number coercion). Inline styles stay allowed (style
-  // injection isn't code execution); only Google Fonts is external.
-  const APP_HTML_PATH = path.join(__dirname, '../public/index.html');
-  let APP_HTML = '';
-  try { APP_HTML = fs.readFileSync(APP_HTML_PATH, 'utf8'); }
-  catch (e) { console.error('[csp] index.html read failed:', e.message); }
-  function sendApp(req, res) {
-    const nonce = crypto.randomBytes(16).toString('base64');
-    let src = APP_HTML;
-    if (!src) { try { src = fs.readFileSync(APP_HTML_PATH, 'utf8'); } catch { return res.status(500).end(); } }
-    const html = src.split('<script>').join(`<script nonce="${nonce}">`);
-    setHtmlSecurityHeaders(req, res, legacyCspHeader(nonce))
-       .set('Content-Type', 'text/html; charset=utf-8')
-       .send(html);
-  }
-  // 3F-3 catover: '/' now serves the new Vite/React SPA (wired in the tail below). The
-  // legacy nonce-shell is reachable at /legacy as a reversible escape hatch until B2
-  // cleanup. Only its /js asset is still served from public/ (public/index.html is no
-  // longer routed — the SPA fallback owns '/').
-  app.use('/js', express.static(path.join(__dirname, '../public/js')));
+  // Единственная HTML-поверхность — SPA (ниже в хвосте). Прежняя nonce-оболочка с собственным
+  // CSP-контуром жила на /legacy как обратимый аварийный выход катовера 3F-3; критерий её
+  // удаления наступил в июле, и второй контур заголовков ушёл вместе с ней (аудит #554).
+  // Картинки для писем (маскот в приглашении). Отдаются с ТОГО ЖЕ origin, что и ссылки в письмах
+  // (appBase, защищённый от Host-header poisoning) — стороннего хостинга у нас нет. Почтовые
+  // клиенты тянут их без сессии, поэтому директория держит только публичную статику.
+  app.use('/email', express.static(path.join(__dirname, '../public/email'), {
+    maxAge: '30d',
+    index: false,
+  }));
+
+  // Security-заголовки API ставятся ДО лимитера: 429 — тоже ответ API, и он тоже не должен
+  // быть подвержен MIME-sniffing. Раньше их не было ни на одном реальном /api-ответе (I-1).
+  app.use('/api/', (req, res, next) => { setApiHeaders(req, res); next(); });
 
   app.use('/api/', limiter);
 
@@ -141,6 +136,7 @@ function createApp(deps) {
     DUMMY_HASH,
     signSession,
     SESSION_TTL,
+    SESSION_ABSOLUTE_TTL,
     GOOGLE_CLIENT_ID,
     fetchWithTimeout,
     log,
@@ -156,14 +152,56 @@ function createApp(deps) {
     escHtml,
     // /api/auth/me отдаёт ai.enabled — фронт гейтит AI-поверхности одним bootstrap-запросом.
     aiEnabledFor: (user) => aiChatService.enabledFor(user),
-    // Cookie-auth фаза 1: login/google ставят HttpOnly-cookie, logout чистит.
+    // Тем же ответом едет фичефлаг витрин Rusender (см. комментарий в routes/auth.js).
+    rusenderSurfaces,
     setSessionCookie,
     clearSessionCookie,
+    // Анти-enumeration хвосты (register/forgot/resend) регистрируются здесь — shutdown их дожидается.
+    jobTracker,
   });
 
   // Account/admin/prefs/config routes are isolated in routes/account.js (accountLimiter travels with
   // them). Shared helpers (requireSuper, sendEmail/emailShell, audit, GOOGLE_CLIENT_ID) are injected.
-  registerAccountRoutes({ app, requireAuth, requireSuper, db, audit, sendEmail, emailShell, GOOGLE_CLIENT_ID });
+  registerAccountRoutes({
+    app,
+    requireAuth,
+    requireSuper,
+    db,
+    audit,
+    sendEmail,
+    emailShell,
+    GOOGLE_CLIENT_ID,
+    clearSessionCookie,
+  });
+
+  // Команда: приглашения в воркспейс и участники (routes/team.js). Живёт рядом с account —
+  // тот же токен-по-почте контур, что verify/reset, плюс публичный приём приглашения по ссылке.
+  registerTeamRoutes({
+    app,
+    db,
+    requireAuth,
+    authLimiter,
+    audit,
+    log,
+    appBase,
+    sha256,
+    newToken,
+    INVITE_TTL,
+    // Приём приглашения по РАСКРЫТОЙ ссылке идёт через подтверждение почты (H-1) — отсюда те же
+    // sendEmail/emailShell/emailBtn/VERIFY_TTL, что у обычной регистрации.
+    VERIFY_TTL,
+    sendEmail,
+    sendEmailDetailed,
+    emailConfigured,
+    emailShell,
+    emailBtn,
+    escHtml,
+    hashPassword,
+    signSession,
+    SESSION_TTL,
+    SESSION_ABSOLUTE_TTL,
+    setSessionCookie,
+  });
 
   // Instagram data routes + the per-request resolveIg middleware are isolated in routes/ig.js.
   // The shared IG data-access (singleflight igFetch + opportunistic refreshIgIfNeeded), the env
@@ -199,6 +237,19 @@ function createApp(deps) {
   // routes/metrika.js, зеркало МС-блока выше: ymCrypto/ymFetch из composition, тот же
   // x-channel-id-резолв, точечная инвалидация ym:*-ключей, audit ym_connect/ym_disconnect.
   registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cacheGet, cacheSet, cache, log });
+
+  // Роуты СДЭК Fulfillment (038) — первый источник БЕЗ API: наполняется ручной загрузкой Excel.
+  // Ни токена, ни крона: сервис импорта (cdekImport из composition) разбирает файл и пишет архив
+  // одной идемпотентной транзакцией. express инъектируется ради собственного raw-парсера тела —
+  // тот же приём, что у registerCollectorRoutes.
+  registerCdekRoutes({ app, express, requireAuth, db, audit, cdekImport });
+
+  // Роуты Rusender (039) — источник email-рассылок. Пока это СЛОЙ ПОДКЛЮЧЕНИЯ (connect по
+  // API-ключу + status/disconnect): витрины приезжают следующим шагом, когда форма живых
+  // ответов Rusender подтверждена ключом владельца, а не одной лишь OpenAPI-спекой.
+  registerRusenderRoutes({
+    app, requireAuth, db, audit, rusenderCrypto, rusenderFetch, surfacesEnabled: rusenderSurfaces, log,
+  });
 
   registerChannelsRoutes({ app, db, requireAuth, audit, getDbReady });
 
@@ -245,20 +296,19 @@ function createApp(deps) {
   //  ОБЩИЕ ROUTES
   // ════════════════════════════════════════════════════════════════
 
+  // Liveness-проба. Отвечает анониму, поэтому несёт только то, что проба обязана знать: жив ли
+  // процесс и поднялась ли схема. Прежний блок `env` перечислял, какие интеграции настроены
+  // (ig/tg/auth), — это карта поверхности для того, кто ещё не вошёл, и ни один потребитель её
+  // не читал: ни фронт, ни healthcheck (I-1, аудит #554). Заодно ушёл `cache` — размер кэша
+  // говорит о нагрузке, а пробе не нужен. Конфигурация видна в boot-баннере, то есть в логах.
   app.get('/api/health', (req, res) => {
     res.json({
       status: 'ok',
       service: 'pulse-analytics-web',
       uptime: Math.round(process.uptime()),
-      cache:  cache.size,
       sessions: 'signed+versioned',
       database_ready: getDbReady(),
       request_id: req.requestId,
-      env: {
-        ig:  !!IG_TOKEN && !!IG_ACCOUNT,
-        tg:  !!TG_TOKEN && !!TG_CHANNEL,
-        auth: !!config.auth.sessionSecret
-      }
     });
   });
 
@@ -333,11 +383,10 @@ function createApp(deps) {
     log,
   });
 
-  // ── Sprint 3F-3 catover: new Vite/React SPA is the primary dashboard, served at '/' ──
-  // The dist/ bundle is produced by the Dockerfile.web build stage. CSP is stricter than
-  // the legacy shell: the new app has NO inline scripts (JSX auto-escapes), so script-src
-  // is plain 'self' — no nonce. The legacy nonce-shell stays at /legacy as a reversible
-  // escape hatch until the B2 cleanup (then this becomes the only HTML surface).
+  // ── Vite/React SPA — единственная HTML-поверхность, отдаётся с '/' ──
+  // Бандл dist/ собирается стадией Dockerfile.web. Инлайновых скриптов в приложении НЕТ
+  // (JSX экранирует), поэтому script-src — простой 'self' без nonce: одного контура
+  // заголовков теперь достаточно на всё приложение.
   const APP_DIST = path.join(__dirname, '../frontend/dist');
   // Hashed SPA assets at root (/assets/*). Security headers set per response; content-hashed
   // /assets/** get a 1-year immutable cache, unhashed files (index.html, favicon) stay
@@ -355,9 +404,6 @@ function createApp(deps) {
     // Same-origin only: '//host' (and '/\host') is protocol-relative → open redirect.
     res.redirect(302, /^\/(?!\/|\\)/.test(local) ? local : '/');
   });
-
-  // Legacy nonce-shell — reversible escape hatch, removed in 3F-3 B2 cleanup.
-  app.get('/legacy', sendApp);
 
   // Unknown /api/* → JSON 404. Without this the SPA fallback served index.html with a
   // 200 for any mistyped API path — clients parsed HTML, monitoring saw success.
@@ -392,6 +438,14 @@ function createApp(deps) {
     const body = dbUnavailable
       ? { error: 'Сервис временно недоступен, попробуйте позже', request_id: req.requestId }
       : { error: responseStatus === 500 ? 'internal_error' : String((err && err.message) || 'error'), request_id: req.requestId };
+    // Машинный код известной ошибки проходит в тело рядом с человеческим текстом: клиенту нужно
+    // отличать «переподключите Instagram» от любого другого 409, а текст для этого — плохой ключ.
+    // Форма строго snake_case: коды Node и pg ('ECONNREFUSED', '23505') ей не удовлетворяют и не
+    // протекают. На 500 не отдаём ничего — там внутренности намеренно не раскрываются.
+    if (!dbUnavailable && responseStatus !== 500 && typeof (err && err.code) === 'string'
+      && /^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$/.test(err.code)) {
+      body.code = err.code;
+    }
     if (err && err.retryAfter != null) {
       res.set('Retry-After', String(err.retryAfter));
       body.retry_after = err.retryAfter;

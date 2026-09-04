@@ -50,7 +50,7 @@ export function useReportData() {
   const chartSpec = (metric: string): ChartSpec => {
     switch (metric) {
       case 'subscribers':
-        return { series: subsSpark, valueFmt: fmt.num, zeroBase: false, label: 'Подписчики по дням', drill: 'subscribers' };
+        return { series: subsSpark, valueFmt: fmt.num, zeroBase: false, label: 'Динамика подписчиков', drill: 'subscribers' };
       case 'reactions':
         return { series: dailyFor('likes'), valueFmt: fmt.short, zeroBase: true, label: 'Реакции по дням', drill: 'reactions' };
       case 'forwards':

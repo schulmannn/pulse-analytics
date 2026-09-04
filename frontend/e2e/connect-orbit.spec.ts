@@ -11,7 +11,7 @@ test('connect orbit spreads all source nodes without overlap', async ({ page }) 
   // под prefers-reduced-motion, этим и пользуемся.
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await bootDemo(page, '/connect');
-  const dots = page.locator('button[data-dot]');
+  const dots = page.locator('[data-dot]');
   await expect(dots.first()).toBeVisible();
   const count = await dots.count();
   expect(count).toBeGreaterThanOrEqual(9);

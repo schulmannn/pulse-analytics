@@ -1,10 +1,12 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { useChannels, useHistory, useTgFull, useTgQrStatus } from '@/api/queries';
 import { useSelectedChannel } from '@/lib/channel-context';
-import { useWidgetPeriod } from '@/lib/period';
+import { lttbDownsample } from '@/lib/downsample';
+import { CHART_MAX_POINTS } from '@/lib/msSeries';
+import { useCardShowsPeriod, useWidgetPeriod } from '@/lib/period';
 import { useWidgetInView } from '@/lib/widgetViewport';
 import { pctDelta, subscriberChange } from '@/lib/delta';
-import { fmt } from '@/lib/format';
+import { fmt, timeAxisFromDayKeys } from '@/lib/format';
 import { freshness, latestHistoryDay } from '@/lib/freshness';
 import { overviewHealthBanner } from '@/lib/connectionHealth';
 import { cn } from '@/lib/utils';
@@ -14,11 +16,10 @@ import { useDemo } from '@/lib/demo-context';
 import { Sparkline } from '@/components/Sparkline';
 import { ChartCardBody, ChartSection } from '@/components/ChartWidget';
 import { WidgetGroup } from '@/components/widgets/WidgetGroup';
-import { SubscriberHistoryChart, SubscriberHistoryBars } from '@/panels/Charts';
+import { SubscriberHistoryChart } from '@/panels/Charts';
 import { TgViewsBody, TgAvgReachBody, TgReactionsBody, TgErBody, useTgKpis } from '@/panels/KpiGrid';
 import { NarrativeWeekBlock } from '@/panels/NarrativeWeek';
 import { TopPosts } from '@/panels/TopPosts';
-import { ChangeSummary } from '@/panels/ChangeSummary';
 
 /**
  * Overview — a focused summary, all of it widgets: KPI hero + ledger («Показатели»), then
@@ -69,37 +70,67 @@ export function Overview() {
             the SAME feed page — default title-ids would make them share prefs (hide one →
             both vanish). id kept as `overview-hero` (this IS the lead card now) so deep-links and
             the shared page-period plumbing keep resolving. */}
-        <ChartSection id="overview-hero" title="Просмотры" defaultSize="half" defaultColor={1} periodControl drillTo="/metrics/views">
-          {/* The one honest daily series at the lead: channel views over the period (area spark). */}
-          <TgViewsBody state={kpis} />
-        </ChartSection>
+        {/* The one honest daily series at the lead: channel views over the period. Линия/Столбцы —
+            через ту же карусель вариантов, что и компактные KPI-карточки ниже.
+            Единственная тонированная карточка доски: по канону цвет = история, и история тут одна
+            (остальные карточки — нейтральная поверхность + канонный iris-акцент серии). */}
+        <ChartSection
+          id="overview-hero"
+          title="Просмотры"
+          defaultSize="half"
+          defaultColor={1}
+          defaultTinted
+          periodControl
+          drillTo="/metrics/views"
+          variants={[
+            { key: 'line', label: 'Линия', render: <TgViewsBody state={kpis} /> },
+            { key: 'bar', label: 'Столбцы', render: <TgViewsBody state={kpis} viz="bar" /> },
+          ]}
+        />
         {/* Subscriber base + movement — the second primary channel signal (reuses the `growth`
             curated Home key, so «На главную» pins the same card it already knew). */}
-        <GrowthChartBlock id="overview-growth" homeKey="growth" defaultColor={5} />
+        <GrowthChartBlock id="overview-growth" homeKey="growth" />
         {/* Row 2 — compact comparison cards at third width: headline value + honest Δ over an
             active-window publication-date sparkline (owner override 2026-07 — the previous non-temporal
             two-bar read is retired), each with its own title, menu and drill route. */}
-        <ChartSection id="overview-avg-reach" title="Ср. охват" defaultSize="third" defaultColor={2} drillTo="/metrics/avgReach">
-          <TgAvgReachBody state={kpis} />
-        </ChartSection>
-        <ChartSection id="overview-reactions" title="Реакции" defaultSize="third" defaultColor={4} drillTo="/metrics/reactions">
-          <TgReactionsBody state={kpis} />
-        </ChartSection>
-        <ChartSection id="overview-er" title="Вовлечённость" defaultSize="third" defaultColor={6} drillTo="/metrics/er">
+        <ChartSection
+          id="overview-avg-reach"
+          title="Ср. охват"
+          defaultSize="third"
+          drillTo="/metrics/avgReach"
+          variants={[
+            // Столбцы первыми = дефолт (решение владельца 2026-08-13, зеркало Home-набора):
+            // среднее живёт только в дни с постами, линия рисовала ложную непрерывность.
+            // Сохранённый выбор юзера (prefs.variant) выигрывает над порядком.
+            { key: 'bar', label: 'Столбцы', render: <TgAvgReachBody state={kpis} viz="bar" /> },
+            { key: 'line', label: 'Линия', render: <TgAvgReachBody state={kpis} /> },
+          ]}
+        />
+        {/* Два варианта = переключатель типа графика в редакторе карточки: EditWidgetDialog
+            показывает VariantCarousel, как только вариантов больше одного. До этого карточка не
+            объявляла ни одного, и типа графика было не выбрать (владелец). Компактный «Столбцы»,
+            а не готовый seriesBarValuesVariant: тот требует minSize 'full' ради леджера справа и
+            раздул бы KPI-карточку в треть ширины на весь ряд. */}
+        <ChartSection
+          id="overview-reactions"
+          title="Реакции"
+          defaultSize="third"
+          drillTo="/metrics/reactions"
+          variants={[
+            // Столбцы первыми = дефолт (решение владельца 2026-08-13): дискретные суточные суммы.
+            { key: 'bar', label: 'Столбцы', render: <TgReactionsBody state={kpis} viz="bar" /> },
+            { key: 'line', label: 'Линия', render: <TgReactionsBody state={kpis} /> },
+          ]}
+        />
+        <ChartSection id="overview-er" title="Вовлечённость" defaultSize="third" drillTo="/metrics/er">
           <TgErBody state={kpis} />
         </ChartSection>
-        {/* The product grid supports S / M / L (33 / 50 / 100), so the narrative pairs honestly at
-            M / M with one strongest measured period change. An unsupported two-thirds footprint
-            would violate the widget contract. */}
-        <NarrativeWeekBlock id="overview-week" homeKey="week" fixedSize="half" />
-        <ChartSection
-          id="overview-change-summary"
-          title="Главное изменение"
-          fixedSize="half"
-          noExpand
-        >
-          <ChangeSummary compact />
-        </ChartSection>
+        {/* Рассказ занимает ВЕСЬ ряд, и это не про «побольше места»: у third/half высота заперта в
+            264px (SIZE_HEIGHT), из-за чего хвост текста уезжал во внутренний скролл с маской
+            затухания. У full высота контентная — скролл и маска стали не нужны. Соседняя карточка
+            «Главное изменение» свёрнута сюда же (владелец: «правый почти не несёт нагрузки»): её
+            медиана и лучшая публикация теперь в леджере рассказа, разбор причины — его абзацем. */}
+        <NarrativeWeekBlock id="overview-week" homeKey="week" fixedSize="full" />
         <ChartSection
           id="overview-top-posts"
           title="Лучшие публикации"
@@ -163,10 +194,10 @@ function HealthBanner({ source }: { source?: string | null }) {
 
 /** Subscriber base over the resolved period — page-controlled in the feed, independently saved on
     Home. Exported bare so both hosts use the same calculation. */
-/** «Рост подписчиков» wrapper: the compact SubscriberGrowth card body, but «Развернуть» now opens the
-    SAME full subscriber chart the history widget does (full-height axes + Мин/Макс/Среднее stats strip
-    + period pills + line↔bar + reference lines) instead of a tiny sparkline over an empty fullscreen. */
-export function GrowthChartBlock({ id, homeKey, defaultColor }: { id?: string; homeKey?: string; defaultColor?: number } = {}) {
+/** «Рост подписчиков» wrapper: the compact SubscriberGrowth card body, but «Развернуть» opens the
+    same full subscriber curve the history widget does (full-height axes + Мин/Макс/Среднее stats strip
+    + period pills + reference lines) instead of a tiny sparkline over an empty fullscreen. */
+export function GrowthChartBlock({ id, homeKey }: { id?: string; homeKey?: string } = {}) {
   const { data } = useHistory(730);
   const rows = (data?.rows ?? []).filter((r) => r.subscribers != null);
   return (
@@ -176,13 +207,11 @@ export function GrowthChartBlock({ id, homeKey, defaultColor }: { id?: string; h
       title="Рост подписчиков"
       drillTo="/metrics/subscribers"
       defaultSize="half"
-      defaultColor={defaultColor}
       periodControl
       expand={
         rows.length >= 2
           ? {
               renderExpanded: (days) => <SubscriberHistoryChart rows={days === 0 ? rows : rows.slice(-days)} />,
-              renderExpandedBar: (days) => <SubscriberHistoryBars rows={days === 0 ? rows : rows.slice(-days)} />,
               statsFor: (days) => (days === 0 ? rows : rows.slice(-days)).map((r) => Number(r.subscribers)),
               statsSum: false, // сумма УРОВНЕЙ подписчиков по дням не имеет смысла
             }
@@ -207,8 +236,12 @@ export function SubscriberGrowth() {
   const rows = (history?.rows ?? [])
     .filter((r) => r.subscribers != null && inRange(r.day))
     .sort((a, b) => a.day.localeCompare(b.day));
-  const values = rows.map((r) => Number(r.subscribers));
-  const labels = rows.map((r) => fmt.day(r.day));
+  // Канон графиков: длинные серии капаются LTTB перед рендером — окно «Всё» отдаёт до 730 дневных
+  // точек, суб-пиксельная мазня в 200×32-спарклайне. Кап чисто визуальный: LTTB сохраняет первую
+  // и последнюю точки, поэтому headline-числа (currentSubs/change) не меняются.
+  const spark = lttbDownsample(rows, CHART_MAX_POINTS, (r) => Number(r.subscribers));
+  const values = spark.map((r) => Number(r.subscribers));
+  const labels = spark.map((r) => fmt.day(r.day));
   // A historical custom range must end at its own last archive level, not today's channel snapshot.
   const currentSubs = range
     ? values.at(-1) ?? 0
@@ -217,6 +250,9 @@ export function SubscriberGrowth() {
     ? (values.at(-1) ?? 0) - (values[0] ?? 0)
     : subscriberChange(history?.rows ?? [], days);
   const periodLabel = range ? 'выбранный период' : days === 0 ? 'всё время' : `${days} дн.`;
+  // Подпись этой карточки СОСТОИТ из окна, поэтому на ленте она уходит целиком: период уже в
+  // шапке. На Главной остаётся — там у карточки собственное сохранённое окно.
+  const showPeriod = useCardShowsPeriod();
 
   const navigate = useNavigate();
   // Steep anatomy (owner rule): label + number + delta + signed caption bottom-left, the
@@ -224,8 +260,7 @@ export function SubscriberGrowth() {
   // two prod bugs' worth) retired by construction.
   return (
     <ChartCardBody
-      hero
-      label={`за ${periodLabel}`}
+      label={showPeriod ? `за ${periodLabel}` : undefined}
       value={fmt.kpi(currentSubs)}
       delta={change != null ? pctDelta(currentSubs, currentSubs - change) : null}
       caption={
@@ -237,7 +272,20 @@ export function SubscriberGrowth() {
       drillLabel="Рост подписчиков"
     >
       {values.length > 1 ? (
-        <Sparkline values={values} labels={labels} area strokeWidth={2} interactive formatValue={fmt.num} className="h-full min-h-14 w-full" />
+        // caption="" резервирует строку оси — единственный hero без неё среди твинов (FeaturedKpi /
+        // IG KpiHero / Ym·MsStoryBody) обнаружен ревизией осей 2026-08-14; буквы короткого окна —
+        // по размаху ключей серии.
+        <Sparkline
+          values={values}
+          labels={labels}
+          axisLabels={timeAxisFromDayKeys(spark.map((r) => r.day))}
+          area
+          strokeWidth={2}
+          interactive
+          caption=""
+          formatValue={fmt.num}
+          className="h-full min-h-14 w-full"
+        />
       ) : (
         <p className="mt-4 text-xs text-muted-foreground">Недостаточно истории для графика.</p>
       )}

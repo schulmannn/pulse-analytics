@@ -1,16 +1,24 @@
 import type { ChannelsResponse, HistoryData, TgFull } from '@/api/schemas';
-import { fmt, pluralRu } from '@/lib/format';
+import { fmt, pluralRu, timeAxisLabels as weekdayAxis } from '@/lib/format';
 import { normalizeTgPosts } from '@/lib/posts';
 import type { NormalizedPost } from '@/lib/posts';
 import type { DateRange, PeriodDays } from '@/lib/period';
 import { avgReachWindows, dailyWindowDelta, pctDelta, subscriberChange, subscriberDelta, sumPostWindows } from '@/lib/delta';
 import type { MetricDelta } from '@/lib/delta';
 
-/** A daily metric series: aligned day labels + values (sparklines, drills, metric pages). */
+/** A daily metric series: aligned day labels + values (sparklines, drills, metric pages).
+    `null` = пропуск измерения (день окна без публикаций у avg-метрик): линия рвётся, столбец
+    получает штрихованную подложку «0 ≠ n/a» — НЕ ноль. */
 export interface DailySeries {
   labels: string[];
-  values: number[];
+  values: Array<number | null>;
+  /** Временна́я ось (timeAxisCore): буквы дней короткого окна / EN-месяцы длинного вместо дат.
+      Только ПОДПИСИ ОСИ — `labels` остаются полными датами для тултипа/читалки. */
+  axisLabels?: string[];
+  /** Сырые day-key'и точек — для пересчёта оси после визуального капа (LTTB теряет индексы). */
+  dayKeys?: string[];
 }
+
 
 /** KPI metrics that have a dedicated metric page (subset of MetricKey shown as a KPI). */
 export type DrillKey = 'views' | 'subscribers' | 'avgReach' | 'reactions' | 'forwards' | 'er';
@@ -42,13 +50,15 @@ export function filledDailySeries(
   }
   const labels: string[] = [];
   const values: number[] = [];
+  const dayKeys: string[] = [];
   const start = fromMs - (fromMs % DAY_MS);
   for (let t = start; t <= toMs; t += DAY_MS) {
     const key = new Date(t).toISOString().slice(0, 10);
+    dayKeys.push(key);
     labels.push(fmt.day(key));
     values.push(byDay.get(key) ?? 0);
   }
-  return { labels, values };
+  return { labels, values, axisLabels: weekdayAxis(dayKeys, dayKeys.length) };
 }
 
 /** Sparse daily sums (no zero-fill) — for the unbounded «Всё» window. */
@@ -153,6 +163,24 @@ export function deriveKpis(
   const avgReachPair = range ? null : avgReachWindows(avgReachPosts, days);
   const avgReachTrend = avgReachPair ? pctDelta(avgReachPair.current, avgReachPair.previous) : null;
 
+  // Длина активного окна в ДНЯХ для временно́й оси (timeAxisLabels): пресет несёт её напрямую,
+  // кастомный диапазон — по своим границам; «Всё» передаёт 0 — хелпер меряет окно размахом серии.
+  const windowDays = range
+    ? Math.round((range.to - range.from) / DAY_MS) + 1
+    : days;
+
+  // Кап фетча (100 постов): когда выборка на капе, дни СТАРШЕ самого старого зафетченного поста
+  // «не измерены», а не «без публикаций» — разворачивать сетку (и штриховку «нет публикаций»)
+  // на них было бы ложью. Честная левая граница публикационной сетки = старейший пост выборки.
+  const fetchedCount = data?.posts?.length ?? 0;
+  const postsAtFetchCap = !range && fetchedCount >= 100 && posts.length >= fetchedCount;
+  const oldestFetchedTs = postsAtFetchCap
+    ? posts.reduce<number>((acc, post) => {
+        const t = post.date ? Date.parse(post.date) : Number.NaN;
+        return Number.isFinite(t) && t < acc ? t : acc;
+      }, Number.POSITIVE_INFINITY)
+    : null;
+
   // Per-metric daily series for the inline sparklines (within the active window). Carries the
   // day labels alongside the values so the interactive read-out can name the hovered point.
   const dailySeries = (value: (post: (typeof posts)[number]) => number): DailySeries => {
@@ -165,17 +193,24 @@ export function deriveKpis(
       byDay.set(key, (byDay.get(key) ?? 0) + value(post));
     });
     const entries = [...byDay.entries()].sort(([a], [b]) => a.localeCompare(b));
-    return { labels: entries.map(([k]) => fmt.day(k)), values: entries.map(([, v]) => v) };
+    return {
+      labels: entries.map(([k]) => fmt.day(k)),
+      values: entries.map(([, v]) => v),
+      axisLabels: weekdayAxis(entries.map(([k]) => k), windowDays),
+      dayKeys: entries.map(([k]) => k),
+    };
   };
   // Active-window sparklines for the three compact TG comparison cards (Ср. охват / Реакции /
-  // Вовлечённость). Owner override (2026-07): these third-width cards now carry an HONEST
-  // publication-date timeline, keyed by UTC publication day over the posts already filtered by the
-  // top-bar period/range — the chart depends ONLY on the active window, never on previous-window
-  // coverage. Sparse by construction (no fabricated zero days) and sorted ascending by UTC day:
-  //   • Ср. охват — mean views per post published that day
-  //   • Реакции — Σ reactions for posts published that day
+  // Вовлечённость): an HONEST publication-date timeline, keyed by UTC publication day over the
+  // posts already filtered by the top-bar period/range — the chart depends ONLY on the active
+  // window, never on previous-window coverage. Sorted ascending by UTC day:
+  //   • Ср. охват — mean views per post published that day (день без постов = ПРОПУСК, не ноль)
+  //   • Реакции — Σ reactions for posts published that day (день без постов = честный ноль)
   //   • Вовлечённость — 100·(reactions + replies/comments + forwards) ÷ member count, that day
   // Divisor is the live `members` (parity with the ER headline). Not shared with Instagram.
+  // История канона: 2026-07 серии были sparse by construction (без сфабрикованных нулей);
+  // 2026-08-14 владелец развернул их на ПОЛНОЕ окно («выбрал 7 дней — вижу 7 дней», как
+  // конфиг-виджеты) — честность держат null-пропуски и нули по семантике метрики, см. ниже.
   const pubDayBuckets = new Map<string, { views: number; reactions: number; replies: number; forwards: number; count: number }>();
   posts.forEach((post) => {
     if (!post.date) return;
@@ -190,24 +225,73 @@ export function deriveKpis(
     bucket.count += 1;
     pubDayBuckets.set(key, bucket);
   });
-  const pubDays = [...pubDayBuckets.entries()].sort(([a], [b]) => a.localeCompare(b));
+  // РАЗВОРОТ НА ПОЛНОЕ ОКНО (решение владельца 2026-08-14, «вариант 2»; прежний sparse-канон
+  // 2026-07 снят): «выбрал 7 дней — вижу 7 дней». Кандидаты — UTC-дни окна (пресет = rolling
+  // Date.now(), диапазон = его границы), ОБЪЕДИНЁННЫЕ с фактическими бакетами: пост на кромке
+  // rolling-окна, чей UTC-день старше кандидатов, не теряется. «Всё» (days=0 без range)
+  // безгранично — остаётся разреженным, как раньше.
+  const pubDayKeys = (() => {
+    const bucketKeys = [...pubDayBuckets.keys()];
+    if (!range && days === 0) return bucketKeys.sort((a, b) => a.localeCompare(b));
+    const toMs = range ? range.to : Date.now();
+    // На капе фетча левая граница сетки — старейший зафетченный пост: дни старше него «не
+    // измерены» (см. postsAtFetchCap выше), их нельзя показывать ни нулём, ни «нет публикаций».
+    const windowFromMs = range ? range.from : Date.now() - (days - 1) * DAY_MS;
+    const fromMs = oldestFetchedTs != null ? Math.max(windowFromMs, oldestFetchedTs) : windowFromMs;
+    const keys = new Set(bucketKeys);
+    for (let t = fromMs; t <= toMs; t += DAY_MS) keys.add(new Date(t).toISOString().slice(0, 10));
+    // Финальный день добавляется явно: шаг в 24 часа через смену сезонного времени внутри
+    // кастомного диапазона мог бы не попасть в последний календарный день.
+    keys.add(new Date(toMs).toISOString().slice(0, 10));
+    return [...keys].sort((a, b) => a.localeCompare(b));
+  })();
+  const pubDays = pubDayKeys.map((key) => [key, pubDayBuckets.get(key)] as const);
   const pubDayLabels = pubDays.map(([k]) => fmt.day(k));
+  const pubDayAxis = weekdayAxis(pubDayKeys, windowDays);
   const avgReachSpark: DailySeries = {
     labels: pubDayLabels,
-    values: pubDays.map(([, b]) => (b.count > 0 ? b.views / b.count : 0)),
+    // День без публикаций — НЕ ноль охвата на пост (среднее от ничего — ложь), а честный
+    // ПРОПУСК: BarChart рисует штрихованную подложку «0 ≠ n/a», тултип говорит «нет публикаций».
+    values: pubDays.map(([, b]) => (b ? (b.count > 0 ? b.views / b.count : 0) : null)),
+    axisLabels: pubDayAxis,
   };
   const reactionsSpark: DailySeries = {
     labels: pubDayLabels,
-    values: pubDays.map(([, b]) => b.reactions),
+    // У счётного потока день без публикаций — честный ноль: реакций к постам этого дня нет.
+    values: pubDays.map(([, b]) => (b ? b.reactions : 0)),
+    axisLabels: pubDayAxis,
   };
+  // Знаменатель ER — аудитория ТОГО ДНЯ, из дневного архива, а не сегодняшнее число подписчиков.
+  // С константой в знаменателе ER выходил РОВНО пропорционален вовлечению: erSpark = reactions ×
+  // (100/members). А `Sparkline` нормализует ряд по min–max, поэтому постоянный множитель форму не
+  // меняет вообще — карточки «Реакции» и «Вовлечённость» рисовали одну и ту же кривую (замерено на
+  // проде: корреляция 0.996, расхождение нормализованных форм 5.4% высоты плота). Деление на
+  // аудиторию своего дня возвращает ряду собственный смысл: за 30 дней база менялась на сотни
+  // подписчиков, и ER растёт медленнее вовлечения, когда канал растёт. Дня нет в архиве — падаем
+  // на живое число (прежнее поведение), это честнее, чем выбросить точку.
+  const membersByDay = new Map<string, number>();
+  for (const row of historyRows) {
+    const value = Number(row.subscribers ?? 0);
+    if (value > 0) membersByDay.set(row.day, value);
+  }
   const erSpark: DailySeries = {
     labels: pubDayLabels,
-    values: pubDays.map(([, b]) => (members > 0 ? ((b.reactions + b.replies + b.forwards) / members) * 100 : 0)),
+    values: pubDays.map(([day, b]) => {
+      if (!b) return 0; // день без публикаций: нового вовлечения нет — честный ноль
+      const base = membersByDay.get(day) ?? members;
+      return base > 0 ? ((b.reactions + b.replies + b.forwards) / base) * 100 : 0;
+    }),
+    axisLabels: pubDayAxis,
   };
   // Sparkline matches the (channel-wide) headline: daily channel views from the archive when we
   // have it, else the post-derived daily series (fallback path).
   const viewsSpark: DailySeries = hasChannelViews
-    ? { labels: viewsArchiveRows.map((r) => fmt.day(r.day)), values: viewsArchiveRows.map((r) => Number(r.views)) }
+    ? {
+        labels: viewsArchiveRows.map((r) => fmt.day(r.day)),
+        values: viewsArchiveRows.map((r) => Number(r.views)),
+        axisLabels: weekdayAxis(viewsArchiveRows.map((r) => r.day), windowDays),
+        dayKeys: viewsArchiveRows.map((r) => r.day),
+      }
     : dailySeries((post) => Number(post.views ?? post.view_count ?? 0));
   // Subscriber trend from the daily archive (reliable, unlike post-derived views).
   const subsRows = historyRows
@@ -216,6 +300,7 @@ export function deriveKpis(
   const subsSpark: DailySeries = {
     labels: subsRows.map((row) => fmt.day(row.day)),
     values: subsRows.map((row) => Number(row.subscribers)),
+    axisLabels: weekdayAxis(subsRows.map((row) => row.day), windowDays),
   };
   // Absolute subscriber change ("−108 за 30 дн.") — more legible than the % alone. Only for the
   // `days` presets: a custom date range overrides the preset window, so a preset-based number +
@@ -249,8 +334,8 @@ export function deriveKpis(
   // всё загруженное попадает в окно (значит, более старые посты обрезаны), честно говорим «по
   // последним N постам», а не молча выдаём урезанный срез как полный — для ЛЮБОГО пресета, не
   // только «Всё».
-  const fetched = data?.posts?.length ?? 0;
-  const atFetchCap = !range && fetched >= 100 && postsAnalyzed >= fetched;
+  // Хойстнуто выше (postsAtFetchCap) — кап нужен уже публикационной сетке спарков.
+  const atFetchCap = postsAtFetchCap;
   // «по N постам» описывает пост-базис — неверно для канальных просмотров (они по всему каналу,
   // не по постам окна). Оставляем этот caption только на фолбэке в пост-сумму.
   const viewsBase = !hasChannelViews && postsAnalyzed
@@ -277,7 +362,10 @@ export function deriveKpis(
     avgReach: { total: fmt.short(avgViews), trend: avgReachTrend, caption: null },
     reactions: { total: fmt.short(totalReactions), trend: reactionsTrend, caption: reactionsCaption },
     forwards: { total: fmt.short(totalForwards), trend: forwardsTrend, caption: forwardsCaption },
-    er: { total: er > 0 ? er.toFixed(2) + '%' : '—', trend: erTrend, caption: erCaption },
+    // Единый абсолютный процент (fmt.pctAbs): drillMeta кормит хедлайн /metrics/er, строку сверки,
+    // KPI отчёта и config-виджеты — карточка Обзора обязана печатать ровно то же число тем же
+    // форматом, иначе клик по «28.9%» приводит на страницу с «28.92%».
+    er: { total: er > 0 ? fmt.pctAbs(er) : '—', trend: erTrend, caption: erCaption },
   };
 
   // Previous-window absolutes for the compact Overview comparison cards (avg reach / reactions /

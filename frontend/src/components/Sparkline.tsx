@@ -1,14 +1,32 @@
-import { useId, useMemo, useState } from 'react';
-import type { MouseEvent } from 'react';
+import { useContext, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { seriesMotionKey } from '@/lib/chartMotion';
 import type { MorphPoint } from '@/lib/chartMorph';
+import { ChartTooltip, type TooltipState } from '@/components/ChartTooltip';
 import { SparklineSeries } from '@/components/SparklineSeries';
 import { cn } from '@/lib/utils';
+import { sparkDomain } from '@/lib/robustDomain';
+import { clampTargetToDomain } from '@/lib/targetDomain';
+import { WidgetTargetContext } from '@/components/ExpandableChart';
 
 interface SparklineProps {
-  values: number[];
+  /**
+   * `null` = пропуск измерения. Компактная искра показывает только наблюдения: пропуски
+   * отбрасываются вместе со своими подписями (labels + axisLabels синхронно), а не заполняются
+   * нулём — рисовать разрыв в 200×32 некуда, а ноль вместо пропуска — прямая ложь. Поэтому
+   * bar-вариант карточки (BarChart со штрихованной подложкой пропуска) показывает ПОЛНОЕ окно,
+   * а line-вариант — только дни с наблюдениями. Полноразмерный {@link LineChart} разрывы
+   * показывает по-настоящему.
+   */
+  values: Array<number | null>;
   /** Per-point labels (e.g. dates), same length as values — used in the hover read-out. */
   labels?: string[];
+  /**
+   * Подписи ОСИ вместо дат из `labels` (короткое окно ≤ 8 точек: буквы дней недели, канон
+   * weekdayAxis). Выравнены с values и при пропусках отбрасываются синхронно с labels. Буквы
+   * узкие, поэтому буквенная ось показывает ВСЕ тики — а не первый/середину/последний, как даты.
+   * Полную дату наведённой точки по-прежнему называет тултип (из `labels`).
+   */
+  axisLabels?: string[];
   /** Full hsl() stroke/fill colour, e.g. 'hsl(var(--brand-iris))'. */
   color?: string;
   /** Add a soft gradient area fill under the line (featured cards). */
@@ -18,9 +36,10 @@ interface SparklineProps {
   /** Show peak + current markers and a hover dot/guide. */
   interactive?: boolean;
   /**
-   * Idle text shown under the line (e.g. "по дням"). On hover it is replaced by the read-out
-   * (date · value · day-over-day Δ). Omit it to suppress the read-out line entirely (compact
-   * tiles) — hover then only moves the dot, so there's no layout shift.
+   * Idle text shown under the line (e.g. "по дням") when there is no axis to draw. The reserved
+   * line otherwise holds the X axis, which STAYS PUT on hover — the hovered date · value · Δ
+   * read-out lives in the floating ChartTooltip (владелец, 2026-08-14: «такие же pop-up, как у
+   * столбцов»). Omit the prop to suppress the line entirely (compact tiles) — no layout shift.
    */
   caption?: string;
   /** Formats a value for the hover read-out (default: String). */
@@ -39,16 +58,16 @@ const VBH = 32;
  * viewBox is fixed (200×32); geometry depends only on the values, never on container size, so a
  * resize can't change these points and never restarts the morph.
  */
-function computeSparkPoints(values: number[]): MorphPoint[] {
+function computeSparkPoints(values: number[], domain: { min: number; max: number }): MorphPoint[] {
   const n = values.length;
   if (n === 0) return [];
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const range = max - min || 1;
+  const range = domain.max - domain.min || 1;
   const step = (VBW - PAD * 2) / Math.max(n - 1, 1);
   return values.map((v, i) => ({
     x: PAD + i * step,
-    y: VBH - PAD - ((v - min) / range) * (VBH - PAD * 2),
+    // Клип по домену: точка выше окна упирается в верх и помечается карéткой — иначе один
+    // вирусный день снова заберёт всю высоту. Значение при этом не меняется, только геометрия.
+    y: VBH - PAD - ((Math.min(v, domain.max) - domain.min) / range) * (VBH - PAD * 2),
   }));
 }
 
@@ -59,8 +78,9 @@ function computeSparkPoints(values: number[]): MorphPoint[] {
  * read-out. Renders nothing for <2 points (skeleton/empty stays clean).
  */
 export function Sparkline({
-  values,
-  labels,
+  values: rawValues,
+  labels: rawLabels,
+  axisLabels: rawAxisLabels,
   color = 'hsl(var(--brand-iris))',
   area = false,
   strokeWidth = 1.6,
@@ -69,13 +89,119 @@ export function Sparkline({
   caption,
   formatValue = String,
 }: SparklineProps) {
+  // Отбрасываем пропуски вместе с их подписями ОДИН раз, до всей геометрии и морфа: дальше по
+  // компоненту `values` — это уже только наблюдения, и ни min/max, ни ховер-тултип, ни
+  // aria-label не могут случайно наткнуться на null. Мемо по ссылке входного массива, чтобы
+  // ховер-перерисовка не порождала новый `values` и не перезапускала морф.
+  const { values, labels, axis } = useMemo(() => {
+    const source = rawValues ?? [];
+    if (!source.some((value) => value == null)) {
+      return { values: source as number[], labels: rawLabels, axis: rawAxisLabels };
+    }
+    const kept: number[] = [];
+    const keptLabels: string[] = [];
+    const keptAxis: string[] = [];
+    source.forEach((value, index) => {
+      if (value == null) return;
+      kept.push(value);
+      if (rawLabels) keptLabels.push(rawLabels[index] ?? '');
+      if (rawAxisLabels) keptAxis.push(rawAxisLabels[index] ?? '');
+    });
+    return {
+      values: kept,
+      labels: rawLabels ? keptLabels : undefined,
+      axis: rawAxisLabels ? keptAxis : undefined,
+    };
+  }, [rawValues, rawLabels, rawAxisLabels]);
+
   // Strip colons from useId — they're valid in ids but break SVG url(#…) refs in some browsers.
   const gradientId = `sl${useId().replace(/:/g, '')}`;
-  const [hover, setHover] = useState<number | null>(null);
+  // Ховер несёт индекс точки И размер поверхности на момент движения: тултип якорится в px
+  // относительно relative-обёртки (контракт ChartTooltip), а проценты xPct/yPct переводятся в px
+  // ровно тем прямоугольником, по которому считался индекс, — отдельный замер не нужен.
+  const [hover, setHover] = useState<{ i: number; w: number; h: number } | null>(null);
+  const hoverSurfaceRef = useRef<HTMLDivElement>(null);
   // Target morph geometry, memoised on the VALUES reference: a hover rerender keeps the same `values`
   // ref (hover is local state — the parent doesn't re-render), so the morph layer sees a stable
   // `points` and never restarts; a period/filter swap hands down a new array → new geometry → morph.
-  const points = useMemo(() => computeSparkPoints(values ?? []), [values]);
+  // Домен считается ОДИН раз и делится между геометрией морфа и разметкой ниже: если посчитать
+  // его дважды, кадр морфа и статический рендер разъедутся. Мемо по той же ссылке `values`.
+  // Целевой уровень виджета — та же `prefs.target`, что рисует линию у LineChart/BarChart. Пока
+  // искра её не читала, один и тот же pref работал на карточках со столбцами и молчал на карточках
+  // с линией: цель, поставленная в развороте, на «Обзоре» просто не появлялась.
+  const targetCtx = useContext(WidgetTargetContext);
+  const rawTarget = targetCtx != null && Number.isFinite(targetCtx) ? targetCtx : null;
+  const baseDomain = useMemo(() => sparkDomain(values ?? []), [values]);
+  // Цель расширяет ОКНО ПРОСМОТРА, но не имеет права сплющить ряд (clampTargetToDomain, ряду не
+  // меньше 60%). А если цель ушла ВЫШЕ потолка, линии на карточке НЕ БУДЕТ: подписать её здесь
+  // нечем (искра — без осей и подписей), а линия не на своём уровне и без числа врала бы про
+  // расстояние до цели. Настоящий уровень с числом и стрелкой живёт в развороте.
+  const goal = useMemo(() => {
+    const c = clampTargetToDomain(rawTarget, baseDomain.min, baseDomain.max);
+    return c.clipped ? null : c.value;
+  }, [rawTarget, baseDomain]);
+  const domain = useMemo(
+    () => (goal != null && goal > baseDomain.max ? { ...baseDomain, max: goal } : baseDomain),
+    [baseDomain, goal],
+  );
+  const clippedSet = useMemo(() => new Set(domain.clipped), [domain]);
+  const points = useMemo(() => computeSparkPoints(values ?? [], domain), [values, domain]);
+  // Y цели в тех же координатах viewBox, что и точки (та же формула, что в computeSparkPoints).
+  const goalY = useMemo(() => {
+    if (goal == null) return null;
+    const range = domain.max - domain.min || 1;
+    return VBH - PAD - ((goal - domain.min) / range) * (VBH - PAD * 2);
+  }, [goal, domain]);
+
+  /**
+   * Разметка оси. Буквенная ось короткого окна (axisLabels: «M T W T F S S») показывает ВСЕ
+   * тики — буквы узкие, и только полный ряд даёт ритм недели (референс владельца, 2026-08-14).
+   * Даты остаются тройкой «первая, середина, последняя»: больше в ширину карточки в треть экрана
+   * не влезает без наложения, а прореживать «сколько поместится» без замера текста значит гадать.
+   * Ровно два лейбла (начало и конец) при коротком ряде — тоже валидная ось, поэтому середина
+   * добавляется, только если она НЕ совпадает с краями. Конкретный день называет ховер-тултип.
+   */
+  const axisTicks = useMemo(() => {
+    if (axis && axis.length >= 2) {
+      return axis.map((text, i) => ({ i, text })).filter((tick) => tick.text.length > 0);
+    }
+    if (!labels || labels.length < 2) return [] as { i: number; text: string }[];
+    const last = labels.length - 1;
+    const mid = Math.floor(last / 2);
+    const idx = mid > 0 && mid < last ? [0, mid, last] : [0, last];
+    return idx
+      .map((i) => ({ i, text: labels[i] ?? '' }))
+      .filter((tick) => tick.text.length > 0);
+  }, [axis, labels]);
+  // Разреженная ось (EN-месяцы длинного окна, timeAxisCore): тики стоят у СВОИХ точек, а не
+  // равномерной flex-раскладкой — детект по пустым элементам массива оси.
+  const sparseAxis = !!axis && axis.some((text) => text.length === 0);
+
+  // Pointer scrubbing is supplementary to the SVG's detailed accessible name, not an activation
+  // action. Keep the surface passive and listen for its coordinates on the DOM node.
+  useEffect(() => {
+    const surface = hoverSurfaceRef.current;
+    if (!surface || !interactive || values.length < 2) return;
+    const handleMove = (event: globalThis.MouseEvent) => {
+      const rect = surface.getBoundingClientRect();
+      if (rect.width === 0) return;
+      const ratio = (event.clientX - rect.left) / rect.width;
+      const i = Math.max(0, Math.min(values.length - 1, Math.round(ratio * (values.length - 1))));
+      setHover((prev) =>
+        prev && prev.i === i && prev.w === rect.width && prev.h === rect.height
+          ? prev
+          : { i, w: rect.width, h: rect.height },
+      );
+    };
+    const clearHover = () => setHover(null);
+    surface.addEventListener('mousemove', handleMove);
+    surface.addEventListener('mouseleave', clearHover);
+    return () => {
+      surface.removeEventListener('mousemove', handleMove);
+      surface.removeEventListener('mouseleave', clearHover);
+    };
+  }, [interactive, values.length]);
+
   if (!values || values.length < 2) return null;
 
   // Stable DATA signature (see index.css «Chart motion») — a change (period / filter swap, longer /
@@ -85,52 +211,47 @@ export function Sparkline({
   const motionKey = seriesMotionKey(values);
 
   const n = values.length;
-  const min = Math.min(...values);
-  const max = Math.max(...values);
+  const min = domain.min;
+  const max = domain.max;
   const range = max - min || 1;
   const step = (VBW - PAD * 2) / Math.max(n - 1, 1);
   const xPct = (i: number) => ((PAD + i * step) / VBW) * 100;
-  const yPct = (v: number) => ((VBH - PAD - ((v - min) / range) * (VBH - PAD * 2)) / VBH) * 100;
+  // Тот же клип, что в геометрии морфа, иначе ховер-точка уехала бы выше линии.
+  const yPct = (v: number) => ((VBH - PAD - ((Math.min(v, max) - min) / range) * (VBH - PAD * 2)) / VBH) * 100;
 
-  const maxIdx = values.indexOf(max);
-  const lastIdx = n - 1;
-  const active = hover;
+  const active = hover?.i ?? null;
 
-  const onMove = (e: MouseEvent<HTMLDivElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    if (rect.width === 0) return;
-    const ratio = (e.clientX - rect.left) / rect.width;
-    setHover(Math.max(0, Math.min(n - 1, Math.round(ratio * (n - 1)))));
-  };
-
-  // Read-out text: idle caption, or date · value · Δ-vs-previous-point while hovering.
-  let readout = caption ?? '';
-  if (active != null) {
-    const v = values[active];
-    const label = labels?.[active];
-    const prev = active > 0 ? values[active - 1] : null;
+  // Плавающий тултип у наведённой точки — тот же канонный ChartTooltip, что у столбцов/линий
+  // (владелец, 2026-08-14: «такие же pop-up для линейных графиков»). Содержимое повторяет формат
+  // бар-карточек («11 авг.: 391») плюс Δ к предыдущей точке, которую несла прежняя читалка.
+  // У клипнутой точки тултип обязан назвать НАСТОЯЩЕЕ число: домен режется, данные — нет.
+  let tip: TooltipState = null;
+  if (interactive && hover != null && hover.w > 0) {
+    const v = values[hover.i];
+    const label = labels?.[hover.i];
+    const prev = hover.i > 0 ? values[hover.i - 1] : null;
     const diff = prev != null ? v - prev : null;
     const diffStr =
       diff != null && diff !== 0 ? ` ${diff > 0 ? '↑' : '↓'}${formatValue(Math.abs(diff))}` : '';
-    readout = `${label ? `${label} · ` : ''}${formatValue(v)}${diffStr}`;
+    const clipNote = clippedSet.has(hover.i) ? ' · пик срезан' : '';
+    tip = {
+      x: (xPct(hover.i) / 100) * hover.w,
+      y: (yPct(v) / 100) * hover.h,
+      text: `${label ? `${label}: ` : ''}${formatValue(v)}${diffStr}${clipNote}`,
+    };
   }
 
-  const dot = (i: number, kind: 'peak' | 'last' | 'active') => (
+  // Ховер-точка — единственный HTML-оверлей: полюса (начало/конец) рисует SparklineSeries из
+  // текущего кадра морфа, а peak-маркер посередине линии убран целиком (владелец: «точки по
+  // середине графика — лишнее; точки начала и конца нужно анимировать»).
+  const dot = (i: number) => (
     <span
       aria-hidden="true"
-      className={cn(
-        'pointer-events-none absolute -translate-x-1/2 -translate-y-1/2 rounded-full',
-        kind === 'active'
-          ? 'h-2.5 w-2.5 ring-2 ring-background'
-          : kind === 'peak'
-            ? 'h-1.5 w-1.5 ring-2 ring-background'
-            : 'h-1.5 w-1.5',
-      )}
+      className="pointer-events-none absolute h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full ring-2 ring-background"
       style={{
         left: `${xPct(i)}%`,
         top: `${yPct(values[i])}%`,
-        background: kind === 'peak' ? 'transparent' : color,
-        boxShadow: kind === 'peak' ? `inset 0 0 0 1.5px ${color}` : undefined,
+        background: color,
       }}
     />
   );
@@ -140,27 +261,30 @@ export function Sparkline({
     // took the full height (h-full) and the caption overflowed below the box onto whatever followed.
     <div className={cn('flex flex-col', className)}>
       <div
+        ref={hoverSurfaceRef}
         className="relative min-h-0 w-full flex-1"
-        onMouseMove={interactive ? onMove : undefined}
-        onMouseLeave={interactive ? () => setHover(null) : undefined}
       >
         {/* Декоративная искра рядом с числом действительно ничего не добавляет скринридеру и
             остаётся aria-hidden. Но `interactive` — уже не украшение: у неё есть hover-читалка со
             значениями, которую мышиный пользователь видит, а AT — нет. Такая искра получает тот же
             режим, что и полный LineChart: role="img" плюс подпись, несущая данные (макс/последнее).
             Точечная клавиатурная навигация — отдельный пункт роадмапа, общий с LineChart. */}
+        {/* БЕЗ svg <title> — см. LineChart: aria-label (interactive-режим) уже именует график, а
+            <title> дублировал его нестилизуемым нативным тултипом с острыми углами. Атрибуты —
+            ПРЯМЫЕ ternary, не спред: Biome (noSvgWithoutTitle) статически ищет aria-label/hidden. */}
         <svg
           viewBox={`0 0 ${VBW} ${VBH}`}
           preserveAspectRatio="none"
           className="h-full w-full"
-          {...(interactive && values.length
-            ? {
-                role: 'img',
-                'aria-label':
-                  `График: ${values.length} точек, макс ${formatValue(Math.max(...values))}, ` +
-                  `последнее ${formatValue(values[values.length - 1])}`,
-              }
-            : { 'aria-hidden': true as const })}
+          role={interactive && values.length ? 'img' : undefined}
+          aria-label={
+            interactive && values.length
+              ? `График: ${values.length} точек, макс ${formatValue(Math.max(...values))}, ` +
+                `последнее ${formatValue(values[values.length - 1])}` +
+                (domain.clipped.length > 0 ? `, ${domain.clipped.length} пик срезан по шкале` : '')
+              : undefined
+          }
+          aria-hidden={interactive && values.length ? undefined : true}
           data-chart-kind="sparkline"
         >
           {area && (
@@ -174,6 +298,22 @@ export function Sparkline({
           {/* The line/area MORPH from the previous shape into the new one on a data change (same as the
               full LineChart) instead of remounting + fading — one stable node whose point geometry
               interpolates. The mount-only reveal fade lives on data-chart-motion="morph" in index.css. */}
+          {/* Целевой уровень — ПУНКТИР БЕЗ ПОДПИСИ: в 200×32 без осей числу негде встать, а линия
+              и так читается как ориентир («докуда надо»). Число живёт в развороте, у графика с
+              осью. Рисуется ПОД серией, чтобы не резать её штрихом. */}
+          {goal != null && (
+            <line
+              x1={0}
+              x2={VBW}
+              y1={goalY ?? 0}
+              y2={goalY ?? 0}
+              stroke="hsl(var(--chart-role-neutral))"
+              strokeDasharray="4 3"
+              strokeWidth="1"
+              opacity="0.55"
+              vectorEffect="non-scaling-stroke"
+            />
+          )}
           <SparklineSeries
             points={points}
             signature={motionKey}
@@ -181,6 +321,7 @@ export function Sparkline({
             strokeWidth={strokeWidth}
             area={area}
             gradientId={gradientId}
+            poles={interactive}
           />
         </svg>
 
@@ -194,15 +335,100 @@ export function Sparkline({
                 style={{ left: `${xPct(active)}%` }}
               />
             )}
-            {maxIdx !== lastIdx && active !== maxIdx && dot(maxIdx, 'peak')}
-            {active !== lastIdx && dot(lastIdx, 'last')}
-            {active != null && dot(active, 'active')}
+            {/* Карéтка на срезанной точке. Клип без пометки — та же ложь, что логарифм без оси
+                (Observable Plot: «Clamped values may need an annotation»). Настоящее число
+                показывает ховер-читалка, а в aria-label уходит счётчик срезанных пиков. */}
+            {/* CSS-треугольник, а не глиф и не SVG-path: глиф потребовал бы магического размера
+                шрифта мимо шкалы токенов (ловит lint:motion), а залитая фигура внутри растянутого
+                viewBox перекосилась бы вместе с ним — та же причина, по которой все обводки несут
+                non-scaling-stroke. HTML-оверлей от растяжения не зависит. */}
+            {/* Тише и на самой кривой (владелец: «странно смотрится»). Было: 4×3px цветом
+                muted-foreground, приколотые к `top: 0` — то есть на PAD выше зажатой точки, отчего
+                они читались как две самостоятельные крапины, висящие над графиком, а не как пометка
+                НА пике. Теперь 3×2px цветом ink3 (ступень вниз по иерархии чернил) с основанием
+                ровно на зажатой точке: yPct сам клампит значение к домену, так что это та самая
+                координата, где линия упёрлась в потолок шкалы. */}
+            {domain.clipped.map((i) => (
+              <span
+                key={`clip${i}`}
+                aria-hidden="true"
+                title="пик срезан по шкале"
+                className="pointer-events-none absolute h-0 w-0 -translate-x-1/2 -translate-y-[2px] border-x-[1.5px] border-b-[2px] border-x-transparent border-b-ink3"
+                style={{ left: `${xPct(i)}%`, top: `${yPct(values[i])}%` }}
+              />
+            ))}
+            {active != null && dot(active)}
+            {/* Канонный плавающий тултип (общий с BarChart/LineChart) — якорится к точке внутри
+                этой же relative-обёртки; на низкой искре его lowHost-логика сама уводит плашку
+                вбок, не накрывая линию. */}
+            <ChartTooltip tip={tip} />
           </>
         )}
       </div>
 
       {interactive && caption !== undefined && (
-        <div className="mt-1 truncate text-2xs tabular-nums text-muted-foreground">{readout}</div>
+        // min-h резервирует строку и при ПУСТОМ idle-caption (caption="" — ось без idle-текста):
+        // без резерва пустой div схлопывался в 0 и график «скакал» (владелец, Метрика/МойСклад).
+        // Высота = line-box text-2xs.
+        //
+        // Ось X живёт в ЭТОЙ ЖЕ строке (владелец: «сделай подписи по оси X, в днях») и с 2026-08-14
+        // НЕ уступает место ховер-читалке: конкретный день называет плавающий ChartTooltip, а ось
+        // стоит на месте — вместе с пилюлей ТЕКУЩЕЙ (последней) метки, которая отвечает на «где
+        // сейчас» (референс владельца: «Aug» / обведённая «T»).
+        <div className="mt-1 min-h-4 truncate text-2xs tabular-nums text-muted-foreground">
+          {axisTicks.length > 1 && sparseAxis ? (
+            // РАЗРЕЖЕННАЯ ось (EN-месяцы длинного окна): тики стоят на НАСТОЯЩИХ x своих точек —
+            // flex-равномерка врала бы позициями (частичный месяц на кромке окна короче целых).
+            // Кромочные тики прижимаются к краям, чтобы не клипались контейнером.
+            <span aria-hidden="true" className="relative block h-4">
+              {axisTicks.map((tick, index) => {
+                const isCurrent = index === axisTicks.length - 1;
+                const pct = xPct(tick.i);
+                const transform =
+                  pct < 6 ? undefined : pct > 92 ? 'translateX(-100%)' : 'translateX(-50%)';
+                return isCurrent ? (
+                  <span
+                    key={tick.i}
+                    data-axis-current=""
+                    className="absolute top-0 rounded-full px-1.5 py-px font-medium leading-none"
+                    style={{ left: `${Math.min(pct, 100)}%`, transform, backgroundColor: color, color: 'hsl(var(--background))' }}
+                  >
+                    {tick.text}
+                  </span>
+                ) : (
+                  <span key={tick.i} className="absolute top-0" style={{ left: `${pct}%`, transform }}>
+                    {tick.text}
+                  </span>
+                );
+              })}
+            </span>
+          ) : axisTicks.length > 1 ? (
+            <span aria-hidden="true" className="flex items-center justify-between gap-2">
+              {axisTicks.map((tick, index) =>
+                index === axisTicks.length - 1 ? (
+                  // Пилюля не выше строки: leading-none (11px) + py-px (2px) = 13px < min-h-4,
+                  // фикс-тайл 264px не растёт ни на пиксель. ЦВЕТ = цвет серии (владелец,
+                  // референс steep): солидная заливка тем же `color`, что рисует линию, чернила —
+                  // фон карточки. На тонированных карточках токен серии переопределён в скоупе
+                  // карточки, и пилюля перекрашивается вместе с линией — вечно-синий primary
+                  // там выбивался.
+                  <span
+                    key={tick.i}
+                    data-axis-current=""
+                    className="shrink-0 rounded-full px-1.5 py-px font-medium leading-none"
+                    style={{ backgroundColor: color, color: 'hsl(var(--background))' }}
+                  >
+                    {tick.text}
+                  </span>
+                ) : (
+                  <span key={tick.i} className="truncate">{tick.text}</span>
+                ),
+              )}
+            </span>
+          ) : (
+            caption
+          )}
+        </div>
       )}
     </div>
   );

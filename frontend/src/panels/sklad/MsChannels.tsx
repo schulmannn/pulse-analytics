@@ -1,19 +1,24 @@
-import { useContext, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useContext, useMemo, useState } from 'react';
+import { WidgetGrid } from '@/components/widgets/WidgetGrid';
 import { ShareTrack } from '@/components/ShareRows';
-import { useMsChannelSeries, useMsGeography, useMsSalesByChannel } from '@/api/queries';
+import { useMsChannelSeries, useMsGeography, useMsSalesByChannel } from '@/api/ms';
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
 import { ChartCardBody } from '@/components/chartWidget/ChartCardBody';
 import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
+import { MultiLineChart } from '@/components/MultiLineChart';
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { ChartSkeleton, TableSkeleton } from '@/components/ui/dataSkeleton';
-import { fmt, pluralRu, smoothSvgPath } from '@/lib/format';
+import { fmt, pluralRu, timeAxisFromDayKeys } from '@/lib/format';
+import { formatMoney } from '@/lib/metricNumber';
 import { usePagePeriod } from '@/lib/period';
 import { msPreviousPeriod, useMsPagePeriod, type MsPeriod } from '@/lib/msPeriod';
-import { MS_CHANNEL_SELECTION_LIMIT } from '@/lib/msMetricUrlState';
+import { useSelectedChannel } from '@/lib/channel-context';
+import { msChannelFilterKey, normalizeMsChannelFilter } from '@/lib/msChannelFilter';
+import { useSavedFilter } from '@/lib/widgetPrefsStore';
 import {
   buildMsChannelContributionItems,
   msChannelContributionCurrent,
@@ -47,6 +52,7 @@ import {
  */
 export function MsChannels() {
   const pp = usePagePeriod();
+  const { channelId } = useSelectedChannel();
   const period = useMsPagePeriod();
   const days = pp ? pp.days : 30;
   const windowLabel = pp?.range ? 'за выбранный период' : days === 0 ? 'за всё время' : `за ${days} дн.`;
@@ -57,6 +63,11 @@ export function MsChannels() {
   const channelOptions = useMemo(
     () => (channels.data?.rows ?? []).map((r) => ({ id: r.sales_channel_id, name: r.name ?? 'Канал без имени' })),
     [channels.data],
+  );
+  const savedFilter = useSavedFilter(msChannelFilterKey(channelId));
+  const selectedChannels = useMemo(
+    () => normalizeMsChannelFilter(savedFilter),
+    [savedFilter],
   );
 
   if (channels.isError) {
@@ -71,8 +82,13 @@ export function MsChannels() {
   }
 
   return (
-    <div className="grid grid-cols-1 gap-6 lg:grid-cols-6">
-      <MsChannelDynamicsCard period={period} windowLabel={windowLabel} options={channelOptions} />
+    <WidgetGrid className="grid grid-cols-1 gap-6 lg:grid-cols-6">
+      <MsChannelDynamicsCard
+        period={period}
+        windowLabel={windowLabel}
+        options={channelOptions}
+        selected={selectedChannels}
+      />
 
       <ChartWidget id="ms-channel-contribution" title="Что изменило результат" fixedSize="full" drillTo="/metrics/ms-sales-channels">
         {channels.isPending ? (
@@ -123,7 +139,7 @@ export function MsChannels() {
           <MsGeographyRows rows={geo.data.rows} noCity={geo.data.no_city_orders} totalOrders={geo.data.total_orders} />
         )}
       </ChartWidget>
-    </div>
+    </WidgetGrid>
   );
 }
 
@@ -133,8 +149,6 @@ export type ChannelOption = { id: string; name: string };
 
 // Отдельные серии breakdown ограничены читаемым лимитом (steep: пёстрый частокол не читается).
 const MAX_BREAKDOWN_SERIES = 6;
-// Единый источник лимита выбора каналов — тот же, что применяет URL-парсер (bounded deep link).
-const MAX_SELECTED_CHANNELS = MS_CHANNEL_SELECTION_LIMIT;
 // Категориальная палитра канона (--chart-1..6, Okabe-Ito) — серия = идентичность, не оценка.
 const SERIES_COLORS = [1, 2, 3, 4, 5, 6].map((n) => `hsl(var(--chart-${n}))`);
 
@@ -143,35 +157,39 @@ function ListSkeleton({ rows }: { rows: number }) {
 }
 
 /**
- * «Выручка по каналу» — карточка с мультивыбором и разворотом в общий explorer. Держит metric/
- * view/selected СНАРУЖИ оверлея, чтобы свёрнутая карточка и развёрнутый режим делили одно
- * состояние; в explorer контролы прокидываются через shared `expand.extraControls`.
+ * «Выручка по каналу» — обзорная карточка с разворотом в общий explorer. Фильтр каналов намеренно
+ * не редактируется внутри карточки: она читает сохранённый source-scoped выбор полноэкранной
+ * страницы, а metric/view остаются быстрыми локальными переключателями представления.
  */
 function MsChannelDynamicsCard({
   period,
   windowLabel,
   options,
+  selected,
 }: {
   period: MsPeriod;
   windowLabel: string;
   options: ChannelOption[];
+  selected: string[];
 }) {
   const [metric, setMetric] = useState<Metric>('revenue');
   const [view, setView] = useState<View>('aggregate');
-  const [selected, setSelected] = useState<string[]>([]);
   const breakdown = view === 'breakdown';
+  const filterLabel = selected.length > 0 ? ` · ${selected.length} кан.` : '';
 
   return (
-    <ChartWidget id="ms-channel-series" title={`${METRIC_LABEL[metric]} по каналам ${windowLabel}`} fixedSize="full" drillTo="/metrics/ms-channels">
+    <ChartWidget
+      id="ms-channel-series"
+      title={`${METRIC_LABEL[metric]} по каналам ${windowLabel}${filterLabel}`}
+      fixedSize="full"
+      drillTo="/metrics/ms-channels"
+    >
       <div className="mb-3">
         <MsChannelControls
           metric={metric}
           onMetric={setMetric}
           view={view}
           onView={setView}
-          options={options}
-          selected={selected}
-          onSelected={setSelected}
         />
       </div>
       <MsChannelChart period={period} metric={metric} breakdown={breakdown} selected={selected} options={options} kind="line" />
@@ -179,25 +197,17 @@ function MsChannelDynamicsCard({
   );
 }
 
-/** MS-контролы (метрика · вид · каналы) — одни и те же в свёрнутой карточке и в explorer'е. */
+/** Быстрые MS-контролы представления. Фильтр данных живёт отдельно в fullscreen rail. */
 export function MsChannelControls({
   metric,
   onMetric,
   view,
   onView,
-  options,
-  selected,
-  onSelected,
-  inModal = false,
 }: {
   metric: Metric;
   onMetric: (m: Metric) => void;
   view: View;
   onView: (v: View) => void;
-  options: ChannelOption[];
-  selected: string[];
-  onSelected: (ids: string[]) => void;
-  inModal?: boolean;
 }) {
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -220,95 +230,6 @@ export function MsChannelControls({
           { value: 'breakdown', content: 'По каналам' },
         ]}
       />
-      <MsChannelPicker options={options} selected={selected} onChange={onSelected} inModal={inModal} />
-    </div>
-  );
-}
-
-/** Доступный мультивыбор каналов без сторонних зависимостей: триггер-пилюля + панель чекбоксов
-    (нативные inputs = доступность из коробки), Escape и клик-вне закрывают. Пусто = все каналы. */
-function MsChannelPicker({
-  options,
-  selected,
-  onChange,
-  inModal = false,
-}: {
-  options: ChannelOption[];
-  selected: string[];
-  onChange: (ids: string[]) => void;
-  inModal?: boolean;
-}) {
-  const [open, setOpen] = useState(false);
-  const wrapRef = useRef<HTMLDivElement>(null);
-  const panelId = useId();
-  const label = selected.length === 0 ? 'Все каналы' : `Каналы: ${selected.length}`;
-
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: PointerEvent) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false);
-    };
-    document.addEventListener('pointerdown', onDown);
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('pointerdown', onDown);
-      document.removeEventListener('keydown', onKey);
-    };
-  }, [open]);
-
-  const toggle = (id: string) => {
-    if (selected.includes(id)) onChange(selected.filter((s) => s !== id));
-    else if (selected.length < MAX_SELECTED_CHANNELS) onChange([...selected, id]);
-  };
-
-  return (
-    <div ref={wrapRef} className="relative">
-      <button
-        type="button"
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        aria-controls={panelId}
-        onClick={() => setOpen((v) => !v)}
-        disabled={options.length === 0}
-        className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs text-foreground transition-colors hover:border-ink3/40 disabled:opacity-50"
-      >
-        <span className="truncate">{label}</span>
-        <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" className="size-3.5 text-muted-foreground">
-          <path d="m4 6 4 4 4-4" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      </button>
-      {open && (
-        <div
-          id={panelId}
-          role="group"
-          aria-label="Каналы продаж"
-          className={`absolute left-0 top-full mt-1 max-h-64 w-64 overflow-y-auto rounded-xl border border-border bg-popover p-1.5 shadow-[0_12px_32px_-16px_rgba(0,0,0,0.6)] ${inModal ? 'z-modal-popover' : 'z-popover'}`}
-        >
-          <div className="flex items-center justify-between px-1.5 pb-1.5">
-            <span className="text-2xs text-muted-foreground">{selected.length} из {MAX_SELECTED_CHANNELS}</span>
-            {selected.length > 0 && (
-              <button type="button" onClick={() => onChange([])} className="text-2xs text-primary hover:underline">
-                Сбросить
-              </button>
-            )}
-          </div>
-          {options.map((o) => (
-            <label key={o.id} className="flex cursor-pointer items-center gap-2 rounded-lg px-1.5 py-1.5 text-xs text-foreground hover:bg-foreground/6">
-              <input
-                type="checkbox"
-                checked={selected.includes(o.id)}
-                disabled={!selected.includes(o.id) && selected.length >= MAX_SELECTED_CHANNELS}
-                onChange={() => toggle(o.id)}
-                className="size-3.5 accent-[hsl(var(--primary))] disabled:opacity-50"
-              />
-              <span className="min-w-0 truncate">{o.name}</span>
-            </label>
-          ))}
-        </div>
-      )}
     </div>
   );
 }
@@ -376,6 +297,8 @@ export function MsChannelChart({
       count: points.length,
       values: points.map((p) => metricValue(metric, p)),
       labels: points.map((p) => fmt.day(p.day)),
+      // Временна́я ось (timeAxisCore): буквы короткого окна / EN-месяцы длинного.
+      axisLabels: timeAxisFromDayKeys(points.map((p) => p.day), { monthsOnly: grain !== 'day' }),
       titles: points.map((p) => `${fmt.day(p.day)}: ${fmtMetric(metric, metricValue(metric, p))}`),
       total: metricTotal(data.series, metric),
     };
@@ -400,7 +323,15 @@ export function MsChannelChart({
     const hiddenTotal = model.groupTotal ?? selected.length;
     return (
       <div>
-        <MsMultiLine series={model.chartSeries} labels={model.labels} height={expandedHeight ?? 200} metric={metric} />
+        <MultiLineChart
+          series={model.chartSeries}
+          labels={model.labels}
+          height={expandedHeight ?? 200}
+          format={(v) => fmtMetric(metric, v ?? null)}
+          bridgeGaps={metric === 'aov'}
+          ariaLabel={`${METRIC_LABEL[metric]} по каналам`}
+          legend={`${METRIC_LABEL[metric]}${metric === 'aov' ? ' · только периоды с заказами' : ''}`}
+        />
         {hiddenTotal > model.groupCount && (
           <p className="mt-2 text-2xs text-muted-foreground">
             Показаны первые {model.groupCount} каналов из {hiddenTotal} — разбивка ограничена для читаемости.
@@ -431,7 +362,7 @@ export function MsChannelChart({
       />
     );
   }
-  const { values, labels, titles, total } = model;
+  const { values, labels, axisLabels, titles, total } = model;
   const channelCaption =
     selected.length === 0 ? 'Все каналы' : `${selected.length} ${pluralRu(selected.length, ['канал', 'канала', 'каналов'])}`;
   // Средний чек агрегируется по бакетам с заказами — подписываем это честно (день/неделя/месяц).
@@ -440,9 +371,9 @@ export function MsChannelChart({
   return (
     <ChartCardBody value={fmtMetric(metric, total)} caption={caption}>
       {kind === 'bar' ? (
-        <BarChart values={values.map((v) => v ?? 0)} labels={labels} titles={titles} height={expandedHeight ?? undefined} />
+        <BarChart values={values.map((v) => v ?? 0)} labels={labels} axisLabels={axisLabels} titles={titles} height={expandedHeight ?? undefined} />
       ) : (
-        <LineChart values={values} labels={labels} titles={titles} yMin={0} height={expandedHeight ?? undefined} />
+        <LineChart values={values} labels={labels} axisLabels={axisLabels} titles={titles} yMin={0} height={expandedHeight ?? undefined} />
       )}
     </ChartCardBody>
   );
@@ -450,183 +381,6 @@ export function MsChannelChart({
 
 /** Компактный мультисерийный SVG (до 6 линий) в категориальной палитре. preserveAspectRatio=none
     растягивает viewBox неравномерно → обводки обязаны нести non-scaling-stroke (канон графиков). */
-function MsMultiLine({
-  series,
-  labels,
-  height,
-  metric,
-}: {
-  series: { name: string; color: string; values: (number | null)[] }[];
-  labels: string[];
-  height: number;
-  metric: Metric;
-}) {
-  const expanded = useContext(ChartExpandedContext);
-  const plotRef = useRef<HTMLDivElement>(null);
-  const [hovered, setHovered] = useState<number | null>(null);
-  const [focused, setFocused] = useState(false);
-  const n = labels.length;
-  // Геометрия серий (max, экранные координаты, сегменты полилиний) от ховера не зависит — мемо по
-  // данным, иначе каждый pointermove-рендер пересобирал бы до 6×CHART_MAX_POINTS точек заново.
-  const geometry = useMemo(() => {
-    const nums = series.flatMap((s) => s.values).filter((v): v is number => v != null);
-    const max = nums.length ? Math.max(...nums, 0) : 1;
-    const x = (i: number) => (n <= 1 ? 0 : (i / (n - 1)) * 100);
-    const y = (v: number) => (max <= 0 ? 100 : 100 - (v / max) * 100);
-    // Для среднего чека null означает не пропуск сбора, а отсутствие определённого значения в период
-    // без заказов. Соединяем реальные наблюдения, сохраняя их календарные X-позиции; tooltip на пустом
-    // периоде по-прежнему показывает «—». Для остальных метрик настоящий null остаётся разрывом.
-    type Pt = { x: number; y: number };
-    const segmentsOf = (values: (number | null)[]): { lines: string[]; lone: Pt[] } => {
-      if (metric === 'aov') {
-        const observed = values.flatMap((v, i) => (v == null ? [] : [{ x: x(i), y: y(v) }]));
-        if (observed.length >= 2) {
-          return { lines: [smoothSvgPath(observed, 2)], lone: [] };
-        }
-        return { lines: [], lone: observed };
-      }
-      const lines: string[] = [];
-      const lone: Pt[] = [];
-      let cur: Pt[] = [];
-      const flush = () => {
-        if (cur.length >= 2) lines.push(smoothSvgPath(cur, 2));
-        else if (cur.length === 1) lone.push(cur[0]);
-        cur = [];
-      };
-      values.forEach((v, i) => {
-        if (v == null) flush();
-        else cur.push({ x: x(i), y: y(v) });
-      });
-      flush();
-      return { lines, lone };
-    };
-    return { max, x, segments: series.map((s) => segmentsOf(s.values)) };
-  }, [series, n, metric]);
-  const { max, x } = geometry;
-  const hoverAt = (clientX: number) => {
-    const rect = plotRef.current?.getBoundingClientRect();
-    if (!rect || n === 0) return;
-    const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / Math.max(rect.width, 1)));
-    setHovered(Math.round(ratio * Math.max(n - 1, 0)));
-  };
-  const axisIndexes = [...new Set([0, Math.floor((n - 1) / 2), n - 1])].filter((i) => i >= 0);
-  const hoverX = hovered == null ? null : x(hovered);
-  // Stable data signature for the reveal (see index.css «Chart motion») — the up-to-6 series fade in
-  // when the metric/period/selection changes, never on hover (separate state) or a container resize.
-  const motionKey = series.map((s) => s.values.join(',')).join('|');
-  const ariaSummary = `${METRIC_LABEL[metric]} по каналам: ${series.map((item) => item.name).join(', ')}`;
-  return (
-    <div>
-      <div className={expanded ? 'relative pl-12' : undefined}>
-        {expanded && (
-          <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 left-0 w-11 text-right text-2xs text-muted-foreground">
-            <span className="absolute right-2 top-0 -translate-y-1/2">{fmtMetric(metric, max)}</span>
-            <span className="absolute right-2 top-1/2 -translate-y-1/2">{fmtMetric(metric, max / 2)}</span>
-            <span className="absolute bottom-0 right-2 translate-y-1/2">{fmtMetric(metric, 0)}</span>
-          </div>
-        )}
-        <div
-          ref={plotRef}
-          role="img"
-          aria-label={ariaSummary}
-          tabIndex={0}
-          className="relative rounded-sm outline-hidden focus-visible:ring-2 focus-visible:ring-primary/60"
-          onPointerMove={(event) => hoverAt(event.clientX)}
-          onPointerLeave={() => {
-            if (!focused) setHovered(null);
-          }}
-          onFocus={() => {
-            setFocused(true);
-            setHovered((current) => current ?? Math.max(n - 1, 0));
-          }}
-          onBlur={() => {
-            setFocused(false);
-            setHovered(null);
-          }}
-          onKeyDown={(event) => {
-            if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
-            event.preventDefault();
-            const step = event.key === 'ArrowLeft' ? -1 : 1;
-            setHovered((current) => Math.max(0, Math.min(n - 1, (current ?? n - 1) + step)));
-          }}
-        >
-          {expanded && (
-            <div aria-hidden="true" className="pointer-events-none absolute inset-0">
-              {[0, 50, 100].map((top) => (
-                <span key={top} className="absolute left-0 right-0 border-t border-dashed border-border/50" style={{ top: `${top}%` }} />
-              ))}
-            </div>
-          )}
-          <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="relative w-full" style={{ height }} aria-hidden="true" data-chart-curve="smooth">
-            {/* Series lines fade-reveal on a data change; the keyed group keeps the hover guide below
-                it out of the motion so scrubbing never re-reveals the chart. */}
-            <g key={motionKey} data-chart-motion="reveal">
-              {series.map((s, si) => {
-                const { lines, lone } = geometry.segments[si];
-                return (
-                  <g key={s.name}>
-                    {lines.map((path, si) => (
-                      <path
-                        key={`l${si}`}
-                        d={path}
-                        fill="none"
-                        stroke={s.color}
-                        strokeWidth="1.5"
-                        vectorEffect="non-scaling-stroke"
-                        strokeLinejoin="round"
-                        strokeLinecap="round"
-                      />
-                    ))}
-                    {lone.map((p, pi) => (
-                      <circle key={`p${pi}`} cx={p.x} cy={p.y} r="1.4" fill={s.color} />
-                    ))}
-                  </g>
-                );
-              })}
-            </g>
-            {hoverX != null && (
-              <line x1={hoverX} x2={hoverX} y1="0" y2="100" stroke="hsl(var(--foreground) / 0.35)" strokeDasharray="3 3" vectorEffect="non-scaling-stroke" />
-            )}
-          </svg>
-          {hovered != null && (
-            <div
-              className={`pointer-events-none absolute top-2 z-tooltip min-w-44 rounded-lg border border-border bg-popover/95 px-2.5 py-2 text-2xs shadow-lg backdrop-blur-xs ${hovered > n * 0.62 ? '-translate-x-full' : ''}`}
-              style={{ left: `${hoverX ?? 0}%` }}
-            >
-              <p className="mb-1 font-medium text-foreground">{labels[hovered]}</p>
-              {series.map((item) => (
-                <p key={item.name} className="flex items-center justify-between gap-3 text-muted-foreground">
-                  <span className="inline-flex min-w-0 items-center gap-1.5">
-                    <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full" style={{ backgroundColor: item.color }} />
-                    <span className="max-w-32 truncate">{item.name}</span>
-                  </span>
-                  <span className="shrink-0 tabular-nums text-foreground">{fmtMetric(metric, item.values[hovered])}</span>
-                </p>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-      {axisIndexes.length > 1 && (
-        <div className={`mt-1 flex justify-between text-2xs text-muted-foreground ${expanded ? 'ml-12' : ''}`} aria-hidden="true">
-          {axisIndexes.map((index) => <span key={index}>{labels[index]}</span>)}
-        </div>
-      )}
-      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
-        {series.map((s) => (
-          <span key={s.name} className="inline-flex items-center gap-1.5 text-2xs text-muted-foreground">
-            <span aria-hidden="true" className="h-1.5 w-3 rounded-full" style={{ backgroundColor: s.color }} />
-            <span className="max-w-40 truncate">{s.name}</span>
-          </span>
-        ))}
-        <span className="text-2xs text-muted-foreground">
-          · {METRIC_LABEL[metric]}
-          {metric === 'aov' ? ' · только периоды с заказами' : ''}
-        </span>
-      </div>
-    </div>
-  );
-}
 
 // Тип канала МС → короткий русский ярлык (тихий, muted): группирует источники, не кричит.
 const CHANNEL_TYPE_LABEL: Record<string, string> = {
@@ -698,8 +452,8 @@ export function MsChannelRows({
                 )}
               </span>
               <span className="shrink-0 tabular-nums text-muted-foreground">
-                <span className="font-medium text-foreground">{fmt.short(r.sum)} ₽</span> · {share}% · {fmt.num(r.orders)}{' '}
-                {pluralRu(r.orders, ['заказ', 'заказа', 'заказов'])} · ср. {fmt.short(aov(r))} ₽
+                <span className="font-medium text-foreground">{formatMoney(r.sum, 'axis')}</span> · {share}% · {fmt.num(r.orders)}{' '}
+                {pluralRu(r.orders, ['заказ', 'заказа', 'заказов'])} · ср. {formatMoney(aov(r), 'axis')}
               </span>
             </div>
             {/* Доля от ЦЕЛОГО, а не от лидера: канал с 40% выручки и должен занимать 40% дорожки. */}
@@ -712,7 +466,7 @@ export function MsChannelRows({
       {restOrders > 0 && (
         <p className="text-2xs text-muted-foreground">
           {expanded ? 'Из них' : 'Ещё'} {fmt.num(restOrders)}{' '}
-          {noChannel > 0 ? `заказов (без канала ${fmt.num(noChannel)} · ${fmt.short(noChannelSum)} ₽)` : 'заказов'} из {fmt.num(totalOrders)}.
+          {noChannel > 0 ? `заказов (без канала ${fmt.num(noChannel)} · ${formatMoney(noChannelSum, 'axis')})` : 'заказов'} из {fmt.num(totalOrders)}.
         </p>
       )}
     </div>
@@ -721,11 +475,17 @@ export function MsChannelRows({
 
 // ── Вклад каналов: текущее окно против равного предыдущего ────────────────────────────────────
 
-function signedValue(delta: number, metric: MsChannelContributionMetric): string {
-  const sign = delta > 0 ? '+' : delta < 0 ? '−' : '';
+/**
+ * Величина вклада БЕЗ знака: направление в этой строке уже сказано стрелкой.
+ *
+ * Было «↑+99.3k ₽₽» — три ошибки в одной строке: стрелка и плюс говорили одно и то же, а знак
+ * валюты дописывался поверх строки, которая его уже несёт (аудит #554, D4). Знак валюты
+ * добавляет ТОЛЬКО formatMoney (см. lib/metricNumber).
+ */
+function unsignedValue(delta: number, metric: MsChannelContributionMetric): string {
   return metric === 'revenue'
-    ? `${sign}${fmt.short(Math.abs(delta))} ₽`
-    : `${sign}${fmt.num(Math.abs(delta))}`;
+    ? formatMoney(Math.abs(delta), 'axis')
+    : fmt.num(Math.abs(delta));
 }
 
 /**
@@ -797,9 +557,6 @@ export function MsChannelContribution({
         const currentValue = msChannelContributionCurrent(it, metric);
         const share = total > 0 ? (currentValue / total) * 100 : 0;
         const delta = msChannelContributionDelta(it, metric);
-        const deltaColor = delta == null || delta === 0
-          ? 'hsl(var(--muted-foreground))'
-          : delta > 0 ? 'hsl(var(--chart-role-positive))' : 'hsl(var(--chart-role-negative))';
         return (
           <div key={it.id}>
             <div className="flex items-baseline justify-between gap-3 text-xs">
@@ -812,18 +569,21 @@ export function MsChannelContribution({
               <span className="flex shrink-0 items-baseline gap-2 tabular-nums text-muted-foreground">
                 <span>
                   <span className="font-medium text-foreground">
-                    {metric === 'revenue' ? `${fmt.short(currentValue)} ₽` : fmt.num(currentValue)}
+                    {metric === 'revenue' ? `${formatMoney(currentValue, 'axis')}` : fmt.num(currentValue)}
                   </span>{' '}
-                  · {share.toLocaleString('ru-RU', { maximumFractionDigits: 1 })}%
+                  · {fmt.pctFixed(share, 1)}
                 </span>
+                {/* Тихий регистр дельты (канон DeltaPill): направление — в знаке/стрелке, не в
+                    оценочном цвете — «ничего не кричит». */}
                 {comparable && delta != null && (
                   <span
-                    className="inline-flex items-center gap-0.5 text-2xs"
-                    style={{ color: deltaColor }}
+                    className="inline-flex items-center gap-0.5 text-2xs text-muted-foreground"
                     title="Изменение против равного предыдущего окна"
                   >
-                    <span aria-hidden="true">{delta > 0 ? '▲' : delta < 0 ? '▼' : '•'}</span>
-                    {signedValue(delta, metric)}
+                    {/* Направление несёт СТРЕЛКА; знак «+/−» внутри значения был бы вторым
+                        голосом об одном и том же («↑+99.3k»). */}
+                    <span aria-hidden="true">{delta > 0 ? '↑' : delta < 0 ? '↓' : '•'}</span>
+                    {unsignedValue(delta, metric)}
                   </span>
                 )}
               </span>
@@ -836,7 +596,7 @@ export function MsChannelContribution({
       })}
       {hiddenValue > 0 && (
         <p className="text-2xs text-muted-foreground">
-          Ещё {metric === 'revenue' ? `${fmt.short(hiddenValue)} ₽` : `${fmt.num(hiddenValue)} ${pluralRu(hiddenValue, ['заказ', 'заказа', 'заказов'])}`} в свёрнутых каналах.
+          Ещё {metric === 'revenue' ? `${formatMoney(hiddenValue, 'axis')}` : `${fmt.num(hiddenValue)} ${pluralRu(hiddenValue, ['заказ', 'заказа', 'заказов'])}`} в свёрнутых каналах.
         </p>
       )}
       {comparable && (
@@ -866,7 +626,7 @@ export function MsGeographyRows({
       <div className="flex items-baseline justify-between gap-3 text-xs">
         <span className="min-w-0 truncate text-foreground">{r.city}</span>
         <span className="shrink-0 tabular-nums text-muted-foreground">
-          <span className="font-medium text-foreground">{fmt.num(r.orders)}</span> · {fmt.short(r.sum)} ₽
+          <span className="font-medium text-foreground">{fmt.num(r.orders)}</span> · {formatMoney(r.sum, 'axis')}
         </span>
       </div>
       <div className="mt-1 flex">

@@ -36,14 +36,16 @@ export function PivotTable({ columns, rows, valueFmt }: PivotTableProps) {
       : { backgroundColor: `hsl(var(--chart-role-primary) / ${(0.06 + 0.42 * Math.min(v / globalMax, 1)).toFixed(3)})` };
 
   return (
-    <div data-pivot-table className="data-table-surface data-table-scroll">
+    <div data-pivot-table data-edge-fade-off className="data-table-surface data-table-scroll">
       <table className="data-table data-table--compact text-sm" style={{ minWidth: Math.max(columns.length * 76 + 112, 320) }}>
         <thead>
           <tr className="border-b border-border dark:border-white/6">
             <th
-              aria-hidden="true"
+              scope="col"
               className="sticky left-0 z-10 w-28 bg-card px-3 py-2"
-            />
+            >
+              <span className="sr-only">Показатель</span>
+            </th>
             {columns.map((c) => (
               <th scope="col" key={c.key} className="px-1.5 py-2 text-right text-2xs font-medium tabular-nums text-muted-foreground">
                 {c.label}

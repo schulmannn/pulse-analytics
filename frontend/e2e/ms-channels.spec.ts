@@ -6,7 +6,7 @@ test.beforeEach(async ({ page }, testInfo) => {
   await bootDemo(page, '/sklad/channels', { theme: 'dark' });
 });
 
-test('MoySklad channels uses the flat feed shell and multi-channel explorer', async ({ page }, testInfo) => {
+test('MoySklad channels saves the fullscreen filter for the compact chart', async ({ page }, testInfo) => {
   test.setTimeout(90_000);
   await expect(page.getByRole('heading', { name: 'Каналы', exact: true })).toBeVisible();
   await expect(page.locator('[data-source-identity]')).toContainText('МойСклад');
@@ -17,17 +17,35 @@ test('MoySklad channels uses the flat feed shell and multi-channel explorer', as
   const dynamics = page.locator('section').filter({ has: page.getByRole('toolbar', { name: 'Метрика', exact: true }) }).first();
   await expect(dynamics.getByRole('toolbar', { name: 'Метрика', exact: true })).toBeVisible();
   await expect(dynamics.getByRole('toolbar', { name: 'Вид' })).toBeVisible();
+  await expect(dynamics.getByRole('button', { name: /^(Все каналы|Каналы:)/ })).toHaveCount(0);
 
-  await dynamics.getByRole('button', { name: 'Все каналы' }).click();
-  const picker = dynamics.getByRole('group', { name: 'Каналы продаж' });
-  await picker.getByRole('checkbox', { name: 'Интернет-магазин' }).check();
-  await picker.getByRole('checkbox', { name: 'Партнёры' }).check();
-  await page.keyboard.press('Escape');
-  await expect(dynamics.getByRole('button', { name: 'Каналы: 2' })).toBeVisible();
-  await expect(dynamics.getByText('2 канала', { exact: true })).toBeVisible();
+  // The compact card is overview-only. Filtering lives on the canonical metric page.
+  await expandWidget(page, /^Выручка по каналам/);
+  await expect(page).toHaveURL(/\/metrics\/ms-channels$/);
+  await expect(page.getByRole('heading', { name: 'Каналы продаж', level: 1 })).toBeVisible({ timeout: 20_000 });
+  const filter = page.locator('details[data-testid="ms-channel-filter"]:visible');
+  await filter.locator('summary').click();
+  const picker = filter.getByRole('group', { name: 'Каналы продаж' });
+  const online = picker.getByRole('checkbox', { name: 'Интернет-магазин' });
+  const partners = picker.getByRole('checkbox', { name: 'Партнёры' });
+  await online.click();
+  await expect(online).toBeChecked();
+  await partners.click();
+  await expect(partners).toBeChecked();
+  await expect(filter.getByText('Не сохранено')).toBeVisible();
+  await filter.getByRole('button', { name: 'Сохранить' }).click();
+  await expect(filter.getByRole('button', { name: 'Сохранить' })).toBeDisabled();
+  await expect(filter.getByText('Сохранено: 2')).toBeVisible();
 
-  await dynamics.getByRole('toolbar', { name: 'Вид' }).getByRole('button', { name: 'По каналам' }).click();
-  const comparisonChart = dynamics.getByRole('img', {
+  // Returning to the source page applies the saved selection without reintroducing a filter button.
+  await page.getByRole('link', { name: /МойСклад · Каналы/ }).click();
+  await expect(page).toHaveURL(/\/sklad\/channels$/);
+  const savedDynamics = page.locator('section').filter({ has: page.getByRole('toolbar', { name: 'Метрика', exact: true }) }).first();
+  await expect(savedDynamics.getByRole('heading', { name: /Выручка по каналам .* · 2 кан\./ })).toBeVisible();
+  await expect(savedDynamics.getByRole('button', { name: /^(Все каналы|Каналы:)/ })).toHaveCount(0);
+
+  await savedDynamics.getByRole('toolbar', { name: 'Вид' }).getByRole('button', { name: 'По каналам' }).click();
+  const comparisonChart = savedDynamics.getByRole('slider', {
     name: /Выручка по каналам: Интернет-магазин, Партнёры/,
   });
   await expect(comparisonChart).toBeVisible();
@@ -38,7 +56,7 @@ test('MoySklad channels uses the flat feed shell and multi-channel explorer', as
   const channelAnimation = await channelMotion.evaluate((element) => getComputedStyle(element).animationName);
   expect(channelAnimation).toContain('chart-fade-in');
   await comparisonChart.focus();
-  await expect(dynamics.locator('.z-tooltip')).toBeVisible();
+  await expect(savedDynamics.locator('.z-tooltip')).toBeVisible();
   await page.keyboard.press('ArrowLeft');
 
   const pageShot = testInfo.outputPath('moysklad-channels-page-dark.png');
@@ -47,22 +65,23 @@ test('MoySklad channels uses the flat feed shell and multi-channel explorer', as
 
   // Sparse AOV keeps the shared calendar axis and honest empty tooltips, but each selected channel
   // remains a readable observation line instead of a collection of isolated one-point segments.
-  await dynamics.getByRole('toolbar', { name: 'Метрика', exact: true }).getByRole('button', { name: 'Средний чек' }).click();
-  const aovComparisonChart = dynamics.getByRole('img', { name: /Средний чек по каналам/ });
+  await savedDynamics.getByRole('toolbar', { name: 'Метрика', exact: true }).getByRole('button', { name: 'Средний чек' }).click();
+  const aovComparisonChart = savedDynamics.getByRole('slider', { name: /Средний чек по каналам/ });
   await expect(aovComparisonChart).toBeVisible();
-  await expect(dynamics.getByText(/только периоды с заказами/)).toBeVisible();
+  await expect(savedDynamics.getByText(/только периоды с заказами/)).toBeVisible();
   const aovShot = testInfo.outputPath('moysklad-channels-aov-dark.png');
   await page.screenshot({ path: aovShot, fullPage: true });
   await testInfo.attach('moysklad-channels-aov-dark', { path: aovShot, contentType: 'image/png' });
-  await dynamics.getByRole('toolbar', { name: 'Метрика', exact: true }).getByRole('button', { name: 'Выручка' }).click();
+  await savedDynamics.getByRole('toolbar', { name: 'Метрика', exact: true }).getByRole('button', { name: 'Выручка' }).click();
 
   // «Развернуть» ведёт на полностраничную метрику /metrics/ms-channels (общий explorer с MS-контролами),
   // а не в модальный оверлей. Страница открывается со своим состоянием (агрегат по умолчанию).
   await expandWidget(page, /^Выручка по каналам/);
-  await expect(page).toHaveURL(/\/metrics\/ms-channels$/);
+  await expect(page).toHaveURL(/\/metrics\/ms-channels/);
   // The MS metric page is a lazy chunk. Allow the cold Vite transform to finish when this suite
   // runs in parallel with the all-routes parity pass; the production bundle is already built.
   await expect(page.getByRole('heading', { name: 'Каналы продаж', level: 1 })).toBeVisible({ timeout: 20_000 });
+  await expect.poll(() => new URL(page.url()).searchParams.get('channels')).toContain('16f07379');
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(page.getByRole('toolbar', { name: 'Метрика' })).toBeVisible();
   const viewGroup = page.getByRole('toolbar', { name: 'Вид' });

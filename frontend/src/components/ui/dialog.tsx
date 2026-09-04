@@ -12,6 +12,23 @@ const DialogPortal = DialogPrimitive.Portal;
 
 const DialogClose = DialogPrimitive.Close;
 
+/**
+ * Unstyled Radix content for sheets and shared-element overlays whose geometry cannot use the
+ * centred `DialogContent` shell. It deliberately keeps Radix semantics/focus management while the
+ * caller owns placement inside `DialogPortal` + `DialogOverlay`.
+ */
+const DialogSurface = React.forwardRef<
+  React.ElementRef<typeof DialogPrimitive.Content>,
+  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
+>(({ className, ...props }, ref) => (
+  <DialogPrimitive.Content
+    ref={ref}
+    className={cn('focus:outline-hidden', className)}
+    {...props}
+  />
+));
+DialogSurface.displayName = 'DialogSurface';
+
 const DialogOverlay = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Overlay>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Overlay>
@@ -19,7 +36,7 @@ const DialogOverlay = React.forwardRef<
   <DialogPrimitive.Overlay
     ref={ref}
     className={cn(
-      'fixed inset-0 z-modal bg-background/70 backdrop-blur-xs backdrop-grayscale data-[state=open]:animate-in data-[state=open]:ease-house data-[state=closed]:animate-out data-[state=closed]:ease-exit data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 motion-reduce:duration-0',
+      'fixed inset-0 z-modal bg-background/70 backdrop-blur-xs backdrop-grayscale data-[state=open]:animate-in data-[state=open]:ease-house data-[state=closed]:animate-out data-[state=closed]:ease-exit data-[state=closed]:anim-dur-exit data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 motion-reduce:duration-0',
       className,
     )}
     {...props}
@@ -31,7 +48,7 @@ DialogOverlay.displayName = DialogPrimitive.Overlay.displayName;
  * Все домашние диалоги открываются ПРОГРАММНО (open через state, без Radix Trigger), поэтому
  * дефолтная реставрация фокуса Radix (на триггер) уходит в body. Снимок открывателя берём на
  * ПЕРВОМ рендере (Radix уводит фокус эффектом позже) и возвращаем его на закрытии — контракт
- * прежнего useFocusTrap, теперь в одном месте для всех диалогов. Пользовательский
+ * прежнего ручного focus-trap, теперь в одном месте для всех диалогов. Пользовательский
  * onCloseAutoFocus (если передан) выполняется после и может переопределить цель.
  */
 export function useRestoreOpenerFocus(): (event: Event) => void {
@@ -59,7 +76,7 @@ const DialogContent = React.forwardRef<
     <DialogPrimitive.Content
       ref={ref}
       className={cn(
-        'fixed left-[50%] top-[50%] z-modal grid max-h-[calc(100vh-2rem)] w-[calc(100%-2rem)] max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 overflow-y-auto rounded-xl border border-border bg-card p-5 anim-dur-fast data-[state=open]:animate-in data-[state=open]:ease-house data-[state=closed]:animate-out data-[state=closed]:ease-exit data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 motion-reduce:duration-0',
+        'fixed left-[50%] top-[50%] z-modal grid max-h-[calc(100vh-2rem)] w-[calc(100%-2rem)] max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 overflow-y-auto rounded-xl border border-border bg-card p-5 anim-dur-fast data-[state=open]:animate-in data-[state=open]:ease-house data-[state=closed]:animate-out data-[state=closed]:ease-exit data-[state=closed]:anim-dur-exit data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 motion-reduce:duration-0',
         className,
       )}
       onCloseAutoFocus={(event) => {
@@ -69,7 +86,11 @@ const DialogContent = React.forwardRef<
       {...props}
     >
       {children}
-      <DialogPrimitive.Close className="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus:outline-hidden focus:ring-2 focus:ring-primary/50 disabled:pointer-events-none">
+      <DialogPrimitive.Close
+        aria-label="Закрыть"
+        data-mobile-touch-target=""
+        className="absolute right-3 top-3 flex h-11 w-11 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus:outline-hidden focus:ring-2 focus:ring-primary/50 disabled:pointer-events-none sm:h-8 sm:w-8"
+      >
         <X className="h-4 w-4" />
         <span className="sr-only">Закрыть</span>
       </DialogPrimitive.Close>
@@ -140,6 +161,7 @@ export {
   DialogOverlay,
   DialogTrigger,
   DialogClose,
+  DialogSurface,
   DialogContent,
   DialogHeader,
   DialogFooter,

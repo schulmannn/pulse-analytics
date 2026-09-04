@@ -1,17 +1,26 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { LoaderDots } from '@/components/ui/loader';
+import { useConfirm } from '@/components/ConfirmDialogProvider';
 import { toast } from 'sonner';
 import { z } from 'zod';
 import QRCode from 'qrcode';
 import { useQueryClient } from '@tanstack/react-query';
-import { useChannels, useCollectorStatus, useConnectIg, useCreateKey, useDisconnectIg, useIgOauthStatus, useMsBackfillStatus, useMsStatus, useTgQrStatus, useYmStatus } from '@/api/queries';
+import { useChannels, useCollectorStatus, useConnectIg, useCreateKey, useDisconnectIg, useIgOauthStatus, useTgQrStatus } from '@/api/queries';
+import { useMsStatus } from '@/api/ms';
+import { useMsBackfillStatus, useYmStatus } from '@/api/ym';
+import { useCdekStatus, useCreateCdekSource } from '@/api/cdek';
+import { RusenderConnectSchema, rusenderKeys, useRusenderStatus } from '@/api/rusender';
 import { ApiError, apiSend } from '@/api/client';
 import { qk } from '@/api/queryKeys';
+import type { Channel } from '@/api/schemas';
+import { orbitHealth, type OrbitNetworkHealth } from '@/lib/connectionHealth';
 import { fmt } from '@/lib/format';
-import { useSelectedChannel } from '@/lib/channel-context';
+import { ChannelScope, useSelectedChannel } from '@/lib/channel-context';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
+import { Snippet } from '@/components/ui/snippet';
 
 /**
  * /connect — the source hub. Platforms sit on an orbit around Atlavue (atlas + view), the same
@@ -22,9 +31,40 @@ import { Progress } from '@/components/ui/progress';
  */
 
 const INGEST_URL = `${window.location.origin}/api/collector/ingest`;
+const MutationOkSchema = z.object({ ok: z.boolean() }).passthrough();
+const MsConnectSchema = z
+  .object({
+    ok: z.literal(true),
+    channel_id: z.coerce.number(),
+    org_name: z.string().nullable().optional(),
+  })
+  .passthrough();
+const MsBackfillStartSchema = z
+  .object({ ok: z.literal(true), status: z.literal('running') })
+  .passthrough();
+const YmConnectSchema = z
+  .object({
+    ok: z.boolean(),
+    choice_required: z.boolean().optional(),
+    counters: z
+      .array(
+        z
+          .object({
+            id: z.coerce.string(),
+            name: z.string().nullable(),
+            site: z.string().nullable(),
+          })
+          .passthrough(),
+      )
+      .optional(),
+    channel_id: z.coerce.number().optional(),
+    counter_name: z.string().nullable().optional(),
+    site: z.string().nullable().optional(),
+  })
+  .passthrough();
 
-type ServiceId = 'telegram' | 'instagram' | 'moysklad' | 'metrika' | 'threads' | 'youtube' | 'tiktok' | 'x' | 'vk' | 'facebook';
-type ServiceKind = 'telegram' | 'instagram' | 'moysklad' | 'metrika' | 'soon';
+type ServiceId = 'telegram' | 'instagram' | 'moysklad' | 'metrika' | 'cdek' | 'rusender' | 'threads' | 'youtube' | 'tiktok' | 'x' | 'vk' | 'facebook';
+type ServiceKind = 'telegram' | 'instagram' | 'moysklad' | 'metrika' | 'cdek' | 'rusender' | 'soon';
 
 interface Service {
   id: ServiceId;
@@ -42,6 +82,10 @@ const SERVICES: Service[] = [
   { id: 'moysklad', name: 'МойСклад', kind: 'moysklad' },
   // «Яндекс.Метрика» — веб-аналитика сайта: визиты/посетители/источники по OAuth-токену.
   { id: 'metrika', name: 'Яндекс.Метрика', kind: 'metrika' },
+  // «СДЭК Fulfillment» — первый источник БЕЗ API: заказы приезжают выгрузкой Excel вручную.
+  { id: 'cdek', name: 'СДЭК', kind: 'cdek' },
+  // «Rusender» — email-рассылки: рассылки, открытия/клики и база контактов по API-ключу.
+  { id: 'rusender', name: 'Rusender', kind: 'rusender' },
   { id: 'threads', name: 'Threads', kind: 'soon', soon: 'Threads-метрики отдаёт тот же токен Instagram — ближайший кандидат после IG.' },
   { id: 'youtube', name: 'YouTube', kind: 'soon', soon: 'Аналитика каналов и видео через YouTube Data API + вход Google.' },
   { id: 'tiktok', name: 'TikTok', kind: 'soon', soon: 'Статистика аккаунта через TikTok for Developers (нужна проверка приложения).' },
@@ -56,6 +100,10 @@ const GLYPHS: Record<ServiceId, ReactNode> = {
   instagram: (<><rect x="3.5" y="3.5" width="17" height="17" rx="5" /><circle cx="12" cy="12" r="4" /><circle cx="17.3" cy="6.7" r="1" className="fill-current" stroke="none" /></>),
   moysklad: (<><path d="M12 3 3.5 7.5v9L12 21l8.5-4.5v-9L12 3Z" /><path d="M3.5 7.5 12 12l8.5-4.5M12 12v9" /></>),
   metrika: (<path d="M5 20v-6M12 20V9M19 20V4" />),
+  // Фура: короб уже занят «МойСкладом», два коробка в одной орбите читались бы как один источник.
+  cdek: (<><path d="M14 17.5V7a1.5 1.5 0 0 0-1.5-1.5h-8A1.5 1.5 0 0 0 3 7v9.5a1 1 0 0 0 1 1h1" /><path d="M14 9h3.2a1 1 0 0 1 .8.4l2.8 3.6a1 1 0 0 1 .2.6v3a1 1 0 0 1-1 1h-1" /><path d="M9 17.5h6" /><circle cx="7" cy="17.5" r="1.9" /><circle cx="17" cy="17.5" r="1.9" /></>),
+  // Конверт: единственный источник, чья единица контента — письмо.
+  rusender: (<><rect x="3" y="5.5" width="18" height="13" rx="2" /><path d="m3.8 7.2 8.2 5.8 8.2-5.8" /></>),
   threads: (<path d="M16 8c-1.5-2-6-2.5-8 0-2.5 3-1 9 3 9 3 0 4-2 4-4s-1.5-3-3.5-3-3 2-1.5 3" />),
   youtube: (<><rect x="2.5" y="6" width="19" height="12" rx="4" /><path d="m10 9.5 5 2.5-5 2.5z" /></>),
   tiktok: (<><path d="M10 8v6.5a3 3 0 1 1-3-3" /><path d="M10 8c.5 2 2 3.5 5 3.5" /></>),
@@ -92,46 +140,107 @@ export function Connect() {
   }, [sourceParam]);
 
   const { data: channelsData } = useChannels();
+  const channels = channelsData?.channels ?? [];
+  const hasQrChannel = channels.some((channel) => channel.source === 'qr');
+  const hasCentralChannel = channels.some((channel) => channel.source === 'central');
+  const tgStatus = useTgQrStatus(hasQrChannel || hasCentralChannel);
   const igStatus = useIgOauthStatus();
   // Орбита обязана говорить то же, что панель справа: у каждого не-«скоро» источника свой
   // источник правды. Статусы МС/Метрики берём теми же хуками, что и MoySkladPanel/MetrikaPanel
   // (ключи запросов общие — повторный вызов не даёт лишнего сетевого похода).
-  const msStatus = useMsStatus();
-  const ymStatus = useYmStatus();
+  const msChannelId = channels.find((channel) => channel.source === 'ms')?.id ?? null;
+  const ymChannels = channels.filter((channel) => channel.source === 'ym');
+  const ymChannelId = ymChannels[0]?.id ?? null;
+  const msStatus = useMsStatus(msChannelId);
+  const ymStatus = useYmStatus(ymChannelId);
+  // У СДЭКа нет статуса подключения: источник существует ровно потому, что его завели. Наличие
+  // канала — и есть весь признак, отдельный запрос сюда ничего бы не добавил.
+  const cdekChannelId = channels.find((channel) => channel.source === 'cdek')?.id ?? null;
+  // Rusender — как у Метрики, источник МОЖЕТ быть не один (свой аккаунт = свой канал), поэтому
+  // панель держит список каналов и адресует мутации поканально.
+  const rusenderChannels = channels.filter((channel) => channel.source === 'rusender');
+  const rusenderChannelId = rusenderChannels[0]?.id ?? null;
+  const rusenderStatus = useRusenderStatus(rusenderChannelId);
 
   // IG counts as connected when a per-channel OAuth account is linked OR the global env account is
   // serving data (env_fallback) — both mean real Instagram numbers are flowing.
   const igConnected = (igStatus.data?.connected ?? false) || (igStatus.data?.env_fallback ?? false);
-  const tgConnected = (channelsData?.channels?.length ?? 0) > 0;
-  const msConnected = msStatus.data?.connected ?? false;
-  const ymConnected = ymStatus.data?.connected ?? false;
-  const stateOf = (s: Service): 'connected' | 'available' | 'soon' => {
+  // Статус источника — на уровне WORKSPACE, не активного канала: useMsStatus/useYmStatus читают
+  // текущий канал свитчера, и подключённый на СВОЁМ канале МойСклад показывался «Доступен»
+  // (владелец: «пишет, что МойСклад не подключён»). Канал каждой сети источника уже есть в списке
+  // каналов (source: 'ms' | 'ym'); Telegram считает только собственные каналы (зеркало
+  // channelsForSource), а не любой канал workspace.
+  const centralOwner = hasCentralChannel && !!tgStatus.data?.central_owner;
+  const managedTelegram = hasQrChannel || centralOwner;
+  const independentTelegram = channels.some(
+    (channel) =>
+      channel.source === 'collector' ||
+      channel.source == null ||
+      (channel.source === 'central' && !centralOwner),
+  );
+  // A retained QR channel row is not proof that its deleted session still sends data. While the
+  // shared status is loading we preserve the previous row-based state; once loaded, `connected`
+  // becomes authoritative. Collector / foreign central channels remain independently connected.
+  const managedTelegramConnected = managedTelegram
+    ? (tgStatus.data?.connected ?? true)
+    : false;
+  const tgConnected = independentTelegram || managedTelegramConnected;
+  const msConnected = msStatus.isSuccess ? !!msStatus.data?.connected : msChannelId != null;
+  // Пилюля источника — про источник целиком, а не про первый счётчик: подключён хотя бы один.
+  const ymConnected = ymStatus.isSuccess ? !!ymStatus.data?.connected : ymChannelId != null;
+  // Пилюля источника — про источник целиком, а не про первый аккаунт: подключён хотя бы один.
+  const rusenderConnected = rusenderStatus.isSuccess
+    ? !!rusenderStatus.data?.connected
+    : rusenderChannelId != null;
+  const networkHealth = orbitHealth({
+    telegram: {
+      managed: managedTelegram,
+      connectionState: managedTelegram ? tgStatus.data?.connection_state : null,
+    },
+    instagram: {
+      connected: igStatus.data?.connected,
+      envFallback: igStatus.data?.env_fallback,
+      tokenExpiresAt: igStatus.data?.token_expires_at,
+    },
+    moysklad: msStatus.data,
+    metrika: ymStatus.data,
+  });
+  // Истёкший токен — не «подключён» и не «доступен»: строка в БД есть, данные не идут, и чинится
+  // это одним действием. Отдельное состояние, чтобы пилюля и подпись узла говорили именно о нём.
+  // Env-fallback у superuser токена не имеет — его смысл «подключён» сохраняется как был.
+  const igNeedsReconnect = igStatus.data?.token_state === 'expired';
+  const stateOf = (s: Service): 'connected' | 'reconnect' | 'available' | 'soon' => {
     if (s.kind === 'soon') return 'soon';
-    if (s.kind === 'instagram') return igConnected ? 'connected' : 'available';
+    if (s.kind === 'instagram') return igNeedsReconnect ? 'reconnect' : igConnected ? 'connected' : 'available';
     if (s.kind === 'moysklad') return msConnected ? 'connected' : 'available';
     if (s.kind === 'metrika') return ymConnected ? 'connected' : 'available';
+    if (s.kind === 'cdek') return cdekChannelId != null ? 'connected' : 'available';
+    if (s.kind === 'rusender') return rusenderConnected ? 'connected' : 'available';
     return tgConnected ? 'connected' : 'available';
   };
-  const connectedCount = SERVICES.filter((s) => stateOf(s) === 'connected').length;
+  const healthOf = (service: Service): OrbitNetworkHealth => {
+    if (service.kind === 'instagram') return networkHealth.instagram;
+    if (service.kind === 'moysklad') return networkHealth.moysklad;
+    if (service.kind === 'metrika') return networkHealth.metrika;
+    if (service.kind === 'telegram') return networkHealth.telegram;
+    return { health: 'ok', reason: null };
+  };
+  const stateLabel = (service: Service, state = stateOf(service)) => {
+    if (state === 'soon') return 'скоро';
+    if (state === 'available') return 'доступен';
+    if (state === 'reconnect') return 'переподключить';
+    const reason = healthOf(service).reason;
+    return reason ? `подключён · ${reason}` : 'подключён';
+  };
+  // Источник с истёкшим токеном настроен — из счётчика он не выпадает; о том, что данные не идут,
+  // говорят подпись узла, красная точка орбиты и пилюля панели, а не скачущее число в шапке.
+  const connectedCount = SERVICES.filter((s) => {
+    const state = stateOf(s);
+    return state === 'connected' || state === 'reconnect';
+  }).length;
 
-  // Arrow keys rotate the selection around the ring (GTA-wheel muscle memory, keyboard-friendly).
-  const ringRef = useRef<HTMLDivElement>(null);
-  const rotate = useCallback((dir: 1 | -1) => {
-    setSelected((cur) => {
-      const i = SERVICES.findIndex((s) => s.id === cur);
-      return SERVICES[(i + dir + SERVICES.length) % SERVICES.length].id;
-    });
-  }, []);
-  useEffect(() => {
-    const el = ringRef.current;
-    if (!el) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { e.preventDefault(); rotate(1); }
-      else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { e.preventDefault(); rotate(-1); }
-    };
-    el.addEventListener('keydown', onKey);
-    return () => el.removeEventListener('keydown', onKey);
-  }, [rotate]);
+  // Native radios provide the expected arrow-key selection contract without a custom group handler.
+  const ringRef = useRef<HTMLFieldSetElement>(null);
 
   // Ring radius (px) for the radiate-from-center entrance — feeds --ring-r so each node's start
   // offset (--dx/--dy) points back to the exact hub centre at any container size.
@@ -181,9 +290,19 @@ export function Connect() {
 
   return (
     <div className="mx-auto max-w-5xl">
-      <div className="mb-2">
-        <Link to="/settings" className="text-xs text-muted-foreground transition-colors hover:text-foreground">
-          ← Назад к настройкам
+      <div className="mb-3">
+        {/* Возврат — круглая иконко-кнопка со стрелкой + тихая подпись (выбор владельца из
+            вариантов дизайна): жест «назад» первичен, подпись вторична. */}
+        <Link
+          to="/settings"
+          className="group inline-flex items-center gap-2.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <span className="inline-flex size-7 items-center justify-center rounded-full border border-border text-foreground/80 transition-colors group-hover:border-muted-foreground group-hover:bg-card group-hover:text-foreground">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="size-3.5" aria-hidden="true">
+              <path d="M19 12H5M11 6l-6 6 6 6" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </span>
+          Настройки
         </Link>
       </div>
       <div className="flex flex-col gap-1">
@@ -200,26 +319,21 @@ export function Connect() {
         {/* Orbit */}
         <div className="relative flex justify-center">
           <Starfield />
-          <div
+          <fieldset
             ref={ringRef}
-            role="radiogroup"
-            aria-label="Источники данных"
-            tabIndex={0}
             style={{ '--ring-r': `${ringR}px` } as CSSProperties}
-            className="relative aspect-square w-[min(420px,86vw)] rounded-full outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-4 focus-visible:ring-offset-background"
+            className="relative m-0 aspect-square min-w-0 w-[min(420px,86vw)] rounded-full border-0 p-0"
           >
+            <legend className="sr-only">Источники данных</legend>
             {/* rings */}
             <div className="absolute inset-0 rounded-full border border-border" aria-hidden="true" />
             <div className="absolute inset-[9%] rounded-full border border-dashed border-border opacity-60" aria-hidden="true" />
 
-            {/* hub */}
-            <div className="connect-hub absolute left-1/2 top-1/2 flex aspect-square w-[38%] -translate-x-1/2 -translate-y-1/2 flex-col items-center justify-center rounded-full border border-border bg-card px-4 text-center" aria-live="polite">
-              <span className="text-2xs font-medium uppercase tracking-widest text-muted-foreground">Источник</span>
-              <span className="mt-1 text-base font-medium tracking-tight text-foreground sm:text-lg">{active.name}</span>
-              <span className="mt-0.5 text-2xs text-muted-foreground">
-                {activeState === 'connected' ? 'Подключён' : activeState === 'available' ? 'Доступен' : 'Скоро'}
-              </span>
-            </div>
+            {/* Хаб-круг с именем выбранного источника убран (владелец: дублировал панель справа —
+                имя и статус уже в её шапке). AT-анонс выбора сохранён невизуальным live-регионом. */}
+            <span className="sr-only" aria-live="polite">
+              {active.name} — {stateLabel(active, activeState)}
+            </span>
 
             {/* nodes */}
             {SERVICES.map((s, i) => {
@@ -229,45 +343,69 @@ export function Connect() {
               const left = 50 + RADIUS * Math.sin(theta);
               const top = 50 - RADIUS * Math.cos(theta);
               const st = stateOf(s);
+              const health = healthOf(s);
+              // Орбита рисуется по факту «источник заведён», а не по здоровью: про истёкший токен
+              // уже честно говорит красная точка ниже. Дизайн орбиты — под вето, не трогаем.
+              const isLinked = st === 'connected' || st === 'reconnect';
               const isSel = s.id === selected;
               return (
-                <div key={s.id} className="absolute" style={{ left: `${left}%`, top: `${top}%`, transform: 'translate(-50%,-50%)' }}>
-                  <div
-                    className="connect-orb"
+                <label
+                  key={s.id}
+                  data-mobile-touch-target=""
+                  className="absolute block size-12 cursor-pointer sm:size-14"
+                  style={{ left: `${left}%`, top: `${top}%`, transform: 'translate(-50%,-50%)' }}
+                >
+                  <input
+                    type="radio"
+                    name="connect-source"
+                    value={s.id}
+                    checked={isSel}
+                    onChange={() => setSelected(s.id)}
+                    aria-label={`${s.name} — ${stateLabel(s, st)}`}
+                    className="peer sr-only"
+                  />
+                  <span
+                    aria-hidden="true"
+                    className="connect-orb absolute inset-0 rounded-full peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-focus-visible:ring-offset-4 peer-focus-visible:ring-offset-background"
                     style={{
                       '--i': i,
                       '--dx': `calc(var(--ring-r, 176px) * ${(-Math.sin(theta)).toFixed(4)})`,
                       '--dy': `calc(var(--ring-r, 176px) * ${Math.cos(theta).toFixed(4)})`,
                     } as CSSProperties}
                   >
-                    <button
+                    <span
                       data-dot
-                      type="button"
-                      role="radio"
-                      aria-checked={isSel}
-                      aria-label={`${s.name}${st === 'connected' ? ' — подключён' : st === 'soon' ? ' — скоро' : ' — доступно'}`}
-                      onClick={() => setSelected(s.id)}
                       className={cn(
                         // Enumerated + dur-track: the dock magnification below writes `transform`
                         // on every pointermove, so this transition exists to smooth THAT — `all`
                         // dragged size/layout properties into a per-frame tween for no reason.
                         'relative flex size-12 items-center justify-center rounded-full border bg-card transition-[transform,border-color,background-color,color,opacity] dur-track ease-house will-change-transform sm:size-14',
-                        st === 'connected' && 'border-primary/60 text-primary',
+                        isLinked && 'border-primary/60 text-primary',
                         st === 'available' && 'border-border text-muted-foreground hover:border-muted-foreground hover:text-foreground',
                         st === 'soon' && 'border-dashed border-border text-muted-foreground opacity-60 hover:opacity-100',
-                        isSel && 'border-primary bg-primary/10 text-primary',
+                        isSel && 'border-primary bg-primary/10 text-accent-foreground',
                       )}
                     >
                       <Glyph id={s.id} className="size-6" />
-                      {st === 'connected' && (
-                        <span aria-hidden="true" className="absolute -right-0.5 -top-0.5 size-3 rounded-full border-2 border-card bg-verdant" />
+                      {isLinked && (
+                        <span
+                          aria-hidden="true"
+                          className={cn(
+                            'absolute -right-0.5 -top-0.5 size-3 rounded-full border-2 border-card',
+                            health.health === 'error'
+                              ? 'bg-ember'
+                              : health.health === 'warn'
+                                ? 'bg-status-warn'
+                                : 'bg-verdant',
+                          )}
+                        />
                       )}
-                    </button>
-                  </div>
-                </div>
+                    </span>
+                  </span>
+                </label>
               );
             })}
-          </div>
+          </fieldset>
         </div>
 
         {/* Panel */}
@@ -276,8 +414,34 @@ export function Connect() {
             <TelegramPanel channelName={channelName(channelsData)} queryTab={tgTab} reconnectRequested={actionParam === 'reconnect'} />
           )}
           {active.kind === 'instagram' && <InstagramPanel />}
-          {active.kind === 'moysklad' && <MoySkladPanel />}
-          {active.kind === 'metrika' && <MetrikaPanel />}
+          {/* Панель источника скоупится на КАНАЛ ЭТОГО источника (когда он есть в workspace):
+              статус/учётка/бэкфилл — атрибуты канала источника, а не активного канала свитчера —
+              иначе подключённый на своём канале МС показывал «Доступен» + поле токена. */}
+          {active.kind === 'moysklad' &&
+            (msChannelId != null ? (
+              <ChannelScope channelId={msChannelId}>
+                <MoySkladPanel />
+              </ChannelScope>
+            ) : (
+              <MoySkladPanel />
+            ))}
+          {/* Метрика — источник со МНОЖЕСТВОМ счётчиков: у каждого свой канал (сервер заводит его
+              в /api/ym/connect и дедупит по counter_id). Приколачивать панель к ПЕРВОМУ ym-каналу
+              через ChannelScope нельзя: тогда подключённый счётчик закрывает собой форму, и второй
+              добавить нечем — панель сама держит список и адресует мутации поканально. */}
+          {active.kind === 'metrika' && <MetrikaPanel channels={ymChannels} />}
+          {active.kind === 'cdek' &&
+            (cdekChannelId != null ? (
+              <ChannelScope channelId={cdekChannelId}>
+                <CdekPanel channelId={cdekChannelId} />
+              </ChannelScope>
+            ) : (
+              <CdekPanel channelId={null} />
+            ))}
+          {/* Rusender — как Метрика, источник со МНОЖЕСТВОМ аккаунтов: у каждого свой канал
+              (сервер заводит его в /api/rusender/connect и дедупит по accountId). Панель сама
+              держит список и адресует мутации поканально, а не через ChannelScope. */}
+          {active.kind === 'rusender' && <RusenderPanel channels={rusenderChannels} />}
           {active.kind === 'soon' && <SoonPanel name={active.name} glyph={active.id} note={active.soon ?? ''} />}
         </div>
       </div>
@@ -396,6 +560,8 @@ function PanelHead({ id, name, pill }: { id: ServiceId; name: string; pill: { la
 // ── МойСклад: история заказов (бэкфилл с прогрессом — слайс 2б) ──
 function MsBackfillBlock() {
   const qc = useQueryClient();
+  // Канал панели (ChannelScope на /connect) — бэкфилл обязан стартовать на канале ИСТОЧНИКА.
+  const { channelId } = useSelectedChannel();
   // kick = «только что нажали»: движок пишет running-строку ПОСЛЕ живой оценки объёма (~секунда),
   // поэтому сразу после POST статус ещё старый — и без принудительного поллинга интервал хука не
   // завёлся бы вовсе (кнопка выглядела мёртвой — прод-фидбек владельца).
@@ -413,7 +579,9 @@ function MsBackfillBlock() {
     if (kick && s !== null && s !== kickBaseRef.current) setKick(false);
     // Финиш прогона: витрины склада (средний чек, статусы заказов, когорты) читают ms_orders — обновить.
     if (prevStatusRef.current === 'running' && s === 'done') {
-      qc.invalidateQueries({ predicate: (q) => String(q.queryKey[0]).startsWith('ms-') });
+      // Список префиксов вместо строкового predicate: он сравнивал первый элемент ключа как
+      // строку и не проверялся компилятором — новая витрина склада молча выпадала бы из сброса.
+      for (const family of qk.msAll) qc.invalidateQueries({ queryKey: family });
     }
     prevStatusRef.current = s;
   }, [st?.status, kick, qc]);
@@ -428,7 +596,7 @@ function MsBackfillBlock() {
     kickBaseRef.current = st?.status ?? null;
     setKick(true);
     try {
-      await apiSend('POST', '/api/ms/backfill');
+      await apiSend('POST', '/api/ms/backfill', undefined, MsBackfillStartSchema, { channelId });
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
         // Прогон уже идёт (другая вкладка/повторный клик) — не ошибка: поллинг покажет прогресс.
@@ -490,8 +658,9 @@ function MsBackfillBlock() {
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <button
             type="button"
+            data-mobile-touch-target=""
             onClick={() => void startBackfill()}
-            className="btn-pill border border-border px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+            className="btn-pill inline-flex min-h-11 items-center border border-border px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted sm:min-h-0"
           >
             Обновить историю заказов
           </button>
@@ -508,8 +677,9 @@ function MsBackfillBlock() {
     <div className="space-y-2">
       <button
         type="button"
+        data-mobile-touch-target=""
         onClick={() => void startBackfill()}
-        className="btn-pill border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+        className="btn-pill inline-flex min-h-11 items-center border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted sm:min-h-0"
       >
         Загрузить историю заказов
       </button>
@@ -538,8 +708,12 @@ function MsBackfillBlock() {
 
 // ── МойСклад: подключение по токену API ──
 function MoySkladPanel() {
+  const confirm = useConfirm();
   const qc = useQueryClient();
   const status = useMsStatus();
+  // Канал панели (ChannelScope на /connect = канал источника). Мутации обязаны слать ЕГО явно:
+  // apiSend без opts падает на глобальный стор свитчера — отключение/бэкфилл ушли бы не туда.
+  const { channelId } = useSelectedChannel();
   const [token, setToken] = useState('');
   const [busy, setBusy] = useState(false);
   const [freshOrg, setFreshOrg] = useState<string | null>(null);
@@ -566,7 +740,7 @@ function MoySkladPanel() {
     try {
       // Токен уходит только на НАШ бэкенд (шифруется AES-256-GCM до записи) — в браузере,
       // логах и git он не живёт; в МойСклад ходит сервер.
-      const res = (await apiSend('POST', '/api/ms/connect', { token: value })) as { org_name?: string };
+      const res = await apiSend('POST', '/api/ms/connect', { token: value }, MsConnectSchema, { channelId });
       setFreshOrg(res?.org_name || 'организация');
       setToken('');
       toast('МойСклад подключён');
@@ -580,10 +754,18 @@ function MoySkladPanel() {
 
   const disconnect = async () => {
     if (busy) return;
+    // Отключение необратимо в том смысле, который важен пользователю: зашифрованный токен
+    // удаляется, и чтобы вернуться, надо снова идти за ним в кабинет МойСклада.
+    const ok = await confirm({
+      title: 'Отключить МойСклад?',
+      reason: 'Токен доступа будет удалён, сбор данных остановится. Уже загруженная история заказов сохранится, но для возобновления понадобится снова получить токен в кабинете МойСклада.',
+      actionLabel: 'Отключить',
+    });
+    if (!ok) return;
     setBusy(true);
     setError(null);
     try {
-      await apiSend('DELETE', '/api/ms/account');
+      await apiSend('DELETE', '/api/ms/account', undefined, MutationOkSchema, { channelId });
       setFreshOrg(null);
       toast('МойСклад отключён');
       await invalidateMs();
@@ -614,14 +796,15 @@ function MoySkladPanel() {
             </Button>
             <button
               type="button"
+              data-mobile-touch-target=""
               onClick={() => void disconnect()}
               disabled={busy}
-              className="btn-pill border border-border px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-destructive disabled:opacity-50"
+              className="btn-pill inline-flex min-h-11 items-center border border-border px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-destructive disabled:opacity-50 sm:min-h-0"
             >
               Отключить
             </button>
           </div>
-          {error && <p className="text-xs text-ember">{error}</p>}
+          {error && <p role="alert" className="text-xs text-ember">{error}</p>}
         </div>
       ) : (
         <div className="mt-4 space-y-4">
@@ -630,20 +813,25 @@ function MoySkladPanel() {
             откройте <b className="font-medium text-foreground">Настройки → Обмен данными → Токены API</b> и создайте токен.
           </p>
           <form onSubmit={submit} className="flex items-center gap-2">
+            <label htmlFor="moysklad-api-token" className="sr-only">Токен API МойСклада</label>
             <input
+              data-mobile-touch-target=""
+              id="moysklad-api-token"
               type="password"
               value={token}
               onChange={(e) => setToken(e.target.value)}
               placeholder="Токен API МойСклада"
               autoComplete="off"
-              className="h-9 min-w-0 flex-1 rounded border border-border bg-background px-3 text-sm text-foreground outline-hidden placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
+              aria-invalid={error ? true : undefined}
+              aria-describedby={error ? 'moysklad-api-token-help moysklad-api-token-error' : 'moysklad-api-token-help'}
+              className="h-11 min-w-0 flex-1 rounded border border-border bg-background px-3 text-sm text-foreground outline-hidden placeholder:text-muted-foreground focus:ring-1 focus:ring-primary sm:h-9"
             />
             <Button type="submit" disabled={!token.trim() || busy} className="shrink-0">
               {busy ? 'Проверяем…' : 'Подключить'}
             </Button>
           </form>
-          {error && <p className="text-xs text-ember">{error}</p>}
-          <p className="text-2xs text-muted-foreground">
+          {error && <p id="moysklad-api-token-error" role="alert" className="text-xs text-ember">{error}</p>}
+          <p id="moysklad-api-token-help" className="text-2xs text-muted-foreground">
             Токен хранится только на сервере в зашифрованном виде (AES-256-GCM) и не попадает в логи.
           </p>
         </div>
@@ -652,20 +840,544 @@ function MoySkladPanel() {
   );
 }
 
-// ── Яндекс.Метрика: подключение по OAuth-токену (+ выбор счётчика при нескольких) ──
-function MetrikaPanel() {
+// ── СДЭК Fulfillment: источник без API, наполняется загрузкой Excel ──
+// Здесь нет ни токена, ни OAuth: «подключить» тут означает завести источник, после чего в него
+// грузят выгрузки. Поэтому вместо поля секрета — имя, а вместо статуса связи — код склада и дата
+// последней загрузки: у ручного источника свежесть данных задаёт человек, а не фоновый сбор.
+function CdekPanel({ channelId }: { channelId: number | null }) {
+  const status = useCdekStatus(channelId);
+  const create = useCreateCdekSource();
+  const [name, setName] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const connected = channelId != null;
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (create.isPending) return;
+    setError(null);
+    try {
+      const res = await create.mutateAsync({ name: name.trim() || 'СДЭК' });
+      setName('');
+      toast(`Источник «${res.title ?? 'СДЭК'}» создан`);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Не удалось создать источник.');
+    }
+  };
+
+  return (
+    <div className="rounded-xl border border-border bg-card p-5 sm:p-6">
+      <PanelHead
+        id="cdek"
+        name="СДЭК"
+        pill={connected ? { label: 'Подключён', tone: 'ok' } : { label: 'Доступен', tone: 'go' }}
+      />
+      {connected ? (
+        <div className="mt-4 space-y-4">
+          <p className="text-sm text-muted-foreground">
+            {status.data?.warehouse_code
+              ? <>Склад <b className="font-medium text-foreground">{status.data.warehouse_code}</b>. </>
+              : 'Склад определится по первой выгрузке. '}
+            {status.data?.last_import?.created_at
+              ? `Последняя выгрузка загружена ${fmt.date(status.data.last_import.created_at)}.`
+              : 'Выгрузок пока не было — загрузите первую.'}
+          </p>
+          <Button asChild>
+            <Link to="/cdek">Открыть загрузки →</Link>
+          </Button>
+        </div>
+      ) : (
+        <div className="mt-4 space-y-4">
+          <p className="text-sm text-muted-foreground">
+            У СДЭК Fulfillment нет открытого API, поэтому заказы приезжают выгрузкой: в личном кабинете выгрузите
+            заказы за нужный период и загрузите файл сюда. Схема выгрузки известна — сопоставлять колонки руками не
+            придётся.
+          </p>
+          <form onSubmit={submit} className="flex items-center gap-2">
+            <label htmlFor="cdek-source-name" className="sr-only">Название источника</label>
+            <input
+              data-mobile-touch-target=""
+              id="cdek-source-name"
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Название источника — например, «Склад Москва»"
+              autoComplete="off"
+              aria-invalid={error ? true : undefined}
+              aria-describedby={error ? 'cdek-source-error' : undefined}
+              className="h-11 min-w-0 flex-1 rounded border border-border bg-background px-3 text-sm text-foreground outline-hidden placeholder:text-muted-foreground focus:ring-1 focus:ring-primary sm:h-9"
+            />
+            <Button type="submit" disabled={create.isPending} className="shrink-0">
+              {create.isPending ? 'Создаём…' : 'Создать источник'}
+            </Button>
+          </form>
+          {error && <p id="cdek-source-error" role="alert" className="text-xs text-ember">{error}</p>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Rusender: аккаунты email-рассылок (подключение по API-ключу) ──
+// Устройство как у Метрики: один аккаунт = один канал, сервер дедупит их по accountId, поэтому
+// панель — СПИСОК, а форма подключения доступна всегда, а не только пока пусто.
+
+/** Строка подключённого аккаунта: email из учётки, переход на его Обзор и отключение. */
+function RusenderAccountRow({
+  channelId,
+  title,
+  onChanged,
+  onReconnect,
+}: {
+  channelId: number;
+  title: string;
+  onChanged: () => Promise<unknown>;
+  /** Вернуть аккаунт В ЭТОТ канал: у него остался архив, ради которого «Отключить» его и щадит. */
+  onReconnect: (channelId: number) => void;
+}) {
+  const confirm = useConfirm();
+  const navigate = useNavigate();
+  const { setChannelId } = useSelectedChannel();
+  const status = useRusenderStatus(channelId);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const connected = status.data?.connected ?? false;
+  const name = status.data?.account_email ?? title;
+  const missing = status.data?.missing_scopes ?? [];
+
+  const disconnect = async () => {
+    if (busy) return;
+    const ok = await confirm({
+      title: `Отключить аккаунт «${name}»?`,
+      reason:
+        'Ключ будет удалён, сбор остановится. Уже загруженный архив рассылок и базы сохранится — источник останется в списке, и аккаунт можно будет подключить в него заново.',
+      actionLabel: 'Отключить',
+    });
+    if (!ok) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await apiSend('DELETE', '/api/rusender/account', undefined, MutationOkSchema, { channelId });
+      toast('Аккаунт отключён');
+      await onChanged();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Не удалось отключить аккаунт.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Переход обязан ПЕРЕКЛЮЧИТЬ источник, иначе «Открыть» у второго аккаунта привело бы на обзор
+  // первого: страница читает канал из свитчера, а не из ссылки (урок #539).
+  const open = () => {
+    setChannelId(channelId);
+    navigate('/rusender');
+  };
+
+  return (
+    <li className="flex min-h-11 flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-border px-3 py-2">
+      <span className="min-w-0 flex-1 truncate text-sm">
+        <span className="font-medium text-foreground">{name}</span>
+      </span>
+      {connected ? (
+        <span className="ml-auto flex shrink-0 items-center gap-1">
+          <Button type="button" variant="ghost" size="xs" onClick={open}>
+            Открыть
+          </Button>
+          <Button type="button" variant="ghost" size="xs" disabled={busy} onClick={() => void disconnect()}>
+            Отключить
+          </Button>
+        </span>
+      ) : (
+        <span className="ml-auto flex shrink-0 items-center gap-2">
+          <span className="text-xs text-muted-foreground">Аккаунт отключён, архив сохранён</span>
+          {/* «Подключить СНОВА», а не «Подключить»: рядом стоит кнопка формы с этим словом. */}
+          <Button type="button" variant="ghost" size="xs" onClick={() => onReconnect(channelId)}>
+            Подключить снова
+          </Button>
+        </span>
+      )}
+      {/* Разрешения могли отозвать уже ПОСЛЕ подключения — источник жив, но собирать ему нечем.
+          Молчать об этом значит оставить владельца наедине с пустеющим обзором. */}
+      {connected && missing.length > 0 && (
+        <p role="alert" className="w-full text-xs text-status-warn">
+          Ключу не хватает разрешений: {missing.join(', ')} — сбор не наполняется.
+        </p>
+      )}
+      {error && (
+        <p role="alert" className="w-full text-xs text-ember">
+          {error}
+        </p>
+      )}
+    </li>
+  );
+}
+
+function RusenderPanel({ channels }: { channels: Channel[] }) {
   const qc = useQueryClient();
-  const status = useYmStatus();
+  const [apiKey, setApiKey] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // Форма второго аккаунта открывается по кнопке: пока подключён хотя бы один, показывать поле
+  // ключа постоянно значит предлагать работу там, где её обычно нет.
+  const [adding, setAdding] = useState(false);
+  // Куда подключаем: null — «заведи новый канал», число — вернуть аккаунт в УЖЕ существующий
+  // источник (у него остался архив от прошлого подключения).
+  const [attachTo, setAttachTo] = useState<number | null>(null);
+  const connected = channels.length > 0;
+  const formOpen = !connected || adding;
+
+  const invalidateRusender = () =>
+    Promise.all([
+      qc.invalidateQueries({ queryKey: qk.channels }),
+      qc.invalidateQueries({ queryKey: rusenderKeys.all }),
+    ]);
+
+  const connect = async () => {
+    const value = apiKey.trim();
+    if (!value || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      // Ключ уходит только на НАШ бэкенд (шифруется AES-256-GCM до записи) — в браузере, логах и
+      // git он не живёт; в Rusender ходит сервер.
+      // channelId: null — «заведи новый канал под этот аккаунт». Явный null, а не пропуск: без
+      // него apiSend подставит канал свитчера, и аккаунт приклеился бы к чужому источнику.
+      const res = await apiSend(
+        'POST',
+        '/api/rusender/connect',
+        { api_key: value },
+        RusenderConnectSchema,
+        { channelId: attachTo },
+      );
+      setApiKey('');
+      setAdding(false);
+      setAttachTo(null);
+      toast(`Аккаунт «${res?.account_email || 'Rusender'}» подключён`);
+      await invalidateRusender();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Не удалось подключить Rusender.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    void connect();
+  };
+
+  return (
+    <div className="rounded-xl border border-border bg-card p-5 sm:p-6">
+      <PanelHead
+        id="rusender"
+        name="Rusender"
+        pill={connected ? { label: 'Подключён', tone: 'ok' } : { label: 'Доступен', tone: 'go' }}
+      />
+      <div className="mt-4 space-y-4">
+        {connected ? (
+          <ul className="space-y-2">
+            {channels.map((channel) => (
+              <RusenderAccountRow
+                key={channel.id}
+                channelId={channel.id}
+                title={channel.title ?? 'Аккаунт'}
+                onChanged={invalidateRusender}
+                onReconnect={(id) => {
+                  setAttachTo(id);
+                  setAdding(true);
+                  setError(null);
+                }}
+              />
+            ))}
+          </ul>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Rusender — сервис email-рассылок. Подключите аккаунт по API-ключу, и сюда приедут рассылки с их
+            открытиями и кликами, а также размер базы контактов.
+          </p>
+        )}
+
+        {connected && !formOpen && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              setAttachTo(null);
+              setAdding(true);
+            }}
+          >
+            Добавить аккаунт
+          </Button>
+        )}
+
+        {formOpen && (
+          <div className="space-y-3">
+            <form onSubmit={submit} className="flex items-center gap-2">
+              <label htmlFor="rusender-api-key" className="sr-only">
+                API-ключ Rusender
+              </label>
+              <input
+                data-mobile-touch-target=""
+                id="rusender-api-key"
+                // type=password: ключ — секрет, и он не должен светиться на экране при демонстрации
+                // или скриншоте. autoComplete=off — менеджеру паролей тут не место.
+                type="password"
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                placeholder="rs_ck_v1_…"
+                autoComplete="off"
+                spellCheck={false}
+                aria-invalid={error ? true : undefined}
+                aria-describedby={error ? 'rusender-api-key-error' : 'rusender-api-key-help'}
+                className="h-11 min-w-0 flex-1 rounded border border-border bg-background px-3 font-mono text-sm text-foreground outline-hidden placeholder:font-sans placeholder:text-muted-foreground focus:ring-1 focus:ring-primary sm:h-9"
+              />
+              <Button type="submit" disabled={busy || !apiKey.trim()} className="shrink-0">
+                {busy ? 'Проверяем…' : 'Подключить'}
+              </Button>
+              {connected && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="shrink-0"
+                  onClick={() => {
+                    setAdding(false);
+                    setAttachTo(null);
+                    setError(null);
+                  }}
+                >
+                  Отмена
+                </Button>
+              )}
+            </form>
+            {error && (
+              <p id="rusender-api-key-error" role="alert" className="text-xs text-ember">
+                {error}
+              </p>
+            )}
+            <p id="rusender-api-key-help" className="text-2xs text-muted-foreground">
+              Ключ создаётся в кабинете Rusender. Ему нужны разрешения <code className="font-mono">campaigns.read</code>{' '}
+              и <code className="font-mono">contacts.read</code> — без них подключение не пройдёт. Ключ хранится только
+              на сервере в зашифрованном виде (AES-256-GCM) и не попадает в логи.
+            </p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Яндекс.Метрика: счётчики (+ выбор счётчика при нескольких на токене) ──
+// У Метрики МНОЖЕСТВО источников: один счётчик = один канал, сервер дедупит их по counter_id.
+// Поэтому панель — список, а форма подключения доступна ВСЕГДА, а не только пока пусто.
+
+/** Строка подключённого счётчика: имя из учётки, переход на его Обзор и отключение. */
+function YmCounterRow({
+  channelId,
+  title,
+  onChanged,
+  onReconnect,
+}: {
+  channelId: number;
+  title: string;
+  onChanged: () => Promise<unknown>;
+  /** Вернуть счётчик В ЭТОТ канал: у него остался дневной архив, ради которого «Отключить» его и щадит. */
+  onReconnect: (channelId: number) => void;
+}) {
+  const confirm = useConfirm();
+  const navigate = useNavigate();
+  const { setChannelId } = useSelectedChannel();
+  const status = useYmStatus(channelId);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const connected = status.data?.connected ?? false;
+  const name = status.data?.counter_name ?? status.data?.site ?? title;
+
+  const disconnect = async () => {
+    if (busy) return;
+    const ok = await confirm({
+      title: `Отключить счётчик «${name}»?`,
+      reason: 'OAuth-доступ к этому счётчику будет отозван, сбор остановится. Уже загруженный дневной архив сохранится — источник останется в списке, и счётчик можно будет подключить в него заново.',
+      actionLabel: 'Отключить',
+    });
+    if (!ok) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await apiSend('DELETE', '/api/ym/account', undefined, MutationOkSchema, { channelId });
+      toast('Счётчик отключён');
+      await onChanged();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Не удалось отключить счётчик.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Переход обязан ПЕРЕКЛЮЧИТЬ источник, иначе «Открыть» у второго счётчика привело бы на обзор
+  // первого: страница читает канал из свитчера, а не из ссылки.
+  const open = () => {
+    setChannelId(channelId);
+    navigate('/metrika');
+  };
+
+  return (
+    <li className="flex min-h-11 flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-border px-3 py-2">
+      <span className="min-w-0 flex-1 truncate text-sm">
+        <span className="font-medium text-foreground">{name}</span>
+        {status.data?.site && status.data.site !== name && (
+          <span className="text-muted-foreground"> · {status.data.site}</span>
+        )}
+      </span>
+      {connected ? (
+        <span className="ml-auto flex shrink-0 items-center gap-1">
+          <Button type="button" variant="ghost" size="xs" onClick={open}>
+            Открыть
+          </Button>
+          <Button type="button" variant="ghost" size="xs" disabled={busy} onClick={() => void disconnect()}>
+            Отключить
+          </Button>
+        </span>
+      ) : (
+        <span className="ml-auto flex shrink-0 items-center gap-2">
+          <span className="text-xs text-muted-foreground">Счётчик отключён, архив сохранён</span>
+          {/* «Подключить СНОВА», а не «Подключить»: рядом на том же экране стоит кнопка формы с
+              этим словом, и два одинаковых действия читались бы как одно. */}
+          <Button type="button" variant="ghost" size="xs" onClick={() => onReconnect(channelId)}>
+            Подключить снова
+          </Button>
+        </span>
+      )}
+      {error && (
+        <p role="alert" className="w-full text-xs text-ember">
+          {error}
+        </p>
+      )}
+    </li>
+  );
+}
+
+/**
+ * «Где взять токен» — инструкция ВНУТРИ панели, а не ссылка «читайте документацию». Раньше здесь
+ * стояла одна фраза «выпустить его можно на oauth.yandex.ru для своего приложения»: она называет
+ * место, но не говорит ни какое право отметить, ни какой Redirect URI вписать, ни где в итоге
+ * искать сам токен — а без любого из трёх шаг не проходится.
+ *
+ * Последний шаг собирает ссылку выдачи ЗА человека: адрес авторизации отличается от обычного
+ * только идентификатором приложения, и склеивать его руками в адресной строке — ровно то место,
+ * где инструкции обычно и рвутся.
+ */
+function YmTokenGuide({ open }: { open: boolean }) {
+  const [clientId, setClientId] = useState('');
+  const id = clientId.trim();
+  // ClientID Яндекса — 32 шестнадцатеричных знака. Проверяем форму, чтобы не звать человека по
+  // заведомо битой ссылке (Яндекс ответит «unknown client», и он решит, что ошибся правами).
+  const ready = /^[0-9a-fA-F]{32}$/.test(id);
+  const authUrl = `https://oauth.yandex.ru/authorize?response_type=token&client_id=${id}`;
+  return (
+    <details open={open} className="group rounded-lg border border-border bg-muted/30">
+      <summary
+        data-mobile-touch-target=""
+        className="flex min-h-11 cursor-pointer list-none items-center gap-2 px-3 py-2 text-sm font-medium text-foreground [&::-webkit-details-marker]:hidden sm:min-h-0"
+      >
+        <svg
+          viewBox="0 0 16 16"
+          className="size-3.5 shrink-0 text-muted-foreground transition-transform group-open:rotate-90"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          aria-hidden="true"
+        >
+          <path d="M6 4l4 4-4 4" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+        Где взять токен — три минуты
+      </summary>
+      <ol className="list-decimal space-y-3 py-1 pl-8 pr-3 text-sm leading-relaxed text-muted-foreground marker:font-medium marker:text-foreground">
+        <li>
+          <span className="font-medium text-foreground">Создайте приложение.</span> На Яндекс OAuth выберите
+          вариант «Для API-доступа или отладки». Название любое — оно нужно только вам.
+          <div className="mt-2">
+            <Button asChild variant="outline" size="sm">
+              <a href="https://oauth.yandex.ru/?dialog=create-client-entry" target="_blank" rel="noreferrer noopener">
+                Открыть Яндекс OAuth ↗
+              </a>
+            </Button>
+          </div>
+        </li>
+        <li>
+          <span className="font-medium text-foreground">Отметьте одно право:</span> <Code>metrika:read</Code> —
+          «Получение статистики, данных о параметрах своих счётчиков». Право на запись не нужно: Atlavue только
+          читает.
+        </li>
+        <li>
+          <span className="font-medium text-foreground">В поле «Redirect URI» вставьте этот адрес.</span> Он
+          служебный: на него Яндекс вернёт готовый токен.
+          <Snippet className="mt-2" value="https://oauth.yandex.ru/verification_code" />
+        </li>
+        <li>
+          <span className="font-medium text-foreground">Выпустите токен.</span> Скопируйте ClientID созданного
+          приложения сюда — соберём ссылку за вас:
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <label htmlFor="yandex-client-id" className="sr-only">ClientID приложения Яндекса</label>
+            <input
+              data-mobile-touch-target=""
+              id="yandex-client-id"
+              type="text"
+              value={clientId}
+              onChange={(e) => setClientId(e.target.value)}
+              placeholder="ClientID — 32 знака"
+              autoComplete="off"
+              spellCheck={false}
+              // На телефоне поле занимает СВОЮ строку, а кнопка переносится под него: рядом с
+              // широкой кнопкой на 430px в поле оставалось ~90px — в ClientID из 32 знаков виден
+              // огрызок, и проверить вставленное нечем.
+              className="h-11 w-full min-w-0 rounded border border-border bg-background px-3 font-mono text-xs text-foreground outline-hidden placeholder:font-sans placeholder:text-muted-foreground focus:ring-1 focus:ring-primary sm:h-9 sm:w-auto sm:flex-1"
+            />
+            {ready ? (
+              <Button asChild size="sm" className="shrink-0">
+                <a href={authUrl} target="_blank" rel="noreferrer noopener">
+                  Открыть страницу выдачи ↗
+                </a>
+              </Button>
+            ) : (
+              <Button size="sm" className="shrink-0" disabled>
+                Открыть страницу выдачи ↗
+              </Button>
+            )}
+          </div>
+          <p className="mt-2">
+            Открывайте под тем аккаунтом Яндекса, у которого есть доступ к счётчику. Нажмите «Разрешить» — токен
+            появится в адресной строке после <Code>#access_token=</Code>.
+          </p>
+        </li>
+        <li>
+          <span className="font-medium text-foreground">Вставьте токен в поле ниже</span> — и всё, счётчик
+          подключён. Токен живёт около года; когда истечёт, повторите четвёртый шаг и нажмите «Подключить снова» у
+          нужного счётчика — он вернётся в свой источник вместе с архивом.
+        </li>
+      </ol>
+    </details>
+  );
+}
+
+function MetrikaPanel({ channels }: { channels: Channel[] }) {
+  const qc = useQueryClient();
   const [token, setToken] = useState('');
   const [busy, setBusy] = useState(false);
-  const [freshName, setFreshName] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Форма второго счётчика открывается по кнопке: пока подключён хотя бы один, показывать поле
+  // токена постоянно значит предлагать работу там, где её обычно нет.
+  const [adding, setAdding] = useState(false);
+  // Куда подключаем: null — «заведи новый канал», число — вернуть счётчик в УЖЕ существующий
+  // источник (у него остался дневной архив от прошлого подключения).
+  const [attachTo, setAttachTo] = useState<number | null>(null);
   // Несколько счётчиков на аккаунте: сервер отвечает choice_required + список (id/имя/сайт —
   // не секреты), клиент повторяет connect с выбранным counter_id. Токен остаётся в памяти
   // формы между шагами и уходит только на НАШ бэкенд.
   const [counters, setCounters] = useState<Array<{ id: string; name: string | null; site: string | null }> | null>(null);
-  const connected = freshName != null || (status.data?.connected ?? false);
-  const counterName = freshName ?? status.data?.counter_name ?? status.data?.site ?? 'счётчик';
+  const connected = channels.length > 0;
+  const formOpen = !connected || adding;
 
   // ВСЕ семьи Метрики, а не три: разрезы кэшируются на 5 минут, и после смены счётчика
   // четырнадцать неинвалидированных карточек продолжали бы показывать данные ПРЕДЫДУЩЕГО
@@ -684,20 +1396,24 @@ function MetrikaPanel() {
     try {
       // Токен уходит только на НАШ бэкенд (шифруется AES-256-GCM до записи) — в браузере,
       // логах и git он не живёт; в Яндекс ходит сервер.
-      const res = (await apiSend('POST', '/api/ym/connect', counterId ? { token: value, counter_id: counterId } : { token: value })) as {
-        choice_required?: boolean;
-        counters?: Array<{ id: string; name: string | null; site: string | null }>;
-        counter_name?: string | null;
-        site?: string | null;
-      };
+      // channelId: null — «заведи новый канал под этот счётчик». Явный null, а не пропуск:
+      // без него apiSend подставит канал свитчера, и счётчик приклеился бы к чужому источнику.
+      const res = await apiSend(
+        'POST',
+        '/api/ym/connect',
+        counterId ? { token: value, counter_id: counterId } : { token: value },
+        YmConnectSchema,
+        { channelId: attachTo },
+      );
       if (res?.choice_required) {
         setCounters(Array.isArray(res.counters) ? res.counters : []);
         return;
       }
-      setFreshName(res?.counter_name || res?.site || 'счётчик');
       setToken('');
       setCounters(null);
-      toast('Метрика подключена');
+      setAdding(false);
+      setAttachTo(null);
+      toast(`Счётчик «${res?.counter_name || res?.site || 'Метрика'}» подключён`);
       await invalidateYm();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Не удалось подключить Яндекс.Метрику.');
@@ -711,22 +1427,6 @@ function MetrikaPanel() {
     void connect();
   };
 
-  const disconnect = async () => {
-    if (busy) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await apiSend('DELETE', '/api/ym/account');
-      setFreshName(null);
-      toast('Метрика отключена');
-      await invalidateYm();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Не удалось отключить источник.');
-    } finally {
-      setBusy(false);
-    }
-  };
-
   return (
     <div className="rounded-xl border border-border bg-card p-5 sm:p-6">
       <PanelHead
@@ -734,83 +1434,122 @@ function MetrikaPanel() {
         name="Яндекс.Метрика"
         pill={connected ? { label: 'Подключена', tone: 'ok' } : { label: 'Доступна', tone: 'go' }}
       />
-      {connected ? (
-        <div className="mt-4 space-y-4">
-          <p className="text-sm text-muted-foreground">
-            Подключён счётчик <b className="font-medium text-foreground">{counterName}</b>. Визиты, посетители и
-            источники трафика уже считаются; дневной архив (включая историю счётчика) пополняется автоматически.
+      <div className="mt-4 space-y-4">
+        {connected ? (
+          <ul className="space-y-2">
+            {channels.map((channel) => (
+              <YmCounterRow
+                key={channel.id}
+                channelId={channel.id}
+                title={channel.title ?? 'Счётчик'}
+                onChanged={invalidateYm}
+                onReconnect={(id) => {
+                  setAttachTo(id);
+                  setAdding(true);
+                  setError(null);
+                }}
+              />
+            ))}
+          </ul>
+        ) : (
+          <p className="text-sm leading-relaxed text-muted-foreground">
+            Трафик сайта встанет рядом с аналитикой каналов: визиты, посетители, источники и цели — в тех же
+            карточках и за тот же период. Нужен один OAuth-токен Яндекса; ниже по шагам, как его выпустить.
           </p>
-          <div className="flex flex-wrap items-center gap-3">
-            <Button asChild>
-              <Link to="/metrika">Открыть Обзор Метрики →</Link>
-            </Button>
-            <button
-              type="button"
-              onClick={() => void disconnect()}
-              disabled={busy}
-              className="btn-pill border border-border px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-destructive disabled:opacity-50"
-            >
-              Отключить
-            </button>
-          </div>
-          {error && <p className="text-xs text-ember">{error}</p>}
-        </div>
-      ) : (
-        <div className="mt-4 space-y-4">
-          <p className="text-sm text-muted-foreground">
-            Трафик сайта из Яндекс.Метрики — рядом с аналитикой каналов. Понадобится OAuth-токен Яндекса с
-            доступом к Метрике (право <b className="font-medium text-foreground">metrika:read</b>); выпустить его
-            можно на oauth.yandex.ru для своего приложения.
-          </p>
-          <form onSubmit={submit} className="flex items-center gap-2">
-            <input
-              type="password"
-              value={token}
-              onChange={(e) => {
-                setToken(e.target.value);
-                setCounters(null);
-              }}
-              placeholder="OAuth-токен Яндекса"
-              autoComplete="off"
-              className="h-9 min-w-0 flex-1 rounded border border-border bg-background px-3 text-sm text-foreground outline-hidden placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
-            />
-            <Button type="submit" disabled={!token.trim() || busy} className="shrink-0">
-              {busy ? 'Проверяем…' : 'Подключить'}
-            </Button>
-          </form>
-          {counters && (
-            <div className="space-y-2">
-              <p className="text-xs text-muted-foreground">
-                {counters.length
-                  ? 'На аккаунте несколько счётчиков — выберите, какой подключить:'
-                  : 'На аккаунте не нашлось счётчиков Метрики.'}
+        )}
+
+        {connected && !formOpen && (
+          <Button type="button" variant="outline" size="sm" onClick={() => setAdding(true)}>
+            Добавить счётчик
+          </Button>
+        )}
+
+        {formOpen && (
+          <div className="space-y-4">
+            {connected && (
+              <p className="text-sm leading-relaxed text-muted-foreground">
+                {attachTo != null
+                  ? 'Счётчик вернётся в этот же источник — вместе с уже загруженным дневным архивом.'
+                  : 'Второй счётчик встанет отдельным источником — его видно в переключателе рядом с первым. Токен подойдёт тот же, если счётчики на одном аккаунте Яндекса: дальше спросим, какой подключить. Если аккаунты разные — выпустите второй токен по шагам ниже.'}
               </p>
-              {counters.map((c) => (
-                <button
-                  key={c.id}
+            )}
+            <YmTokenGuide open={!connected} />
+            <form onSubmit={submit} className="flex items-center gap-2">
+              <label htmlFor="yandex-metrika-token" className="sr-only">OAuth-токен Яндекса</label>
+              <input
+                data-mobile-touch-target=""
+                id="yandex-metrika-token"
+                type="password"
+                value={token}
+                onChange={(e) => {
+                  setToken(e.target.value);
+                  setCounters(null);
+                }}
+                placeholder="OAuth-токен Яндекса"
+                autoComplete="off"
+                aria-invalid={error ? true : undefined}
+                aria-describedby={error ? 'yandex-metrika-token-help yandex-metrika-token-error' : 'yandex-metrika-token-help'}
+                className="h-11 min-w-0 flex-1 rounded border border-border bg-background px-3 text-sm text-foreground outline-hidden placeholder:text-muted-foreground focus:ring-1 focus:ring-primary sm:h-9"
+              />
+              <Button type="submit" disabled={!token.trim() || busy} className="shrink-0">
+                {busy ? 'Проверяем…' : 'Подключить'}
+              </Button>
+              {connected && (
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="shrink-0"
                   disabled={busy}
-                  onClick={() => void connect(c.id)}
-                  className="flex w-full items-baseline justify-between gap-3 rounded-lg border border-border px-3 py-2 text-left text-sm transition-colors hover:border-primary/60 hover:bg-muted disabled:pointer-events-none disabled:opacity-50"
+                  onClick={() => {
+                    setAdding(false);
+                    setAttachTo(null);
+                    setToken('');
+                    setCounters(null);
+                    setError(null);
+                  }}
                 >
-                  <span className="min-w-0 truncate font-medium text-foreground">{c.name ?? c.site ?? `Счётчик ${c.id}`}</span>
-                  <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{c.site ?? c.id}</span>
-                </button>
-              ))}
-            </div>
-          )}
-          {error && <p className="text-xs text-ember">{error}</p>}
-          <p className="text-2xs text-muted-foreground">
-            Токен хранится только на сервере в зашифрованном виде (AES-256-GCM) и не попадает в логи.
-          </p>
-        </div>
-      )}
+                  Отмена
+                </Button>
+              )}
+            </form>
+            {counters && (
+              <div className="space-y-2">
+                <p className="text-xs text-muted-foreground">
+                  {counters.length
+                    ? 'На аккаунте несколько счётчиков — выберите, какой подключить:'
+                    : 'На аккаунте не нашлось счётчиков Метрики.'}
+                </p>
+                {counters.map((c) => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    data-mobile-touch-target=""
+                    disabled={busy}
+                    onClick={() => void connect(c.id)}
+                    className="flex min-h-11 w-full items-center justify-between gap-3 rounded-lg border border-border px-3 py-2 text-left text-sm transition-colors hover:border-primary/60 hover:bg-muted disabled:pointer-events-none disabled:opacity-50 sm:min-h-0 sm:items-baseline"
+                  >
+                    <span className="min-w-0 truncate font-medium text-foreground">{c.name ?? c.site ?? `Счётчик ${c.id}`}</span>
+                    <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{c.site ?? c.id}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            <p id="yandex-metrika-token-help" className="text-2xs leading-relaxed text-muted-foreground">
+              Токен уходит только на наш сервер: там он шифруется (AES-256-GCM), в логи и в браузер не попадает, а
+              в Яндекс за данными ходит сервер. Отозвать доступ можно в любой момент — кнопкой «Отключить».
+            </p>
+          </div>
+        )}
+        {error && <p id="yandex-metrika-token-error" role="alert" className="text-xs text-ember">{error}</p>}
+      </div>
     </div>
   );
 }
 
 // ── Instagram: real OAuth ──
 function InstagramPanel() {
+  const confirm = useConfirm();
   const { channelId } = useSelectedChannel();
   const status = useIgOauthStatus();
   const connect = useConnectIg();
@@ -822,13 +1561,24 @@ function InstagramPanel() {
   const serverReady = status.data?.server_ready ?? false;
   const notReady = status.isSuccess && !serverReady;
   const connectError = connect.error instanceof Error ? connect.error.message : null;
+  // Доступ Instagram живёт 60 дней. Пока пилюля смотрела только на наличие строки в БД, панель
+  // говорила «Подключён» об аккаунте, который уже неделю не отдаёт ни одного числа.
+  const needsReconnect = status.data?.token_state === 'expired';
 
   return (
     <div className="rounded-xl border border-border bg-card p-5 sm:p-6">
       <PanelHead
         id="instagram"
         name="Instagram"
-        pill={connected ? { label: 'Подключён', tone: 'ok' } : envAccount ? { label: 'Общий аккаунт', tone: 'ok' } : { label: 'Доступен', tone: 'go' }}
+        pill={
+          needsReconnect
+            ? { label: 'Переподключить', tone: 'warn' }
+            : connected
+              ? { label: 'Подключён', tone: 'ok' }
+              : envAccount
+                ? { label: 'Общий аккаунт', tone: 'ok' }
+                : { label: 'Доступен', tone: 'go' }
+        }
       />
 
       {channelId == null ? (
@@ -836,27 +1586,59 @@ function InstagramPanel() {
       ) : connected ? (
         <div className="mt-4 space-y-4">
           <p className="text-sm text-muted-foreground">
-            Подключён бизнес-аккаунт <span className="font-mono text-foreground">@{status.data?.username}</span>. Реальные охваты,
-            аудитория и публикации этого канала идут из Instagram.
+            {needsReconnect ? (
+              <>
+                Доступ к бизнес-аккаунту <span className="font-mono text-foreground">@{status.data?.username}</span> истёк:
+                Instagram выдаёт его на 60 дней. Ранее собранные дни на месте, новые не приходят — переподключите аккаунт.
+              </>
+            ) : (
+              <>
+                Подключён бизнес-аккаунт <span className="font-mono text-foreground">@{status.data?.username}</span>. Реальные охваты,
+                аудитория и публикации этого канала идут из Instagram.
+              </>
+            )}
           </p>
           <div className="flex flex-wrap items-center gap-2">
+            {serverReady && needsReconnect && (
+              <Button
+                type="button"
+                onClick={() => connect.mutate()}
+                pending={connect.isPending}
+                disabled={connect.isPending}
+              >
+                {connect.isPending ? 'Открытие Instagram…' : 'Переподключить'}
+              </Button>
+            )}
             {serverReady && (
               <Button
                 type="button"
+                variant={needsReconnect ? 'secondary' : 'default'}
                 onClick={() => connect.mutate({ newSource: true })}
+                pending={connect.isPending}
                 disabled={connect.isPending}
               >
                 {connect.isPending ? 'Открытие Instagram…' : 'Подключить ещё один аккаунт'}
               </Button>
             )}
-            <button
+            <Button
               type="button"
-              onClick={() => disconnect.mutate(undefined, { onSuccess: () => toast('Instagram отключён') })}
+              variant="secondary"
+              onClick={() => {
+                void (async () => {
+                  const ok = await confirm({
+                    title: 'Отключить Instagram?',
+                    reason: 'OAuth-доступ к аккаунту будет отозван, сбор остановится. Уже загруженная история сохранится, но для возобновления понадобится заново пройти авторизацию Instagram.',
+                    actionLabel: 'Отключить',
+                  });
+                  if (ok) disconnect.mutate(undefined, { onSuccess: () => toast('Instagram отключён') });
+                })();
+              }}
+              pending={disconnect.isPending}
               disabled={disconnect.isPending}
-              className="btn-pill border border-border px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-destructive disabled:opacity-50"
+              className="text-muted-foreground hover:text-destructive"
             >
               {disconnect.isPending ? 'Отключение…' : 'Отключить'}
-            </button>
+            </Button>
           </div>
           {serverReady && (
             <p className="text-xs leading-relaxed text-muted-foreground">
@@ -885,6 +1667,7 @@ function InstagramPanel() {
               <Button
                 type="button"
                 onClick={() => connect.mutate()}
+                pending={connect.isPending}
                 disabled={connect.isPending}
                 size="lg"
                 className="px-5"
@@ -904,6 +1687,7 @@ function InstagramPanel() {
           <Button
             type="button"
             onClick={() => connect.mutate()}
+            pending={connect.isPending}
             disabled={connect.isPending || notReady}
             size="lg"
             className="px-5"
@@ -988,6 +1772,7 @@ function TelegramPanel({
   queryTab?: 'qr' | 'agent' | null;
   reconnectRequested?: boolean;
 }) {
+  const confirm = useConfirm();
   const qc = useQueryClient();
   // Shared status (same ['tg-qr-status'] cache the Overview banner reads). The live login flow below
   // keeps LOCAL state (phase/qrImg/captured channels) — a scan-in-progress overrides the shared
@@ -1036,7 +1821,11 @@ function TelegramPanel({
     if (pollRef.current) { window.clearTimeout(pollRef.current); pollRef.current = null; }
   };
 
-  const refreshStatus = () => qc.invalidateQueries({ queryKey: qk.tgQrStatus });
+  const refreshStatus = () =>
+    Promise.all([
+      qc.invalidateQueries({ queryKey: qk.tgQrStatus }),
+      qc.invalidateQueries({ queryKey: qk.channels }),
+    ]);
 
   const onConnected = (username: string | null, chans: QrChannel[]) => {
     stopPoll();
@@ -1149,6 +1938,17 @@ function TelegramPanel({
   };
 
   const disconnect = async () => {
+    // Самое дорогое отключение в продукте: managed QR-сессия ОБЩАЯ для всех каналов владельца,
+    // и её нельзя восстановить — только войти заново по QR с телефона. Поэтому здесь не просто
+    // подтверждение, а type-to-confirm (тот же приём, что у удаления канала).
+    const ok = await confirm({
+      title: 'Отключить Telegram?',
+      reason: 'Сессия будет удалена, и сбор остановится СРАЗУ ПО ВСЕМ каналам этого подключения. Восстановить её нельзя — понадобится заново войти по QR-коду с телефона. Каналы и уже собранная история сохранятся.',
+      actionLabel: 'Отключить Telegram',
+      typeToConfirm: 'Telegram',
+      typeToConfirmLabel: 'Введите «Telegram», чтобы подтвердить',
+    });
+    if (!ok) return;
     setBusy(true);
     // Тост — только при удачном DELETE; провал молча игнорируется (сессия и так мертва), не тостить.
     try {
@@ -1243,9 +2043,10 @@ function TgTab({ active, onClick, children }: { active: boolean; onClick: () => 
   return (
     <button
       type="button"
+      data-mobile-touch-target=""
       onClick={onClick}
       aria-pressed={active}
-      className={cn('relative px-3 py-2 text-sm font-medium transition-colors', active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground')}
+      className={cn('relative min-h-11 px-3 py-2 text-sm font-medium transition-colors sm:min-h-0', active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground')}
     >
       {children}
       {active && <span aria-hidden="true" className="absolute inset-x-0 -bottom-px h-0.5 bg-primary" />}
@@ -1273,17 +2074,23 @@ function TgScanning({
   if (phase === 'password') {
     return (
       <div className="mx-auto w-full max-w-xs">
-        <p className="text-sm text-muted-foreground">У аккаунта включена двухфакторная защита. Введите облачный пароль Telegram:</p>
+        <label htmlFor="telegram-cloud-password" className="block text-sm text-muted-foreground">
+          У аккаунта включена двухфакторная защита. Введите облачный пароль Telegram:
+        </label>
         <input
+          data-mobile-touch-target=""
+          id="telegram-cloud-password"
           type="password"
-          autoFocus
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') onSubmit(); }}
           placeholder="Облачный пароль"
-          className="mt-3 w-full rounded border border-border bg-background px-3 py-2 text-sm text-foreground outline-hidden focus:ring-1 focus:ring-primary"
+          autoComplete="off"
+          aria-invalid={err ? true : undefined}
+          aria-describedby={err ? 'telegram-cloud-password-error' : undefined}
+          className="mt-3 min-h-11 w-full rounded border border-border bg-background px-3 py-2 text-sm text-foreground outline-hidden focus:ring-1 focus:ring-primary sm:min-h-0"
         />
-        {err && <p role="alert" className="mt-2 text-xs font-medium text-destructive">{err}</p>}
+        {err && <p id="telegram-cloud-password-error" role="alert" className="mt-2 text-xs font-medium text-destructive">{err}</p>}
         <Button type="button" onClick={onSubmit} disabled={busy || !password} className="mt-3">
           {busy ? 'Проверка…' : 'Подтвердить'}
         </Button>
@@ -1296,7 +2103,7 @@ function TgScanning({
         {img ? <img src={img} alt="QR-код для входа в Telegram" className="h-52 w-52" /> : <div className="h-52 w-52" />}
       </div>
       <p className="mt-4 max-w-sm text-sm text-muted-foreground">
-        В Telegram: <b className="text-foreground">Настройки → Устройства → Подключить устройство</b> — наведите камеру на код. Он обновляется автоматически.
+        В Telegram: <b className="font-medium text-foreground">Настройки → Устройства → Подключить устройство</b> — наведите камеру на код. Он обновляется автоматически.
       </p>
       {err && <p role="alert" className="mt-2 text-xs font-medium text-destructive">{err}</p>}
     </div>
@@ -1416,7 +2223,7 @@ function TgConnected({ username, channels, onDisconnect, busy }: { username: str
               const disabled = added || !eligible;
               return (
                 <li key={c.id}>
-                  <label className={cn('flex items-center gap-2.5 rounded px-2 py-1.5 text-sm transition-colors',
+                  <label data-mobile-touch-target="" className={cn('flex min-h-11 items-center gap-2.5 rounded px-2 py-1.5 text-sm transition-colors sm:min-h-0',
                     disabled ? 'cursor-default text-muted-foreground' : 'cursor-pointer text-foreground hover:bg-muted/40')}>
                     <input
                       type="checkbox"
@@ -1428,7 +2235,7 @@ function TgConnected({ username, channels, onDisconnect, busy }: { username: str
                     <span className="min-w-0 flex-1 truncate">
                       {c.title || '(без названия)'}
                       {c.username ? <span className="font-mono text-muted-foreground"> · @{c.username}</span> : null}
-                      {typeof c.participants === 'number' ? <span className="text-muted-foreground"> · {c.participants.toLocaleString('ru-RU')}</span> : null}
+                      {typeof c.participants === 'number' ? <span className="text-muted-foreground"> · {fmt.num(c.participants)}</span> : null}
                     </span>
                     {added ? <span className="shrink-0 text-2xs text-verdant">в дашборде</span>
                       : !eligible ? <span className="shrink-0 text-2xs text-muted-foreground">группа</span> : null}
@@ -1459,9 +2266,10 @@ function TgConnected({ username, channels, onDisconnect, busy }: { username: str
       </p>
       <button
         type="button"
+        data-mobile-touch-target=""
         onClick={onDisconnect}
         disabled={busy}
-        className="btn-pill mt-4 border border-border px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-destructive disabled:opacity-50"
+        className="btn-pill mt-4 inline-flex min-h-11 items-center border border-border px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-destructive disabled:opacity-50 sm:min-h-0"
       >
         {busy ? 'Отключение…' : 'Отключить'}
       </button>
@@ -1493,10 +2301,8 @@ function CollectorGuide({ channelName }: { channelName: string | null }) {
   const createKey = useCreateKey(channelId ?? 0);
   const [oneTimeKey, setOneTimeKey] = useState<string | null>(null);
   const [keyErr, setKeyErr] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
   const handleCreateKey = async () => {
     setKeyErr(null);
-    setCopied(false);
     try {
       const res = await createKey.mutateAsync({ label: 'локальный коллектор' });
       if (res.key) setOneTimeKey(res.key);
@@ -1504,13 +2310,6 @@ function CollectorGuide({ channelName }: { channelName: string | null }) {
       setKeyErr(error instanceof ApiError ? error.message : 'Не удалось сгенерировать ключ — попробуйте ещё раз');
     }
   };
-  const copyKey = (txt: string) => {
-    navigator.clipboard.writeText(txt).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
-  };
-
   // Шаг 5 — живая проверка: поллим collector-status, пока шаг открыт.
   const onCheckStep = step === WIZARD_STEPS.length;
   const statusQ = useCollectorStatus(onCheckStep ? channelId : null);
@@ -1554,11 +2353,12 @@ function CollectorGuide({ channelName }: { channelName: string | null }) {
             <li key={label} className={cn('flex items-center gap-1', n < WIZARD_STEPS.length && 'flex-1')}>
               <button
                 type="button"
+                data-mobile-touch-target=""
                 onClick={() => reachable && setStep(n)}
                 disabled={!reachable}
                 aria-current={active ? 'step' : undefined}
                 className={cn(
-                  'flex items-center gap-1.5 rounded-full py-0.5 pl-0.5 pr-2 text-2xs font-medium transition-colors',
+                  'flex min-h-11 min-w-11 items-center gap-1.5 rounded-full py-0.5 pl-0.5 pr-2 text-2xs font-medium transition-colors sm:min-h-0 sm:min-w-0',
                   active ? 'text-foreground' : 'text-muted-foreground',
                   reachable && !active && 'hover:text-foreground',
                   !reachable && 'pointer-events-none',
@@ -1567,7 +2367,7 @@ function CollectorGuide({ channelName }: { channelName: string | null }) {
                 <span
                   className={cn(
                     'flex size-5 shrink-0 items-center justify-center rounded-full text-2xs font-medium',
-                    active ? 'bg-primary text-primary-foreground' : done ? 'bg-primary/15 text-primary' : 'bg-muted text-muted-foreground',
+                    active ? 'bg-primary text-primary-foreground' : done ? 'bg-primary/15 text-accent-foreground' : 'bg-muted text-muted-foreground',
                   )}
                 >
                   {done ? (
@@ -1606,6 +2406,7 @@ function CollectorGuide({ channelName }: { channelName: string | null }) {
                   <Button
                     type="button"
                     onClick={handleCreateKey}
+                    pending={createKey.isPending}
                     disabled={createKey.isPending}
                     size="sm"
                     className="px-4 text-sm"
@@ -1615,19 +2416,11 @@ function CollectorGuide({ channelName }: { channelName: string | null }) {
                 )}
                 {keyErr && <p role="alert" className="text-xs text-destructive">{keyErr}</p>}
                 {oneTimeKey && (
-                  <div role="status" className="space-y-2 rounded border border-status-warn/40 bg-background p-3">
-                    <p className="text-xs font-medium text-status-warn">Скопируйте сейчас — повторно ключ не показывается.</p>
-                    <div className="flex items-center gap-2">
-                      <code className="min-w-0 flex-1 truncate rounded bg-muted px-2 py-1.5 font-mono text-xs">{oneTimeKey}</code>
-                      <button
-                        type="button"
-                        onClick={() => copyKey(oneTimeKey)}
-                        className="btn-pill shrink-0 border border-border px-3 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                      >
-                        {copied ? 'Скопировано' : 'Копировать'}
-                      </button>
-                    </div>
-                  </div>
+                  <Snippet
+                    value={oneTimeKey}
+                    label="Скопируйте сейчас — повторно ключ не показывается."
+                    tone="warn"
+                  />
                 )}
               </div>
             )}
@@ -1698,7 +2491,8 @@ python collector/pulse_collector.py run      # дальше каждые 6 ч`}<
                 </>
               ) : (
                 <>
-                  <span aria-hidden="true" className="size-3 shrink-0 animate-pulse rounded-full bg-status-warn/70" />
+                  {/* Канон-лоадер (полировка 2026-07-28): стаггер-точки вместо одиночного пульса. */}
+                  <LoaderDots className="shrink-0 text-status-warn" />
                   <span>Ждём первый прогон агента… страница проверяет связь каждые 5 секунд.</span>
                 </>
               )}
@@ -1711,9 +2505,10 @@ python collector/pulse_collector.py run      # дальше каждые 6 ч`}<
       <div className="mt-3 flex items-center justify-between">
         <button
           type="button"
+          data-mobile-touch-target=""
           onClick={() => step > 1 && setStep(step - 1)}
           disabled={step === 1}
-          className="btn-pill border border-border px-3.5 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+          className="btn-pill inline-flex min-h-11 items-center border border-border px-3.5 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50 sm:min-h-0"
         >
           Назад
         </button>
@@ -1751,8 +2546,9 @@ function SoonPanel({ name, glyph, note }: { name: string; glyph: ServiceId; note
       <p className="mt-4 text-sm leading-relaxed text-muted-foreground">{note}</p>
       <button
         type="button"
+        data-mobile-touch-target=""
         disabled
-        className="btn-pill mt-5 border border-border px-4 py-2 text-sm font-medium text-muted-foreground opacity-60"
+        className="btn-pill mt-5 inline-flex min-h-11 items-center border border-border px-4 py-2 text-sm font-medium text-muted-foreground opacity-60 sm:min-h-0"
       >
         В дорожной карте
       </button>
@@ -1766,10 +2562,21 @@ function Code({ children }: { children: ReactNode }) {
 }
 
 function CodeBlock({ children }: { children: ReactNode }) {
+  const text = typeof children === 'string' ? children : '';
+  if (!text) {
+    return (
+      <pre className="mt-2 overflow-x-auto rounded border border-border bg-muted px-3 py-2.5 font-mono text-xs leading-relaxed text-foreground">
+        {children}
+      </pre>
+    );
+  }
   return (
-    <pre className="mt-2 overflow-x-auto rounded border border-border bg-muted px-3 py-2.5 font-mono text-xs leading-relaxed text-foreground">
-      {children}
-    </pre>
+    <Snippet
+      value={text}
+      multiline
+      copyLabel="Скопировать команды"
+      className="mt-2"
+    />
   );
 }
 

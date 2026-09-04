@@ -10,7 +10,11 @@ import {
   useIgOnline,
   useIgStories,
   useIgHistory,
+  useIgOauthStatus,
 } from '@/api/queries';
+import { ApiError } from '@/api/client';
+import { useSelectedChannel } from '@/lib/channel-context';
+import { igAccessStateOf } from '@/lib/igAccessState';
 import { usePagePeriod, usePeriod } from '@/lib/period';
 import {
   tvBreakdown,
@@ -39,6 +43,7 @@ export function useIgData() {
     ? Math.min(90, Math.max(1, Math.ceil((range.to - range.from) / DAY_MS)))
     : days && days > 0 ? Math.min(days, 90) : 90;
 
+  const { channelId } = useSelectedChannel();
   const profileQ = useIgProfile();
   const insightsQ = useIgInsights(insDays);
   const postsQ = useIgPosts(24);
@@ -48,6 +53,9 @@ export function useIgData() {
   // DB-first history: the cron accumulates a long ig_daily series past the live API window. Used
   // below only to LENGTHEN the reach/follows daily lines when it has more points (else live wins).
   const historyQ = useIgHistory();
+  // Состояние подключения — единственный источник, который знает срок токена и отвечает даже
+  // когда Graph-запросы падают. Дешёвое чтение из БД, react-query дедуплицирует его с /connect.
+  const oauthStatusQ = useIgOauthStatus();
 
   // Selected window (custom range overrides the days preset; IG insights cap at ~90 days).
   // Quantized to the minute: a raw Date.now() in render produced a new value every render,
@@ -162,9 +170,18 @@ export function useIgData() {
   });
 
   const isMock = !!(profileQ.data?.mock || insightsQ.data?.mock || postsQ.data?.mock || breakdownsQ.data?.mock);
-  // isPending (не isLoading): пока канал не известен, IG-запросы выключены — это тоже «загрузка».
-  const loading = profileQ.isPending || insightsQ.isPending || postsQ.isPending;
-  const error = profileQ.isError && insightsQ.isError;
+  // Правило состояний кластера — чистой функцией (см. igAccessState): «истёк доступ», «загрузка» и
+  // «ошибка» обязаны быть взаимоисключающими и проверяемыми без React. Два независимых свидетеля
+  // истёкшего токена: статус подключения (отвечает, даже когда все Graph-запросы падают) и машинный
+  // код с самого упавшего запроса профиля.
+  const { loading, error, reauth } = igAccessStateOf({
+    channelId,
+    pending: [profileQ.isPending, insightsQ.isPending, postsQ.isPending],
+    profileErrored: profileQ.isError,
+    profileErrorCode: profileQ.error instanceof ApiError ? profileQ.error.code : undefined,
+    tokenState: oauthStatusQ.data?.token_state,
+  });
+  const tokenExpiresAt = oauthStatusQ.data?.token_expires_at ?? null;
   // Real last-sync time the server stamped when it fetched from Instagram (falls back to the React
   // Query receive time only if the server didn't provide one, e.g. demo mode).
   const lastSync =
@@ -174,6 +191,8 @@ export function useIgData() {
   return {
     loading,
     error,
+    reauth,
+    tokenExpiresAt,
     isMock,
     lastSync,
     profile: profileQ.data,

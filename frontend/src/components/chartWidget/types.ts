@@ -26,14 +26,33 @@ export interface ChartSectionProps {
   defaultSize?: WidgetSize;
   /** Metric-identity accent used until the user chooses a colour explicitly. */
   defaultColor?: number;
+  /** Opt-in accent-tinted surface until the user decides otherwise. Canon: at most ONE tinted
+      story card per page — every other card defaults to a neutral surface (DESIGN_TOKENS.md
+      «Surface & width policy»). Meaningful only together with `defaultColor`. */
+  defaultTinted?: boolean;
   /** Locks the surface size and hides the size control in the editor. */
   fixedSize?: WidgetSize;
+  /**
+   * Явная высота тела — для full-карточек С ГРАФИКОМ (аудит #554, D15).
+   *
+   * `SIZE_HEIGHT.full` пустая намеренно: полноширинная карточка с леджером или таблицей растёт
+   * по содержимому. Но тело карточки — это `flex-1 min-h-0` в КОЛОНКЕ БЕЗ ВЫСОТЫ, а такой элемент
+   * по спеке флекса получает базис 0 и схлопывается. График внутри меряет хост, видит крошки и падает
+   * в свой минимум — замерено на «Упоминаниях по дням»: карточка 164px, тело 81px, svg 60px
+   * (пол), тогда как любая фикс-карточка рядом отдаёт графику 161–181px.
+   */
+  chartHeight?: number;
   /** Rich fullscreen explorer configuration. */
   expand?: ChartExpandConfig;
   /** Dedicated metric route used by every expand affordance when present. */
   drillTo?: string;
   /** Removes every expand affordance for views that are already expanded. */
   noExpand?: boolean;
+  /** Карточка НЕ участвует в закрытии хвостового пробела ряда (WidgetGroup растягивает одиночку
+      последнего ряда на всю ширину). Ставить там, где содержимое шириной не пользуется — дуга,
+      разбивка, недельная семёрка столбцов: растянутая на 1110px карточка даёт не «широкий
+      график», а маленький график посреди пустоты. */
+  noStretch?: boolean;
   /** Marks a period-aware body. Feed pages use their top bar; Home exposes the widget's own value. */
   periodControl?: boolean;
   /** Thin full-width summary row without card chrome. */

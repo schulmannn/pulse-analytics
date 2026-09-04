@@ -1,10 +1,17 @@
-import { useState } from 'react';
-import * as DialogPrimitive from '@radix-ui/react-dialog';
+import { useRef, useState } from 'react';
 import { usePostStats } from '@/api/queries';
 import type { NormalizedPost } from '@/lib/posts';
-import { fmt, ruAxisLabel } from '@/lib/format';
+import { fmt } from '@/lib/format';
 import { cn } from '@/lib/utils';
-import { Dialog, DialogOverlay, DialogPortal, DialogTitle, useRestoreOpenerFocus } from '@/components/ui/dialog';
+import {
+  Dialog,
+  DialogClose,
+  DialogOverlay,
+  DialogPortal,
+  DialogSurface,
+  DialogTitle,
+  useRestoreOpenerFocus,
+} from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { MetricInfo } from '@/components/InfoTooltip';
 import { getDrillMetric, getMetric, type MetricDef } from '@/lib/widgetMetrics';
@@ -19,7 +26,9 @@ interface PostDetailModalProps {
   /** Leaderboard position badge; omit where the list order is a transient sort. */
   rank?: number;
   reason: string | null;
-  /** Semantic tone for a benchmark label. Existing callers default to their legacy positive tone. */
+  /** Направление benchmark-подписи. Красит ГЛИФ ▲/▼/•, но НЕ текст: дельта «к медиане» читается
+      muted и в ячейке таблицы, и в модалке, открытой кликом по этой же ячейке — иначе одно и то же
+      сравнение звучит двумя голосами (канон «One voice for deltas»). */
   reasonTone?: 'positive' | 'negative' | 'neutral';
   /** Explain why no benchmark is shown instead of leaving an unexplained blank. */
   benchmarkUnavailable?: boolean;
@@ -63,6 +72,7 @@ export function PostDetailModal({
 }: PostDetailModalProps) {
   const [previewFailed, setPreviewFailed] = useState(false);
   const [lightbox, setLightbox] = useState(false);
+  const previewButtonRef = useRef<HTMLButtonElement>(null);
   const hasPreview = !!post.thumb && !previewFailed;
   // Browser Back / the phone's back gesture closes the modal instead of leaving the page.
   useLayerBack(onClose);
@@ -80,10 +90,10 @@ export function PostDetailModal({
       <DialogPortal>
         <DialogOverlay />
         <div className="fixed inset-0 z-modal flex items-end justify-center sm:items-center">
-          <DialogPrimitive.Content
+          <DialogSurface
             aria-label={rank != null ? `Детали поста №${rank}` : 'Детали поста'}
             onCloseAutoFocus={restoreOpener}
-            className="relative flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-t-2xl border bg-card focus:outline-hidden sm:rounded-2xl lg:max-w-5xl"
+            className="relative flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-t-2xl border bg-card sm:rounded-2xl lg:max-w-5xl"
           >
             <DialogTitle className="sr-only">{rank != null ? `Детали поста №${rank}` : 'Детали поста'}</DialogTitle>
         {/* Header */}
@@ -105,9 +115,17 @@ export function PostDetailModal({
             type="button"
             onClick={onClose}
             aria-label="Закрыть"
-            className="rounded-full p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            data-mobile-touch-target=""
+            className="flex h-11 w-11 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground sm:h-8 sm:w-8"
           >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4">
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              className="h-4 w-4"
+              aria-hidden="true"
+            >
               <path d="M18 6 6 18M6 6l12 12" strokeLinecap="round" />
             </svg>
           </button>
@@ -126,6 +144,7 @@ export function PostDetailModal({
           <div className="contents lg:flex lg:flex-col lg:gap-4">
             {hasPreview && (
               <button
+                ref={previewButtonRef}
                 type="button"
                 onClick={() => setLightbox(true)}
                 aria-label="Открыть медиа на весь экран"
@@ -136,7 +155,9 @@ export function PostDetailModal({
                   src={`${post.thumb}?size=lg`}
                   alt={rank != null ? `Превью поста №${rank}` : 'Превью поста'}
                   referrerPolicy="no-referrer"
-                  onError={() => setPreviewFailed(true)}
+                  ref={(node) => {
+                    if (node) node.onerror = () => setPreviewFailed(true);
+                  }}
                   className="max-h-72 w-full rounded-lg object-cover lg:max-h-104"
                 />
               </button>
@@ -164,16 +185,10 @@ export function PostDetailModal({
           {/* DATA column: benchmark context + primary metrics + ratios + velocity + reactions */}
           <div className="contents lg:flex lg:flex-col lg:gap-4">
             {reason && (
-              <p
-                className={cn(
-                  'order-2 flex items-center gap-1.5 text-xs font-medium',
-                  reasonTone === 'positive'
-                    ? 'text-verdant'
-                    : reasonTone === 'negative'
-                      ? 'text-ember'
-                      : 'text-muted-foreground',
-                )}
-              >
+              // Дельта «к медиане» — MUTED, как и в ячейке таблицы, из которой открыт этот пост:
+              // verdant/ember зарезервированы за оценочной Δ сравнения периодов в metric-эксплорере.
+              // Направление несёт глиф ▲/▼/• (и слово в самой подписи «выше/ниже медианы»).
+              <p className="order-2 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
                 <span aria-hidden="true">
                   {reasonTone === 'positive' ? '▲' : reasonTone === 'negative' ? '▼' : '•'}
                 </span>
@@ -244,7 +259,14 @@ export function PostDetailModal({
                 className="inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:underline"
               >
                 Открыть в Telegram
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-3.5 w-3.5">
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  className="h-3.5 w-3.5"
+                  aria-hidden="true"
+                >
                   <path d="M7 17 17 7M9 7h8v8" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
               </a>
@@ -263,18 +285,22 @@ export function PostDetailModal({
             )}
           </div>
         )}
-          </DialogPrimitive.Content>
+          </DialogSurface>
         </div>
-        {/* Lightbox (Astryx): полноэкранный просмотр медиа. Вложенный Radix-диалог — Escape
+        {/* Полноэкранный просмотр медиа. Вложенный Radix-диалог — Escape
             закрывает верхний слой, фокус честно возвращается к превью-кнопке. */}
         {lightbox && hasPreview && (
           <Dialog open onOpenChange={(open) => !open && setLightbox(false)}>
             <DialogPortal>
               <DialogOverlay className="bg-background/90" />
               <div className="fixed inset-0 z-modal flex items-center justify-center p-4 sm:p-8">
-                <DialogPrimitive.Content
+                <DialogSurface
                   aria-label="Медиа публикации"
-                  className="relative flex max-h-full max-w-5xl items-center justify-center focus:outline-hidden"
+                  onCloseAutoFocus={(event) => {
+                    event.preventDefault();
+                    previewButtonRef.current?.focus();
+                  }}
+                  className="relative flex max-h-full max-w-5xl items-center justify-center"
                 >
                   <DialogTitle className="sr-only">Медиа публикации</DialogTitle>
                   <img
@@ -283,15 +309,16 @@ export function PostDetailModal({
                     referrerPolicy="no-referrer"
                     className="max-h-[calc(100vh-4rem)] max-w-full rounded-lg object-contain"
                   />
-                  <DialogPrimitive.Close
+                  <DialogClose
                     aria-label="Закрыть просмотр"
-                    className="absolute -right-2 -top-2 flex h-8 w-8 items-center justify-center rounded-full border border-border bg-card text-muted-foreground transition-colors hover:text-foreground"
+                    data-mobile-touch-target=""
+                    className="absolute -right-2 -top-2 flex h-11 w-11 items-center justify-center rounded-full border border-border bg-card text-muted-foreground transition-colors hover:text-foreground sm:h-8 sm:w-8"
                   >
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4" aria-hidden="true">
                       <path d="M18 6 6 18M6 6l12 12" strokeLinecap="round" />
                     </svg>
-                  </DialogPrimitive.Close>
-                </DialogPrimitive.Content>
+                  </DialogClose>
+                </DialogSurface>
               </div>
             </DialogPortal>
           </Dialog>
@@ -323,16 +350,11 @@ function PostVelocity({ postId, className }: { postId: number | null; className?
   const graphValues = stats.data?.views_graph?.series?.[0]?.values ?? [];
   if (!(stats.data?.available ?? false) || graphValues.length <= 1) return null;
 
-  const titles = graphX.map((ts, i) => {
-    const dateStr = new Date(ts).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit' });
-    return `${dateStr}: ${fmt.num(graphValues[i] ?? 0)}`;
-  });
-  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  const formatLabel = (ts: number) => {
-    const d = new Date(ts);
-    // ruAxisLabel: «24 Jun 21:00» → «24 июн 21:00» — axis labels must be Russian in the RU UI.
-    return ruAxisLabel(`${d.getDate()} ${months[d.getMonth()] ?? ''} ${String(d.getHours()).padStart(2, '0')}:00`);
-  };
+  // Дата — общим каноном (`fmt.day` → «24 июн.»), час дописывается: ось почасовая.
+  const formatLabel = (ts: number) =>
+    `${fmt.day(ts)} ${String(new Date(ts).getHours()).padStart(2, '0')}:00`;
+  // Тултип и ось читают ОДНУ подпись — иначе на одном графике два формата даты.
+  const titles = graphX.map((ts, i) => `${formatLabel(ts)}: ${fmt.num(graphValues[i] ?? 0)}`);
   const first = graphX[0];
   const mid = graphX[Math.floor(graphX.length / 2)];
   const last = graphX[graphX.length - 1];

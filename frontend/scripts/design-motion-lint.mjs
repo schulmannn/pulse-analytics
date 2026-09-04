@@ -3,23 +3,25 @@
 // ad-hoc per component instead of pulling from a token:
 //   node scripts/design-motion-lint.mjs      → report + exit 1 on canon violations
 // Canon (see frontend/DESIGN_TOKENS.md):
-//   • the house easing cubic-bezier(0.2, 0.7, 0.3, 1) must be var(--ease-standard), never inlined
+//   • the house easing cubic-bezier(0.23, 1, 0.32, 1) must be var(--ease-standard), never inlined
 //   • UI durations come from the --motion-* ladder. In .ts/.tsx that means the dur-* / ease-house
 //     utilities (index.css) — never a numeric `duration-300` or a bare `ease-out`. Raw ms/s live in
-//     index.css only: the :root ladder, the allow-listed bespoke illustration keyframes, and framer
-//     on the landing. (index.css itself is NOT scanned by the duration/easing-utility rules — it is
+//     index.css only: the :root ladder and the allow-listed bespoke illustration/landing keyframes.
+//     (index.css itself is NOT scanned by the duration/easing-utility rules — it is
 //     where the exceptions legitimately live; the house-easing rule still applies to it.)
 //   • never `transition-all` — it animates layout-triggering properties (width/height/padding) too,
 //     which drops frames on a busy main thread. Enumerate: transition-[width] / transition-colors.
 //   • the type scale is the Tailwind fontSize ladder — no magic text-[Npx]
 //   • no arbitrary Tailwind motion values (duration-[…] / ease-[…] / delay-[…]) — use the scale/tokens
+//   • selected chips painted with bg-primary/10 use text-accent-foreground, whose composite
+//     contrast is gated by contrast-tokens.mjs; text-primary is only for neutral surfaces
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, relative } from 'node:path';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const srcDir = join(root, 'src');
-const HOUSE_CURVE = 'cubic-bezier(0.2, 0.7, 0.3, 1)';
+const HOUSE_CURVE = 'cubic-bezier(0.23, 1, 0.32, 1)';
 
 function* walk(dir) {
   for (const name of readdirSync(dir)) {
@@ -29,8 +31,8 @@ function* walk(dir) {
   }
 }
 
-// Bespoke surfaces outside the product-UI canon: the public marketing landing is its own framer
-// system with hand-tuned display typography, and Legal is long-form prose. They are exempt from the
+// Bespoke surfaces outside the product-UI canon: the public marketing landing owns a CSS-native
+// motion system with hand-tuned display typography, and Legal is long-form prose. They are exempt from the
 // type-scale rule (restyling them is a separate task, not token governance) — but NOT from the motion
 // rules: the house easing stays canonical everywhere.
 const BESPOKE_TYPE = ['src/pages/Landing.tsx', 'src/pages/Legal.tsx'];
@@ -73,6 +75,27 @@ function blockHasMarker({ lines, index }, marker) {
   return false;
 }
 
+/**
+ * Селекторы всех блоков, ВНУТРИ которых стоит строка — от ближайшего к внешнему.
+ *
+ * Скан назад со счётчиком: закрывающая скобка гасит свою открывающую, поэтому СОСЕДНИЙ закрытый
+ * блок с нужным селектором не выдаст индульгенцию тому, кто лежит после него. CSS здесь
+ * отформатирован Biome — одна скобка на строку, так что порядок скобок ВНУТРИ строки не важен.
+ */
+function enclosingSelectors({ lines, index }) {
+  const out = [];
+  let pending = 0;
+  for (let i = index - 1; i >= 0; i--) {
+    pending += (lines[i].match(/\}/g) ?? []).length;
+    let opens = (lines[i].match(/\{/g) ?? []).length;
+    while (opens-- > 0) {
+      if (pending > 0) pending -= 1;
+      else out.push(lines[i]);
+    }
+  }
+  return out;
+}
+
 const rules = [
   {
     id: 'house-easing-inlined',
@@ -85,6 +108,68 @@ const rules = [
     hint: 'use the Tailwind type scale (text-2xs … text-hero)',
     test: (line) => /text-\[\d+(px|rem)\]/.test(line),
     exempt: (rel) => BESPOKE_TYPE.includes(rel),
+  },
+  {
+    id: 'kpi-number-recipe-retyped',
+    hint: 'render the number through components/chartWidget/KpiValue',
+    // Рецепт крупного числа карточки был скопирован в четыре места, и копии разошлись: канон
+    // давно чинил line-box на leading-[1.15] («глиф-бокс дисплейного начертания выше line-box,
+    // leading-none клипал цифры в фикс-тайле»), а две копии остались на leading-none. Одинаковые
+    // 44px с разной высотой строки читаются как две разные системы. Размер героя живёт в одном
+    // компоненте; нужен другой — он появляется там вариантом, а не строкой классов на месте.
+    test: (line) =>
+      /\btext-hero\b/.test(line) ||
+      (/\btext-3xl\b/.test(line) && /tabular-nums/.test(line)),
+    exempt: (rel) => rel.endsWith('.css') || rel.endsWith('components/chartWidget/KpiValue.tsx'),
+  },
+  {
+    id: 'contrast-button-retyped',
+    hint: 'use <Button variant="contrast"> — inverted ink/canvas lives in one variant',
+    // Инверсия «чернила ↔ полотно» была набрана руками в четырёх местах, и копии разошлись:
+    // у одной пары чернила брались по плите таблицы, у другой hover светлел на /80 вместо /90,
+    // а focus-кольцо оставалось СИНИМ на чёрной кнопке. Правило ловит голый bg-foreground рядом
+    // с инвертированными чернилами: под альфой (bg-foreground/10) это заливка, а не инверсия, и
+    // под префиксом состояния (data-[state=checked]:bg-foreground у чекбокса) — не кнопка.
+    test: (line) =>
+      /(?<![:/\w-])bg-foreground(?![/\w-])/.test(line) &&
+      /(?<![:/\w-])text-(background|surface-table|card)(?![/\w-])/.test(line),
+    exempt: (rel) => rel.endsWith('.css') || rel.endsWith('components/ui/button.tsx'),
+  },
+  {
+    id: 'money-formatted-inline',
+    hint: 'format money through lib/metricNumber (formatMoney / formatMetricNumber)',
+    // Один смысл — «сколько рублей» — жил в ШЕСТИ объявлениях по трём разным правилам: СДЭК звал
+    // fmt.num («1 000 000 ₽», съедало полкарточки — жалоба владельца), МойСклад fmt.short («2k ₽»
+    // для двух тысяч, хотя канон сжимает от десяти), резолвер виджетов — своё третье. Правило
+    // задаётся ролью числа на экране (headline / axis / exact), и знать её должен один модуль.
+    test: (line) => /₽/.test(line) && /fmt\.(num|short|kpi)\s*\(/.test(line),
+    exempt: (rel) =>
+      rel.endsWith('lib/metricNumber.ts') ||
+      rel.endsWith('.test.ts') ||
+      rel.endsWith('.test.tsx'),
+  },
+  {
+    id: 'money-sign-appended',
+    hint: 'formatMoney already carries ₽ — never append it (see formatMoneyDelta for signed values)',
+    // На /sklad печаталось «61.9k ₽₽» и «↑+99.3k ₽₽»: знак валюты дописывался ШАБЛОННОЙ СТРОКОЙ
+    // поверх готовой строки formatMoney, а правило выше ловило только fmt.num/short/kpi.
+    // Аргумент может сам содержать скобки (`formatMoney(Math.abs(v), 'axis')`), поэтому не
+    // пытаемся разобрать вызов — достаточно факта: в строке есть formatMoney и «₽» сразу после
+    // закрывающей скобки или интерполяции.
+    test: (line) => /formatMoney\s*\(/.test(line) && /[)}]\s*₽/.test(line),
+    exempt: (rel) => rel.endsWith('lib/metricNumber.ts') || rel.endsWith('.test.ts') || rel.endsWith('.test.tsx'),
+  },
+  {
+    id: 'locale-number-outside-format',
+    hint: 'format numbers through lib/format (fmt.num / fmt.numFixed / fmt.pctFixed)',
+    // toLocaleString('ru-RU') даёт ЗАПЯТУЮ, и на одном экране оказывались «32,7%» и «↑5.8%» —
+    // две системы записи одного и того же (аудит #554, D5). Канон DESIGN_TOKENS — точка.
+    test: (line) => /toLocaleString\s*\(\s*['"]ru-RU['"]/.test(line),
+    exempt: (rel) =>
+      rel.endsWith('lib/format.ts') ||
+      rel.endsWith('components/KpiNumber.tsx') ||
+      rel.endsWith('.test.ts') ||
+      rel.endsWith('.test.tsx'),
   },
   {
     id: 'arbitrary-motion-util',
@@ -137,9 +222,66 @@ const rules = [
     hint: 'use the layering scale (z-sticky … z-tooltip) — see DESIGN_TOKENS «Layering»',
     // Arbitrary z-index (z-[999]) side-steps the ladder and reintroduces the tie-fights the scale
     // exists to prevent. Named/numeric utilities (z-modal, z-10) are fine; only bracketed values fail.
-    // The bespoke marketing landing owns its own hero stacking (framer system) — exempt like the type rule.
+    // The bespoke marketing landing owns its own CSS-native hero stacking — exempt like the type rule.
     test: (line) => /\bz-\[/.test(line),
     exempt: (rel) => rel === 'src/pages/Landing.tsx',
+  },
+  {
+    id: 'third-font-weight',
+    hint: 'канон — два начертания: 400 и 500 (font-medium). Иерархию даёт оттенок, а не вес',
+    // DOM-замер аудита #554 нашёл 27 текстовых узлов с весом 600 при каноне 400/500: заголовки,
+    // ранги и числа рейтингов набирались `font-semibold` по привычке. Вес — самый дорогой способ
+    // выделить: он ломает ритм страницы сильнее, чем разница оттенков, ради которой DESIGN_TOKENS
+    // и держит шкалу ink/ink2/ink3. Рендер сторожит e2e/type-weight-canon.spec.ts, но он видит
+    // только демо-маршруты — экраны логина, /connect и Radix-меню открываются лишь по действию.
+    test: (line) => /\bfont-(?:semibold|bold|extrabold|black)\b/.test(line),
+  },
+  {
+    id: 'emphasis-browser-bold',
+    hint: 'добавьте font-medium к <strong>/<b> — UA-правило font-weight: bolder даёт 700',
+    // Второй канал утечки того же дефекта, и он не виден в поиске по классам: у <strong>/<b>
+    // браузерное правило `font-weight: bolder` считается ОТ РОДИТЕЛЯ, и родитель с весом 500 даёт
+    // ровно 700 — самое тяжёлое начертание на экране появлялось там, где про вес никто не думал
+    // («лучший слот», «лучший день», «база без тегов», приглашение в команду). Образец — RichText.
+    test: (line) => /<(?:strong|b)(?=[\s>])/.test(line) && !line.includes('font-medium'),
+    exempt: (rel) => rel.endsWith('.test.ts') || rel.endsWith('.test.tsx'),
+  },
+  {
+    id: 'primary-tint-ink',
+    hint: 'use text-accent-foreground on bg-primary/10 (AA composite); reserve text-primary for neutral surfaces',
+    // The safe hover recipe may keep a base `text-primary` while switching BOTH the hover
+    // background and ink (`hover:bg-primary/10 hover:text-accent-foreground`) on the same line.
+    test: (line) =>
+      line.includes('bg-primary/10') &&
+      line.includes('text-primary') &&
+      !line.includes('text-accent-foreground'),
+  },
+  {
+    id: 'css-third-font-weight',
+    hint: 'канон — два начертания: 400 и 500. В CSS это такой же третий вес, как font-semibold в классе',
+    // Второй канал того же дефекта, и он СИЛЬНЕЕ классового: правило в index.css перебивает
+    // утилитарный класс на элементе, и чистка по классам (#591, D18) его НЕ видит. Шапка таблицы
+    // контента Instagram так и стояла на 600, а классы её ряда (`text-2xs font-semibold
+    // tracking-wide`) вообще не доезжали — читающий разметку видел одно, браузер рисовал другое.
+    // Объявление с ДВУМЯ значениями (`font-weight: 100 900` в @font-face) — диапазон вариативного
+    // шрифта, а не выбор начертания, и под правило не попадает.
+    test: (line, ctx) => {
+      const m = /font-weight:\s*(?:(\d{3})|(bold|bolder))\s*;/.exec(line);
+      if (!m) return false;
+      if (m[1] && Number(m[1]) < 600) return false;
+      // `.report-rhea` — ЛЕКСИКОН отчёта (свой шрифт Geist и свой трекинг), такой же bespoke, как
+      // лендинг и Legal в BESPOKE_TYPE. Его веса живут по своим правилам и только внутри отчёта.
+      return !enclosingSelectors(ctx).some((sel) => sel.includes('report-rhea'));
+    },
+  },
+  {
+    id: 'disabled-cursor',
+    hint: 'канон #265 — disabled:pointer-events-none. Курсор «нельзя» не ставить никогда',
+    // Решение владельца (#265): выключенный элемент НЕ отвечает на указатель вовсе — он просто
+    // приглушён. Перечёркнутый круг — это упрёк в ответ на движение мыши, а не объяснение.
+    // Button живёт по канону с #265; семь примитивов в components/ui сохранили заводскую строку
+    // shadcn и разъехались с ним молча (аудит #554).
+    test: (line) => /\bcursor-not-allowed\b/.test(line),
   },
 ];
 
@@ -163,4 +305,4 @@ if (violations > 0) {
   console.error(`\n${violations} design-token violation(s). Move the value into a token (see frontend/DESIGN_TOKENS.md).`);
   process.exit(1);
 }
-console.log('Design-token motion/type canon clean — no inlined easings, magic sizes or arbitrary motion utils.');
+console.log('Design-token canon clean — no inlined easings, magic sizes, arbitrary motion utils or low-contrast primary tint ink.');

@@ -17,9 +17,11 @@ test('all production runtime images explicitly drop root privileges', () => {
   assert.match(collector, /\nUSER collector[\s\S]+ENTRYPOINT/);
 });
 
-test('Dockerfile.web documents the actual SPA and legacy routes', () => {
+test('Dockerfile.web описывает ЕДИНСТВЕННУЮ HTML-поверхность', () => {
+  // Комментарий описывал две поверхности — SPA и nonce-оболочку на /legacy. Оболочка удалена
+  // (аудит #554, ТЗ-6), и упоминание её в образе теперь было бы враньём.
   const web = read('Dockerfile.web');
-  assert.match(web, /primary dashboard, served by Express at '\/'/);
-  assert.match(web, /legacy public\/index\.html shell survives only at \/legacy/);
+  assert.match(web, /ЕДИНСТВЕННАЯ HTML-поверхность/);
+  assert.doesNotMatch(web, /\/legacy/);
   assert.doesNotMatch(web, /served by Express under \/app/);
 });

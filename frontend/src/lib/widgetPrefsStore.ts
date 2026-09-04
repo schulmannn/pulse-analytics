@@ -1,6 +1,13 @@
 import { createContext, useEffect, useSyncExternalStore } from 'react';
 import { z } from 'zod';
 import { apiGet, apiSend } from '@/api/client';
+import {
+  appearanceCacheStale,
+  parseAppearance,
+  readStoredAppearance,
+  sameAppearance,
+  setAppearanceSyncHook,
+} from '@/lib/appearanceStorage';
 import { isDemoMode } from '@/lib/demo';
 import { parsePrefs } from '@/lib/prefsSchema';
 import { preserveEntryIdentity, preserveValueIdentity } from '@/lib/storeIdentity';
@@ -9,6 +16,9 @@ import type { PeriodDays } from '@/lib/period';
 
 const PREFS_KEY = 'pulse_widget_prefs';
 const ORDER_KEY = 'pulse_widget_order';
+/** Saved filter values for drill pages, keyed by a source-scoped view id. These live beside widget
+    prefs because the compact card and its full metric page must read one account-synced value. */
+const SAVED_FILTERS_KEY = 'pulse_saved_filters';
 /** Personal Home: the ordered list of pinned widget registry keys (steep «На главную»). Stored
     as an object `{keys:[]}` so it round-trips through the object-only store-row parser. */
 const HOME_KEY = 'pulse_home_blocks';
@@ -122,6 +132,17 @@ function orderSnapshot(): Record<string, string[]> {
   return orderCache;
 }
 
+let savedFiltersRaw: string | null | undefined;
+let savedFiltersCache: Record<string, string[]> = {};
+function savedFiltersSnapshot(): Record<string, string[]> {
+  const raw = readRaw(SAVED_FILTERS_KEY);
+  if (raw === savedFiltersRaw) return savedFiltersCache;
+  savedFiltersRaw = raw;
+  const next = parsePrefs({ savedFilters: parseObjectRow<unknown>(raw) }).savedFilters ?? {};
+  savedFiltersCache = preserveEntryIdentity(savedFiltersCache, next);
+  return savedFiltersCache;
+}
+
 export function getPrefs(id: string): WidgetPrefs {
   return prefsSnapshot()[id] ?? EMPTY_PREFS;
 }
@@ -169,6 +190,24 @@ export function setGroupOrder(groupId: string, ids: string[]) {
   schedulePush();
 }
 
+/** One source-scoped saved filter. Empty values mean «all» and remove the row. */
+export function getSavedFilter(id: string): string[] {
+  return savedFiltersSnapshot()[id] ?? EMPTY_ORDER;
+}
+
+export function setSavedFilter(id: string, values: string[]) {
+  try {
+    const map = { ...savedFiltersSnapshot() };
+    if (values.length === 0) delete map[id];
+    else map[id] = values;
+    localStorage.setItem(SAVED_FILTERS_KEY, JSON.stringify(map));
+  } catch {
+    /* storage blocked — the current URL still keeps the active filter */
+  }
+  notify();
+  schedulePush();
+}
+
 /** Subscribe to ONE widget's prefs: re-renders the caller only when THAT row changes. */
 export function useWidgetPrefs(id: string): WidgetPrefs {
   return useSyncExternalStore(
@@ -184,6 +223,15 @@ export function useGroupOrder(groupId: string): string[] {
     subscribeStore,
     () => getGroupOrder(groupId),
     () => getGroupOrder(groupId),
+  );
+}
+
+/** Subscribe to ONE saved filter without re-rendering consumers of unrelated views. */
+export function useSavedFilter(id: string): string[] {
+  return useSyncExternalStore(
+    subscribeStore,
+    () => getSavedFilter(id),
+    () => getSavedFilter(id),
   );
 }
 
@@ -280,11 +328,15 @@ let pushTimer: number | null = null;
 const PREFS_MAX = 32000;
 
 const PrefsBlobSchema = z.object({ prefs: z.unknown().optional().nullable() }).passthrough();
+const PrefsWriteSchema = z
+  .object({ ok: z.boolean(), stored: z.boolean().optional() })
+  .passthrough();
 
 function localBlob() {
   return {
     widgets: prefsSnapshot(),
     widgetOrder: orderSnapshot(),
+    savedFilters: savedFiltersSnapshot(),
     // The pinned-Home list rides the SAME account blob under `home` (a plain string[]) — no
     // new endpoint. Destructured OUT of `rest` in the hydrate below so serverExtra never
     // double-carries it.
@@ -294,6 +346,9 @@ function localBlob() {
     // composites are excluded (device-local, re-derived from the synced Home pins) so they never
     // resurrect on a device that cleared them.
     widgetConfigs: syncableWidgetConfigs(),
+    // Пользовательская тема («Оформление») едет тем же blob'ом: пять коротких ключей со своим
+    // localStorage-first стором. Канон в blob не пишем — отсутствие ключа И ЕСТЬ канон.
+    appearance: readStoredAppearance(),
   };
 }
 
@@ -308,7 +363,7 @@ function schedulePush() {
     // If the whole blob would exceed the server cap, drop the builder configs so dashboard LAYOUT
     // keeps syncing (the too-large builder set stays device-local) instead of a 413 killing ALL sync.
     if (JSON.stringify(prefs).length > PREFS_MAX) delete prefs.widgetConfigs;
-    void apiSend('PUT', '/api/prefs', { prefs }).catch(() => {
+    void apiSend('PUT', '/api/prefs', { prefs }, PrefsWriteSchema).catch(() => {
       /* offline / DB off — customisation stays device-local; the next mutation retries */
     });
   }, 1500);
@@ -322,6 +377,7 @@ export function useWidgetPrefsSync() {
     // A LOCAL widget-config mutation mirrors into the account blob (schedulePush is debounced and
     // no-ops until syncReady, so a mutation before hydrate can't blind-push).
     setWidgetConfigsSyncHook(schedulePush);
+    setAppearanceSyncHook(schedulePush);
     // Snapshot the syncable config ids at mount. Any syncable id NOT in this baseline when the GET
     // resolves was created in the fetch window (a genuine raced create) and must survive account-wins;
     // a pre-existing local id IS in the baseline, so account-wins correctly drops it if another device
@@ -330,7 +386,8 @@ export function useWidgetPrefsSync() {
     void apiGet('/api/prefs', PrefsBlobSchema)
       .then(({ prefs }) => {
         if (cancelled) return;
-        const { widgets, widgetOrder, home, widgetConfigs, ...rest } = parsePrefs(prefs);
+        const { widgets, widgetOrder, savedFilters, home, widgetConfigs, appearance, ...rest } =
+          parsePrefs(prefs);
         serverExtra = rest;
         syncReady = true;
         const local = localBlob();
@@ -342,6 +399,11 @@ export function useWidgetPrefsSync() {
           else if (Object.keys(local.widgets).length) pushLocal = true;
           if (widgetOrder && typeof widgetOrder === 'object') localStorage.setItem(ORDER_KEY, JSON.stringify(widgetOrder));
           else if (Object.keys(local.widgetOrder).length) pushLocal = true;
+          if (savedFilters && typeof savedFilters === 'object') {
+            localStorage.setItem(SAVED_FILTERS_KEY, JSON.stringify(savedFilters));
+          } else if (Object.keys(local.savedFilters).length) {
+            pushLocal = true;
+          }
           // Home pinned list: same account-wins rule. Stored under `{keys}` so getHomeBlocks reads it.
           if (Array.isArray(home)) localStorage.setItem(HOME_KEY, JSON.stringify({ keys: home }));
           else if (local.home.length) pushLocal = true;
@@ -350,6 +412,19 @@ export function useWidgetPrefsSync() {
           // device-local legacy composites are preserved. hydrateWidgetConfigs notifies its subscribers
           // WITHOUT firing the sync hook (no push-back of the just-hydrated copy); pushBack pushes the
           // genuinely-raced widget up.
+          // Тема: тот же account-wins, но применение ЛЕНИВОЕ. Модуль темы (и следом таблицы
+          // палитр) поднимается только при реальном расхождении устройств или протухшем
+          // прерисовочном кэше — пользователь на каноне не грузит ни байта.
+          const accountAppearance = appearance ? parseAppearance(appearance) : null;
+          const needsApply = accountAppearance
+            ? !local.appearance || !sameAppearance(accountAppearance, local.appearance)
+            : false;
+          if (!accountAppearance && local.appearance) pushLocal = true;
+          if (needsApply || appearanceCacheStale()) {
+            void import('@/lib/appearance').then((module) => {
+              module.applyAccountAppearance(needsApply ? appearance : null);
+            });
+          }
           if (Array.isArray(widgetConfigs)) {
             const { seed, pushBack } = reconcileHydratedConfigs(widgetConfigs, baseline);
             hydrateWidgetConfigs(seed);
@@ -369,6 +444,7 @@ export function useWidgetPrefsSync() {
     return () => {
       cancelled = true;
       setWidgetConfigsSyncHook(null);
+      setAppearanceSyncHook(null);
       // Reset the module-global sync state so a prior account's push (or preserved foreign keys)
       // can never land on the NEXT account after a logout→login within the same page session.
       syncReady = false;

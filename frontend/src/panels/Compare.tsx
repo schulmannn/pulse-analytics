@@ -1,6 +1,7 @@
 import { useTgFull } from '@/api/queries';
 import { normalizeTgPosts, type NormalizedPost } from '@/lib/posts';
 import { fmt, pluralRu } from '@/lib/format';
+import { withShares } from '@/lib/breakdownShare';
 import { pctDelta } from '@/lib/delta';
 import { describeChange, explainChange } from '@/lib/whyChanged';
 import { calendarWindowForPeriod, periodDateTimestamp, splitCalendarRows, useWidgetPeriod } from '@/lib/period';
@@ -85,7 +86,7 @@ export function deriveWeekdayReach(posts: NormalizedPost[]): { values: number[];
  */
 export function deriveFormatViews(
   posts: NormalizedPost[],
-): { label: string; value: number; display: string; color: string }[] {
+): { label: string; value: number; display: string; color: string; share?: number }[] {
   const byFormat = new Map<string, { views: number; count: number }>();
   posts.forEach((p) => {
     const key = formatLabel(p.mediaType, p.albumSize);
@@ -94,14 +95,18 @@ export function deriveFormatViews(
     e.count += 1;
     byFormat.set(key, e);
   });
-  return [...byFormat.entries()]
-    .sort((x, y) => y[1].views - x[1].views)
-    .map(([label, v], i) => ({
-      label,
-      value: v.views,
-      display: `${fmt.short(v.views)} · ${v.count} ${pluralRu(v.count, ['пост', 'поста', 'постов'])}`,
-      color: CHART_CYCLE[i % CHART_CYCLE.length]!,
-    }));
+  // Форматы делят ВСЕ просмотры окна — часть целого, поэтому строка несёт долю; рендер допишет её
+  // последним сегментом: «1,3 тыс · 12 постов · 54.3%» (объём выборки остаётся при значении).
+  return withShares(
+    [...byFormat.entries()]
+      .sort((x, y) => y[1].views - x[1].views)
+      .map(([label, v], i) => ({
+        label,
+        value: v.views,
+        display: `${fmt.short(v.views)} · ${v.count} ${pluralRu(v.count, ['пост', 'поста', 'постов'])}`,
+        color: CHART_CYCLE[i % CHART_CYCLE.length]!,
+      })),
+  );
 }
 
 /**
@@ -167,7 +172,9 @@ export function Compare() {
     { label: 'Репосты', cur: a.forwards, prev: b.forwards, render: fmt.short },
     { label: 'Комментарии', cur: a.replies, prev: b.replies, render: fmt.short },
     { label: 'Постов', cur: a.count, prev: b.count, render: fmt.num },
-    { label: 'ER', cur: a.er, prev: b.er, render: (n) => `${n.toFixed(2)}%` },
+    // Тот же абсолютный процент, что на карточке Обзора и /metrics/er (fmt.pctAbs) — одно число
+    // одним форматом на всех поверхностях.
+    { label: 'ER', cur: a.er, prev: b.er, render: fmt.pctAbs },
   ];
 
   // By weekday (avg reach per post over the current window) and by format (total views per format)

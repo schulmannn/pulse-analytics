@@ -1,9 +1,9 @@
-import { getSessionToken } from '@/lib/session';
+import { redirectBrowserOnUnauthorized } from '@/lib/authRedirect';
 
 /**
  * Стриминговый ответ AI-ассистента: POST /api/ai/chats/:id/messages отвечает text/event-stream.
- * EventSource не умеет POST и кастомные заголовки (X-Session-Token), поэтому читаем поток через
- * fetch + ReadableStream. Кадры разделяются пустой строкой; полезные строки начинаются с
+ * EventSource не умеет POST, поэтому читаем same-origin cookie-auth поток через fetch +
+ * ReadableStream. Кадры разделяются пустой строкой; полезные строки начинаются с
  * `data: {json}`, heartbeat-комментарии (`: hb`) игнорируются.
  *
  * Модуль импортируется ТОЛЬКО lazy-страницей чата — в entry-чанк не попадает.
@@ -59,15 +59,20 @@ export function createSseFrameParser(onEvent: (e: AiStreamEvent) => void): (chun
 export async function streamAiMessage(
   chatId: number,
   text: string,
-  { onEvent, signal }: { onEvent: (e: AiStreamEvent) => void; signal?: AbortSignal },
+  {
+    onEvent,
+    signal,
+    onUnauthorized = redirectBrowserOnUnauthorized,
+  }: {
+    onEvent: (e: AiStreamEvent) => void;
+    signal?: AbortSignal;
+    onUnauthorized?: (error: unknown) => boolean;
+  },
 ): Promise<void> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     Accept: 'text/event-stream',
   };
-  const token = getSessionToken();
-  if (token) headers['X-Session-Token'] = token;
-
   const res = await fetch(`/api/ai/chats/${chatId}/messages`, {
     method: 'POST',
     credentials: 'same-origin',
@@ -76,6 +81,7 @@ export async function streamAiMessage(
     signal,
   });
   if (!res.ok) {
+    onUnauthorized({ status: res.status });
     let message = `${res.status} ${res.statusText}`;
     try {
       const body = await res.json();

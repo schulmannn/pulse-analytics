@@ -38,6 +38,9 @@ const ROUTES = [
   { path: '/analytics', name: 'analytics' },
   { path: '/posts', name: 'posts' },
   { path: '/home', name: 'home' },
+  { path: '/settings', name: 'settings' },
+  { path: '/connect?source=moysklad', name: 'connect-moysklad' },
+  { path: '/connect?source=metrika', name: 'connect-metrika' },
 ];
 
 for (const route of ROUTES) {
@@ -139,6 +142,17 @@ test('axe: no serious violations — command palette open', async ({ page }, tes
   await page.keyboard.press('ControlOrMeta+k');
   await expect(page.getByRole('dialog', { name: 'Поиск' })).toBeVisible();
   await expectNoSeriousViolations(page, testInfo, 'palette');
+});
+
+test('axe: no serious violations — mobile settings sections', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'mobile-430', 'mobile settings sections');
+  await bootDemo(page, '/settings?section=billing');
+  await expect(page.getByRole('heading', { name: 'Подписка', level: 2 })).toBeVisible();
+  await expectNoSeriousViolations(page, testInfo, 'settings-billing');
+
+  await page.getByRole('tab', { name: 'Каналы', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Каналы', level: 2 })).toBeVisible();
+  await expectNoSeriousViolations(page, testInfo, 'settings-channels');
 });
 
 test('keyboard: widget edit dialog traps Tab and restores focus to the ⋯ trigger', async ({ page }) => {

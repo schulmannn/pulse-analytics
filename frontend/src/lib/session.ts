@@ -1,39 +1,21 @@
-const TOKEN_KEY = 'pulse_token';
-const TOKEN_EXP = 'pulse_token_exp';
-// Mirrors the server's SESSION_TTL (index.js). The server slides it forward on activity via the
-// X-Session-Refresh response header (see api/client.ts); this is the idle window, not a hard cap.
-const DEFAULT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const LEGACY_TOKEN_KEY = 'pulse_token';
+const LEGACY_TOKEN_EXP_KEY = 'pulse_token_exp';
 
 /**
- * Read the legacy session token from localStorage. The new app is served same-origin as
- * the legacy dashboard ('/'), so it shares localStorage — a user logged in at '/' is
- * already authenticated here. Mirrors the legacy getToken(): null if missing or expired.
+ * Чистка ключей до-cookie-транспорта из localStorage.
+ *
+ * Сам мост (заголовочный токен → одноразовый роут обмена на cookie) снят: критерий удаления —
+ * «семь дней после первого деплоя» — наступил в июле, а прожил он до сентября (аудит #554).
+ * Осталась одна строка уборки: у пользователя, не заходившего с тех пор, ключи всё ещё лежат в
+ * браузере, и оставлять там читаемый из JS токен без всякой пользы незачем.
+ *
+ * УДАЛИТЬ ПОСЛЕ 2026-12-01: к этому сроку ключи выветрятся у всех, кто заходил хоть раз.
  */
-export function getSessionToken(): string | null {
+export function purgeLegacySession(): void {
   try {
-    const t = localStorage.getItem(TOKEN_KEY);
-    const exp = parseInt(localStorage.getItem(TOKEN_EXP) || '0', 10);
-    if (!t || exp < Date.now()) return null;
-    return t;
+    localStorage.removeItem(LEGACY_TOKEN_KEY);
+    localStorage.removeItem(LEGACY_TOKEN_EXP_KEY);
   } catch {
-    return null;
-  }
-}
-
-export function setSessionToken(token: string, ttlMs = DEFAULT_TTL_MS): void {
-  try {
-    localStorage.setItem(TOKEN_KEY, token);
-    localStorage.setItem(TOKEN_EXP, String(Date.now() + ttlMs));
-  } catch {
-    /* localStorage may be unavailable; the next auth check will surface it */
-  }
-}
-
-export function clearSessionToken(): void {
-  try {
-    localStorage.removeItem(TOKEN_KEY);
-    localStorage.removeItem(TOKEN_EXP);
-  } catch {
-    /* localStorage may be unavailable */
+    /* localStorage может быть недоступен */
   }
 }

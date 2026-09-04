@@ -207,7 +207,7 @@ export function WidgetMenu({
 }
 
 function MenuSeparator() {
-  return <div role="separator" className="mx-1 my-1 h-px bg-border" />;
+  return <hr className="mx-1 my-1 h-px border-0 bg-border" />;
 }
 
 /** Глифы виджет-меню. Экспортируется, потому что тот же `drag`-глиф носит клавиатурная ручка

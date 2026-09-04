@@ -25,7 +25,7 @@ function managedPostStatsLogCode(error) {
  * TG-exclusive helpers travel with the routes: `tgFetch` (Bot API), `notCentral`/`serveSnapshot`
  * (live-vs-snapshot dispatch), and the `tgQr*` QR-login machinery incl. the in-memory `_qrStarts`
  * binding map. Request-time state (db), secrets and shared middleware are injected; `TG_TOKEN`/
- * `TG_CHANNEL` stay defined in index.js (still read by /api/health + the boot banner) and are passed in.
+ * `TG_CHANNEL` are read in composition.js and passed in (наружу они не публикуются).
  */
 function registerTgRoutes({
   app, requireAuth, resolveChannel, db, audit, log,
@@ -208,6 +208,24 @@ function registerTgRoutes({
     return !!o && o.uid === uid;
   }
 
+  // Коды ошибок QR-входа, которые можно отдать браузеру. Список из ОДНОГО элемента не по лени:
+  // фронт печатает `error` дословно (`setErr(r.error || …)`), поэтому сюда попадает только то,
+  // у чего на клиенте есть свой человеческий перевод. `bad_password` — есть («Неверный пароль»).
+  // Всё остальное поле теряет: у статусов error/expired фронт уже показывает нормальный русский
+  // текст, а раньше вместо него доезжал str(e) исключения Telethon — сообщение драйвера, из
+  // которого пользователь не узнаёт ничего, а посторонний узнаёт версию и внутренности приватного
+  // сервиса (L-4, аудит #554). Исходное исключение остаётся в логе mtproto-сервиса.
+  const QR_SAFE_ERROR_CODES = new Set(['bad_password']);
+  function safeQrError(raw) {
+    if (raw === undefined || raw === null || raw === '') return undefined;
+    const code = String(raw);
+    if (QR_SAFE_ERROR_CODES.has(code)) return code;
+    // Ни самого текста, ни его фрагментов: он и в лог веба не нужен — приватный сервис уже
+    // записал исключение целиком у себя.
+    log('warn', 'tg_qr_error_masked', { length: code.length });
+    return undefined;
+  }
+
   app.post('/api/tg/qr/start', requireAuth, async (req, res, next) => {
     if (!tgQrConfigured()) return res.status(400).json({ error: 'Подключение Telegram по QR не настроено на сервере' });
     try {
@@ -244,7 +262,13 @@ function registerTgRoutes({
       const data = await mtprotoPost('/qr/poll', { params: { id } });
       if (data.status === 'ok') { _qrStarts.delete(id); return res.json(await tgQrFinish(req, data)); }
       if (data.status === 'expired' || data.status === 'error') _qrStarts.delete(id);
-      res.json({ status: data.status, error: data.error });   // pending | password | expired | error
+      const error = safeQrError(data.error);
+      // pending | password | expired | error; `error` отдаётся только из allow-list
+      // The login token rotates while the scan is pending — mtproto re-mints it every ~30s and the
+      // browser must re-render the fresh code, or the user scans a dead QR. Forward ONLY that url,
+      // never the rest of `data` (the ok-path payload carries the session and goes via tgQrFinish).
+      const url = data.status === 'pending' && typeof data.url === 'string' ? data.url : undefined;
+      res.json({ status: data.status, ...(error ? { error } : {}), ...(url ? { url } : {}) });
     } catch (e) { next(e); }
   });
 
@@ -257,7 +281,8 @@ function registerTgRoutes({
     try {
       const data = await mtprotoPost('/qr/password', { params: { id }, body: { password } });
       if (data.status === 'ok') { _qrStarts.delete(id); return res.json(await tgQrFinish(req, data)); }
-      res.json({ status: data.status, error: data.error });
+      const error = safeQrError(data.error);
+      res.json({ status: data.status, ...(error ? { error } : {}) });
     } catch (e) { next(e); }
   });
 
@@ -504,8 +529,7 @@ function registerTgRoutes({
   });
 
   // ── Public media proxies (thumb / channel photo) ─────────────────────────────
-  // Deliberately unauthenticated: they back plain <img src> tags, which can't send
-  // the x-session-token header. Tradeoff accepted because the central channel is
+  // Deliberately unauthenticated: they back plain <img src> tags. Tradeoff accepted because the central channel is
   // public anyway (the proxy only reveals what t.me already shows); revisit with
   // signed URLs if private channels ever land. Beyond the global /api limiter
   // (per-IP for anonymous traffic), a dedicated modest per-IP limiter keeps an
@@ -544,7 +568,10 @@ function registerTgRoutes({
         if (r.status >= 500) return res.status(503).json({ error: 'источник недоступен' });
         return res.status(r.status).end();
       }
-      const buf = await r.buffer();
+      // arrayBuffer(), НЕ buffer(): `.buffer()` был методом node-fetch, у нативного Response его нет.
+      // Вызов бросал TypeError, его ловил catch ниже — и живой фолбэк ВСЕГДА отвечал 503, то есть
+      // был мёртв с перехода на нативный fetch (L-3, аудит #554).
+      const buf = Buffer.from(await r.arrayBuffer());
       res.set('Content-Type', r.headers.get('content-type') || 'image/jpeg');
       res.set('Cache-Control', 'public, max-age=86400');
       res.send(buf);
@@ -584,7 +611,8 @@ function registerTgRoutes({
         if (r.status >= 500) return res.status(503).json({ error: 'источник недоступен' });
         return res.status(r.status).end();
       }
-      const buf = await r.buffer();
+      // arrayBuffer(), НЕ buffer() — тот же разрыв, что и у /thumb выше (L-3).
+      const buf = Buffer.from(await r.arrayBuffer());
       res.set('Content-Type', r.headers.get('content-type') || 'image/jpeg');
       res.set('Cache-Control', 'public, max-age=86400');
       res.send(buf);

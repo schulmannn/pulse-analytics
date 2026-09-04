@@ -151,8 +151,6 @@ async function bootReports(page: Page, seed: MockReport[]): Promise<BootState> {
   });
 
   await page.addInitScript(() => {
-    localStorage.setItem('pulse_token', 'e2e-token');
-    localStorage.setItem('pulse_token_exp', String(Date.now() + 60 * 60 * 1000));
     localStorage.setItem('pulse_channel', '1');
     if (!localStorage.getItem('pulse_theme')) localStorage.setItem('pulse_theme', 'dark');
   });
@@ -243,7 +241,9 @@ test.describe('Отчёты — desktop', () => {
     await expect(dialog).toBeVisible();
     await expect(dialog.getByLabel('Источник · Telegram').locator('option[value="2"]')).toHaveCount(0);
     await dialog.getByLabel('Название').fill('Новый тест');
-    await dialog.getByRole('radio', { name: /Пустой/ }).click();
+    const blankTemplate = dialog.getByRole('radio', { name: /Пустой/ });
+    await dialog.getByText('Пустой', { exact: true }).click();
+    await expect(blankTemplate).toBeChecked();
     await dialog.getByRole('button', { name: '90д' }).click();
     await selectPill(dialog.getByLabel('Доставка на почту'), { value: 'weekly' });
     await dialog.getByRole('button', { name: 'Создать отчёт' }).click();

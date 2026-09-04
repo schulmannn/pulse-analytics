@@ -1,5 +1,6 @@
 import { useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
+import { ChartGapPattern } from '@/components/ChartGapPattern';
 import { EmptyState } from '@/components/EmptyState';
 import { fmt } from '@/lib/format';
 import { seriesMotionKey } from '@/lib/chartMotion';
@@ -10,21 +11,33 @@ import { nearestPointIndex } from '@/lib/chartHover';
 import { axisLabelIndexes } from '@/lib/chartLabels';
 import { ChartTooltip, type TooltipRow, type TooltipState } from '@/components/ChartTooltip';
 import { ChartExpandedContext, ChartRefLinesContext, ExpandedChartHeightContext, WidgetTargetContext } from '@/components/ExpandableChart';
+import { clampTargetToDomain, targetTooltipRow } from '@/lib/targetDomain';
 import { observeSize } from '@/lib/observeSize';
+import {
+  activateChartControl,
+  chartControlAriaLabel,
+  nextChartControlIndex,
+} from '@/lib/chartOverlayControl';
 
 interface LineChartProps {
   /** Значения серии; null = день без данных (сбор пропущен) — рисуется РАЗРЫВОМ линии, а не
       нулём: ноль-которого-не-было — ложь дашборда (выдуманный обвал). */
   values: Array<number | null>;
   labels?: string[];
+  /**
+   * Подписи ОСИ вместо дат из `labels` (короткое окно ≤ 8 точек: буквы дней недели, канон
+   * weekdayAxis). Буквы узкие — тик у КАЖДОЙ точки. Тултип по-прежнему называет полную дату.
+   */
+  axisLabels?: string[];
   titles?: string[];
   yMin?: number;
   yMax?: number;
   height?: number;
   /** Overlay hollow amber rings on statistically unusual points (local-outlier detection). */
   markAnomalies?: boolean;
-  /** Comparison series (previous period / baseline), drawn dashed in the contrast colour
-      (--chart-2) on the same y-scale, with a built-in legend row under the chart.
+  /** Comparison series (previous period / baseline), drawn dashed and WITHOUT a fill in the
+      contrast colour (`--chart-role-comparison`) on the same y-scale — в любом appearance, включая
+      `comparison` — with a built-in legend row under the chart.
       null здесь — тот же «день без сбора»: в пунктире разрыв, строка сравнения в ховере
       не показывается (гарды `!= null` сохранены). */
   ghost?: Array<number | null>;
@@ -53,6 +66,13 @@ interface LineChartProps {
       where a page-level compare control already owns turning the comparison on/off (the metric
       page) — there the chip renders as a static label so the two controls can't desync. */
   legendToggle?: boolean;
+  /**
+   * Сравнение показано? Отличается от «ghost есть»: данные прошлого окна остаются переданными, а
+   * выключенный переключатель лишь ГАСИТ линию. Так переход в обе стороны плавный (снятый из DOM
+   * элемент анимировать нечем), а строка легенды не пропадает и не дёргает вверх всё, что под
+   * графиком — таймбар окна прыгал на 21px (замер).
+   */
+  ghostVisible?: boolean;
   /** PINNED point (steep): a persistent dashed crosshair + solid marker at this index, set by
       the host page from onPointClick — the anchor for a «этот день» panel. null/undefined = off. */
   pinnedIndex?: number | null;
@@ -76,6 +96,58 @@ interface Hover {
 
 // Approximate glyph width of the 11px tabular numerals used for axis/value labels.
 const CHAR_W = 6.6;
+// Кириллица шире табулярной цифры, прописная — заметно шире строчной.
+const CHAR_W_LOWER = 6.4;
+const CHAR_W_UPPER = 7.6;
+
+/**
+ * ОЦЕНКА ШИРИНЫ ПОДПИСИ ОСИ — одна на всю семью графиков (аудит #554).
+ *
+ * Было: три копии константы `6.6` (LineChart, BarChart, DivergingBars), и все три считали
+ * любой символ табулярной цифрой. На кириллице это даёт до ±20%: «Сентябрь» шире оценки,
+ * «5 авг.» — у́же. От этого числа зависят ширина y-гаттера, кламп крайних подписей и ширина
+ * пилюли текущей метки — то есть ошибка видна как обрезанный текст или как лишний воздух.
+ *
+ * Здесь нет измерения через getComputedTextLength намеренно: оно потребовало бы второго
+ * прохода раскладки на каждый рендер графика. Трёх классов хватает: оси несут цифры,
+ * точки, пробелы и короткие русские слова.
+ */
+export function axisTextWidth(text: string): number {
+  let w = 0;
+  for (const ch of text) {
+    if (ch >= '0' && ch <= '9') w += CHAR_W;
+    else if (ch.toLowerCase() !== ch.toUpperCase()) w += ch === ch.toLowerCase() ? CHAR_W_LOWER : CHAR_W_UPPER;
+    else w += CHAR_W;
+  }
+  return w;
+}
+// Высота строки подписи-экстремума (2xs, 11px + просвет). По ней решается, слиплись ли две
+// подписи одной серии и надо ли разводить их вверх/вниз — см. `extremes` ниже.
+const EXTREME_LINE_H = 13;
+/**
+ * КОЛЬЦА НА КАЖДОЙ ТОЧКЕ — читаемы только на КОРОТКОМ ряду (аудит #554, D13).
+ *
+ * Было: линия IG- и ЯМ-метрики усыпана кружками на каждом дне, линия TG чистая — одна и та же
+ * сущность в двух подачах, потому что каждая страница решала сама через `values.length <= 45`.
+ * На дневном ряде такие кольца не отвечают ни на один вопрос: «что в этой точке» говорит
+ * ховер, «где конец» — полюс линии, а кольца на 90 днях сливаются в бусы.
+ *
+ * Стало: постоянные кольца только там, где точек ДЕЙСТВИТЕЛЬНО МАЛО — меньше десяти,
+ * то есть ряд читается как набор замеров, а не как кривая. Вторым условием — шаг: десять точек на
+ * узкой искре в 120px дают те же бусы. Кольцо r=3 со штрихом 1.5 — ~7.5px внешнего диаметра;
+ * ближе 14px друг к другу между ними не остаётся бумаги.
+ *
+ * Правило живёт ЗДЕСЬ: хост говорит только НАМЕРЕНИЕ («этой серии кольца идут»), а вмещаются
+ * ли они — знает только график, у которого есть ширина.
+ *
+ * Не зависит от этого правила и остаётся всегда: полюса линии (первая полая и последняя сплошная
+ * точки — MorphingSeries), кольца аномалий, одиночные измерения между дырами и точка под курсором.
+ */
+const RING_MAX_POINTS = 10;
+const RING_MIN_STEP = 14;
+
+/** Запас над максимумом, ниже которого шкала поднимается ещё на шаг (доля высоты плота). */
+const SCALE_HEADROOM = 0.08;
 
 /** Next step up the 1-2-5×10ⁿ ladder (20 → 50 → 100 → 200 …). */
 function nextStep(step: number): number {
@@ -89,6 +161,15 @@ function nextStep(step: number): number {
  * values and never format into duplicate labels («4.9k / 4.9k / 4.8k»), capped at 5 ticks.
  */
 export function niceScale(minV: number, maxV: number): { lo: number; hi: number; step: number; ticks: number[] } {
+  // ПИК НЕ КАСАЕТСЯ ПОТОЛКА (аудит #554). Когда максимум кратен шагу, `ceil` ниже отдавал
+  // hi === maxV: вершина линии ложилась РОВНО на верхнюю линейку сетки и сливалась с ней (видно на
+  // /metrics/ig-follows): глазу нечем отличить «дошло до максимума окна» от «упёрлось в край графика».
+  //
+  // Запас добавляется К ВХОДУ, а не к готовому потолку: иначе лишний шаг ломает потолок числа
+  // делений (цикл «> 4.5 шагов» ниже), и вместо четырёх линеек сетки получается шесть. Округление
+  // вверх само подберёт честный потолок выше пика.
+  const pad = Math.abs(maxV - minV) || Math.abs(maxV) || 1;
+  maxV += pad * SCALE_HEADROOM;
   let span = maxV - minV;
   if (!Number.isFinite(span) || span <= 0) span = Math.abs(maxV) || 1;
   const mag0 = 10 ** Math.floor(Math.log10(Math.max(span / 2.5, 1e-9)));
@@ -121,6 +202,7 @@ export function axisLabel(v: number, step: number): string {
 export function LineChart({
   values,
   labels,
+  axisLabels,
   titles,
   yMin,
   yMax,
@@ -136,6 +218,7 @@ export function LineChart({
   fullAxes = false,
   onPointClick,
   legendToggle = true,
+  ghostVisible = true,
   pinnedIndex = null,
   hoverTitles,
   ghostTitles,
@@ -143,8 +226,12 @@ export function LineChart({
   appearance = 'default',
 }: LineChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const svgRef = useRef<SVGSVGElement>(null);
   // Press position (client px) for the drag guard — see onSvgClick below.
   const pressRef = useRef<{ x: number; y: number } | null>(null);
+  // Native-button focus follows pointerdown. Preserve that fresh press through focus, but let a
+  // later keyboard focus discard coordinates left by an interrupted pointer gesture.
+  const pointerDownRef = useRef(false);
   const [hover, setHover] = useState<Hover | null>(null);
   // The comparison series can be toggled off via its legend chip (steep #9) — a decluttering
   // reading aid. Hidden, it also drops out of the y-domain below so the current series
@@ -183,7 +270,7 @@ export function LineChart({
   // Strip colons from useId — valid in ids, but break SVG url(#…) refs in some browsers.
   const chartId = useId().replace(/:/g, '');
   const gradientId = `lc${chartId}`;
-  const comparisonGradientId = `lcg${chartId}`;
+  const gapPatternId = `lcgap${chartId}`;
 
   useLayoutEffect(() => {
     const el = containerRef.current;
@@ -198,7 +285,11 @@ export function LineChart({
   const hasHover = hover !== null;
   useEffect(() => {
     if (!hasHover) return;
-    const clear = () => setHover(null);
+    const clear = () => {
+      pointerDownRef.current = false;
+      pressRef.current = null;
+      setHover(null);
+    };
     window.addEventListener('scroll', clear, true);
     window.addEventListener('blur', clear);
     return () => {
@@ -219,8 +310,11 @@ export function LineChart({
   // Toggled off (or absent), the comparison drops out of every draw/measure below; the legend
   // chip stays visible so it can be toggled back on. Derived before the plot memo (its inputs).
   const hasGhostLegend = !!ghost && ghost.length >= 2;
-  const showGhost = hasGhostLegend && !ghostHidden;
+  const showGhost = hasGhostLegend && !ghostHidden && ghostVisible;
+  // ДОМЕН считается по показанному: выключенное сравнение не имеет права растягивать шкалу под
+  // чужое окно. А вот ГЕОМЕТРИЯ ghost строится всегда, пока данные есть, — иначе гасить нечего.
   const activeGhost = showGhost ? ghost : undefined;
+  const geomGhost = hasGhostLegend ? ghost : undefined;
 
   // Stable data signature for the shape morph (see index.css «Chart motion»). Primary values plus
   // the shown comparison start a transition on a real period/filter/compare swap, while hover,
@@ -244,8 +338,12 @@ export function LineChart({
       const v = values[i];
       if (v != null) real.push({ i, v });
     }
-    // Меньше двух реальных точек — графика нет: дыры данными не считаются.
-    if (real.length < 2) return null;
+    // Ни одной реальной точки — графика нет: дыры данными не считаются. РОВНО одна точка — это
+    // факт, а не пустота: сегмент из одной точки ниже рисуется кружком (lonePts), поэтому серия
+    // из одного бакета (грануляция «Квартал»/«Год», первый день сбора) больше не показывает
+    // «Нет данных за период» поверх реального значения — паритет со столбцами, где один бакет
+    // всегда рисовался.
+    if (real.length < 1) return null;
 
     // In a fixed-height card tile (ctxHeight = the tile's leftover height, and NOT the expanded
     // overlay), the svg shares the tile with the HTML rows drawn below it — the minimal x-label
@@ -272,11 +370,15 @@ export function LineChart({
 
     // Domain covers the series, the (shown) ghost and the target — a goal above the data must
     // be visible. Только non-null: null в Math.min/max превратился бы в 0 — ложный «пол» домена.
-    const scaleVals = [
-      ...real.map((r) => r.v),
-      ...(activeGhost ?? []).filter((v): v is number => v != null),
-      ...(target != null ? [target] : []),
-    ];
+    const seriesVals = [...real.map((r) => r.v), ...(activeGhost ?? []).filter((v): v is number => v != null)];
+    // Цель имеет право растянуть шкалу — но не настолько, чтобы ряд сплющился в черту у нижнего
+    // края: недостижимую цель ставит человек, и график перестал бы отвечать на первый свой вопрос
+    // («как шло дело»), отвечая на второй. Приём тот же, что у искры (см. clampTargetToDomain):
+    // режется ОКНО ПРОСМОТРА, а выход за край помечается стрелкой в подписи.
+    const seriesMin = seriesVals.length > 0 ? Math.min(...seriesVals) : 0;
+    const seriesMax = seriesVals.length > 0 ? Math.max(...seriesVals) : 0;
+    const clamped = clampTargetToDomain(target, seriesMin, seriesMax);
+    const scaleVals = [...seriesVals, ...(clamped.value != null ? [clamped.value] : [])];
     const computedMin = Math.min(...scaleVals);
     const computedMax = Math.max(...scaleVals);
     // The caller's yMin/yMax (e.g. a zero base for volume metrics) defines the domain; the nice
@@ -300,7 +402,7 @@ export function LineChart({
     // on the line/area and the first label is never clipped by the container edge.
     // Axis-free mode keeps only a sliver so edge markers (rings) don't clip on the viewBox.
     const gutterW = showAxes && !rhea
-      ? Math.max(28, Math.round(Math.max(...yLabels.map((l) => l.length)) * CHAR_W) + 14)
+      ? Math.max(28, Math.round(Math.max(...yLabels.map(axisTextWidth))) + 14)
       : 6;
 
     const n = values.length;
@@ -314,12 +416,9 @@ export function LineChart({
     });
 
     // Маркер «сейчас» — последняя РЕАЛЬНАЯ точка: хвостовая дыра не должна вешать его в пустоту.
+    // Сами ПОЛЮСА (первая полая + последняя сплошная точки) рисует MorphingSeries из текущего
+    // кадра морфа; здесь lastReal остаётся только для markExtremes-подписей ниже.
     const lastReal = real[real.length - 1];
-    const lastPt = { x: points[lastReal.i].x, y: yFor(lastReal.v) };
-    // Начало серии — ПОЛАЯ точка (steep): полюса линии размечены парой «прокол → сплошная»,
-    // взгляд сразу считывает направление чтения. Тоже первая РЕАЛЬНАЯ точка.
-    const firstReal = real[0];
-    const firstPt = { x: points[firstReal.i].x, y: yFor(firstReal.v) };
 
     // Линия и заливка — СЕГМЕНТАМИ по непрерывным run'ам реальных точек: дыра = честный разрыв,
     // интерполяция «через пропуск» нарисовала бы данные, которых не было.
@@ -336,6 +435,26 @@ export function LineChart({
       }
     }
     if (run.length > 0) segs.push(run);
+
+    // Полосы ПРОПУСКОВ: интервал между последней и следующей реальной точкой. Разрыв честен, но
+    // молчаливый разрыв читается как «график сломался» и СНИЖАЕТ доверие к данным (Song & Szafir);
+    // подсвеченный пропуск — повышает. Поэтому дыра получает штриховку и подпись, а не просто
+    // пустоту. Крайние пропуски (в начале/конце окна) не рисуем: там нет второй границы, и полоса
+    // до края плота выглядела бы как «данных нет вообще».
+    const gapBands: Array<{ x: number; w: number; from: number; to: number }> = [];
+    for (let i = 0; i < points.length; i++) {
+      if (points[i].y != null) continue;
+      const start = i;
+      while (i < points.length && points[i].y == null) i++;
+      const end = i - 1;
+      const prev = start - 1;
+      const next = i;
+      if (prev < 0 || next >= points.length) continue; // висячий пропуск у края окна
+      const x1 = points[prev].x;
+      const x2 = points[next].x;
+      if (x2 > x1) gapBands.push({ x: x1, w: x2 - x1, from: start, to: end });
+    }
+
     const baseY = h - padB;
     // Сегмент из одной точки: точка-кружок — единственное измерение между дырами всё равно факт,
     // а линия нулевой длины была бы невидима.
@@ -346,23 +465,47 @@ export function LineChart({
     // nothing here bakes a path (the whole plot must stay OUT of the RAF loop). `null` stays a gap;
     // baseY closes each area segment. Ghost x-spacing matches the primary (gutterW + i·step).
     const primaryPoints: MorphPoint[] = points.map((p) => ({ x: p.x, y: p.y }));
-    const ghostPoints: MorphPoint[] | null = activeGhost
-      ? activeGhost.map((v, i) => ({ x: gutterW + i * step, y: v != null ? yFor(v) : null }))
+    const ghostPoints: MorphPoint[] | null = geomGhost
+      ? geomGhost.map((v, i) => ({ x: gutterW + i * step, y: v != null ? yFor(v) : null }))
       : null;
 
     // Real x-axis ticks (axes mode): width-aware stride so labels never collide — one label
-    // by measured width, always including the first and the last point.
+    // by measured width, always including the first and the last point. Буквенная ось короткого
+    // окна (axisLabels, канон weekdayAxis) метит КАЖДУЮ точку — буквы узкие и не сталкиваются.
+    const letterAxis = axisLabels && axisLabels.length === n ? axisLabels : null;
+    // «Текущий» индекс оси (несёт пилюлю): у дат — последняя точка; у канонной оси
+    // (буквы/месяцы) — последний НЕПУСТОЙ тик (месяц-тик стоит у первой точки месяца).
+    const axisCurrentIdx = letterAxis
+      ? letterAxis.reduce((acc, text, i) => (text.length > 0 ? i : acc), -1)
+      : n - 1;
     const xTicks = hasXAxis
       ? (() => {
-          return axisLabelIndexes(n, plotW, { minLabelPx: expanded ? 76 : 88, maxLabels: expanded ? 12 : 8 })
+          const indexes = letterAxis
+            ? values.map((_, i) => i)
+            : axisLabelIndexes(n, plotW, { minLabelPx: expanded ? 76 : 88, maxLabels: expanded ? 12 : 8 });
+          const laid = indexes
             .map((i) => {
-              const text = labels?.[i] ?? '';
+              const text = letterAxis ? letterAxis[i] : labels?.[i] ?? '';
               if (!text) return null;
-              const halfW = (text.length * CHAR_W) / 2;
+              const halfW = axisTextWidth(text) / 2;
               const x = Math.min(Math.max(points[i].x, gutterW + halfW), Math.max(W - padR - halfW, gutterW + halfW));
-              return { i, px: points[i].x, x, text };
+              return { i, px: points[i].x, x, text, halfW };
             })
-            .filter((t): t is { i: number; px: number; x: number; text: string } => t !== null);
+            .filter((t): t is { i: number; px: number; x: number; text: string; halfW: number } => t !== null);
+          // Месяц-тики идут ПО ТОЙ ЖЕ ветке, что буквы дней недели, а там прореживание выключено
+          // («буквы узкие и не сталкиваются»). Для месяцев это неверно: частичный месяц у кромки
+          // окна отстоит от следующего на считаные дни, и на 90 днях «May» налезал на «Jun»
+          // (замер: 46+23 против 68). Отбор идёт СПРАВА НАЛЕВО, поэтому последний тик — тот, что
+          // несёт пилюлю «сейчас», — остаётся всегда, а жертвой становится кромка.
+          const GAP = 6;
+          const keptTicks: typeof laid = [];
+          for (let k = laid.length - 1; k >= 0; k -= 1) {
+            const t = laid[k];
+            const right = keptTicks[keptTicks.length - 1];
+            if (right && t.x + t.halfW + GAP > right.x - right.halfW) continue;
+            keptTicks.push(t);
+          }
+          return keptTicks.reverse();
         })()
       : [];
 
@@ -375,40 +518,61 @@ export function LineChart({
       let maxE = real[0];
       for (const r of real) if (r.v > maxE.v) maxE = r;
       const idxs = maxE.i === lastReal.i ? [lastReal] : [maxE, lastReal];
-      return idxs.map((e) => {
+      const laidOut = idxs.map((e) => {
         const px = points[e.i].x;
         const py = yFor(e.v);
         const text = fmt.short(e.v);
-        const halfW = (text.length * CHAR_W) / 2;
+        const halfW = axisTextWidth(text) / 2;
         // +6px воздуха справа: лейбл последней точки не прилипает к краю карточки.
         const x = Math.min(Math.max(px, gutterW + halfW), Math.max(W - padR - halfW - 6, gutterW + halfW));
         const fitsAbove = py - 18 >= 0;
         const y = fitsAbove ? py - 8 : py + 16;
-        return { key: e.i, x, y, text };
+        return { key: e.i, x, y, text, halfW, py, v: e.v };
       });
+
+      /* Две подписи одной серии — максимум и последняя точка — клампились к ОДНОМУ правому краю и
+         ставились по одному правилу «выше точки». Когда максимум приходится на хвост ряда, они
+         оказывались буквально друг на друге: на /metrics/views «10.1k» и «9.9k» слипались в кашу
+         (аудит #554, D3). Любые два близких хвоста давали то же самое.
+
+         Лечение в два шага. Если точки практически совпали — печатаем только последнюю: две
+         подписи об одном и том же месте не несут информации. Иначе разводим их вверх и вниз от
+         общего центра: большее значение выше, меньшее ниже — порядок читается без легенды. */
+      if (laidOut.length === 2) {
+        const [a, b] = laidOut;
+        const overlapX = Math.abs(a.x - b.x) < a.halfW + b.halfW + 4;
+        if (!overlapX) return laidOut;
+        if (Math.abs(a.py - b.py) < 4) return [laidOut[1]];
+        if (Math.abs(a.y - b.y) < EXTREME_LINE_H) {
+          const center = (a.py + b.py) / 2;
+          const upper = a.v >= b.v ? a : b;
+          const lower = upper === a ? b : a;
+          upper.y = Math.max(EXTREME_LINE_H, center - 6);
+          lower.y = Math.min(h - 2, center + EXTREME_LINE_H + 2);
+        }
+      }
+      return laidOut;
     })();
 
     // ── The chart splits into three z-layers so the RAF morph re-renders ONLY the series paths ──
     // `staticUnder` (defs, grid, target/reference lines) sits below the series; `MorphingSeries`
-    // (rendered between them in the SVG body) owns the morphing primary/comparison line+area; and
+    // (rendered between them in the SVG body) owns the morphing primary line+area and the dashed
+    // comparison line (the ghost never gets an area of its own); and
     // `staticOver` (lone points, rings, poles, value/axis labels) sits above. Both static fragments
     // are part of this memo, so a morph frame's setState — confined to MorphingSeries — never rebuilds
     // the axes, labels or hover geometry. Target/reference hairlines read as «drawn under the series».
     const staticUnder = (
       <>
         <defs>
+          <ChartGapPattern id={gapPatternId} />
           {/* Default cards keep the flat Steep tint. The isolated Rhea treatment follows the
               shadcn area-chart recipe with a stronger top tint fading toward the baseline. */}
           <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor="hsl(var(--chart-role-primary))" stopOpacity={richStyle ? '0.3' : expanded ? '0.05' : '0.12'} />
             <stop offset="100%" stopColor="hsl(var(--chart-role-primary))" stopOpacity={richStyle ? '0.035' : expanded ? '0.05' : '0.12'} />
           </linearGradient>
-          {comparison && (
-            <linearGradient id={comparisonGradientId} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="hsl(var(--chart-role-comparison))" stopOpacity="0.22" />
-              <stop offset="100%" stopColor="hsl(var(--chart-role-comparison))" stopOpacity="0.025" />
-            </linearGradient>
-          )}
+          {/* У сравнения СВОЕГО градиента нет: прошлый период по канону — штриховая линия без
+              заливки, иначе две area пересекаются и дают мутные зоны. */}
         </defs>
 
         {/* Gridlines — start after the label gutter */}
@@ -434,16 +598,19 @@ export function LineChart({
         ))}
 
         {/* Target level (widget pref) — a dashed goal line with a small right-aligned label */}
-        {target != null && (
+        {clamped.value != null && (
           <>
-            <line x1={gutterW} y1={yFor(target)} x2={W} y2={yFor(target)} stroke="hsl(var(--chart-role-neutral))" strokeDasharray="6 4" strokeWidth="1.2" opacity="0.8" vectorEffect="non-scaling-stroke" />
+            {/* Линия стоит на УРЕЗАННОМ уровне, а число в подписи — настоящее: стрелка говорит, что
+                цель выше окна. Молча нарисовать её у края значило бы соврать про уровень. */}
+            <line x1={gutterW} y1={yFor(clamped.value)} x2={W} y2={yFor(clamped.value)} stroke="hsl(var(--chart-role-neutral))" strokeDasharray="6 4" strokeWidth="1.2" opacity="0.8" vectorEffect="non-scaling-stroke" />
             <text
               x={W - 4}
-              y={yFor(target) - 4 < 10 ? yFor(target) + 12 : yFor(target) - 4}
+              y={yFor(clamped.value) - 4 < 10 ? yFor(clamped.value) + 12 : yFor(clamped.value) - 4}
               textAnchor="end"
               className="pointer-events-none select-none fill-muted-foreground text-2xs font-medium tabular-nums"
             >
-              цель {fmt.short(target)}
+              цель {fmt.short(target ?? clamped.value)}
+              {clamped.clipped ? ' ↑' : ''}
             </text>
           </>
         )}
@@ -479,7 +646,7 @@ export function LineChart({
 
         {/* Per-point hollow rings (steep-style) — knocked out from the paper so the line reads
             as a dotted sequence of measurements, not a continuous estimate. Дыры пропускаем. */}
-        {showPoints &&
+        {showPoints && n <= RING_MAX_POINTS && step >= RING_MIN_STEP &&
           points.map((p, i) =>
             p.y != null ? (
               <circle key={`pt${i}`} cx={p.x} cy={p.y} r="3" fill="hsl(var(--background))" stroke="hsl(var(--chart-role-primary))" strokeWidth="1.5" vectorEffect="non-scaling-stroke" className="pointer-events-none" />
@@ -495,20 +662,13 @@ export function LineChart({
           ) : null;
         })}
 
-        {/* Полюса линии (steep): начало — полая точка, конец — сплошной маркер «сейчас».
-            Оба стоят на РЕАЛЬНЫХ точках: краевые дыры маркеров не получают. Полюса — часть
-            дефолтного стиля карточек; rich-хосты (Rhea/comparison) их прячут, кривая при этом
-            одинаково сглажена в обоих режимах. */}
-        {!richStyle && (
-          <>
-            <circle cx={firstPt.x} cy={firstPt.y} r="3.5" fill="hsl(var(--background))" stroke="hsl(var(--chart-role-primary))" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
-            <circle cx={lastPt.x} cy={lastPt.y} r="4" fill="hsl(var(--chart-role-primary))" stroke="hsl(var(--background))" strokeWidth="2" vectorEffect="non-scaling-stroke" />
-          </>
-        )}
+        {/* Полюса линии (первая полая + последняя сплошная точки) переехали в MorphingSeries:
+            они рисуются из ТЕКУЩЕГО КАДРА морфа и скользят вместе с линией — в статичном слое
+            они прыгали в целевое место, пока линия ещё перетекала (владелец). */}
 
         {/* Max / last value labels (markExtremes) — bare tabular text, no boxes */}
         {extremes.map((e) => (
-          <text key={`e${e.key}`} x={e.x} y={e.y} textAnchor="middle" className="pointer-events-none select-none fill-ink2 text-2xs font-medium tabular-nums">
+          <text key={`e${e.key}`} x={e.x} y={e.y} data-chart-extreme="" textAnchor="middle" className="pointer-events-none select-none fill-ink2 text-2xs font-medium tabular-nums">
             {e.text}
           </text>
         ))}
@@ -520,28 +680,77 @@ export function LineChart({
           </text>
         ))}
 
-        {/* X-axis (axes mode) — tick marks + date labels inside the bottom band */}
-        {xTicks.map((t) => (
-          <g key={`x${t.i}`}>
-            {!rhea && <line x1={t.px} y1={h - padB + 3} x2={t.px} y2={h - padB + 7} stroke="hsl(var(--border))" strokeWidth="1" vectorEffect="non-scaling-stroke" />}
-            <text x={t.x} y={h - 8} textAnchor="middle" data-chart-axis-label="x" className="pointer-events-none select-none fill-muted-foreground text-2xs font-medium tabular-nums">
-              {t.text}
-            </text>
-          </g>
-        ))}
+        {/* X-axis (axes mode) — tick marks + date labels inside the bottom band. Последняя
+            (текущая) метка несёт пилюлю «где сейчас» (референс владельца 2026-08-14, канон общий
+            со спарками и столбцами); viewBox тут 1:1 с CSS-px, скруглённый rect не искажается. */}
+        {xTicks.map((t) => {
+          const isCurrent = t.i === axisCurrentIdx;
+          const pill = isCurrent
+            ? (() => {
+                const textW = axisTextWidth(t.text);
+                const pillH = 15;
+                const pillW = Math.max(textW + 12, pillH);
+                return { x: Math.max(1, Math.min(t.x - pillW / 2, W - pillW - 1)), w: pillW, h: pillH };
+              })()
+            : null;
+          return (
+            <g key={`x${t.i}`} data-axis-current={isCurrent ? '' : undefined}>
+              {!rhea && <line x1={t.px} y1={h - padB + 3} x2={t.px} y2={h - padB + 7} stroke="hsl(var(--border))" strokeWidth="1" vectorEffect="non-scaling-stroke" />}
+              {pill && (
+                // Цвет пилюли = цвет серии (владелец, референс steep): солидный chart-role-primary,
+                // чернила — фон; тонированные карточки переопределяют токен в своём скоупе.
+                <rect x={pill.x} y={h - 19.5} width={pill.w} height={pill.h} rx={pill.h / 2} fill="hsl(var(--chart-role-primary))" className="pointer-events-none" />
+              )}
+              <text x={t.x} y={h - 8} textAnchor="middle" data-chart-axis-label="x" fill={isCurrent ? 'hsl(var(--background))' : undefined} className={`pointer-events-none select-none text-2xs font-medium tabular-nums ${isCurrent ? '' : 'fill-muted-foreground'}`}>
+                {t.text}
+              </text>
+            </g>
+          );
+        })}
       </>
     );
 
     return {
-      W, h, gutterW, step, points, yFor, hasXAxis,
+      W, h, gutterW, step, points, yFor, hasXAxis, gapBands,
       plotTop: padY, plotBottom: h - padB,
       staticUnder, staticOver,
       morphGeom: { primary: primaryPoints, ghost: ghostPoints, baseY } as MorphGeom,
     };
-  }, [values, labels, activeGhost, hasGhostLegend, target, refLines, yMin, yMax, width, ctxHeight, height, expanded, showAxes, markExtremes, showPoints, anomalyIdx, gradientId, comparisonGradientId, rhea, comparison, richStyle]);
+  }, [values, labels, axisLabels, activeGhost, geomGhost, hasGhostLegend, target, refLines, yMin, yMax, width, ctxHeight, height, expanded, showAxes, markExtremes, showPoints, anomalyIdx, gradientId, gapPatternId, rhea, comparison, richStyle]);
 
-  // Пустое состояние считается по РЕАЛЬНЫМ точкам (plot = null при < 2 non-null): серия из
-  // одних null-дней — честное «нет данных», а не нулевая линия.
+  // Hover-only lines remain one passive named graphic. Pointer scrubbing is supplementary to its
+  // accessible summary and is registered on the DOM node. A drillable line instead uses the real
+  // overlay button rendered below, which provides focus, arrow selection and Enter/Space parity.
+  useEffect(() => {
+    const container = containerRef.current;
+    const svg = svgRef.current;
+    if (!container || !svg || !plot || values.length === 0) return;
+    const clear = () => {
+      pointerDownRef.current = false;
+      pressRef.current = null;
+      setHover(null);
+    };
+    const handleMove = (event: globalThis.MouseEvent) => {
+      const rect = svg.getBoundingClientRect();
+      if (rect.width === 0) return;
+      const xView = ((event.clientX - rect.left) / rect.width) * plot.W;
+      const i = nearestPointIndex(xView, values.length, plot.gutterW, plot.step);
+      if (i == null) return;
+      setHover((prev) => (prev && prev.i === i ? prev : { i }));
+    };
+    if (!onPointClick) svg.addEventListener('mousemove', handleMove);
+    container.addEventListener('mouseleave', clear);
+    container.addEventListener('pointerleave', clear);
+    return () => {
+      if (!onPointClick) svg.removeEventListener('mousemove', handleMove);
+      container.removeEventListener('mouseleave', clear);
+      container.removeEventListener('pointerleave', clear);
+    };
+  }, [onPointClick, plot, values.length]);
+
+  // Пустое состояние считается по РЕАЛЬНЫМ точкам (plot = null при 0 non-null): серия из
+  // одних null-дней — честное «нет данных», а не нулевая линия. Одна реальная точка рисуется
+  // lone-кружком, не пустым состоянием (паритет со столбцами).
   if (!plot) {
     return (
       <EmptyState compact size="chart" title="Нет данных за период" />
@@ -589,17 +798,21 @@ export function LineChart({
     const prev = activeGhost?.[i];
     if (prev != null) {
       const cur = v;
+      const d = prev !== 0 ? ((cur - prev) / Math.abs(prev)) * 100 : null;
       const rows: TooltipRow[] = [
         { label: primaryLabel ?? 'Текущий', value: formatValue(cur), color: 'hsl(var(--chart-role-primary))' },
         {
-          // Своя дата у строки сравнения (артефакт v2): «Пред. период · вт, 18 июн».
-          label: ghostTitles?.[i] ? `${ghostLabel} · ${ghostTitles[i]}` : ghostLabel,
+          label: ghostLabel,
+          // Дата прошлого окна — ПРИПИСКОЙ под меткой, а не через «·» в самой метке: длинная
+          // склейка «Пред. период · вт, 18 июн» упиралась в ширину плашки и переносилась.
+          sub: ghostTitles?.[i],
           value: formatValue(prev),
           color: 'hsl(var(--chart-role-comparison))',
+          // Дельта живёт ПРИ величине, к которой относится, а не отдельной строкой с меткой «Δ».
+          delta: comparisonDelta && d != null && Number.isFinite(d) ? d : undefined,
         },
       ];
-      const d = prev !== 0 ? ((cur - prev) / Math.abs(prev)) * 100 : null;
-      if (comparisonDelta && d != null && Number.isFinite(d)) rows.push({ label: 'Δ', value: `${d >= 0 ? '+' : '−'}${Math.abs(d).toFixed(1)}%` });
+      if (target != null) rows.push(targetTooltipRow(target, cur, formatValue));
       return { x: p.x, y: py, title: cardTitle(i), rows };
     }
     if (expanded || rhea) {
@@ -615,89 +828,157 @@ export function LineChart({
     return { x: p.x, y: py, text: tipText(i, v) };
   };
 
-  // ONE hit surface: the svg itself. The pointer x maps to the nearest point in O(1); moving
-  // within a point's zone keeps the same state object, so those mousemoves don't re-render.
-  const indexFromEvent = (e: ReactMouseEvent<SVGSVGElement>): number | null => {
-    const rect = e.currentTarget.getBoundingClientRect();
+  // One surface maps pointer x to the nearest point in O(1); moving inside the same point's zone
+  // keeps the state object stable. For a drillable line that surface is the semantic overlay button.
+  const indexFromClientX = (clientX: number, surface: Element): number | null => {
+    const rect = surface.getBoundingClientRect();
     if (rect.width === 0) return null;
-    const xView = ((e.clientX - rect.left) / rect.width) * W;
+    const xView = ((clientX - rect.left) / rect.width) * W;
     return nearestPointIndex(xView, n, gutterW, step);
   };
-  const onSvgMove = (e: ReactMouseEvent<SVGSVGElement>) => {
-    const i = indexFromEvent(e);
+  const onSurfaceMove = (e: ReactMouseEvent<HTMLButtonElement>) => {
+    const i = indexFromClientX(e.clientX, e.currentTarget);
     if (i == null) return;
     setHover((prev) => (prev && prev.i === i ? prev : { i }));
   };
   // Drill only on a genuine click, not a press-drag-release scrub (the browser retargets a
   // cross-point click to the svg — without this guard a drag-to-read gesture would navigate). A
   // click with no recorded press (keyboard / AT) passes through.
-  const onSvgClick = onPointClick
-    ? (e: ReactMouseEvent<SVGSVGElement>) => {
+  const lastRealIndex = values.reduce<number>(
+    (latest, value, index) => (value == null ? latest : index),
+    0,
+  );
+  const fallbackControlIndex =
+    pinnedIndex != null && pinnedIndex >= 0 && pinnedIndex < n ? pinnedIndex : lastRealIndex;
+  const controlIndex = hover?.i ?? fallbackControlIndex;
+  const onSurfaceClick = onPointClick
+    ? (e: ReactMouseEvent<HTMLButtonElement>) => {
         const press = pressRef.current;
         pressRef.current = null;
-        if (press && Math.hypot(e.clientX - press.x, e.clientY - press.y) > 5) return;
-        const i = indexFromEvent(e);
-        if (i != null) {
-          // The chart OWNS this click (point drill / pin) — don't let it bubble into the host
-          // card's whole-card expand, which would double-act on one tap.
-          e.stopPropagation();
-          onPointClick(i);
-        }
+        pointerDownRef.current = false;
+        // Resolve keyboard/AT FIRST: a cancelled old pointer gesture must never suppress a
+        // detail=0 click produced by Enter, Space or assistive technology.
+        activateChartControl(
+          {
+            detail: e.detail,
+            controlIndex,
+            pointerIndex: e.detail === 0 ? null : indexFromClientX(e.clientX, e.currentTarget),
+            press,
+            clientX: e.clientX,
+            clientY: e.clientY,
+          },
+          (i) => {
+            // The chart OWNS this click (point drill / pin) — don't let it bubble into the host
+            // card's whole-card expand, which would double-act on one tap.
+            e.stopPropagation();
+            onPointClick(i);
+          },
+        );
       }
     : undefined;
   const clearHover = () => {
+    pointerDownRef.current = false;
     pressRef.current = null;
     setHover(null);
   };
 
-  const hovered = hover && hover.i < n ? points[hover.i] : null;
+  const activeIdx = hover && hover.i < n ? hover.i : null;
+  const hovered = activeIdx != null ? points[activeIdx] : null;
   // Ghost-точка под курсором: считаем локалом заранее — element-access в JSX TS не сужает.
-  const hoverGhostVal = hover && activeGhost ? activeGhost[hover.i] : null;
+  const hoverGhostVal = activeIdx != null && activeGhost ? activeGhost[activeIdx] : null;
   const hoverGhostY = hoverGhostVal != null ? yFor(hoverGhostVal) : null;
   // Пин на дыре: вертикаль остаётся (день-то выбран), solid-маркер — только у реальной точки.
   const pinnedPt = pinnedIndex != null && pinnedIndex >= 0 && pinnedIndex < n ? points[pinnedIndex] : null;
+  // Канонная компакт-ось (timeAxisCore): буквы короткого окна — на каждой точке; EN-месяцы
+  // длинного — только непустые тики. Даты — прежний прореженный ряд.
+  const compactLetterAxis = axisLabels && axisLabels.length === values.length ? axisLabels : null;
+  const compactSparse = !!compactLetterAxis && compactLetterAxis.some((text) => text.length === 0);
   const compactLabelIndexes =
-    labels && labels.length > 0 && !hasXAxis
-      ? axisLabelIndexes(labels.length, W, { minLabelPx: 92, maxLabels: expanded ? 8 : 5 })
+    (labels || compactLetterAxis) && !hasXAxis
+      ? compactLetterAxis
+        ? compactLetterAxis.flatMap((text, i) => (text.length > 0 ? [i] : []))
+        : labels && labels.length > 0
+          ? axisLabelIndexes(labels.length, W, { minLabelPx: 92, maxLabels: expanded ? 8 : 5 })
+          : []
       : [];
 
   return (
-    <div
-      ref={containerRef}
-      className="relative w-full"
-      onMouseLeave={clearHover}
-      onPointerLeave={clearHover}
-    >
+    <div className="w-full">
+      {/* ЛЕГЕНДА СВЕРХУ — по образцу Steep (кадр владельца: чипы рядов стоят НАД полотном).
+          Читатель узнаёт, что за линии, до того как всмотрится, а не после.
+          Вынесена ЗА `relative`-контейнер полотна НАМЕРЕННО: читалка позиционируется абсолютно
+          внутри него и берёт координаты точки из системы svg. Оставь легенду внутри — и svg
+          сдвинулся бы вниз на её высоту, а тултип встал бы выше курсора ровно на эти 22px. */}
+      {/* Comparison legend — names both series whenever a ghost is present; the comparison chip is a
+          toggle (steep #9): click to hide/show the ghost series (the current-period chip stays put,
+          hiding the metric itself is meaningless). Where a page-level compare control already owns the
+          on/off (legendToggle=false, the metric page) the chip is a static label instead.
+          Чипы одинаковы во ВСЕХ appearance и повторяют язык линий: сплошной штрих — текущий период,
+          пунктир — сравнение (квадрат-заливка врал бы про несуществующую area прошлого периода). */}
+      {ghost && ghost.length >= 2 && (
+        <div className="mb-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-2xs font-medium text-muted-foreground">
+          <span className="flex select-none items-center gap-1.5">
+            <span aria-hidden="true" className="h-0.5 w-4 rounded-full" style={{ backgroundColor: 'hsl(var(--chart-role-primary))' }} />
+            {primaryLabel ?? 'Текущий период'}
+          </span>
+          {legendToggle ? (
+            <button
+              type="button"
+              aria-pressed={!ghostHidden}
+              onClick={() => setGhostHidden((v) => !v)}
+              title={ghostHidden ? 'Показать сравнение' : 'Скрыть сравнение'}
+              className={`flex select-none items-center gap-1.5 rounded transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40 ${ghostHidden ? 'opacity-40 line-through' : ''}`}
+            >
+              <span aria-hidden="true" className="w-4 border-t-2 border-dashed" style={{ borderColor: 'hsl(var(--chart-role-comparison))' }} />
+              {ghostLabel}
+            </button>
+          ) : (
+            // Выключенное сравнение НЕ уносит чип из потока: место остаётся за ним, иначе строка
+            // легенды пропадает целиком и всё, что под графиком, дёргается вверх. Но и утверждать
+            // «пред. период» он не должен — поэтому становится невидим, а не приглушён.
+            <span className={`flex select-none items-center gap-1.5${ghostVisible ? '' : ' invisible'}`} aria-hidden={!ghostVisible}>
+              <span aria-hidden="true" className="w-4 border-t-2 border-dashed" style={{ borderColor: 'hsl(var(--chart-role-comparison))' }} />
+              {ghostLabel}
+            </span>
+          )}
+        </div>
+      )}
+      <div ref={containerRef} className="relative w-full">
       <svg
+        ref={svgRef}
         data-chart-kind="line"
         data-chart-expanded={expanded ? '' : undefined}
         data-chart-appearance={appearance}
         data-chart-curve="smooth"
-        data-chart-comparison={comparison && hasGhostLegend ? 'area' : undefined}
+        // Как нарисован прошлый период: у линии он ВСЕГДА штриховой и без заливки (BarChart рядом
+        // рапортует 'grouped'/'stacked' — там призрак рисуется столбцами). Атрибут следует за
+        // РЕАЛЬНО нарисованной серией, поэтому смотрит на activeGhost, а не на наличие легенды.
+        data-chart-comparison={activeGhost ? 'dashed' : undefined}
         className={`block w-full ${onPointClick ? 'cursor-pointer' : 'cursor-crosshair'}`}
         height={h}
         viewBox={`0 0 ${W} ${h}`}
         preserveAspectRatio="none"
         // A named graphic for AT (PieChart idiom): role="img" stops screen readers from announcing
         // the raw axis <text> ticks as loose numbers, and the label carries the data a mouse user
-        // reads from hover (per-point keyboard access is a separate roadmap item). Math.max over
-        // the SERIES — the in-scope `max` is the padded nice-scale top, not the data max.
+        // reads from hover. Drillable charts add a focusable arrow-key surface immediately after
+        // this SVG. Math.max over the SERIES — the in-scope `max` is the padded nice-scale top.
         // Только реальные значения: null-дыра не участвует ни в max, ни в «последнем».
         role="img"
         aria-label={`График: ${values.length} точек, макс ${fmt.short(Math.max(...realValues))}, последнее ${fmt.short(realValues[realValues.length - 1])}`}
-        onMouseMove={onSvgMove}
-        onMouseDown={onPointClick ? (e) => (pressRef.current = { x: e.clientX, y: e.clientY }) : undefined}
-        onClick={onSvgClick}
       >
+        {/* БЕЗ svg <title>: aria-label выше уже даёт имя для AT, а <title> дублировал его нативным
+            браузерным тултипом — нестилизуемый белый прямоугольник с острыми углами поверх нашего
+            скруглённого ChartTooltip (владелец: «появляющийся элемент имеет острые углы»). */}
         {/* Only the data layer animates. Axes, labels and all interaction overlays stay anchored. */}
         {plot.staticUnder}
         <MorphingSeries
           geom={plot.morphGeom}
           signature={motionSignature}
           primaryGradientId={gradientId}
-          comparisonGradientId={comparisonGradientId}
           comparison={comparison}
+          ghostMuted={hasGhostLegend && !showGhost}
           richStyle={richStyle}
+          poles={!richStyle}
         />
         {plot.staticOver}
 
@@ -750,7 +1031,7 @@ export function LineChart({
             />
             {/* Solid-маркер — только у реальной точки: у дыры нет значения, куда его ставить. */}
             {pinnedPt.y != null && (
-              <circle cx={pinnedPt.x} cy={pinnedPt.y} r="4.5" fill="hsl(var(--chart-role-selection))" stroke="hsl(var(--background))" strokeWidth="2" />
+              <circle cx={pinnedPt.x} cy={pinnedPt.y} r="4.5" fill="hsl(var(--chart-role-selection))" stroke="hsl(var(--background))" strokeWidth="2" vectorEffect="non-scaling-stroke" />
             )}
           </g>
         )}
@@ -779,59 +1060,128 @@ export function LineChart({
             {hovered.y != null && (
               <>
                 {rhea && <circle data-chart-hover-halo cx={hovered.x} cy={hovered.y} r="7" fill="hsl(var(--chart-role-selection) / 0.16)" />}
-                <circle data-chart-hover-marker cx={hovered.x} cy={hovered.y} r={rhea ? '3.5' : '4'} fill="hsl(var(--chart-role-selection))" stroke="hsl(var(--background))" strokeWidth={rhea ? '2' : '1.5'} />
+                <circle data-chart-hover-marker cx={hovered.x} cy={hovered.y} r={rhea ? '3.5' : '4'} fill="hsl(var(--chart-role-selection))" stroke="hsl(var(--background))" strokeWidth={rhea ? '2' : '1.5'} vectorEffect="non-scaling-stroke" />
               </>
             )}
+            {/* Плашка даты на оси у crosshair (осевой режим; ресёрч 2026-07-28, приём Nivo):
+                mono = timestamp по канону. Поверх прореженных тиков — как «axis tooltip». */}
+            {hasXAxis && activeIdx != null && labels?.[activeIdx] && (() => {
+              const text = labels[activeIdx];
+              const halfW = axisTextWidth(text) / 2 + 7;
+              const cx = Math.min(Math.max(hovered.x, gutterW + halfW), W - halfW - 2);
+              return (
+                <g data-chart-axis-plate className="pointer-events-none">
+                  <rect x={cx - halfW} y={plotBottom + 5} width={halfW * 2} height={18} rx={4} fill="hsl(var(--popover))" stroke="hsl(var(--border))" strokeWidth="1" vectorEffect="non-scaling-stroke" />
+                  <text x={cx} y={h - 9} textAnchor="middle" className="select-none fill-foreground font-mono text-2xs tabular-nums">
+                    {text}
+                  </text>
+                </g>
+              );
+            })()}
           </>
         )}
       </svg>
-
-      {/* Minimal x labels (axis-free cards): first / mid / last under the svg. Axes mode
-          draws the real in-svg x-axis above instead. Метки ровные: бывшая акцент-пилюля
-          последней метки (emphasizeLastLabel) снята продуктово — прод-фидбек: среди плоских
-          соседок она читалась как залипший ховер, а не подсветка «сегодня». */}
-      {labels && labels.length > 0 && !hasXAxis && (
-        <div className="mt-1.5 flex select-none items-center justify-between gap-2 px-1 text-2xs font-medium text-muted-foreground">
-          {compactLabelIndexes.map((i) => (
-            <span key={i} data-chart-axis-label="x-compact" className="min-w-0 truncate">
-              {labels[i]}
-            </span>
-          ))}
-        </div>
+      {onPointClick && (
+        <button
+          type="button"
+          aria-label={chartControlAriaLabel({
+            index: controlIndex,
+            label: hoverTitles?.[controlIndex] ?? labels?.[controlIndex],
+            fallbackNoun: 'точка',
+            value: values[controlIndex] == null ? 'данных нет' : formatValue(values[controlIndex]),
+          })}
+          aria-keyshortcuts="ArrowLeft ArrowRight Home End"
+          className="absolute inset-x-0 top-0 z-10 block w-full cursor-pointer rounded bg-transparent p-0 text-left hover:bg-transparent focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/50"
+          style={{ height: h }}
+          onMouseMove={onSurfaceMove}
+          onPointerDown={(event) => {
+            pointerDownRef.current = true;
+            pressRef.current = { x: event.clientX, y: event.clientY };
+          }}
+          onPointerUp={() => {
+            // Keep coordinates through the following click; only the active-pointer flag ends here.
+            pointerDownRef.current = false;
+          }}
+          onPointerCancel={() => {
+            pointerDownRef.current = false;
+            pressRef.current = null;
+          }}
+          onClick={onSurfaceClick}
+          onFocus={() => {
+            if (!pointerDownRef.current) pressRef.current = null;
+            setHover((current) => current ?? { i: fallbackControlIndex });
+          }}
+          onBlur={clearHover}
+          onKeyDown={(event) => {
+            const next = nextChartControlIndex(event.key, controlIndex, n);
+            if (next == null) return;
+            event.preventDefault();
+            setHover({ i: next });
+          }}
+        />
       )}
 
-      {/* Comparison legend — names both series whenever a ghost is present; the comparison chip is a
-          toggle (steep #9): click to hide/show the ghost series (the current-period chip stays put,
-          hiding the metric itself is meaningless). Where a page-level compare control already owns the
-          on/off (legendToggle=false, the metric page) the chip is a static label instead. */}
-      {ghost && ghost.length >= 2 && (
-        <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-2xs font-medium text-muted-foreground">
-          <span className="flex select-none items-center gap-1.5">
-            <span aria-hidden="true" className={comparison ? 'h-2.5 w-2.5 rounded-[3px]' : 'h-0.5 w-4 rounded-full'} style={{ backgroundColor: 'hsl(var(--chart-role-primary))' }} />
-            {primaryLabel ?? 'Текущий период'}
-          </span>
-          {legendToggle ? (
-            <button
-              type="button"
-              aria-pressed={!ghostHidden}
-              onClick={() => setGhostHidden((v) => !v)}
-              title={ghostHidden ? 'Показать сравнение' : 'Скрыть сравнение'}
-              className={`flex select-none items-center gap-1.5 rounded transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40 ${ghostHidden ? 'opacity-40 line-through' : ''}`}
-            >
-              <span aria-hidden="true" className={comparison ? 'h-2.5 w-2.5 rounded-[3px]' : 'w-4 border-t-2 border-dashed'} style={comparison ? { backgroundColor: 'hsl(var(--chart-role-comparison))' } : { borderColor: 'hsl(var(--chart-role-comparison))' }} />
-              {ghostLabel}
-            </button>
-          ) : (
-            <span className="flex select-none items-center gap-1.5">
-              <span aria-hidden="true" className={comparison ? 'h-2.5 w-2.5 rounded-[3px]' : 'w-4 border-t-2 border-dashed'} style={comparison ? { backgroundColor: 'hsl(var(--chart-role-comparison))' } : { borderColor: 'hsl(var(--chart-role-comparison))' }} />
-              {ghostLabel}
-            </span>
+      {/* Minimal x labels (axis-free cards): first / mid / last under the svg. Axes mode draws the
+          real in-svg x-axis above instead. История пилюли последней метки: первая попытка
+          (emphasizeLastLabel) была снята — ОДИНОКАЯ пилюля среди плоских соседок читалась как
+          залипший ховер. С 2026-08-14 владелец вернул её ОБЩИМ каноном всей семьи графиков
+          (искры/столбцы/линии несут одинаковую метку «где сейчас»), что и снимает старую жалобу:
+          теперь это язык системы, а не глитч одной карточки. */}
+      {compactLabelIndexes.length > 0 && !hasXAxis && compactSparse && (
+        // РАЗРЕЖЕННАЯ компакт-ось (EN-месяцы длинного окна): тики стоят у СВОИХ точек по доле
+        // индекса — flex-равномерка врала бы позициями (частичный месяц на кромке короче целых).
+        <div className="relative mt-1.5 h-4 select-none px-1 text-2xs font-medium text-muted-foreground">
+          {compactLabelIndexes.map((i, index) => {
+            const isCurrent = index === compactLabelIndexes.length - 1;
+            const pct = values.length > 1 ? (i / (values.length - 1)) * 100 : 0;
+            const transform = pct < 6 ? undefined : pct > 92 ? 'translateX(-100%)' : 'translateX(-50%)';
+            return isCurrent ? (
+              <span
+                key={i}
+                data-chart-axis-label="x-compact"
+                data-axis-current=""
+                className="absolute top-0 rounded-full px-1.5 py-px leading-none"
+                style={{ left: `${Math.min(pct, 100)}%`, transform, backgroundColor: 'hsl(var(--chart-role-primary))', color: 'hsl(var(--background))' }}
+              >
+                {compactLetterAxis?.[i]}
+              </span>
+            ) : (
+              <span key={i} data-chart-axis-label="x-compact" className="absolute top-0" style={{ left: `${pct}%`, transform }}>
+                {compactLetterAxis?.[i]}
+              </span>
+            );
+          })}
+        </div>
+      )}
+      {compactLabelIndexes.length > 0 && !hasXAxis && !compactSparse && (
+        <div className="mt-1.5 flex select-none items-center justify-between gap-2 px-1 text-2xs font-medium text-muted-foreground">
+          {compactLabelIndexes.map((i, index) =>
+            index === compactLabelIndexes.length - 1 ? (
+              // Цвет пилюли = цвет серии (владелец, референс steep): солидный chart-role-primary
+              // (тонированные карточки переопределяют токен в своём скоупе), чернила — фон.
+              <span
+                key={i}
+                data-chart-axis-label="x-compact"
+                data-axis-current=""
+                className="shrink-0 rounded-full px-1.5 py-px font-medium leading-none"
+                style={{ backgroundColor: 'hsl(var(--chart-role-primary))', color: 'hsl(var(--background))' }}
+              >
+                {compactLetterAxis ? compactLetterAxis[i] : labels?.[i]}
+              </span>
+            ) : (
+              <span key={i} data-chart-axis-label="x-compact" className="min-w-0 truncate">
+                {compactLetterAxis ? compactLetterAxis[i] : labels?.[i]}
+              </span>
+            ),
           )}
         </div>
       )}
 
+
       {/* Readout anchored to the snapped data point (not the cursor) so it stays inside the chart */}
-      <ChartTooltip tip={hovered ? buildTip(hover!.i) : null} appearance={appearance} />
+      {/* Тултип — ТОЛЬКО у собственного hover; sync-подсветка соседей живёт без читалки. */}
+      <ChartTooltip tip={hover && hover.i < n ? buildTip(hover.i) : null} appearance={appearance} />
+      </div>
     </div>
   );
 }

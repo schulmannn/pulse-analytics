@@ -2,7 +2,12 @@ import { createContext, useCallback, useContext, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { DEMO_CHANNEL_ID, isDemoMode, setDemoFlag } from '@/lib/demo';
+import {
+  DEMO_CHANNEL_ID,
+  disableDemoMode,
+  enableDemoMode,
+  isDemoMode,
+} from '@/lib/demo';
 import { useSelectedChannel } from '@/lib/channel-context';
 
 interface DemoContextValue {
@@ -26,7 +31,7 @@ export function DemoProvider({ children }: { children: ReactNode }) {
   const { setChannelId } = useSelectedChannel();
 
   const enterDemo = useCallback(() => {
-    setDemoFlag(true);
+    enableDemoMode();
     setDemo(true);
     setChannelId(DEMO_CHANNEL_ID); // the demo workspace
     qc.clear();
@@ -34,7 +39,7 @@ export function DemoProvider({ children }: { children: ReactNode }) {
   }, [qc, navigate, setChannelId]);
 
   const exitDemo = useCallback(() => {
-    setDemoFlag(false);
+    disableDemoMode();
     setDemo(false);
     setChannelId(null);
     qc.clear();

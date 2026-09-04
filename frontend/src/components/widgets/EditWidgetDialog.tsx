@@ -1,27 +1,22 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useId, useLayoutEffect, useRef, useState } from 'react';
 import type * as React from 'react';
-import { createPortal } from 'react-dom';
 import type { CSSProperties } from 'react';
 import { observeSize } from '@/lib/observeSize';
 import { DEFAULT_WIDGET_DAYS, usePagePeriod } from '@/lib/period';
 import type { PeriodDays } from '@/lib/period';
-import { useFocusTrap } from '@/lib/useFocusTrap';
 import { useChannels } from '@/api/queries';
 import { PillSelect } from '@/components/PillSelect';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Switch } from '@/components/ui/switch';
+import { SwatchButton } from '@/components/ui/swatch-button';
 import type { SeriesGrain, WidgetPrefs, WidgetSize } from '@/lib/widgetPrefsStore';
 import { SIZE_RANK, type WidgetVariant } from '@/components/widgets/variants';
+import { WIDGET_PERIODS } from '@/components/chartWidget/constants';
 
 const SWATCHES = [1, 2, 3, 4, 5, 6] as const;
 
-export const WIDGET_PERIODS: Array<{ days: PeriodDays; label: string }> = [
-  { days: 7, label: '7д' },
-  { days: 30, label: '30д' },
-  { days: 90, label: '90д' },
-  { days: 0, label: 'Всё' },
-];
 
 
 /** The edit dialog's «Период» segment — the same follow/override semantics as the card's pill
@@ -36,7 +31,7 @@ function DialogPeriodSegment({
   const pagePeriod = usePagePeriod();
   const following = prefs.period === undefined && pagePeriod != null;
   // «Стр.» (follow-page) + the presets are one mutually-exclusive set, so they ride the shared
-  // sliding-glider primitive.
+  // shared shadcn/Radix ToggleGroup primitive.
   const value = following ? 'follow' : String(prefs.period ?? DEFAULT_WIDGET_DAYS);
   const options = [
     ...(pagePeriod != null
@@ -75,6 +70,9 @@ export interface EditWidgetDialogProps {
   defaultSize?: WidgetSize;
   /** Metric-identity accent shown by the standard swatch when no override is stored. */
   defaultColor?: number;
+  /** «Цветной фон» of the card when the user hasn't chosen one (see defaultWidgetTint) — the
+      switch must show what the card actually renders, not a hardcoded «on». */
+  defaultTinted: boolean;
   /** Active variant's floor — sizes below it are disabled (the variant needs the width). */
   minSize?: WidgetSize;
   onChange: (next: WidgetPrefs) => void;
@@ -99,10 +97,13 @@ const CAROUSEL_GAP = 12;
 function VariantCarousel({
   variants,
   prefs,
+  tinted,
   onChange,
 }: {
   variants: WidgetVariant[];
   prefs: WidgetPrefs;
+  /** Effective «цветной фон» of the live card, so the preview matches it. */
+  tinted: boolean;
   onChange: (prefs: WidgetPrefs) => void;
 }) {
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -146,13 +147,14 @@ function VariantCarousel({
   const offset = viewportW / 2 - CAROUSEL_CARD_W / 2 - activeIdx * (CAROUSEL_CARD_W + CAROUSEL_GAP);
 
   const arrowCls =
-    'absolute top-1/2 z-10 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full border border-border bg-card/90 text-muted-foreground backdrop-blur-sm transition-colors hover:text-foreground disabled:opacity-30 disabled:hover:text-muted-foreground';
+    'absolute top-1/2 z-10 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full border border-border bg-card/90 text-muted-foreground backdrop-blur-sm transition-colors hover:text-foreground disabled:opacity-30 disabled:hover:text-muted-foreground sm:h-7 sm:w-7';
 
   return (
     <div>
       <div className="relative">
         <button
           type="button"
+          data-mobile-touch-target=""
           aria-label="Предыдущий тип"
           disabled={activeIdx === 0}
           onClick={() => select(activeIdx - 1)}
@@ -164,6 +166,7 @@ function VariantCarousel({
         </button>
         <button
           type="button"
+          data-mobile-touch-target=""
           aria-label="Следующий тип"
           disabled={activeIdx === variants.length - 1}
           onClick={() => select(activeIdx + 1)}
@@ -201,7 +204,7 @@ function VariantCarousel({
                   '--chart-role-selection': acc,
                 });
               }
-              if (prefs.tinted ?? true)
+              if (tinted)
                 previewStyle.backgroundColor = `hsl(var(${prefs.color ? `--chart-${prefs.color}-accent` : '--card-tint'}) / 0.07)`;
               return (
                 <button
@@ -248,21 +251,28 @@ function VariantCarousel({
         </div>
       </div>
       {/* Dot pagination — one per presentation, the active one stretched. */}
-      <div className="mt-2.5 flex justify-center gap-1.5">
+      <div className="mt-2.5 flex justify-center gap-0 sm:gap-1.5">
         {variants.map((v, i) => (
           <button
             key={v.key}
             type="button"
+            data-mobile-touch-target=""
             aria-label={`Тип ${i + 1}: ${v.label}`}
             aria-current={i === activeIdx || undefined}
             onClick={() => select(i)}
-            // Enumerated rather than `all`: the stretch IS a width tween here (a 1.5→4px pill that
-            // scaleX would visibly distort at the rounded caps), so the layout cost is accepted —
-            // but only for these two properties, not for every property the dot happens to carry.
-            className={`h-1.5 rounded-full transition-[width,background-color] dur-fast ease-house motion-reduce:transition-none ${
-              i === activeIdx ? 'w-4 bg-primary' : 'w-1.5 bg-border hover:bg-ink3/60'
+            // The visual dot stretches inside a fixed 44px phone target; ≥sm restores the original
+            // compact pagination geometry.
+            className={`group flex h-11 w-11 items-center justify-center rounded-full sm:h-1.5 ${
+              i === activeIdx ? 'sm:w-4' : 'sm:w-1.5'
             }`}
-          />
+          >
+            <span
+              aria-hidden="true"
+              className={`h-1.5 rounded-full transition-[width,background-color] dur-fast ease-house motion-reduce:transition-none ${
+                i === activeIdx ? 'w-4 bg-primary' : 'w-1.5 bg-border group-hover:bg-ink3/60'
+              }`}
+            />
+          </button>
         ))}
       </div>
     </div>
@@ -279,13 +289,15 @@ const GRAIN_OPTIONS: Array<{ value: SeriesGrain; label: string }> = [
     cross-source surfaces (Home); standalone Instagram sources are excluded — the Home catalog
     is TG-data widgets, an IG-only source would render them honestly empty. */
 function SourceSelect({ prefs, onChange }: { prefs: WidgetPrefs; onChange: (next: WidgetPrefs) => void }) {
+  const sourceId = useId();
   const channels = useChannels();
   const list = (channels.data?.channels ?? []).filter((c) => c.source !== 'ig');
   return (
-    <label className="mt-4 block">
+    <label htmlFor={sourceId} className="mt-4 block">
       <span className="text-2xs tracking-wide text-muted-foreground">Источник</span>
       <div className="mt-1">
         <PillSelect
+          id={sourceId}
           ariaLabel="Источник"
           className="w-full"
           value={String(prefs.source ?? '')}
@@ -303,47 +315,20 @@ function SourceSelect({ prefs, onChange }: { prefs: WidgetPrefs; onChange: (next
   );
 }
 
-export function EditWidgetDialog({ defaultTitle, prefs, variants, showPeriod, showSeries, showSource, showSize, defaultSize = 'half', defaultColor, minSize = 'third', onChange, onClose }: EditWidgetDialogProps) {
-  // Modal focus contract. The trap's effect must run BEFORE the title-focus effect (declaration
-  // order) so it snapshots the real opener; an `autoFocus` attribute would fire during commit —
-  // before the trap — corrupting the opener snapshot and then losing focus to panel.focus().
-  const panelRef = useRef<HTMLDivElement>(null);
+export function EditWidgetDialog({ defaultTitle, prefs, variants, showPeriod, showSeries, showSource, showSize, defaultSize = 'half', defaultColor, defaultTinted, minSize = 'third', onChange, onClose }: EditWidgetDialogProps) {
+  // Сохранённый выбор пользователя главнее дефолта карточки (тот уже посчитан хостом).
+  const tinted = prefs.tinted ?? defaultTinted;
   const titleRef = useRef<HTMLInputElement>(null);
-  useFocusTrap(panelRef);
-  useEffect(() => {
-    titleRef.current?.focus();
-  }, []);
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.stopPropagation();
-        onClose();
-      }
-    };
-    document.addEventListener('keydown', onKey, true);
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.removeEventListener('keydown', onKey, true);
-      document.body.style.overflow = prevOverflow;
-    };
-  }, [onClose]);
-
-  return createPortal(
-    <div
-      className="fixed inset-0 z-modal flex items-center justify-center bg-background/70 p-4 backdrop-blur-xs backdrop-grayscale"
-      role="dialog"
-      aria-modal="true"
-      aria-label={`Настройка виджета «${prefs.title || defaultTitle}»`}
-      onClick={onClose}
-    >
-      <div
-        ref={panelRef}
-        tabIndex={-1}
-        className={`max-h-[85vh] w-full ${variants && variants.length > 1 ? 'max-w-lg' : 'max-w-sm'} overflow-y-auto rounded-xl border border-border bg-card p-5 focus:outline-hidden`}
-        onClick={(e) => e.stopPropagation()}
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent
+        className={variants && variants.length > 1 ? 'max-w-lg' : 'max-w-sm'}
+        onOpenAutoFocus={(event) => {
+          event.preventDefault();
+          titleRef.current?.focus();
+        }}
       >
-        <div className="text-sm font-medium text-foreground">Настройка виджета</div>
+        <DialogTitle>{`Настройка виджета «${prefs.title || defaultTitle}»`}</DialogTitle>
 
         {variants && variants.length > 1 && (
           <div className="mt-4">
@@ -351,7 +336,7 @@ export function EditWidgetDialog({ defaultTitle, prefs, variants, showPeriod, sh
             {/* Live preview cards on a steep-style carousel: the centered card is the active
                 presentation; each renders for real, scaled down, and inherits accent/tint. */}
             <div className="mt-2">
-              <VariantCarousel variants={variants} prefs={prefs} onChange={onChange} />
+              <VariantCarousel variants={variants} prefs={prefs} tinted={tinted} onChange={onChange} />
             </div>
           </div>
         )}
@@ -375,10 +360,11 @@ export function EditWidgetDialog({ defaultTitle, prefs, variants, showPeriod, sh
                   <button
                     key={o.size}
                     type="button"
+                    data-mobile-touch-target=""
                     aria-pressed={active}
                     disabled={disabled}
                     onClick={() => onChange({ ...prefs, size: o.size === defaultSize ? undefined : o.size })}
-                    className={`flex-1 border-r border-border px-2 py-1.5 text-xs font-medium transition-colors last:border-r-0 disabled:pointer-events-none disabled:opacity-40 ${
+                    className={`min-h-11 flex-1 border-r border-border px-2 py-1.5 text-xs font-medium transition-colors last:border-r-0 disabled:pointer-events-none disabled:opacity-40 sm:min-h-0 ${
                       active ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
                     }`}
                   >
@@ -396,11 +382,12 @@ export function EditWidgetDialog({ defaultTitle, prefs, variants, showPeriod, sh
         <label className="mt-4 block">
           <span className="text-2xs tracking-wide text-muted-foreground">Заголовок</span>
           <input
+            data-mobile-touch-target=""
             ref={titleRef}
             value={prefs.title ?? ''}
             placeholder={defaultTitle}
             onChange={(e) => onChange({ ...prefs, title: e.target.value || undefined })}
-            className="mt-1 w-full rounded border border-border bg-background px-3 py-2 text-sm text-foreground outline-hidden placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
+            className="mt-1 min-h-11 w-full rounded border border-border bg-background px-3 py-2 text-sm text-foreground outline-hidden placeholder:text-muted-foreground focus:ring-1 focus:ring-primary sm:min-h-0"
           />
         </label>
 
@@ -434,6 +421,7 @@ export function EditWidgetDialog({ defaultTitle, prefs, variants, showPeriod, sh
             <span className="text-2xs tracking-wide text-muted-foreground">Целевой уровень</span>
             {/* Draws a dashed goal line on the widget's line charts. Empty = none. */}
             <input
+              data-mobile-touch-target=""
               type="number"
               inputMode="numeric"
               min={0}
@@ -444,7 +432,7 @@ export function EditWidgetDialog({ defaultTitle, prefs, variants, showPeriod, sh
                 const num = raw === '' ? undefined : Number(raw);
                 onChange({ ...prefs, target: num !== undefined && Number.isFinite(num) && num > 0 ? num : undefined });
               }}
-              className="mt-1 w-full rounded border border-border bg-background px-3 py-2 text-sm tabular-nums text-foreground outline-hidden placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
+              className="mt-1 min-h-11 w-full rounded border border-border bg-background px-3 py-2 text-sm tabular-nums text-foreground outline-hidden placeholder:text-muted-foreground focus:ring-1 focus:ring-primary sm:min-h-0"
             />
           </label>
         )}
@@ -463,23 +451,23 @@ export function EditWidgetDialog({ defaultTitle, prefs, variants, showPeriod, sh
         <div className="mt-4">
           <span className="text-2xs tracking-wide text-muted-foreground">Акцент</span>
           <div className="mt-2 flex items-center gap-2">
-            <button
-              type="button"
+            <SwatchButton
               aria-label="Стандартный акцент"
               aria-pressed={!prefs.color}
               onClick={() => onChange({ ...prefs, color: undefined })}
-              className={`h-5 w-5 rounded-full transition-shadow ${!prefs.color ? 'ring-2 ring-foreground/50 ring-offset-2 ring-offset-card' : ''}`}
-              style={{ backgroundColor: defaultColor ? `hsl(var(--chart-${defaultColor}-accent))` : 'hsl(var(--primary))' }}
+              // Дефолт хоста красится общим слотом --accent-card (он следует акценту темы), а не
+              // номерным --chart-N-accent: свотч обязан показывать тот же цвет, что и карточка.
+              color={defaultColor ? 'hsl(var(--accent-card))' : 'hsl(var(--primary))'}
+              selected={!prefs.color}
             />
             {SWATCHES.map((n) => (
-              <button
+              <SwatchButton
                 key={n}
-                type="button"
                 aria-label={`Акцент ${n}`}
                 aria-pressed={prefs.color === n}
                 onClick={() => onChange({ ...prefs, color: n })}
-                className={`h-5 w-5 rounded-full transition-shadow ${prefs.color === n ? 'ring-2 ring-foreground/50 ring-offset-2 ring-offset-card' : ''}`}
-                style={{ backgroundColor: `hsl(var(--chart-${n}-accent))` }}
+                color={`hsl(var(--chart-${n}-accent))`}
+                selected={prefs.color === n}
               />
             ))}
           </div>
@@ -489,7 +477,7 @@ export function EditWidgetDialog({ defaultTitle, prefs, variants, showPeriod, sh
           <label htmlFor="widget-tinted">Цветной фон</label>
           <Switch
             id="widget-tinted"
-            checked={prefs.tinted ?? true}
+            checked={tinted}
             onCheckedChange={(checked) => onChange({ ...prefs, tinted: checked })}
           />
         </div>
@@ -497,8 +485,9 @@ export function EditWidgetDialog({ defaultTitle, prefs, variants, showPeriod, sh
         <div className="mt-5 flex items-center justify-between border-t border-border pt-3">
           <button
             type="button"
+            data-mobile-touch-target=""
             onClick={() => onChange({ hidden: prefs.hidden })}
-            className="text-xs text-muted-foreground transition-colors hover:text-foreground"
+            className="inline-flex min-h-11 items-center px-2 text-xs text-muted-foreground transition-colors hover:text-foreground sm:min-h-0"
           >
             Сбросить
           </button>
@@ -506,8 +495,7 @@ export function EditWidgetDialog({ defaultTitle, prefs, variants, showPeriod, sh
             Готово
           </Button>
         </div>
-      </div>
-    </div>,
-    document.body,
+      </DialogContent>
+    </Dialog>
   );
 }

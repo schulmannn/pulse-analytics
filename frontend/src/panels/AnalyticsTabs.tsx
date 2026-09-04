@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { cn } from '@/lib/utils';
+import { Check, Download } from 'lucide-react';
+import { IconMorph, useMorphFlash } from '@/components/ui/icon-morph';
 import { fmt, pluralRu } from '@/lib/format';
 import { TgAnalytics } from '@/panels/TgAnalytics';
 import { useChannels, useTgFull, useTgGraphs } from '@/api/queries';
@@ -10,17 +11,22 @@ import { buildTgAnalyticsRows, tgDailySeriesFromGraphs } from '@/lib/tgAnalytics
 import { downloadAnalyticsCsv, exportFilename } from '@/lib/analyticsExport';
 import { Insights } from '@/panels/Insights';
 import { Compare } from '@/panels/Compare';
-import { HistoryChartBlock, HeatmapChartBlock, VelocityChartBlock } from '@/panels/Charts';
+import { CalendarChartBlock, HistoryChartBlock, HeatmapChartBlock, VelocityChartBlock } from '@/panels/Charts';
 import { ChartSection } from '@/components/ChartWidget';
 import { WidgetGroup } from '@/components/widgets/WidgetGroup';
 import { WidgetErrorBoundary } from '@/components/WidgetErrorBoundary';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { CampaignFilterControl } from '@/components/campaigns/CampaignFilterControl';
 import { useTgCampaignScope, type TgCampaignScope } from '@/lib/campaignFilter';
 import { Hashtags } from '@/panels/Hashtags';
 import { ContentOpportunity } from '@/panels/ContentOpportunity';
+import { PAGE_SUBNAV_SHELL } from '@/lib/pageChrome';
+import { ANALYTICS_TABS, isAnalyticsTab, type AnalyticsTab } from '@/lib/analyticsTabs';
+import { cn } from '@/lib/utils';
+import { useScrollEdgeFade } from '@/lib/useScrollEdgeFade';
 
 /**
  * Analytics — the deep breakdowns. The Overview is a focused summary (Figma), so the detailed
@@ -28,25 +34,19 @@ import { ContentOpportunity } from '@/panels/ContentOpportunity';
  * сравнение) live here alongside the TG breakdowns + hashtag lift. Moved out of App.tsx so
  * the TG feed can compose it as a block.
  */
-// Order mirrors the canonical section schema (dynamics/reach → content aggregates →
-// audience/demographics → comparison). The tab is «Форматы», not «Контент»: the sidebar's
-// «Контент» section (the posts list) owns that name now — two different «Контент» one click
-// apart read as the same thing. This tab is per-TYPE aggregates (formats, эмодзи, hashtags).
-const ANALYTICS_TABS = [
-  { key: 'dynamics', label: 'Динамика' },
-  { key: 'content', label: 'Форматы' },
-  { key: 'audience', label: 'Аудитория' },
-  { key: 'compare', label: 'Сравнение' },
-] as const;
-type AnalyticsTab = (typeof ANALYTICS_TABS)[number]['key'];
+// Порядок/подписи вкладок — в lib/analyticsTabs (их же читает ⌘K-палитра, см. модуль).
 
-const isAnalyticsTab = (raw: string | null): raw is AnalyticsTab =>
-  ANALYTICS_TABS.some((t) => t.key === raw);
+const DYNAMICS_WIDGET_ORDER = [
+  'История подписчиков',
+  'Скорость набора просмотров',
+  'Календарь активности',
+] as const;
 
 export function Analytics() {
   // The active tab lives in ?tab= (replace, not push) so a shared /analytics link restores
   // it; the default «Динамика» keeps the URL clean. Period params (?p / ?from&to) coexist.
   const [params, setParams] = useSearchParams();
+  const tabsFadeRef = useScrollEdgeFade<HTMLDivElement>();
   const rawTab = params.get('tab');
   const tab: AnalyticsTab = isAnalyticsTab(rawTab) ? rawTab : 'dynamics';
   const setTab = (next: AnalyticsTab) => {
@@ -61,46 +61,38 @@ export function Analytics() {
     );
   };
   return (
-    <div className="space-y-8">
+    <Tabs
+      value={tab}
+      onValueChange={(next) => setTab(next as AnalyticsTab)}
+      className="space-y-8"
+    >
       {/* Grouped tabs break the 20-chart wall into Динамика / Аудитория / Контент / Сравнение —
           each tab renders only its section family (progressive disclosure). The desktop-only export
-          control sits alongside the tabs and covers the whole analytics window regardless of tab. */}
-      {/* Пилюльные табы (steep-регистр): подчёркивание border-b-2 выбивалось из пилюльного
-          языка сегментов; активный таб — тихая secondary-заливка, никакой синей линии. */}
-      <div className="flex items-center justify-between gap-3">
-      <div role="tablist" aria-label="Разделы аналитики" className="flex gap-1 overflow-x-auto">
-        {ANALYTICS_TABS.map((t) => (
-          <button
-            key={t.key}
-            id={`analytics-tab-${t.key}`}
-            type="button"
-            role="tab"
-            aria-selected={tab === t.key}
-            tabIndex={tab === t.key ? 0 : -1}
-            onClick={() => setTab(t.key)}
-            // APG tabs: ролям tab обещаны стрелки — без них скринридер объявляет навигацию,
-            // которой нет (аудит). Roving tabindex + перенос фокуса на активированный таб.
-            onKeyDown={(e) => {
-              if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
-              e.preventDefault();
-              const i = ANALYTICS_TABS.findIndex((x) => x.key === tab);
-              const next = ANALYTICS_TABS[(i + (e.key === 'ArrowRight' ? 1 : ANALYTICS_TABS.length - 1)) % ANALYTICS_TABS.length]!;
-              setTab(next.key);
-              requestAnimationFrame(() => document.getElementById(`analytics-tab-${next.key}`)?.focus());
-            }}
-            className={cn(
-              'shrink-0 rounded-full px-3 py-1.5 text-sm font-medium transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40',
-              tab === t.key ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground',
-            )}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
+          control sits alongside the tabs and covers the whole analytics window regardless of tab.
+          Второй уровень навигации липнет под шапкой страницы (md+, PAGE_SUBNAV_SHELL): в глубине
+          «Аудитории» строка остаётся и ориентиром, и путём к соседним табам. Внутренний ряд
+          «Форматов» (analytics-campaign-scope) НЕ липнет — липкий слой ровно один. */}
+      <div className={cn(PAGE_SUBNAV_SHELL, 'flex items-center justify-between gap-3')}>
+        <TabsList
+          ref={tabsFadeRef}
+          aria-label="Разделы аналитики"
+          variant="line"
+          className="scroll-fade-x min-w-0 max-w-full shrink justify-start overflow-x-auto"
+        >
+          {ANALYTICS_TABS.map((t) => (
+            <TabsTrigger
+              key={t.key}
+              value={t.key}
+              className="shrink-0"
+            >
+              {t.label}
+            </TabsTrigger>
+          ))}
+        </TabsList>
         <TgAnalyticsExportButton />
       </div>
 
-      {tab === 'dynamics' && (
+      <TabsContent value="dynamics" className="mt-0">
         <div className="space-y-10">
           {/* TgAnalytics derives its breakdowns in its OWN render (above every ChartSection), so a
               panel-level boundary keeps the app shell alive if a top-level derive throws; its
@@ -113,18 +105,27 @@ export function Analytics() {
               still take the full row via the widgets' own variant span. History/Velocity build
               their series in their own render (above ChartSection), so each gets a per-widget card
               boundary here — the same seam Home protects. */}
-          <WidgetGroup id="analytics-dynamics" className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-6">
+          <WidgetGroup
+            id="analytics-dynamics"
+            className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-6"
+            defaultOrder={DYNAMICS_WIDGET_ORDER}
+          >
             <WidgetErrorBoundary variant="card" size="half" widgetId="analytics-history" label="История подписчиков">
               <HistoryChartBlock />
             </WidgetErrorBoundary>
             <WidgetErrorBoundary variant="card" size="half" widgetId="analytics-velocity" label="Скорость набора просмотров">
               <VelocityChartBlock />
             </WidgetErrorBoundary>
+            <WidgetErrorBoundary variant="card" size="full" widgetId="analytics-calendar" label="Календарь активности">
+              <CalendarChartBlock />
+            </WidgetErrorBoundary>
           </WidgetGroup>
         </div>
-      )}
-      {tab === 'content' && <FormatsTab />}
-      {tab === 'audience' && (
+      </TabsContent>
+      <TabsContent value="content" className="mt-0">
+        <FormatsTab />
+      </TabsContent>
+      <TabsContent value="audience" className="mt-0">
         <div className="space-y-10">
           <WidgetErrorBoundary variant="inline" widgetId="analytics-tg-audience" label="Аналитика">
             <TgAnalytics group="audience" />
@@ -133,8 +134,8 @@ export function Analytics() {
             <HeatmapChartBlock />
           </WidgetErrorBoundary>
         </div>
-      )}
-      {tab === 'compare' && (
+      </TabsContent>
+      <TabsContent value="compare" className="mt-0">
         <WidgetGroup id="analytics-compare" className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-6">
           {/* Real widgets (аудит: не-виджетные блоки без ⋯) — hide/reorder like every card. */}
           <ChartSection id="tg-period-compare" title="Сравнение периодов" defaultSize="full" noExpand>
@@ -144,8 +145,8 @@ export function Analytics() {
             <Insights />
           </ChartSection>
         </WidgetGroup>
-      )}
-    </div>
+      </TabsContent>
+    </Tabs>
   );
 }
 
@@ -170,20 +171,30 @@ function TgAnalyticsExportButton() {
     [source, win?.from, win?.to, graphs],
   );
 
+  // Морф Download→Check после выгрузки (кнопочная моторика 2026-08-18): экспорт синхронный и
+  // раньше не подтверждался ничем.
+  const [exported, flashExported] = useMorphFlash();
   return (
     <button
       type="button"
-      onClick={() =>
+      onClick={() => {
         downloadAnalyticsCsv(
           exportFilename({ network: 'telegram', section: 'analytics', source, from: win?.from, to: win?.to }),
           rows,
-        )
-      }
+        );
+        flashExported();
+      }}
       disabled={rows.length === 0}
       aria-label="Экспорт метрик аналитики за выбранный период в CSV"
       title={rows.length === 0 ? 'Нет метрик за выбранный период' : undefined}
-      className="mb-1 hidden shrink-0 btn-pill border border-border bg-background px-3.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50 md:inline-flex"
+      className="mb-1 hidden shrink-0 items-center gap-1.5 btn-pill border border-border bg-background px-3.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50 md:inline-flex"
     >
+      <IconMorph
+        active={exported}
+        a={<Download className="size-3.5" />}
+        b={<Check className="size-3.5" />}
+        className="size-3.5"
+      />
       Экспорт метрик
     </button>
   );
@@ -265,5 +276,4 @@ function FormatsBody({ scope }: { scope: TgCampaignScope }) {
     </div>
   );
 }
-
 

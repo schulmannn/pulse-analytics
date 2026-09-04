@@ -1,37 +1,35 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { QueryCache, QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import {
+  MutationCache,
+  QueryCache,
+  QueryClient,
+  QueryClientProvider,
+} from '@tanstack/react-query';
 import { BrowserRouter } from 'react-router-dom';
 import App from '@/App';
-import { ApiError } from '@/api/client';
-import { ChannelProvider } from '@/lib/channel-context';
-import { DemoProvider } from '@/lib/demo-context';
-import { isDemoMode } from '@/lib/demo';
-import { PeriodProvider } from '@/lib/period';
-import { clearSessionToken, getSessionToken } from '@/lib/session';
+import { redirectBrowserOnUnauthorized } from '@/lib/authRedirect';
+import { purgeLegacySession } from '@/lib/session';
 import { ThemeProvider } from '@/lib/theme';
 import { installGlobalErrorReporter } from '@/lib/crashReporting';
-import { Toaster } from '@/components/ui/sonner';
-import { ConfirmProvider } from '@/components/ConfirmDialogProvider';
-import '@fontsource-variable/geist';
 import '@/index.css';
 
 // Client-cache defaults: dedupe in-flight requests, serve stale-then-revalidate, and
 // DON'T refetch on window focus — the legacy dashboard re-hammered a rate-limited API on
 // every focus/timeframe flip, which is exactly the class of bug TanStack Query removes.
+function handleUnauthorized(error: unknown): void {
+  redirectBrowserOnUnauthorized(error);
+}
+
 const queryClient = new QueryClient({
   queryCache: new QueryCache({
-    // Central 401 policy: an expired/invalidated session (token present, server says 401)
-    // clears the stored session and lands on /login. Guards: no token → this is the normal
-    // logged-out flow (the login gate handles it, no redirect loop since we just cleared
-    // the token); demo mode → fixtures don't auth; already on /login → nothing to do.
-    onError: (error) => {
-      if (!(error instanceof ApiError) || error.status !== 401) return;
-      if (isDemoMode() || !getSessionToken()) return;
-      clearSessionToken();
-      if (window.location.pathname !== '/login') window.location.assign('/login');
-    },
+    // Central cookie-auth policy: any protected request that returns 401 lands on
+    // /login. The HttpOnly session is cleared server-side when invalid/revoked.
+    onError: handleUnauthorized,
   }),
+  // Mutations use a separate TanStack cache; without this mirror, a 401 from settings/connect/
+  // logout would stay inside the stale protected shell while query 401s redirected correctly.
+  mutationCache: new MutationCache({ onError: handleUnauthorized }),
   defaultOptions: {
     queries: {
       staleTime: 60_000,
@@ -40,7 +38,14 @@ const queryClient = new QueryClient({
       // retry. Keep one retry for 5xx/network flake; network failures are ApiError with
       // .network (human message), so the flag — not the status — keeps their retry.
       retry: (failureCount, error) =>
-        !(error instanceof ApiError && !error.network && error.status < 500) && failureCount < 1,
+        !(
+          typeof error === 'object' &&
+          error !== null &&
+          'status' in error &&
+          (error as { network?: unknown }).network !== true &&
+          typeof (error as { status?: unknown }).status === 'number' &&
+          (error as { status: number }).status < 500
+        ) && failureCount < 1,
     },
   },
 });
@@ -50,26 +55,21 @@ const queryClient = new QueryClient({
 // console. React error boundaries only catch throws during render; this covers the rest.
 installGlobalErrorReporter();
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <ChannelProvider>
+function bootstrap(): void {
+  // Мост до-cookie-сессии снят (его срок истёк в июле): осталась синхронная уборка ключей из
+  // localStorage — ждать её нечего, сети она не трогает.
+  purgeLegacySession();
+  createRoot(document.getElementById('root')!).render(
+    <StrictMode>
+      <QueryClientProvider client={queryClient}>
         <ThemeProvider>
-          <PeriodProvider>
-            <BrowserRouter basename="/">
-              <DemoProvider>
-                {/* Промис-confirm поверх канонного alert-dialog — замена window.confirm. */}
-                <ConfirmProvider>
-                  <App />
-                </ConfirmProvider>
-                {/* Глобальные тосты (sonner). Внутри ThemeProvider — Toaster читает нашу тему;
-                    колбэки действий замыкают navigate у call-site, роутер-контекст ему не нужен. */}
-                <Toaster />
-              </DemoProvider>
-            </BrowserRouter>
-          </PeriodProvider>
+          <BrowserRouter basename="/">
+            <App />
+          </BrowserRouter>
         </ThemeProvider>
-      </ChannelProvider>
-    </QueryClientProvider>
-  </StrictMode>,
-);
+      </QueryClientProvider>
+    </StrictMode>,
+  );
+}
+
+bootstrap();

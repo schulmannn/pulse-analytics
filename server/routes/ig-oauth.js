@@ -1,8 +1,9 @@
 'use strict';
 
 const crypto = require('crypto');
-const { hasWorkspaceRole } = require('../middleware/tenant');
+const { hasWorkspaceRole, tenantChannelId } = require('../middleware/tenant');
 const { createAdmissionController } = require('../lib/admissionController');
+const { igTokenState } = require('../domain/igToken');
 
 // "Business Login for Instagram" (Instagram API with Instagram Login, no Facebook Page). These app
 // credentials + scopes are read once at load, exactly as index.js did.
@@ -119,7 +120,8 @@ function registerIgOauthRoutes({
       `Max-Age=${maxAge}`,
     ];
     if (isHttps(req)) attrs.push('Secure');
-    res.setHeader('Set-Cookie', attrs.join('; '));
+    // Preserve a sliding pulse_session Set-Cookie already added by requireAuth.
+    res.append('Set-Cookie', attrs.join('; '));
   }
 
   function rememberState(payload) {
@@ -171,7 +173,7 @@ function registerIgOauthRoutes({
     // ?new_source=1 — connect the account as its OWN standalone source (a fresh channels row is
     // created in the callback once the identity is known) instead of attaching it to a channel.
     const newSource = String(req.query.new_source || '') === '1';
-    const channelId = newSource ? 0 : parseInt(req.query.channel || req.headers['x-channel-id'], 10) || 0;
+    const channelId = newSource ? 0 : tenantChannelId(req);
     if (!newSource) {
       if (!channelId) return res.status(400).json({ error: 'Выбери канал, к которому подключить Instagram' });
       const ch = await db.getChannel(channelId, req.user).catch(() => null);
@@ -322,7 +324,7 @@ function registerIgOauthRoutes({
 
   // DELETE /api/ig/oauth — disconnect the Instagram account from the selected channel.
   app.delete('/api/ig/oauth', requireAuth, asyncHandler(async (req, res) => {
-    const channelId = parseInt(req.query.channel || req.headers['x-channel-id'], 10) || 0;
+    const channelId = tenantChannelId(req);
     if (!channelId) return res.status(400).json({ error: 'Канал не выбран' });
     const ch = await db.getChannel(channelId, req.user).catch(() => null);
     if (!ch) return res.status(403).json({ error: 'Нет доступа к этому каналу' });
@@ -336,7 +338,7 @@ function registerIgOauthRoutes({
 
   // GET /api/ig/oauth/status — connection state for Settings + the connect panel (no token leaked).
   app.get('/api/ig/oauth/status', requireAuth, asyncHandler(async (req, res) => {
-    const channelId = parseInt(req.query.channel || req.headers['x-channel-id'], 10) || 0;
+    const channelId = tenantChannelId(req);
     let acc = null;
     if (db.enabled && channelId) {
       const ch = await db.getChannel(channelId, req.user).catch(() => null);
@@ -351,6 +353,9 @@ function registerIgOauthRoutes({
       ig_user_id: acc ? acc.ig_user_id : null,
       connected_at: acc ? acc.connected_at : null,
       token_expires_at: acc ? acc.token_expires_at : null,
+      // Срок токена в машинном виде: экран Instagram и пилюля источника не должны сами
+      // разбирать дату, а `connected: true` при истёкшем токене — правда только про строку в БД.
+      token_state: acc ? igTokenState(acc.token_expires_at) : 'none',
     });
   }));
 }

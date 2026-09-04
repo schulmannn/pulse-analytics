@@ -110,12 +110,31 @@ export function capResultSeries(out: WidgetResult, viz: WidgetViz, kind: SeriesA
     // Лексикографический сорт YYYY-MM-DD-ключей = хронология; для level порядок обязателен
     // (last-of-bucket), для flow безразличен. Непарсибельная дата — честно оставить как есть.
     const points = [...series].sort((a, b) => a.date.localeCompare(b.date));
-    const by = new Map<string, number>();
+    // Пропуск (value === null) НЕ участвует в корзине: для flow он не прибавляет ноль, для level
+    // не становится «последним значением». Корзина, где ВСЕ дни — пропуск, сама остаётся пропуском,
+    // иначе агрегация тихо родила бы ноль, которого не было.
+    const by = new Map<string, number | null>();
+    const meanAcc = new Map<string, { sum: number; n: number }>();
     for (const point of points) {
       const timestamp = Date.parse(point.date);
       if (!Number.isFinite(timestamp)) return out;
       const key = bucketKeyOf(timestamp, 'week');
-      by.set(key, kind === 'level' ? point.value : (by.get(key) ?? 0) + point.value);
+      if (!by.has(key)) by.set(key, null);
+      if (point.value == null) continue;
+      const prev = by.get(key) ?? null;
+      if (kind === 'level') {
+        by.set(key, point.value);
+      } else if (kind === 'mean') {
+        // Точка ряда уже среднее (средний охват на пост) — суммировать средние нельзя, это
+        // завысило бы неделю в разы. Копим сумму и счётчик, делим в конце.
+        const cell = meanAcc.get(key) ?? { sum: 0, n: 0 };
+        cell.sum += point.value;
+        cell.n += 1;
+        meanAcc.set(key, cell);
+        by.set(key, cell.sum / cell.n);
+      } else {
+        by.set(key, (prev ?? 0) + point.value);
+      }
     }
     out.series = [...by.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
@@ -135,14 +154,81 @@ export function capResultSeries(out: WidgetResult, viz: WidgetViz, kind: SeriesA
     return out;
   }
   const ghost = out.ghost;
-  if (ghost && ghost.length === series.length) {
+  // LTTB выбирает точки по ПЛОЩАДИ треугольников, то есть требует число в каждой точке; пропуск
+  // пришлось бы чем-то заменить, и разрыв либо исчез бы (ложная непрерывность), либо провалился
+  // бы в ноль. Поэтому серия с пропусками децимируется равномерными индексами — форма чуть
+  // грубее, зато позиции разрывов сохраняются честно.
+  const hasGaps = series.some((point) => point.value == null);
+  if ((ghost && ghost.length === series.length) || hasGaps) {
     const idx = pickIndexes(series.length, CHART_MAX_POINTS);
     out.series = idx.map((i) => series[i]);
-    out.ghost = idx.map((i) => ghost[i]);
+    if (ghost && ghost.length === series.length) out.ghost = idx.map((i) => ghost[i]);
   } else {
-    out.series = lttbDownsample(series, CHART_MAX_POINTS, (point) => point.value);
+    out.series = lttbDownsample(series, CHART_MAX_POINTS, (point) => point.value ?? 0);
   }
   return out;
+}
+
+/**
+ * СРЕДНЕЕ значение пост-метрики за корзину: Σ поля ÷ число постов корзины. Для «Среднего охвата
+ * поста» это единственная честная форма ряда — {@link bucketPostField} даёт СУММУ дня, и на дне с
+ * тремя постами столбец втрое выше охвата любого из них, хотя карточка называется «средний».
+ *
+ * Корзина без постов — `null`, а не ноль: среднее по пустому множеству не определено. Это НЕ тот
+ * «честный ноль post-derived метрик», о котором говорит инвариант (у суммы реакций день без
+ * публикаций действительно нулевой) — у отношения знаменатель просто отсутствует.
+ */
+export function bucketPostMean(
+  posts: NormalizedPost[],
+  field: PostMetricField,
+  winFrom: number | null,
+  winTo: number,
+  grain: SeriesGrain,
+): WidgetSeriesPoint[] {
+  const by = new Map<string, { sum: number; count: number }>();
+  for (const post of posts) {
+    if (!post.date) continue;
+    const timestamp = Date.parse(post.date);
+    if (!Number.isFinite(timestamp)) continue;
+    const key = bucketKeyOf(timestamp, grain);
+    const cell = by.get(key) ?? { sum: 0, count: 0 };
+    cell.sum += Number(post[field] ?? 0);
+    cell.count += 1;
+    by.set(key, cell);
+  }
+  const keys = winFrom != null ? bucketKeysInWindow(winFrom, winTo, grain) : [...by.keys()].sort();
+  return keys.map((key) => {
+    const cell = by.get(key);
+    return { date: key, value: cell && cell.count > 0 ? cell.sum / cell.count : null };
+  });
+}
+
+/**
+ * КАНАЛЬНЫЙ дневной поток (channel_daily.views) по корзинам окна — та же величина, что хедлайн
+ * `deriveKpis().channelViews` и что рисуют Обзор и `/metrics/views`. В отличие от
+ * {@link bucketPostField} меряет просмотры ВСЕГО канала за день, а не только постов, опубликованных
+ * в этот день.
+ *
+ * Корзина без единой строки архива — это ПРОПУСК СБОРА (`null`), а не нулевой день: канал не может
+ * набрать ровно ноль просмотров за сутки, ноль тут всегда означал бы «мы не спросили». Строка
+ * архива со значением 0 остаётся честным нулём и пропуском не считается.
+ */
+export function bucketChannelFlow(
+  rows: { day: string; views?: number | null }[],
+  winFrom: number | null,
+  winTo: number,
+  grain: SeriesGrain,
+): WidgetSeriesPoint[] {
+  const by = new Map<string, number>();
+  for (const row of rows) {
+    if (row.views == null) continue;
+    const timestamp = Date.parse(row.day);
+    if (!Number.isFinite(timestamp)) continue;
+    const key = bucketKeyOf(timestamp, grain);
+    by.set(key, (by.get(key) ?? 0) + Number(row.views));
+  }
+  const keys = winFrom != null ? bucketKeysInWindow(winFrom, winTo, grain) : [...by.keys()].sort();
+  return keys.map((key) => ({ date: key, value: by.has(key) ? (by.get(key) as number) : null }));
 }
 
 export function bucketSubscriberLevels(

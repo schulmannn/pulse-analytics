@@ -1,5 +1,9 @@
-import { useId, useState } from 'react';
+import { useContext } from 'react';
+import { ExpandedChartHeightContext } from '@/components/ExpandableChart';
+import { useMediaQuery } from '@/lib/useMediaQuery';
+import { useCallback, useRef, useState } from 'react';
 import { fmt } from '@/lib/format';
+import { useMorphValues } from '@/lib/useMorphValues';
 
 /**
  * Составное полукольцо: доли фиксированного малого набора категорий плюс ИТОГ в центре.
@@ -55,12 +59,20 @@ function ringPath(from: number, to: number): string {
   ].join(' ');
 }
 
+// Бюджет легенды в фикс-тайле: пол кольца (min-h-20), строка «Ещё N» и высота одной строки
+// легенды (замерено 30px на узком тайле, где строка идёт в две линии).
+const RING_MIN_H = 80;
+const LEGEND_REST_H = 16;
+const LEGEND_ITEM_H = 30;
+
 export function RadialShare({
   segments,
   total = null,
   unitWord,
   centerCaption,
   format = fmt.num,
+  legendMax = 4,
+  layout = 'column',
 }: {
   segments: RadialSegment[];
   /** Итог ПОЛНОГО отчёта. null → сумма сегментов (тогда остатка нет по построению). */
@@ -70,14 +82,56 @@ export function RadialShare({
   /** Подпись под числом в центре (по умолчанию — unitWord). */
   centerCaption?: string;
   format?: (n: number) => string;
+  /** Строк легенды до сводного хвоста «Ещё N». Отчётные поверхности передают Infinity. */
+  legendMax?: number;
+  /** 'row' — кольцо слева, легенда справа: для фикс-тайлов с дополнительным контролом в шапке
+      (например «Статусы заказов» с переключателем Заказы/Выручка), где вертикальной высоты на
+      столбик «кольцо + легенда» не хватает. */
+  layout?: 'column' | 'row';
 }) {
-  const gradId = useId();
+  // Хуки — строго до ранних return ниже (правило React; биом ловит это как
+  // useHookAtTopLevel): у компонента есть выходы «нет данных», и вызов контекста после них
+  // менял бы порядок хуков между рендерами.
+  const ctxHeight = useContext(ExpandedChartHeightContext);
+  const legendWide = useMediaQuery('(min-width: 640px)');
   const [hover, setHover] = useState<string | null>(null);
+  const detachSvgListeners = useRef<(() => void) | null>(null);
+  // The arcs are passive parts of one named graphic. Pointer hover only mirrors a value already
+  // present in the persistent legend, so event delegation belongs on the DOM node rather than
+  // turning every decorative path into a fake focusable control.
+  const bindSvg = useCallback((node: SVGSVGElement | null) => {
+    detachSvgListeners.current?.();
+    detachSvgListeners.current = null;
+    if (!node) return;
+    const handleMove = (event: PointerEvent) => {
+      const target = event.target instanceof Element
+        ? event.target.closest<SVGPathElement>('[data-radial-segment]')
+        : null;
+      const key = target?.dataset.radialSegment ?? null;
+      setHover((current) => (current === key ? current : key));
+    };
+    const clearHover = () => setHover(null);
+    node.addEventListener('pointermove', handleMove);
+    node.addEventListener('pointerleave', clearHover);
+    detachSvgListeners.current = () => {
+      node.removeEventListener('pointermove', handleMove);
+      node.removeEventListener('pointerleave', clearHover);
+    };
+  }, []);
 
-  const shown = segments.filter((s) => s.value > 0).sort((a, b) => b.value - a.value);
+  // Граница компонента не пропускает отрицательные/NaN/Infinity в SVG-геометрию. Ноль честно
+  // означает отсутствие сегмента; невалидный `total` не превращает path в `NaN`, а возвращает
+  // построение к сумме валидных показанных значений.
+  const shown = segments
+    .map((segment) => ({
+      ...segment,
+      value: Number.isFinite(segment.value) ? Math.max(0, segment.value) : 0,
+    }))
+    .filter((segment) => segment.value > 0)
+    .sort((a, b) => b.value - a.value || a.key.localeCompare(b.key));
   const shownSum = shown.reduce((acc, s) => acc + s.value, 0);
-  const whole = Math.max(shownSum, total ?? 0);
-  if (!shown.length || whole <= 0) return null;
+  const safeTotal = total != null && Number.isFinite(total) && total >= 0 ? total : null;
+  const whole = Math.max(shownSum, safeTotal ?? 0);
 
   // Остаток — то, что сервер посчитал в итоге, но не отнёс ни к одной категории (Метрика скрывает
   // демографию при малой выборке). Рисуем его приглушённым, а не растягиваем сегменты на 100%.
@@ -86,9 +140,23 @@ export function RadialShare({
     ? [...shown, { key: '__rest', label: 'Не определено', value: rest }]
     : shown;
 
+  // UPDATE-морф дуг (канон Chart motion): на смене периода/фильтра значения сегментов ПЕРЕТЕКАЮТ
+  // (index-режим: новый сегмент честно растёт с нуля), и спаны пересчитываются по кадру от суммы
+  // текущих значений — кольцо всегда полно. Тексты (центр, легенда, aria) снапают на target: числа
+  // не «крутятся». Хук ДО ранних return-ов (React #310); сигнатура — ключи+значения состава.
+  const tweened = useMorphValues(
+    parts.map((p) => p.value),
+    parts.map((p) => `${p.key}:${p.value}`).join('|'),
+    'index',
+  );
+  if (!shown.length || !Number.isFinite(shownSum) || shownSum <= 0) return null;
+  if (!Number.isFinite(whole) || whole <= 0) return null;
+
+  const tweenedWhole = tweened.reduce((acc, v) => acc + v, 0);
   let cursor = 180;
   const arcs = parts.map((p, i) => {
-    const span = (p.value / whole) * 180;
+    const tv = tweened[i] ?? p.value;
+    const span = tweenedWhole > 0 ? (tv / tweenedWhole) * 180 : 0;
     const from = cursor;
     const to = cursor - span;
     cursor = to;
@@ -107,22 +175,55 @@ export function RadialShare({
   });
 
   const active = arcs.find((a) => a.key === hover) ?? null;
-  const label = `Состав: ${arcs.map((a) => `${a.label} ${a.pct.toFixed(0)}%`).join(', ')}`;
+  const totalCaption = centerCaption ?? unitWord;
+  const label = `Всего ${format(whole)} ${totalCaption}. Состав: ${arcs
+    .map((a) => `${a.label} — ${format(a.value)} ${unitWord}, ${a.pct.toFixed(1)}%`)
+    .join('; ')}`;
+
+  // Легенда фикс-тайла компактится по канону ShareRows: топ-4 построчно + сводный хвост «Ещё N».
+  // Без этого 7 возрастных групп съедали высоту тайла, и flex-1 регион дуги схлопывался в
+  // крошечное кольцо (владелец: «график стал слишком маленьким»). Дуга рисует ВСЕ сегменты,
+  // hover/центр читают каждый, aria-label перечисляет всё — сжимается только легенда.
+  // Сколько строк легенды влезает: тело тайла минус кольцо и строка «Ещё N». Без этого счёта
+  // легенда на узком тайле идёт одной колонкой и выталкивает содержимое за нижнюю кромку.
+  // Свободная высота (страница разреза, разворот) — прежнее число строк.
+  const legendBudget = ctxHeight == null || layout === 'row' ? null : ctxHeight - RING_MIN_H - LEGEND_REST_H;
+  const legendFit =
+    legendBudget == null
+      ? legendMax
+      : Math.max(1, Math.min(legendMax, Math.floor(legendBudget / LEGEND_ITEM_H) * (legendWide ? 2 : 1)));
+  const legendShown = Number.isFinite(legendFit) ? arcs.slice(0, legendFit) : arcs;
+  const legendRest = Number.isFinite(legendFit) ? arcs.slice(legendFit) : [];
+  const legendRestSum = legendRest.reduce((acc, a) => acc + a.value, 0);
+  const legendRestPct = legendRest.reduce((acc, a) => acc + a.pct, 0);
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <div className="relative min-h-0 flex-1">
-        <svg viewBox={`0 0 ${VB} ${CY + 14}`} className="h-full w-full" role="img" aria-label={label}>
-          <title id={gradId}>{label}</title>
+    <div className={layout === 'row' ? 'flex h-full min-h-0 items-center gap-5' : 'flex h-full min-h-0 flex-col'}>
+      {/* min-h держит кольцо читаемым, но НЕ распирает тайл: на 104px карточка «Пол»
+          переполнялась на 21px (кольцо 104 + легенда 94 против тела 181). 80px — нижняя
+          граница, при которой дуга и центр ещё читаются. */}
+      {/* Кап высоты и в column-режиме: flex-1 без потолка раздувал кольцо на всю высоту высокой
+          карточки (IG «Пол» — гигантская дуга без пользы; владелец). Кольцо — модуль, не фон. */}
+      <div className={layout === 'row' ? 'relative h-full max-h-32 w-32 shrink-0' : 'relative mx-auto min-h-20 w-full max-w-52 flex-1 [max-height:10rem]'}>
+        {/* aria-label вместо svg <title>: у <title> есть побочный нативный браузерный тултип —
+            нестилизуемый прямоугольник с острыми углами (канон: только свои скруглённые читалки). */}
+        <svg
+          ref={bindSvg}
+          viewBox={`0 0 ${VB} ${CY + 14}`}
+          className="h-full w-full"
+          role="img"
+          aria-label={label}
+          focusable="false"
+        >
           {arcs.map((a) => (
             <path
               key={a.key}
+              data-radial-segment={a.key}
               d={a.d}
               fill={a.color}
               opacity={hover && hover !== a.key ? 0.4 : 1}
               className="transition-opacity dur-base ease-house"
-              onMouseEnter={() => setHover(a.key)}
-              onMouseLeave={() => setHover((h) => (h === a.key ? null : h))}
+              focusable="false"
             />
           ))}
           {/* Итог в центре — как Label внутри PolarRadiusAxis у shadcn. На наведении подменяется
@@ -135,15 +236,46 @@ export function RadialShare({
           </text>
         </svg>
       </div>
-      {/* Легенда: свотч, подпись, доля (charts/tooltip). Она же — доступная альтернатива дуге. */}
-      <ul className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-2xs">
-        {arcs.map((a) => (
-          <li key={a.key} className="flex items-center gap-1.5">
-            <span aria-hidden="true" className="h-2.5 w-2.5 shrink-0 rounded-[2px]" style={{ backgroundColor: a.color }} />
-            <span className="text-muted-foreground">{a.label}</span>
-            <span className="font-medium tabular-nums text-foreground">{a.pct.toFixed(1)}%</span>
+      {/* Легенда — постоянная доступная читалка дуги: touch/keyboard не зависят от mouse hover,
+          а сырое значение не теряется за одним процентом. На 320/390px остаётся одна колонка. */}
+      <ul
+        aria-label="Легенда состава"
+        className={
+          layout === 'row'
+            ? 'grid min-w-0 flex-1 grid-cols-1 gap-y-1 text-2xs'
+            : 'mt-1 grid min-w-0 grid-cols-1 gap-x-3 gap-y-1 text-2xs sm:grid-cols-2'
+        }
+      >
+        {legendShown.map((a) => (
+          <li
+            key={a.key}
+            /* items-start, а не center: при переносе значения ячейка соседней колонки получала
+               пустую строку сверху и легенда разъезжалась по вертикали (аудит #554, D14). */
+            className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start gap-x-1.5"
+          >
+            <span
+              aria-hidden="true"
+              className="mt-1 h-2.5 w-2.5 shrink-0 rounded-[2px]"
+              style={{ backgroundColor: a.color }}
+            />
+            <span className="min-w-0 truncate text-muted-foreground" title={a.label}>{a.label}</span>
+            {/* Доля ПЕРВОЙ и склеена с абсолютным значением неразрывными пробелами вокруг «·».
+                Раньше точка-разделитель повисала в конце строки, а процент уезжал на следующую;
+                теперь перенос, если и случится, унесёт менее важное — абсолютное число. */}
+            <span className="col-start-2 min-w-0 tabular-nums text-foreground">
+              <span className="font-medium">{a.pct.toFixed(1)}%</span>
+              <span className="text-muted-foreground">{' · '}{format(a.value)} {unitWord}</span>
+            </span>
           </li>
         ))}
+        {legendRest.length > 0 && (
+          <li
+            className="min-w-0 truncate text-muted-foreground"
+            title={legendRest.map((a) => a.label).join(', ')}
+          >
+            Ещё {legendRest.length} · {format(legendRestSum)} {unitWord} · {legendRestPct.toFixed(1)}%
+          </li>
+        )}
       </ul>
     </div>
   );

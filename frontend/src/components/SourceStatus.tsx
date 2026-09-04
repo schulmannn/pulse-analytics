@@ -29,7 +29,7 @@ function StatusRow({
   text: string;
   cta?: { to: string; label: string };
   compact?: boolean;
-  /** Technical readout (timestamp / collector version) rendered in Roboto Mono. */
+  /** Technical readout (timestamp / collector version) rendered in the local system mono stack. */
   monoSuffix?: string;
 }) {
   return (

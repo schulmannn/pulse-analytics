@@ -74,6 +74,10 @@ function loadConfig(env = process.env) {
     auth: Object.freeze({
       sessionSecret: env.SESSION_SECRET || '',
       sessionTtlMs: 7 * 24 * 60 * 60 * 1000,
+      // Sliding idle refresh is bounded by an absolute lifetime. A successful
+      // password re-authentication starts a new absolute window.
+      sessionAbsoluteTtlMs:
+        Number(env.SESSION_ABSOLUTE_TTL_DAYS || 30) * 24 * 60 * 60 * 1000,
       adminEmail: normalizeEmail(env.ADMIN_EMAIL),
       adminPassword: env.ADMIN_PASSWORD || '',
       googleClientId: env.GOOGLE_CLIENT_ID || '',
@@ -102,6 +106,17 @@ function loadConfig(env = process.env) {
       // Ключ шифрования OAuth-токенов Яндекс.Метрики (AES-256-GCM, lib/ym_crypto) — по образцу
       // moysklad.tokenKey: пусто = connect-флоу inert (/api/ym/connect отвечает 503).
       tokenKey: env.YM_TOKEN_KEY || '',
+    }),
+    rusender: Object.freeze({
+      // Ключ шифрования API-ключей Rusender (AES-256-GCM, lib/rusender_crypto) — по образцу
+      // metrika.tokenKey: пусто = connect-флоу inert (/api/rusender/connect отвечает 503).
+      tokenKey: env.RUSENDER_KEY || '',
+      // ФИЧЕФЛАГ ВИТРИН. Сбор в архив идёт всегда (у подключённого аккаунта), а вот ЭКРАНЫ
+      // (обзор, лента рассылок, база) и их data-роуты включаются только этим флагом: числа
+      // Rusender ещё не сверены с живыми данными, и показывать их всем участникам воркспейса
+      // до сверки нельзя. Архив тем временем копится — к моменту включения история уже есть.
+      // Выключено = data-роуты отвечают 404 (поверхности ещё нет), нав их не показывает.
+      surfaces: /^(1|true|yes|on)$/i.test(String(env.RUSENDER_SURFACES || '')),
     }),
     telegram: Object.freeze({
       botToken: env.TG_BOT_TOKEN || '',
@@ -150,6 +165,13 @@ function loadConfig(env = process.env) {
       // 4096: у Sonnet 5 adaptive thinking включён по умолчанию и расходует тот же бюджет,
       // что и видимый ответ — 2048 рисковал бы обрывом на середине.
       maxOutputTokens: Number(env.AI_MAX_OUTPUT_TOKENS || 4096),
+    }),
+    cdek: Object.freeze({
+      // Потолок строк одной выгрузки СДЭК. Годовой файл склада — ~1100 строк, так что 100 000
+      // это запас, а не ограничение; смысл кэпа в том, чтобы разбор оставался синхронным и
+      // предсказуемым по памяти. Файл, который в него не влезет, — сигнал вынести разбор в job,
+      // а не молча поднять число.
+      maxRows: Number(env.CDEK_MAX_ROWS || 100000),
     }),
     cache: Object.freeze({
       // In-memory response cache (infrastructure/memoryCache) — bounded LRU. maxEntries caps retained
@@ -231,6 +253,15 @@ function validateConfig(config) {
 
   if (prod && !config.auth.sessionSecret) {
     add('auth.sessionSecret', 'SESSION_SECRET обязателен в production (подписывает сессии дашборда).');
+  }
+  if (!Number.isInteger(config.auth.sessionAbsoluteTtlMs)
+      || config.auth.sessionAbsoluteTtlMs % (24 * 60 * 60 * 1000) !== 0
+      || config.auth.sessionAbsoluteTtlMs < config.auth.sessionTtlMs
+      || config.auth.sessionAbsoluteTtlMs > 365 * 24 * 60 * 60 * 1000) {
+    add(
+      'auth.sessionAbsoluteTtlMs',
+      'SESSION_ABSOLUTE_TTL_DAYS должен быть целым числом в диапазоне 7..365.',
+    );
   }
   if (prod && !config.database.url && !config.database.allowDbLess) {
     add('database.url', 'DATABASE_URL обязателен в production, если не задан ALLOW_DBLESS=true.');

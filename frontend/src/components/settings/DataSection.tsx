@@ -1,20 +1,21 @@
 import { useState } from 'react';
 import { DataHealth } from '@/components/DataHealth';
-import { BTN_SECONDARY, SettingsGroup, SettingsIcon } from '@/components/settings/primitives';
-import { getSessionToken } from '@/lib/session';
+import { SettingsGroup, SettingsIcon } from '@/components/settings/primitives';
+import { Button } from '@/components/ui/button';
+import { fetchAccountExport } from '@/lib/accountExport';
 
 /** «Данные» — the data-health ledger, GDPR-экспорт и row-link в раздел каналов. */
 export function DataSection({ onOpenChannels }: { onOpenChannels: () => void }) {
   return (
     <SettingsGroup>
-      <div className="py-4">
+      <div className="px-5 py-4">
         <DataHealth defaultOpen />
       </div>
       <ExportRow />
       <button
         type="button"
         onClick={onOpenChannels}
-        className="group flex w-full items-center justify-between gap-6 py-4 text-left"
+        className="group flex w-full items-center justify-between gap-6 px-5 py-4 text-left"
       >
         <span className="min-w-0">
           <span className="block text-sm font-medium text-foreground transition-colors group-hover:text-primary">
@@ -26,7 +27,7 @@ export function DataSection({ onOpenChannels }: { onOpenChannels: () => void }) 
         </span>
         <SettingsIcon
           name="arrow"
-          className="h-4 w-4 shrink-0 text-ink3 transition-transform group-hover:translate-x-0.5"
+          className="h-4 w-4 shrink-0 text-ink3 transition-transform group-hover-fine:translate-x-0.5"
         />
       </button>
     </SettingsGroup>
@@ -35,8 +36,8 @@ export function DataSection({ onOpenChannels }: { onOpenChannels: () => void }) 
 
 /**
  * GDPR F5: все данные аккаунта одним JSON-файлом (профиль, настройки, отчёты, каналы с полными
- * архивами; токены и сессии не покидают сервер). Скачивание — обычный fetch с сессионным
- * заголовком → blob-ссылка: react-query здесь не нужен, ответ не кэшируется.
+ * архивами; токены и сессии не покидают сервер). Скачивание — обычный same-origin
+ * cookie-auth fetch → blob-ссылка: react-query здесь не нужен, ответ не кэшируется.
  */
 function ExportRow() {
   const [busy, setBusy] = useState(false);
@@ -46,20 +47,7 @@ function ExportRow() {
     setBusy(true);
     setErr(null);
     try {
-      const token = getSessionToken();
-      const res = await fetch('/api/account/export', {
-        credentials: 'same-origin',
-        headers: token ? { 'X-Session-Token': token } : undefined,
-      });
-      if (!res.ok) {
-        let message = 'Не удалось выгрузить данные';
-        try {
-          const body = await res.json();
-          if (body && typeof body.error === 'string') message = body.error;
-        } catch { /* не-JSON ответ — оставляем общий текст */ }
-        throw new Error(message);
-      }
-      const blob = await res.blob();
+      const blob = await fetchAccountExport();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -77,7 +65,7 @@ function ExportRow() {
   };
 
   return (
-    <div className="flex w-full items-center justify-between gap-6 py-4">
+    <div className="flex w-full items-center justify-between gap-6 px-5 py-4">
       <span className="min-w-0">
         <span className="block text-sm font-medium text-foreground">Экспорт данных</span>
         <span className="mt-0.5 block max-w-[56ch] text-xs leading-relaxed text-ink3">
@@ -86,9 +74,9 @@ function ExportRow() {
         </span>
         {err && <span role="alert" className="mt-1 block text-xs font-medium text-destructive">{err}</span>}
       </span>
-      <button type="button" onClick={onExport} disabled={busy} className={BTN_SECONDARY}>
+      <Button type="button" variant="secondary" size="sm" onClick={onExport} pending={busy} disabled={busy}>
         {busy ? 'Подготовка…' : 'Скачать JSON'}
-      </button>
+      </Button>
     </div>
   );
 }

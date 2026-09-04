@@ -1,22 +1,6 @@
 import { useContext } from 'react';
 import type { ReactElement, ReactNode } from 'react';
-import {
-  useYmAge,
-  useYmCities,
-  useYmCountries,
-  useYmDevices,
-  useYmExits,
-  useYmGender,
-  useYmGoals,
-  useYmLandings,
-  useYmMessengers,
-  useYmPages,
-  useYmReferrers,
-  useYmSocial,
-  useYmSources,
-  useYmUtm,
-  type YmBreakdownParams,
-} from '@/api/queries';
+import { useYmAge, useYmCities, useYmCountries, useYmDevices, useYmExits, useYmGender, useYmGoals, useYmLandings, useYmMessengers, useYmPages, useYmReferrers, useYmSocial, useYmSources, useYmUtm, type YmBreakdownParams } from '@/api/ym';
 import { ChartExpandedContext } from '@/components/ExpandableChart';
 import { RadialShare } from '@/components/RadialShare';
 import { ShareRows } from '@/components/ShareRows';
@@ -70,20 +54,22 @@ export const YM_GENDER_LABELS: Record<string, string> = {
   female: 'Женщины',
 };
 
-/** Методологическая подпись соцдема: оценочная природа, фактическое покрытие и privacy-redaction
-    перечисляются отдельно. При нулевом total процент не выдумывается. */
+/** Методологическая подпись соцдема — ТОЛЬКО когда есть реальная оговорка (владелец: постоянная
+    строка «Оценка Метрики (Crypta) · определено для 100% визитов» — шум): неполное покрытие и/или
+    privacy-redaction. Полное покрытие без redaction → null (сама оценочная природа задокументирована
+    в «О метрике» и дескрипторе страницы). */
 export const demographicsFootnote = (data: {
   coverage_percent: number | null;
   contains_sensitive_data: boolean;
-}): string => {
-  const coverage =
-    data.coverage_percent == null
-      ? null
-      : `определено для ${data.coverage_percent.toLocaleString('ru-RU', { maximumFractionDigits: 1 })}% визитов`;
-  const base = ['Оценка Метрики (Crypta)', coverage].filter(Boolean).join(' · ');
-  return data.contains_sensitive_data
-    ? `${base}. Часть данных скрыта при малой выборке.`
-    : `${base}.`;
+}): string | null => {
+  const partial = data.coverage_percent != null && data.coverage_percent < 99.95;
+  const coverage = partial
+    ? `Определено для ${fmt.pctFixed(data.coverage_percent!, 1)} визитов`
+    : null;
+  const redacted = data.contains_sensitive_data ? 'часть данных скрыта при малой выборке' : null;
+  if (!coverage && !redacted) return null;
+  const joined = [coverage, redacted].filter(Boolean).join(' · ');
+  return `${joined.charAt(0).toUpperCase()}${joined.slice(1)}.`;
 };
 
 /** Вторичный контекст строки разреза: посетители + отказы (когда доступны). Отказы nullable —
@@ -91,7 +77,7 @@ export const demographicsFootnote = (data: {
 export const breakdownNote = (users: number, bounceRate: number | null): string =>
   [
     `${fmt.num(users)} чел.`,
-    bounceRate != null ? `${bounceRate.toLocaleString('ru-RU', { maximumFractionDigits: 1 })}% отказов` : null,
+    bounceRate != null ? `${fmt.pctFixed(bounceRate, 1)} отказов` : null,
   ]
     .filter(Boolean)
     .join(' · ');
@@ -107,7 +93,7 @@ export const goalNote = (
   if (goalId == null) return null;
   return (
     [
-      conversion != null ? `CR ${conversion.toLocaleString('ru-RU', { maximumFractionDigits: 2 })}%` : null,
+      conversion != null ? `CR ${fmt.pctFixed(conversion, 2)}` : null,
       reaches != null ? `${fmt.num(reaches)} достиж.` : null,
     ]
       .filter(Boolean)
@@ -248,11 +234,6 @@ export function YmReportBody<T>({
 
 // ── Таблица разрезов ───────────────────────────────────────────────────────────────────────────
 
-export interface AboutDef {
-  formula: string;
-  included?: string;
-  source: string;
-}
 
 /** Доска Обзора vs полностраничный отчёт: отличаются только высотой скелета и лимитом отчёта. */
 export type YmBreakdownSurface = 'board' | 'page';
@@ -272,7 +253,6 @@ export interface YmBreakdownDef {
   /** Тихая подпись под h1 полностраничного отчёта. */
   descriptor: string;
   /** Rail «О метрике». */
-  about: AboutDef;
   /** Заголовок карточки внутри полностраничного отчёта («Все источники»). */
   pageTitle: string;
   /** aria-label синхронного селектора цели; undefined — у разреза нет атрибуции. */
@@ -291,7 +271,6 @@ function defineYmBreakdown<T>(spec: {
   key: string;
   title: string;
   descriptor: string;
-  about: AboutDef;
   pageTitle: string;
   goalAria?: string;
   errorTitle: string;
@@ -305,7 +284,6 @@ function defineYmBreakdown<T>(spec: {
     key: spec.key,
     title: spec.title,
     descriptor: spec.descriptor,
-    about: spec.about,
     pageTitle: spec.pageTitle,
     goalAria: spec.goalAria,
     Body: function YmBreakdownBody({ period, goalId, surface }: YmBreakdownBodyProps) {
@@ -329,12 +307,15 @@ function defineYmBreakdown<T>(spec: {
 }
 
 /** Пустое состояние демографии: EmptyState + та же методологическая сноска, что и под строками. */
-const demographicsEmpty = (data: { coverage_percent: number | null; contains_sensitive_data: boolean } | undefined) => (
-  <div>
-    <EmptyState compact size="table" title="Демографические данные недоступны за период." />
-    {data && <p className="text-2xs text-muted-foreground">{demographicsFootnote(data)}</p>}
-  </div>
-);
+const demographicsEmpty = (data: { coverage_percent: number | null; contains_sensitive_data: boolean } | undefined) => {
+  const note = data ? demographicsFootnote(data) : null;
+  return (
+    <div>
+      <EmptyState compact size="table" title="Демографические данные недоступны за период." />
+      {note != null && <p className="text-2xs text-muted-foreground">{note}</p>}
+    </div>
+  );
+};
 
 /** 14 разрезов Метрики в порядке доски Обзора. Каждый — источник правды и для карточки, и для
     полностраничного отчёта `/metrics/<key>`. */
@@ -343,11 +324,6 @@ export const YM_BREAKDOWNS: YmBreakdownDef[] = [
     key: 'ym-sources',
     title: 'Источники трафика',
     descriptor: 'Откуда пришли визиты за выбранное окно',
-    about: {
-      formula: 'Группировка визитов по источнику трафика (поиск/прямые/соцсети/реклама/…). Строка — визиты и посетители источника.',
-      included: 'С выбранной целью строки дополняются достижениями и конверсией (CR) этой цели.',
-      source: 'Отчёт визитов Метрики (ym:s:<trafficSource>).',
-    },
     pageTitle: 'Все источники',
     goalAria: 'Цель для источников трафика',
     errorTitle: 'Не удалось получить источники трафика',
@@ -370,10 +346,6 @@ export const YM_BREAKDOWNS: YmBreakdownDef[] = [
     key: 'ym-referrers',
     title: 'Реферальные сайты',
     descriptor: 'Внешние домены, приводящие трафик по ссылкам',
-    about: {
-      formula: 'Группировка визитов по внешнему домену-источнику перехода. Строка — визиты и отказы домена.',
-      source: 'Отчёт визитов Метрики (ym:s:externalRefererDomain).',
-    },
     pageTitle: 'Все домены',
     errorTitle: 'Не удалось получить реферальные сайты',
     useData: useYmReferrers,
@@ -402,10 +374,6 @@ export const YM_BREAKDOWNS: YmBreakdownDef[] = [
     key: 'ym-social',
     title: 'Соцсети',
     descriptor: 'Конкретные соцсети, приводящие трафик',
-    about: {
-      formula: 'Группировка визитов из соцсетей по конкретной сети. Строка — визиты и отказы сети.',
-      source: 'Отчёт визитов Метрики (ym:s:lastsignSocialNetwork).',
-    },
     pageTitle: 'Все соцсети',
     errorTitle: 'Не удалось получить соцсети',
     useData: useYmSocial,
@@ -434,10 +402,6 @@ export const YM_BREAKDOWNS: YmBreakdownDef[] = [
     key: 'ym-messengers',
     title: 'Мессенджеры',
     descriptor: 'Telegram и другие мессенджеры — отдельная размерность, не внутри «Соцсетей»',
-    about: {
-      formula: 'Группировка визитов из мессенджеров по конкретному мессенджеру. Строка — визиты и отказы.',
-      source: 'Отчёт визитов Метрики (ym:s:<messenger>).',
-    },
     pageTitle: 'Все мессенджеры',
     errorTitle: 'Не удалось получить мессенджеры',
     useData: useYmMessengers,
@@ -466,11 +430,6 @@ export const YM_BREAKDOWNS: YmBreakdownDef[] = [
     key: 'ym-devices',
     title: 'Устройства',
     descriptor: 'Типы устройств посетителей за выбранное окно',
-    about: {
-      formula: 'Группировка визитов по типу устройства (десктоп/смартфон/планшет/ТВ). Строка — визиты и отказы.',
-      included: 'Тип локализуется по стабильному id категории; с выбранной целью строки дополняются достижениями и CR.',
-      source: 'Отчёт визитов Метрики (ym:s:deviceCategory).',
-    },
     pageTitle: 'Все устройства',
     goalAria: 'Цель для устройств',
     errorTitle: 'Не удалось получить устройства',
@@ -493,11 +452,6 @@ export const YM_BREAKDOWNS: YmBreakdownDef[] = [
     key: 'ym-countries',
     title: 'Страны',
     descriptor: 'География посетителей по странам за выбранное окно',
-    about: {
-      formula: 'Группировка визитов по стране визита. Строка — визиты и отказы страны.',
-      included: 'География определяется Метрикой по данным визита, а не по GPS.',
-      source: 'Отчёт визитов Метрики (ym:s:regionCountry, lang=ru).',
-    },
     pageTitle: 'Все страны',
     errorTitle: 'Не удалось получить страны',
     useData: useYmCountries,
@@ -520,11 +474,6 @@ export const YM_BREAKDOWNS: YmBreakdownDef[] = [
     key: 'ym-cities',
     title: 'Города',
     descriptor: 'География посетителей по городам за выбранное окно',
-    about: {
-      formula: 'Группировка визитов по городу визита — отдельная от страны размерность. Строка — визиты и отказы.',
-      included: 'География определяется Метрикой по данным визита, а не по GPS.',
-      source: 'Отчёт визитов Метрики (ym:s:regionCity, lang=ru).',
-    },
     pageTitle: 'Все города',
     errorTitle: 'Не удалось получить города',
     useData: useYmCities,
@@ -546,11 +495,6 @@ export const YM_BREAKDOWNS: YmBreakdownDef[] = [
     key: 'ym-age',
     title: 'Возраст',
     descriptor: 'Возрастные группы посетителей — оценка Метрики (Crypta)',
-    about: {
-      formula: 'Группировка визитов по возрастной группе посетителя. Строка — визиты и отказы группы.',
-      included: 'Значения — оценка Метрики по поведению аудитории, не анкета; при малой выборке часть данных скрыта.',
-      source: 'Отчёт визитов Метрики (ym:s:ageInterval).',
-    },
     pageTitle: 'Все возрастные группы',
     errorTitle: 'Не удалось получить возраст',
     useData: useYmAge,
@@ -574,11 +518,6 @@ export const YM_BREAKDOWNS: YmBreakdownDef[] = [
     key: 'ym-gender',
     title: 'Пол',
     descriptor: 'Пол посетителей — оценка Метрики (Crypta)',
-    about: {
-      formula: 'Группировка визитов по полу посетителя. Строка — визиты и отказы группы.',
-      included: 'Значения — оценка Метрики по поведению аудитории, не анкета; при малой выборке часть данных скрыта.',
-      source: 'Отчёт визитов Метрики (ym:s:gender).',
-    },
     pageTitle: 'По полу',
     errorTitle: 'Не удалось получить пол',
     useData: useYmGender,
@@ -602,10 +541,6 @@ export const YM_BREAKDOWNS: YmBreakdownDef[] = [
     key: 'ym-goals',
     title: 'Цели',
     descriptor: 'Достижения целей и конверсия за выбранное окно',
-    about: {
-      formula: 'Достижения (reaches) каждой цели за окно; конверсия (CR) — отдельная метрика Метрики, из reaches не выводится.',
-      source: 'Отчёт целей Метрики (goal reaches + conversionRate).',
-    },
     pageTitle: 'Все цели',
     errorTitle: 'Не удалось получить цели',
     useData: useYmGoals,
@@ -624,7 +559,7 @@ export const YM_BREAKDOWNS: YmBreakdownDef[] = [
         value: g.reaches,
         // Конверсия — не знаковая дельта (fmt.pct) и не целое (fmt.num): доли процента
         // значимы, локаль ru даёт запятую.
-        note: `CR ${g.conversion_rate.toLocaleString('ru-RU', { maximumFractionDigits: 2 })}%`,
+        note: `CR ${fmt.pctFixed(g.conversion_rate, 2)}`,
       })),
       tailWord: 'достижений',
       footnote: data.truncated ? 'Показаны первые 20 целей счётчика.' : null,
@@ -636,11 +571,6 @@ export const YM_BREAKDOWNS: YmBreakdownDef[] = [
     key: 'ym-utm',
     title: 'UTM-метки',
     descriptor: 'Размеченные визиты по utm_source за выбранное окно',
-    about: {
-      formula: 'Группировка размеченных визитов по utm_source. Неразмеченные визиты — честной сноской, не строкой.',
-      included: 'С выбранной целью строки дополняются достижениями и конверсией (CR) этой цели.',
-      source: 'Отчёт визитов Метрики (ym:s:<UTMSource>).',
-    },
     pageTitle: 'Все UTM-источники',
     goalAria: 'Цель для UTM-меток',
     errorTitle: 'Не удалось получить UTM-разметку',
@@ -674,10 +604,6 @@ export const YM_BREAKDOWNS: YmBreakdownDef[] = [
     key: 'ym-pages',
     title: 'Топ-страницы',
     descriptor: 'Самые просматриваемые страницы за выбранное окно',
-    about: {
-      formula: 'Группировка ПРОСМОТРОВ страниц по пути. Просмотры — hits-метрика, не визиты (другая единица).',
-      source: 'Отчёт просмотров Метрики (ym:pv:URLPath).',
-    },
     pageTitle: 'Все страницы',
     errorTitle: 'Не удалось получить страницы',
     useData: useYmPages,
@@ -699,11 +625,6 @@ export const YM_BREAKDOWNS: YmBreakdownDef[] = [
     key: 'ym-landings',
     title: 'Страницы входа',
     descriptor: 'Где визиты начинаются за выбранное окно',
-    about: {
-      formula: 'Группировка визитов по странице ВХОДА (startURLPath). Строка — визиты и отказы страницы.',
-      included: 'С выбранной целью строки дополняются достижениями и конверсией (CR) этой цели.',
-      source: 'Отчёт визитов Метрики (ym:s:startURLPath).',
-    },
     pageTitle: 'Все страницы входа',
     goalAria: 'Цель для страниц входа',
     errorTitle: 'Не удалось получить страницы входа',
@@ -718,7 +639,7 @@ export const YM_BREAKDOWNS: YmBreakdownDef[] = [
         // Отказы всегда; конверсия/достижения цели — только когда цель выбрана и метрика пришла.
         note: joinNote(
           r.bounce_rate != null
-            ? `${r.bounce_rate.toLocaleString('ru-RU', { maximumFractionDigits: 1 })}% отказов`
+            ? `${fmt.pctFixed(r.bounce_rate, 1)} отказов`
             : null,
           goalNote(data.goal_id, r.goal_reaches, r.goal_conversion),
         ),
@@ -733,10 +654,6 @@ export const YM_BREAKDOWNS: YmBreakdownDef[] = [
     key: 'ym-exits',
     title: 'Страницы выхода',
     descriptor: 'Где визиты заканчиваются за выбранное окно',
-    about: {
-      formula: 'Группировка визитов по странице ВЫХОДА (endURLPath) — зеркало входов. Строка — визиты и отказы.',
-      source: 'Отчёт визитов Метрики (ym:s:endURLPath).',
-    },
     pageTitle: 'Все страницы выхода',
     errorTitle: 'Не удалось получить страницы выхода',
     useData: useYmExits,

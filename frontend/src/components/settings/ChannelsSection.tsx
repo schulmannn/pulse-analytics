@@ -18,15 +18,18 @@ import { ChannelAvatar } from '@/components/ChannelAvatar';
 import { EmptyState } from '@/components/EmptyState';
 import { SourceStatus } from '@/components/SourceStatus';
 import { Button } from '@/components/ui/button';
+import { Snippet } from '@/components/ui/snippet';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useConfirm } from '@/components/ConfirmDialogProvider';
+import { InstagramGroup } from '@/components/settings/InstagramSection';
 import {
   BTN_DESTRUCTIVE,
   SettingsGroup,
   SettingsIcon,
 } from '@/components/settings/primitives';
 
-/** «Каналы» — add a Telegram channel + the connected list with collector API keys. */
+/** «Каналы» — add a Telegram channel, the connected list with collector API keys, and the
+    Instagram OAuth connection (merged here: one «Подключения» surface, not two nav rows). */
 export function ChannelsSection() {
   const confirm = useConfirm();
   const { data, isLoading, isError, error, refetch } = useChannels();
@@ -92,14 +95,14 @@ export function ChannelsSection() {
   };
 
   return (
-    <>
+    <div className="space-y-8">
       <SettingsGroup title="Добавить канал">
-        <div className="py-4">
+        <div className="px-5 py-4 @min-[32rem]:py-5">
           <div className="text-sm font-medium text-foreground">Telegram-канал</div>
           <p className="mt-0.5 max-w-[56ch] text-xs leading-relaxed text-ink3">
             Укажите @username публичного канала — начнём собирать статистику.
           </p>
-          <form onSubmit={handleAddChannel} className="mt-3 flex flex-col gap-3 sm:flex-row">
+          <form onSubmit={handleAddChannel} className="mt-3 flex flex-col gap-3 @min-[32rem]:flex-row">
             <div className="relative flex-1">
               <span className="absolute left-3 top-2.5 select-none font-mono text-sm text-muted-foreground">@</span>
               <input
@@ -111,11 +114,12 @@ export function ChannelsSection() {
                 aria-invalid={errorMessage ? true : undefined}
                 aria-describedby={errorMessage ? 'add-channel-err' : undefined}
                 disabled={createChannelMutation.isPending}
-                className="w-full rounded border bg-background py-2 pl-7 pr-3 font-mono text-sm focus:outline-hidden focus:ring-1 focus:ring-primary"
+                className="w-full rounded-md border bg-background py-2 pl-7 pr-3 font-mono text-sm focus:outline-hidden focus:ring-1 focus:ring-primary"
               />
             </div>
             <Button
               type="submit"
+              pending={createChannelMutation.isPending}
               disabled={createChannelMutation.isPending || !usernameInput.trim()}
               className="shrink-0"
             >
@@ -128,7 +132,7 @@ export function ChannelsSection() {
 
       {channels.length === 0 ? (
         <SettingsGroup title="Подключённые каналы">
-          <div className="py-4">
+          <div className="px-5 py-4">
             <EmptyState title="Список каналов пуст" reason="Добавьте первый канал выше." />
           </div>
         </SettingsGroup>
@@ -140,13 +144,13 @@ export function ChannelsSection() {
             const initial = (channel.username || channel.title || 'T').slice(0, 1).toUpperCase();
             const keysOpen = activeChannelKeysId === channel.id && !isCentral;
             return (
-              <div key={channel.id} className="py-4">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
-                  <div className="flex min-w-0 items-start gap-3">
+              <div key={channel.id} className="px-5 py-4 @min-[32rem]:py-5">
+                <div className="flex flex-col gap-3 @min-[32rem]:flex-row @min-[32rem]:items-start @min-[32rem]:justify-between @min-[32rem]:gap-6">
+                  <div className="flex min-w-0 items-start gap-3.5">
                     <ChannelAvatar
                       source={channel.source}
                       initial={initial}
-                      className="h-9 w-9 rounded text-sm"
+                      className="h-10 w-10 rounded-lg text-sm ring-1 ring-border"
                     />
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
@@ -155,7 +159,7 @@ export function ChannelsSection() {
                           <span className="font-mono text-xs text-muted-foreground">@{channel.username}</span>
                         )}
                         {isCentral && (
-                          <span className="inline-flex select-none items-center rounded bg-primary/10 px-2 py-0.5 text-2xs font-medium tracking-wide text-primary">
+                          <span className="inline-flex select-none items-center rounded bg-primary/10 px-2 py-0.5 text-2xs font-medium tracking-wide text-accent-foreground">
                             central
                           </span>
                         )}
@@ -172,14 +176,15 @@ export function ChannelsSection() {
                     </div>
                   </div>
                   {!isCentral && (
-                    <div className="flex shrink-0 items-center gap-2 self-end sm:self-auto">
+                    <div className="flex shrink-0 items-center gap-2 self-end @min-[32rem]:self-auto">
                       <button
                         type="button"
+                        data-mobile-touch-target=""
                         onClick={() =>
                           setActiveChannelKeysId(activeChannelKeysId === channel.id ? null : channel.id)
                         }
                         className={cn(
-                          'btn-pill border px-3.5 py-1.5 text-xs font-medium transition-colors',
+                          'btn-pill min-h-11 border px-3.5 py-1.5 text-xs font-medium transition-colors sm:min-h-0',
                           activeChannelKeysId === channel.id
                             ? 'border-border bg-secondary text-foreground'
                             : 'bg-background text-muted-foreground hover:bg-muted hover:text-foreground',
@@ -209,7 +214,9 @@ export function ChannelsSection() {
           })}
         </SettingsGroup>
       )}
-    </>
+
+      <InstagramGroup />
+    </div>
   );
 }
 
@@ -221,7 +228,6 @@ function ChannelKeysPanel({ channelId }: { channelId: number }) {
   const revokeKeyMutation = useRevokeKey(channelId);
 
   const [oneTimeKey, setOneTimeKey] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
 
   if (isLoading) {
     return (
@@ -237,7 +243,6 @@ function ChannelKeysPanel({ channelId }: { channelId: number }) {
 
   const handleCreateKey = async () => {
     setOneTimeKey(null);
-    setCopied(false);
     setKeyError(null);
     try {
       const res = await createKeyMutation.mutateAsync({ label: 'локальный коллектор' });
@@ -248,75 +253,49 @@ function ChannelKeysPanel({ channelId }: { channelId: number }) {
     }
   };
 
-  const handleCopy = (txt: string) => {
-    navigator.clipboard.writeText(txt).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
-  };
-
   const ingestUrl = `${window.location.origin}/api/collector/ingest`;
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between gap-4">
-        <div className="flex items-baseline gap-3">
+    <div data-settings-key-panel="" className="space-y-4">
+      <div className="flex flex-col items-start gap-3 @min-[32rem]:flex-row @min-[32rem]:items-center @min-[32rem]:justify-between @min-[32rem]:gap-4">
+        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
           <h4 className="text-xs font-medium tracking-wider text-muted-foreground">Ключи внешних коллекторов</h4>
           <Link
             to="/connect"
-            className="text-2xs text-primary underline decoration-primary/40 underline-offset-2 hover:decoration-primary"
+            data-mobile-touch-target=""
+            className="inline-flex min-h-11 items-center text-2xs text-primary underline decoration-primary/40 underline-offset-2 hover:decoration-primary sm:min-h-0"
           >
             Что делать с ключом? →
           </Link>
         </div>
-        <button
+        <Button
           type="button"
+          variant="secondary"
+          size="xs"
           onClick={handleCreateKey}
+          pending={createKeyMutation.isPending}
           disabled={createKeyMutation.isPending}
-          className="rounded bg-primary px-2.5 py-1 text-2xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+          className="px-3 text-2xs"
         >
           {createKeyMutation.isPending ? 'Генерация…' : 'Создать ключ'}
-        </button>
+        </Button>
       </div>
       {keyError && <p role="alert" className="text-xs text-destructive">{keyError}</p>}
 
-      {/* role="status" on the inserted box itself (announced on insertion) — a permanently mounted
-          live-region wrapper would eat two space-y-4 gaps in the default no-token state. */}
       {oneTimeKey && (
-          <div role="status" className="space-y-2.5 rounded border border-status-warn/40 bg-background p-3.5">
-            <div className="flex items-center gap-1.5 text-xs font-medium text-status-warn">
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                className="h-3.5 w-3.5 shrink-0"
-                aria-hidden="true"
-              >
-                <path
-                  d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-                <path d="M12 9v4M12 17h.01" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-              <span>Скопируйте токен сейчас — он показывается ОДИН раз:</span>
-            </div>
-            <div className="relative flex items-center gap-2 break-all rounded bg-muted/60 p-2 font-mono text-xs text-foreground">
-              <span className="flex-1 select-all pr-16">{oneTimeKey}</span>
-              <button
-                type="button"
-                onClick={() => handleCopy(oneTimeKey)}
-                className="absolute right-2 top-1.5 rounded border bg-background px-2 py-1 font-sans text-2xs font-medium transition-colors hover:bg-secondary"
-              >
-                {copied ? 'Скопировано' : 'Копировать'}
-              </button>
-              <span role="status" className="sr-only">{copied ? 'Скопировано' : ''}</span>
-            </div>
-            <div className="text-2xs leading-normal text-muted-foreground">
-              Ingest URL: <code className="rounded bg-muted px-1 py-0.5 font-mono text-foreground">{ingestUrl}</code>
-            </div>
+        <div className="space-y-2.5">
+          <Snippet
+            value={oneTimeKey}
+            label="Скопируйте токен сейчас — он показывается ОДИН раз:"
+            tone="warn"
+          />
+          <div className="text-2xs leading-normal text-muted-foreground">
+            Ingest URL:{' '}
+            <code className="rounded bg-muted px-1 py-0.5 font-mono text-foreground">
+              {ingestUrl}
+            </code>
           </div>
+        </div>
       )}
 
       {keys.length === 0 ? (
@@ -327,7 +306,7 @@ function ChannelKeysPanel({ channelId }: { channelId: number }) {
             <div
               key={k.id}
               className={cn(
-                'flex items-center justify-between rounded border border-border/40 bg-background p-2 font-mono text-xs',
+                'flex items-center justify-between rounded-md border border-border/40 bg-background p-2 font-mono text-xs',
                 k.revoked && 'opacity-50',
               )}
             >
@@ -346,6 +325,7 @@ function ChannelKeysPanel({ channelId }: { channelId: number }) {
                 ) : (
                   <button
                     type="button"
+                    data-mobile-touch-target=""
                     onClick={async () => {
                       const ok = await confirm({
                         title: 'Отозвать ключ?',
@@ -355,7 +335,7 @@ function ChannelKeysPanel({ channelId }: { channelId: number }) {
                       if (ok) revokeKeyMutation.mutate(k.id);
                     }}
                     disabled={revokeKeyMutation.isPending}
-                    className="font-sans text-2xs text-destructive hover:underline disabled:opacity-50"
+                    className="min-h-11 px-2 font-sans text-2xs text-destructive hover:underline disabled:opacity-50 sm:min-h-0"
                   >
                     Отозвать
                   </button>
@@ -372,18 +352,18 @@ function ChannelKeysPanel({ channelId }: { channelId: number }) {
 function ChannelsSkeleton() {
   return (
     <div className="space-y-8">
-      <div className="space-y-3">
-        <Skeleton className="h-4 w-40" />
-        <div className="rounded border border-border p-4">
+      <div className="space-y-2.5">
+        <Skeleton className="h-3.5 w-32" />
+        <div className="rounded-2xl border border-border bg-card p-5">
           <Skeleton className="h-9 w-full" />
         </div>
       </div>
-      <div className="space-y-3">
-        <Skeleton className="h-4 w-48" />
-        <div className="divide-y divide-border rounded border border-border">
+      <div className="space-y-2.5">
+        <Skeleton className="h-3.5 w-44" />
+        <div className="divide-y divide-border rounded-2xl border border-border bg-card">
           {Array.from({ length: 3 }).map((_, i) => (
-            <div key={i} className="p-4">
-              <Skeleton className="h-9 w-full" />
+            <div key={i} className="p-5">
+              <Skeleton className="h-10 w-full" />
             </div>
           ))}
         </div>

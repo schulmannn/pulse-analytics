@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { isIgChartMetricKey, IG_CHART_METRIC_KEYS } from './igMetricKeys';
+import {
+  IG_CHART_METRIC_KEYS,
+  IG_EXPLORER_METRIC_KEYS,
+  isIgChartMetricKey,
+  isIgMetricKey,
+} from './igMetricKeys';
 import { routeNetworkOwner } from '@/lib/networks';
 
 describe('Instagram chart-card metric route registry', () => {
@@ -24,6 +29,24 @@ describe('Instagram chart-card metric route registry', () => {
     // The numeric daily/aggregate/ER IG keys stay owned by IgMetricPage's own DEFS, not this registry.
     for (const key of ['ig-reach', 'ig-views', 'ig-er', 'views', 'ym-visits', 'tg-heatmap', 'ms-revenue', 'ig', 'ig-unknown', undefined]) {
       expect(isIgChartMetricKey(key)).toBe(false);
+    }
+  });
+
+  it('keeps the lightweight dispatcher registry complete for numeric/derived IG explorers', () => {
+    expect(IG_EXPLORER_METRIC_KEYS).toEqual([
+      'ig-reach',
+      'ig-follows',
+      'ig-views',
+      'ig-interactions',
+      'ig-likes',
+      'ig-saves',
+      'ig-er',
+    ]);
+    for (const key of [...IG_EXPLORER_METRIC_KEYS, ...IG_CHART_METRIC_KEYS]) {
+      expect(isIgMetricKey(key)).toBe(true);
+    }
+    for (const key of ['views', 'ym-visits', 'tg-heatmap', 'ms-revenue', 'ig-unknown', undefined]) {
+      expect(isIgMetricKey(key)).toBe(false);
     }
   });
 

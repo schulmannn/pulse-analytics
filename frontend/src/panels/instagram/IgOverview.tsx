@@ -28,28 +28,61 @@ export function IgOverview({ ig }: { ig: IgData }) {
   return (
     <WidgetGroup id="ig-overview-v2" className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-6">
       {/* Row 1 — the two primary cards. Reach reuses the curated `ig-reach` Home key, so «На
-          главную» pins the card it already knew; audience drills to /metrics/ig-follows. */}
-      <ChartSection id="ig-overview-reach" title="Охват" defaultSize="half" defaultColor={1} homeKey="ig-reach" drillTo="/metrics/ig-reach">
-        <IgReachBody ig={ig} />
-      </ChartSection>
-      <ChartSection id="ig-overview-audience" title="Динамика аудитории" defaultSize="half" defaultColor={5} drillTo="/metrics/ig-follows">
+          главную» pins the card it already knew; audience drills to /metrics/ig-follows.
+          «Охват» — единственная тонированная карточка доски (канон: одна история = один цвет). */}
+      <ChartSection
+        id="ig-overview-reach"
+        title="Охват"
+        defaultSize="half"
+        defaultColor={1}
+        defaultTinted
+        homeKey="ig-reach"
+        drillTo="/metrics/ig-reach"
+        variants={[
+          { key: 'line', label: 'Линия', render: <IgReachBody ig={ig} /> },
+          { key: 'bar', label: 'Столбцы', render: <IgReachBody ig={ig} viz="bar" /> },
+        ]}
+      />
+      <ChartSection id="ig-overview-audience" title="Динамика аудитории" defaultSize="half" drillTo="/metrics/ig-follows">
         <IgAudienceBody ig={ig} />
       </ChartSection>
       {/* Row 2 — compact comparisons at third width. */}
-      <ChartSection id="ig-overview-views" title="Просмотры" defaultSize="third" defaultColor={2} drillTo="/metrics/ig-views">
-        <IgViewsBody ig={ig} />
-      </ChartSection>
-      <ChartSection id="ig-overview-interactions" title="Взаимодействия" defaultSize="third" defaultColor={4} drillTo="/metrics/ig-interactions">
-        <IgInteractionsBody ig={ig} />
-      </ChartSection>
-      <ChartSection id="ig-overview-engagement" title="Вовлечённость" defaultSize="third" defaultColor={6} drillTo="/metrics/ig-er">
+      <ChartSection
+        id="ig-overview-views"
+        title="Просмотры"
+        defaultSize="third"
+        drillTo="/metrics/ig-views"
+        variants={[
+          { key: 'line', label: 'Линия', render: <IgViewsBody ig={ig} /> },
+          { key: 'bar', label: 'Столбцы', render: <IgViewsBody ig={ig} viz="bar" /> },
+        ]}
+      />
+      <ChartSection
+        id="ig-overview-interactions"
+        title="Взаимодействия"
+        defaultSize="third"
+        drillTo="/metrics/ig-interactions"
+        variants={[
+          // Столбцы первыми = дефолт (решение владельца 2026-08-13): счётный поток, а оконный
+          // агрегат-одиночка столбцом виден. Сохранённый выбор юзера (prefs.variant) выигрывает.
+          { key: 'bar', label: 'Столбцы', render: <IgInteractionsBody ig={ig} viz="bar" /> },
+          { key: 'line', label: 'Линия', render: <IgInteractionsBody ig={ig} /> },
+        ]}
+      />
+      {/* Вовлечённость — центрированный стат БЕЗ графика (владелец, 2026-08-14): вариантов
+          line/bar больше нет, дневной ER остаётся на /metrics/ig-er. Сохранённый prefs.variant
+          прежних вариантов просто игнорируется (children-режим ChartSection, как у TG ER). */}
+      <ChartSection id="ig-overview-engagement" title="Вовлечённость" defaultSize="third" drillTo="/metrics/ig-er">
         <IgEngagementBody ig={ig} />
       </ChartSection>
-      {/* The S/M/L grid pairs the narrative with one strongest rule-based insight at M/M;
-          no unsupported footprint and no second wall of text. */}
+      {/* Ряд «рассказ + выводы»: слева недельный нарратив с леджером, справа — два сильнейших
+          инсайта строками во всю высоту тайла. Раньше справа стоял ОДИН буллет под заголовком
+          «Главное изменение», и две трети карточки пустовали. Третью строку сюда не ставить —
+          она переполняет 264px на узком тайле (см. InsightsBlock, там замеры); полный список
+          живёт карточкой «Главное» в Аналитике (limit 4, во всю ширину). */}
       <IgNarrativeWeekBlock id="ig-overview-week" homeKey="ig-week" fixedSize="half" title="Неделя аккаунта" />
-      <ChartSection id="ig-overview-change" title="Главное изменение" fixedSize="half" noExpand>
-        <InsightsBlock insights={ig.insights} limit={1} />
+      <ChartSection id="ig-overview-change" title="Главное" fixedSize="half" noExpand>
+        <InsightsBlock insights={ig.insights} limit={2} variant="list" />
       </ChartSection>
       <ChartSection
         id="ig-overview-top-posts"

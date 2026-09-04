@@ -14,12 +14,15 @@ const { createCampaignsRepo } = require('./repos/campaignsRepo');
 const { createUsersRepo } = require('./repos/usersRepo');
 const { createChannelsRepo } = require('./repos/channelsRepo');
 const { createSourcesRepo } = require('./repos/sourcesRepo');
+const { createTeamRepo } = require('./repos/teamRepo');
 const { createIntegrationsRepo } = require('./repos/integrationsRepo');
 const { createMentionSettingsRepo } = require('./repos/mentionSettingsRepo');
 const { createMentionNotifyRepo } = require('./repos/mentionNotifyRepo');
+const { createCdekRepo } = require('./repos/cdekRepo');
+const { createRusenderRepo } = require('./repos/rusenderRepo');
 const { createAiChatsRepo } = require('./repos/aiChatsRepo');
 const { createAuditRepo } = require('./repos/auditRepo');
-const { createGdprService } = require('./services/gdprService');
+
 // DB core (P2 db/core): пул / Railway-SSL / enabled / ping / close + классификация недоступности
 // живут в server/db/*. db.js их импортирует и ре-экспортит — публичный `db.*` API не меняется.
 const { createPool } = require('./db/pool');
@@ -190,6 +193,15 @@ function createDatabase(config, overrides = {}) {
     transaction,
     ensureExternalSource: sourcesRepo.ensureExternalSource,
   });
+  // Команда: приглашения в воркспейс + управление участниками (миграция 037). ensurePersonalWorkspace
+  // — инъекция из channelsRepo (repos не импортят друг друга): пригласить можно и с аккаунта, где
+  // ещё нет ни одного источника, то есть воркспейс приходится создавать лениво. ПОСЛЕ channelsRepo (TDZ).
+  const teamRepo = createTeamRepo({
+    pool,
+    enabled,
+    transaction,
+    ensurePersonalWorkspace: channelsRepo.ensurePersonalWorkspace,
+  });
   // ensureExternalSource / transaction — инъекция (repos не импортят друг друга; связывание только тут).
   const integrationsRepo = createIntegrationsRepo({
     pool,
@@ -216,9 +228,16 @@ function createDatabase(config, overrides = {}) {
   // GDPR — сервис над пулом+transaction (кросс-доменные erasure/export; спека: GDPR=service).
   // pageSize — размер keyset-страницы стриминг-экспорта (из config: services читают только
   // внедрённые deps, не окружение — check:boundaries).
-  const gdprService = createGdprService({
-    pool, enabled, transaction, exportPageSize: config.database.gdprExportPageSize,
-  });
+  /* Фабрика приходит СНАРУЖИ: фасад данных не имеет права тянуть слой сервисов (гвард границ).
+     Направление db → services было единственным местом, где нижний слой знал о верхнем, и
+     composition.js — естественное место для сборки, он и так собирает все сервисы.
+     Без фабрики (server/migrate.js: ему нужна только схема) секция gdpr в фасаде просто
+     отсутствует — это честнее заглушки, которая молча ничего не стирает. */
+  const gdprService = overrides.createGdprService
+    ? overrides.createGdprService({
+        pool, enabled, transaction, exportPageSize: config.database.gdprExportPageSize,
+      })
+    : null;
   // Campaign membership performs an atomic lock/count/insert through the shared transaction helper.
   const campaignsRepo = createCampaignsRepo({
     pool,
@@ -235,6 +254,26 @@ function createDatabase(config, overrides = {}) {
   // Доставка упоминаний (035): привязка бота (uid→chat) + личные подписки. Запись подписки
   // вшивает channelAccessSql в SQL (member-view достаточно — поиск идёт сессией подписчика).
   const mentionNotifyRepo = createMentionNotifyRepo({ pool, enabled });
+  // СДЭК Fulfillment (038): источник с ручной загрузкой Excel — импорты и архив заказов.
+  // ensureExternalSource — инъекция, как у integrationsRepo (repos не импортят друг друга).
+  // getAccessibleChannel — инъекция для ForActor-ридеров (канон analyticsRepo). ПОСЛЕ channelsRepo (TDZ).
+  const cdekRepo = createCdekRepo({
+    pool,
+    enabled,
+    transaction,
+    ensureExternalSource: sourcesRepo.ensureExternalSource,
+    getAccessibleChannel: channelsRepo.getChannel,
+  });
+  // Rusender (039): учётка источника email-рассылок, архив рассылок и дневная активность.
+  // Тот же набор инъекций, что у cdekRepo — ensureExternalSource (repos не импортят друг друга)
+  // и getAccessibleChannel для ForActor-ридеров. ПОСЛЕ channelsRepo (TDZ).
+  const rusenderRepo = createRusenderRepo({
+    pool,
+    enabled,
+    transaction,
+    ensureExternalSource: sourcesRepo.ensureExternalSource,
+    getAccessibleChannel: channelsRepo.getChannel,
+  });
   // Личные AI-диалоги (028): все методы uid-scoped; аналитика в чат попадает только через
   // ForActor-инструменты aiChatService, не через этот repo.
   const aiChatsRepo = createAiChatsRepo({ pool, enabled });
@@ -259,18 +298,21 @@ function createDatabase(config, overrides = {}) {
     users: usersRepo,
     channels: channelsRepo,
     sources: sourcesRepo,
+    team: teamRepo, // MAX_WORKSPACE_SEATS, INVITE_ROLES, WORKSPACE_NAME_MAX, ensureTeamWorkspace, renameWorkspace, listWorkspaceMembers, listWorkspaceInvites, listForeignMemberships, countWorkspaceSeats, createWorkspaceInvite, getWorkspaceInviteByToken, acceptWorkspaceInvite, reissueWorkspaceInviteToken, revokeWorkspaceInvite, setWorkspaceMemberRole, removeWorkspaceMember
     integrations: integrationsRepo,
     bugs: bugsRepo,
     analytics: analyticsRepo,
     collector: collectorRepo,
     reports: reportsRepo, // REPORT_SCHEDULES, listReports, getReport, createReport, updateReport, deleteReport, listDueReports, markReportSent, reserveReportDelivery, clearReportDelivery, listPostsWindow
     campaigns: campaignsRepo, // CAMPAIGN_*, listCampaigns, getCampaign, create/update/deleteCampaign, add/remove/listCampaignPosts, getCampaignSummary
+    cdek: cdekRepo, // get/saveCdekSource, setCdekWarehouse, find/start/finish/failCdekImport, list/getCdekImport(File), pruneCdekImportFiles, applyCdekImport, getCdekWarehouseFromOrders, getCdek{Summary,Series,Breakdown,Coverage,Bounds}ForActor
+    rusender: rusenderRepo, // save/get/list/deleteRusenderAccount, upsertRusender{Daily,Campaigns,CampaignActivity}, listRusenderCampaignsForActivity, getRusender{Summary,Series,Campaigns,Campaign,Bounds}ForActor
     mentionSettings: mentionSettingsRepo, // getMentionSettingsInternal/ForActor, upsertMentionSettingsForActor
     mentionNotify: mentionNotifyRepo, // issueMentionNotifyLink, bindMentionNotifyByToken, get/deleteMentionNotifyBinding, unbindMentionNotifyChat, set/getMentionNotifySubscription*, listRunnableMentionNotifySubscriptions, markMentionNotifyRun, filterNewMentions
     aiChats: aiChatsRepo, // listAiChats, createAiChat, getAiChat, deleteAiChat, listAiChatMessages, appendAiChatMessage, getAiUsageToday, bumpAiUsage
     jobs: jobsRepo, // claimJob, completeJob, failJob, getJob, runJobOnce, pruneTerminalJobs
     audit: auditRepo, // recordAuditEvent, pruneAuditEvents
-    gdpr: gdprService, // deleteUserAccount, streamUserExport (сервис, не repo)
+    ...(gdprService ? { gdpr: gdprService } : {}), // deleteUserAccount, streamUserExport (сервис, не repo)
   });
 }
 

@@ -11,7 +11,8 @@
    ai_usage_daily — дневной quota-гейт: день считается в UTC (Railway живёт в UTC; локальная
    таймзона дев-машины не должна менять момент сброса лимита). */
 
-const AI_CHAT_TITLE_MAX = 80;
+// Заголовок чата — lib/chatTitle: он нужен и сервису, а тянуть его из repo сервису нельзя.
+const { AI_CHAT_TITLE_MAX, makeChatTitle } = require('../lib/chatTitle');
 const AI_CHAT_LIST_LIMIT = 20;
 const AI_CHAT_MESSAGES_LIMIT = 200;
 const UTC_TODAY = `(now() AT TIME ZONE 'utc')::date`;
@@ -153,13 +154,5 @@ function createAiChatsRepo({ pool, enabled }) {
 }
 
 /** Заголовок чата из первого вопроса: схлопнутые пробелы, обрезка ≤80 по границе слова + «…». */
-function makeChatTitle(text) {
-  const flat = String(text || '').replace(/\s+/g, ' ').trim();
-  if (!flat) return null;
-  if (flat.length <= AI_CHAT_TITLE_MAX) return flat;
-  const cut = flat.slice(0, AI_CHAT_TITLE_MAX);
-  const atWord = cut.lastIndexOf(' ') > AI_CHAT_TITLE_MAX * 0.6 ? cut.slice(0, cut.lastIndexOf(' ')) : cut;
-  return `${atWord.trimEnd()}…`;
-}
 
 module.exports = { createAiChatsRepo, makeChatTitle };

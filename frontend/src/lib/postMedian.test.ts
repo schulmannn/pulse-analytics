@@ -4,6 +4,7 @@ import {
   compareToMedian,
   median,
   medianDeltaLabel,
+  medianDeltaShort,
   periodMedian,
 } from '@/lib/postMedian';
 
@@ -72,5 +73,23 @@ describe('medianDeltaLabel', () => {
 
   it('uses a plain phrase at the median', () => {
     expect(medianDeltaLabel({ pct: 0.1, dir: 'at', ratio: 1.001 })).toBe('на уровне медианы');
+  });
+});
+
+describe('medianDeltaShort', () => {
+  it('оставляет только знак и процент — подпись ячейки плотной таблицы', () => {
+    expect(medianDeltaShort({ pct: 42, dir: 'above', ratio: 1.42 })).toBe('+42%');
+    expect(medianDeltaShort({ pct: -18, dir: 'below', ratio: 0.82 })).toBe('−18%');
+  });
+
+  it('на медиане печатает нейтральный ноль, а не слова', () => {
+    expect(medianDeltaShort({ pct: 0.1, dir: 'at', ratio: 1.001 })).toBe('±0%');
+  });
+
+  // Обе таблицы контента (Telegram и Instagram) берут подпись ОТСЮДА: разъехавшиеся ячейки —
+  // ровно тот дефект, ради которого хелпер и появился.
+  it('короткая подпись никогда не длиннее полной', () => {
+    const cmp = { pct: -92.4, dir: 'below', ratio: 0.076 } as const;
+    expect(medianDeltaShort(cmp).length).toBeLessThan(medianDeltaLabel(cmp).length);
   });
 });

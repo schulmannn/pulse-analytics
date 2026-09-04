@@ -4,7 +4,8 @@ import { bootDemo, openDetailOverlay } from './helpers';
 /**
  * Mobile navigation & reachability (card «Mobile dashboard navigation»). Two things get gated here at
  * phone widths (360/390/430):
- *  1. Touch targets — each widget's menu button and the period pills are ≥32px, and the
+ *  1. Touch targets — shared buttons/selects/menus, tabs, widget chrome and editor swatches are
+ *     ≥44px, and the
  *     page never scrolls horizontally. (Inline text links / ⓘ keep their text size by design — their
  *     tap area is the text, and the same action has a full-size path in the detail overlay.)
  *  2. Sheets — the card detail opens as a full-height edge-to-edge sheet, the source switcher opens as
@@ -13,48 +14,167 @@ import { bootDemo, openDetailOverlay } from './helpers';
  * Guards against the desktop-only tiny affordances the card calls out.
  */
 const WIDTHS = [360, 390, 430];
-const MIN = 32;
+const MIN = 44;
+const PHONE_ROUTES = [
+  { path: '/', label: 'overview' },
+  { path: '/instagram/content', label: 'instagram content' },
+  { path: '/mentions', label: 'mentions' },
+  { path: '/connect', label: 'connect' },
+  { path: '/settings', label: 'settings' },
+] as const;
 
-/** Обмер один на оба теста ниже: горизонтальный скролл гейтится, размер контролов — пока нет. */
-async function measureMobileChrome(page: import('@playwright/test').Page, w: number) {
+/** Обмер один на оба теста ниже: горизонтальный скролл и размер основных контролов гейтятся вместе. */
+async function measureMobileChrome(page: import('@playwright/test').Page, w: number, path = '/') {
   await page.setViewportSize({ width: w, height: 820 });
-  await bootDemo(page, '/');
+  await bootDemo(page, path);
   return page.evaluate((min) => {
-      const hScroll = document.documentElement.scrollWidth - document.documentElement.clientWidth;
-      const tooSmall: string[] = [];
-      const check = (sel: string, name: (e: Element) => string) => {
-        for (const el of Array.from(document.querySelectorAll(sel))) {
-          const r = el.getBoundingClientRect();
-          if (r.width === 0 || r.height === 0) continue;
-          if (r.height < min - 0.5 || r.width < min - 0.5) tooSmall.push(`${name(el)} ${Math.round(r.width)}x${Math.round(r.height)}`);
-        }
-      };
-    check('button[aria-label^="Меню виджета"]', (e) => (e.getAttribute('aria-label') || '').slice(0, 24));
-    check('[role="group"][aria-label^="Период"] button', (e) => `период ${(e.textContent || '').trim()}`);
+    const hScroll = document.documentElement.scrollWidth - document.documentElement.clientWidth;
+    const tooSmall: string[] = [];
+    const controls = document.querySelectorAll(
+      '[data-mobile-touch-target], button[aria-label^="Меню виджета"], [role="group"][aria-label^="Период"] button',
+    );
+    for (const el of Array.from(controls)) {
+      const r = el.getBoundingClientRect();
+      if (r.width === 0 || r.height === 0) continue;
+      if (r.height < min - 0.5 || r.width < min - 0.5) {
+        const name =
+          el.getAttribute('aria-label') ||
+          el.getAttribute('title') ||
+          el.textContent?.trim().slice(0, 28) ||
+          el.tagName.toLowerCase();
+        tooSmall.push(`${name} ${Math.round(r.width)}x${Math.round(r.height)}`);
+      }
+    }
     return { hScroll, tooSmall };
   }, MIN);
 }
 
-// Горизонтальный скролл — живой гейт: его появление это регрессия, а не отложенный долг.
-for (const w of WIDTHS) {
-  test(`mobile ${w}: no horizontal scroll`, async ({ page }) => {
-    const res = await measureMobileChrome(page, w);
-    expect(res.hScroll, `horizontal scroll ${res.hScroll}px at ${w}px`).toBeLessThanOrEqual(1);
-  });
+async function visibleTouchTargetFailures(
+  page: import('@playwright/test').Page,
+  scope = 'body',
+): Promise<string[]> {
+  return page.locator(scope).evaluate((root, min) => {
+    const failures: string[] = [];
+    for (const el of Array.from(root.querySelectorAll('[data-mobile-touch-target]'))) {
+      const r = el.getBoundingClientRect();
+      if (r.width === 0 || r.height === 0) continue;
+      if (r.height < min - 0.5 || r.width < min - 0.5) {
+        const name =
+          el.getAttribute('aria-label') ||
+          el.getAttribute('title') ||
+          el.textContent?.trim().slice(0, 28) ||
+          el.tagName.toLowerCase();
+        failures.push(`${name} ${Math.round(r.width)}x${Math.round(r.height)}`);
+      }
+    }
+    return failures;
+  }, MIN);
 }
 
-// Размер тач-целей — ИЗВЕСТНЫЙ отложенный долг, а не неожиданная поломка: period controls сейчас
-// 24–28px при цели 32px (PROJECT_MEMORY, раздел незакрытых долгов). CLAUDE.md откладывает любую
-// переделку мобильного UI до отдельного mobile-этапа, поэтому чинить это здесь нельзя — но и
-// удалять тест нельзя: он и есть определение готовности того этапа. `fixme` держит его на виду,
-// не крася CI; снять пометку — первым делом mobile-этапа.
+// Route matrix: the phone gate covers the default overview plus each distinct mobile surface that
+// owns plain controls. This prevents a green root-only check from hiding compact actions deeper in
+// Instagram, Mentions and Connect.
 for (const w of WIDTHS) {
-  test(`mobile ${w}: primary controls ≥32px`, async ({ page }) => {
-    test.fixme(true, 'Отложенный mobile-долг: period controls 24–28px вместо 32px (PROJECT_MEMORY)');
-    const res = await measureMobileChrome(page, w);
-    expect(res.tooSmall, `sub-32px primary controls at ${w}px: ${JSON.stringify(res.tooSmall)}`).toEqual([]);
-  });
+  for (const route of PHONE_ROUTES) {
+    test(`mobile ${w}: ${route.label} has no overflow and primary controls ≥44px`, async ({ page }) => {
+      const res = await measureMobileChrome(page, w, route.path);
+      expect(res.hScroll, `horizontal scroll ${res.hScroll}px at ${w}px on ${route.path}`).toBeLessThanOrEqual(1);
+      expect(
+        res.tooSmall,
+        `sub-44px primary controls at ${w}px on ${route.path}: ${JSON.stringify(res.tooSmall)}`,
+      ).toEqual([]);
+    });
+  }
 }
+
+test('mobile 430: the four network labels and feed title are not clipped', async ({ page }) => {
+  await page.setViewportSize({ width: 430, height: 820 });
+  await bootDemo(page, '/analytics');
+
+  const clipped = await page
+    .getByRole('button', { name: /^(Telegram|Instagram|МойСклад|Метрика)$/ })
+    .evaluateAll((buttons) =>
+      buttons
+        .map((button) => {
+          const label = button.querySelector('span.whitespace-nowrap');
+          if (!label) return null;
+          const outer = button.getBoundingClientRect();
+          const inner = label.getBoundingClientRect();
+          return inner.left < outer.left - 0.5 || inner.right > outer.right + 0.5
+            ? label.textContent?.trim() ?? 'unknown'
+            : null;
+        })
+        .filter(Boolean),
+    );
+
+  expect(clipped).toEqual([]);
+  const heading = page.getByRole('heading', { name: 'Аналитика', level: 2 });
+  await expect(heading).toBeVisible();
+  expect(await heading.evaluate((element) => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1);
+});
+
+test('mobile 390: dialog, editor, post and pinned-point actions keep 44px targets', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 820 });
+  await bootDemo(page, '/');
+
+  const account = page.getByRole('button', { name: 'Аккаунт' });
+  await account.click();
+  await expect(page.getByRole('menu')).toBeVisible();
+  // DropdownMenuContent also scales from 95% on entry, which transiently turns a 44px
+  // target into a 42–43px bounding box on faster CI runners.
+  await page.waitForTimeout(250);
+  expect(await visibleTouchTargetFailures(page, '[role="menu"]')).toEqual([]);
+  await page.keyboard.press('Escape');
+
+  // The common widget editor exposes Button, Select and the shared colour-swatch primitive.
+  const menuButton = page.locator('button[aria-label^="Меню виджета"]').first();
+  await menuButton.click();
+  await page.getByRole('menuitem', { name: 'Изменить' }).first().click();
+  const editor = page.getByRole('dialog', { name: /^Настройка виджета/ });
+  await expect(editor).toBeVisible();
+  // DialogContent scales from 95% on entry; measure the settled controls, not an animation frame.
+  await page.waitForTimeout(250);
+  expect(await visibleTouchTargetFailures(page, '[role="dialog"]')).toEqual([]);
+  await editor.getByRole('button', { name: 'Закрыть', exact: true }).click();
+
+  // The catalog used to render its own × in addition to DialogContent's ×. There must be one.
+  await bootDemo(page, '/home');
+  await page.locator('button.edit-toggle').click();
+  await page.locator('button.add-widget-trigger').click();
+  await page.getByRole('button', { name: /Метрика из каталога/ }).click();
+  const catalog = page.getByRole('dialog', { name: 'Добавить метрику' });
+  await expect(catalog).toBeVisible();
+  // This dialog uses the same zoom-in entry animation as the editor above.
+  await page.waitForTimeout(250);
+  await expect(catalog.getByRole('button', { name: 'Закрыть', exact: true })).toHaveCount(1);
+  expect(await visibleTouchTargetFailures(page, '[role="dialog"]')).toEqual([]);
+  await catalog.getByRole('button', { name: 'Закрыть', exact: true }).click();
+
+  await bootDemo(page, '/metrics/views');
+  expect(await visibleTouchTargetFailures(page, '[data-metric-toolbar]')).toEqual([]);
+  const metricCard = page.locator('[data-metric-chart-card]');
+  await metricCard.getByRole('button', { name: 'Тип графика: Линия' }).click();
+  const line = metricCard.locator('svg[data-chart-kind="line"][data-chart-expanded]').first();
+  await line.waitFor({ state: 'visible', timeout: 10_000 });
+  // The audit replaced raw SVG clicks with a semantic keyboard/touch overlay. Activate its
+  // default (last real) point so this test cannot accidentally choose a null data gap.
+  const chartControl = line.locator('xpath=following-sibling::button[1]');
+  await expect(chartControl).toBeVisible();
+  await chartControl.focus();
+  await chartControl.press('Enter');
+  const pinned = page.locator('[data-pinned-day="detail"]');
+  await expect(pinned).toBeVisible();
+  expect(await visibleTouchTargetFailures(page, '[data-pinned-day="detail"]')).toEqual([]);
+  await pinned.getByRole('button', { name: 'Снять выделение точки' }).click();
+
+  const topPost = page.locator('[data-metric-top-posts] [data-top-post-row] button').first();
+  await topPost.scrollIntoViewIfNeeded();
+  await topPost.click();
+  const postDialog = page.getByRole('dialog', { name: /^Детали поста/ });
+  await expect(postDialog).toBeVisible();
+  await expect(postDialog.getByRole('button', { name: 'Закрыть', exact: true })).toHaveCount(1);
+  expect(await visibleTouchTargetFailures(page, '[role="dialog"][aria-label^="Детали поста"]')).toEqual([]);
+});
 
 // ── Card detail = full-height, edge-to-edge sheet on mobile ─────────────────────────────────────
 for (const w of WIDTHS) {
@@ -84,11 +204,12 @@ for (const w of WIDTHS) {
       };
     });
     expect(box, 'detail panel present').not.toBeNull();
+    if (!box) throw new Error('detail panel is missing');
     // Edge-to-edge + full-height: hugs the left edge, spans the whole viewport (no 16px paper gutter).
-    expect(box!.left, `panel left ${box!.left}`).toBeLessThanOrEqual(1);
-    expect(Math.abs(box!.width - box!.vw), `panel width ${box!.width} vs vw ${box!.vw}`).toBeLessThanOrEqual(1);
-    expect(Math.abs(box!.height - box!.vh), `panel height ${box!.height} vs vh ${box!.vh}`).toBeLessThanOrEqual(1);
-    expect(box!.hScroll, `horizontal scroll ${box!.hScroll}px`).toBeLessThanOrEqual(1);
+    expect(box.left, `panel left ${box.left}`).toBeLessThanOrEqual(1);
+    expect(Math.abs(box.width - box.vw), `panel width ${box.width} vs vw ${box.vw}`).toBeLessThanOrEqual(1);
+    expect(Math.abs(box.height - box.vh), `panel height ${box.height} vs vh ${box.vh}`).toBeLessThanOrEqual(1);
+    expect(box.hScroll, `horizontal scroll ${box.hScroll}px`).toBeLessThanOrEqual(1);
   });
 }
 
@@ -97,7 +218,8 @@ test('mobile 390: detail deep-links, Back closes it, reload reopens, source surv
   await page.setViewportSize({ width: 390, height: 820 });
   await bootDemo(page, '/');
 
-  const sourceLabelBefore = await page.getByRole('button', { name: /^Источник/ }).getAttribute('aria-label');
+  const sourceTrigger = page.locator('button[aria-label^="Источник"]').first();
+  const sourceLabelBefore = await sourceTrigger.getAttribute('aria-label');
 
   // Open a widget's detail from its header ↗ button → the URL gains ?detail= (a pushed history entry).
   await openDetailOverlay(page);
@@ -118,7 +240,9 @@ test('mobile 390: detail deep-links, Back closes it, reload reopens, source surv
   await expect(page.getByRole('dialog', { name: /^График/ })).toBeVisible();
 
   // The active source (channel) is unchanged across the whole dance.
-  expect(await page.getByRole('button', { name: /^Источник/ }).getAttribute('aria-label')).toBe(sourceLabelBefore);
+  // Radix correctly hides the background shell from the accessibility tree while the modal is open,
+  // so read the persisted trigger's DOM label directly.
+  expect(await sourceTrigger.getAttribute('aria-label')).toBe(sourceLabelBefore);
 });
 
 // ── The shared page period survives opening + closing a detail overlay ─────────────────────────
@@ -128,7 +252,7 @@ test('mobile 390: page period survives a detail open/close round-trip', async ({
 
   // На мобильной Обзорной период страницы живёт в топбаре с меткой «Период» (пилюли
   // WidgetPeriodPills с меткой «Период страницы» — карточные, и на этой ширине их нет).
-  const group = page.locator('[role="group"][aria-label="Период"]').first();
+  const group = page.getByRole('group', { name: 'Период', exact: true }).first();
   await expect(group).toBeVisible();
   const allPill = group.getByRole('button', { name: 'Всё' });
   await allPill.click();
@@ -153,7 +277,7 @@ test('mobile 390: source switcher opens as a dismissable bottom sheet', async ({
   const sheet = page.getByRole('dialog', { name: /^Источник/ });
   await expect(sheet).toBeVisible();
   // It is pinned to the bottom edge and lists the Telegram source group.
-  await expect(sheet.locator('[role="group"][aria-label="Telegram"]')).toBeVisible();
+  await expect(sheet.getByRole('group', { name: 'Telegram', exact: true })).toBeVisible();
   // Let the .sheet-in slide-up settle: getBoundingClientRect includes the in-flight translateY, so
   // measuring mid-animation reads a bottom below the fold. 300ms animation → wait a touch longer.
   await page.waitForTimeout(450);
@@ -185,4 +309,46 @@ test('mobile 390: source switcher opens as a dismissable bottom sheet', async ({
   await expect(sheet).toBeVisible();
   await page.mouse.click(195, 30);
   await expect(sheet).toHaveCount(0);
+});
+
+// ── Settings = one active section in an APG line-tab row ───────────────────────────────────────
+test('mobile 390: settings tabs fit, keep URL state and focus the destination', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 820 });
+  await bootDemo(page, '/settings');
+
+  const tablist = page.getByRole('tablist', { name: 'Разделы настроек' });
+  const tabs = tablist.getByRole('tab');
+  await expect(tabs).toHaveCount(7);
+  // Poll: входной zoom-in-95 модалки настроек на долю секунды масштабирует rect'ы вкладок.
+  await expect
+    .poll(async () => {
+      const heights = await tabs.evaluateAll((elements) =>
+        elements.map((element) => element.getBoundingClientRect().height),
+      );
+      return heights.length === 7 && heights.every((height) => height >= 44);
+    })
+    .toBe(true);
+  await expect(tablist.getByRole('tab', { name: 'Профиль' })).toHaveAttribute(
+    'aria-current',
+    'true',
+  );
+
+  const channels = tablist.getByRole('tab', { name: 'Каналы' });
+  await channels.focus();
+  await page.keyboard.press('Enter');
+  await expect(page).toHaveURL(/[?&]section=channels(?:&|$)/);
+  await expect(page.getByRole('heading', { name: 'Каналы', level: 2 })).toBeFocused();
+  await expect(page.locator('[data-settings-section="data"]')).toHaveCount(0);
+
+  await expect(page.locator('button[aria-label^="Выбрать раздел настроек"]')).toHaveCount(0);
+  await expect(page.getByRole('dialog', { name: 'Разделы настроек' })).toHaveCount(0);
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1),
+  ).toBeTruthy();
+
+  const profile = tablist.getByRole('tab', { name: 'Профиль' });
+  await profile.focus();
+  await page.keyboard.press('Enter');
+  await expect(page).toHaveURL(/\/settings(?:\?[^#]*)?$/);
+  expect(new URL(page.url()).searchParams.has('section')).toBe(false);
 });

@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { fmt } from '@/lib/format';
+import { displayWithShare } from '@/lib/breakdownShare';
 import { BarChart } from '@/components/BarChart';
 import { Breakdown } from '@/components/Breakdown';
 import { PieChart } from '@/components/PieChart';
@@ -28,6 +29,9 @@ export interface BreakdownLikeItem {
   value: number;
   display?: string;
   color?: string;
+  /** Доля от полной суммы разбивки (0..1) — только для частей целого, проставляется на слое
+      данных ДО среза топ-N (lib/breakdownShare). Средние/коэффициенты её не несут. */
+  share?: number;
 }
 
 export interface LedgerRow {
@@ -71,7 +75,11 @@ export function BarValuesLayout({ chart, rows }: { chart: ReactNode; rows: Ledge
 export function breakdownVariants(items: BreakdownLikeItem[]): WidgetVariant[] {
   const values = items.map((i) => i.value);
   const labels = items.map((i) => i.label);
-  const titles = items.map((i) => `${i.label}: ${i.display ?? i.value}`);
+  const shares = items.map((i) => i.share);
+  // «Значение · доля» — у частей целого (доля приходит со слоя данных). Круговая печатает долю
+  // САМА, поэтому её тултипам достаётся подпись без суффикса — иначе процент шёл бы дважды.
+  const pieTitles = items.map((i) => `${i.label}: ${i.display ?? i.value}`);
+  const titles = items.map((i, n) => displayWithShare(pieTitles[n]!, i.share));
   return [
     { key: 'list', label: 'Список', render: <Breakdown items={items} /> },
     {
@@ -82,7 +90,7 @@ export function breakdownVariants(items: BreakdownLikeItem[]): WidgetVariant[] {
     {
       key: 'pie',
       label: 'Круговая',
-      render: <PieChart values={values} labels={labels} titles={titles} colors={items.map((i) => i.color)} />,
+      render: <PieChart values={values} labels={labels} titles={pieTitles} shares={shares} colors={items.map((i) => i.color)} />,
     },
     {
       key: 'bar-values',
@@ -91,7 +99,10 @@ export function breakdownVariants(items: BreakdownLikeItem[]): WidgetVariant[] {
       render: (
         <BarValuesLayout
           chart={<BarChart values={values} labels={labels} titles={titles} />}
-          rows={items.map((i) => ({ label: i.label, value: i.display ?? fmt.num(i.value) }))}
+          rows={items.map((i) => ({
+            label: i.label,
+            value: displayWithShare(i.display ?? fmt.num(i.value), i.share),
+          }))}
         />
       ),
     },
@@ -117,6 +128,8 @@ export interface SeriesBarValuesOptions {
   /** Extra ledger rows PREPENDED to the stats (e.g. «Сейчас» — the current level beside
       a delta chart). */
   extraRows?: LedgerRow[];
+  /** Ось букв короткого дневного окна (канон timeAxisFromDayKeys) — прокидывается в чарт. */
+  axisLabels?: string[];
 }
 
 /** The wide «Столбцы + значения» variant for SERIES charts: bars (flex-1) plus a right-hand
@@ -151,9 +164,9 @@ export function seriesBarValuesVariant(
       <BarValuesLayout
         chart={
           opts.diverging ? (
-            <DivergingBars values={values} labels={labels} titles={titles} />
+            <DivergingBars values={values} labels={labels} axisLabels={opts.axisLabels} titles={titles} />
           ) : (
-            <BarChart values={values} labels={labels} titles={titles} />
+            <BarChart values={values} labels={labels} axisLabels={opts.axisLabels} titles={titles} />
           )
         }
         rows={rows}

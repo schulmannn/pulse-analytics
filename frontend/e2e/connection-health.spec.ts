@@ -78,8 +78,6 @@ async function bootRevokedSession(
   });
 
   await page.addInitScript(() => {
-    localStorage.setItem('pulse_token', 'e2e-token');
-    localStorage.setItem('pulse_token_exp', String(Date.now() + 60 * 60 * 1000));
     localStorage.setItem('pulse_theme', 'dark');
     localStorage.setItem('pulse_network', 'tg');
     localStorage.setItem('pulse_channel', '1');

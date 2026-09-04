@@ -1,8 +1,33 @@
 import { describe, expect, it } from 'vitest';
-import { buildIgWeekNarrative, buildWeekNarrative, narrativeToPlain, plural, pluralKpi, type NarrativeIgInput, type NarrativeInput } from '@/lib/narrative';
+import { buildIgWeekNarrative, buildWeekNarrative, buildWeekSummary, narrativeToPlain, plural, pluralKpi, type NarrativeIgInput, type NarrativeInput } from '@/lib/narrative';
 
 /** Intl ставит NBSP/узкий пробел в разрядах — тесты сравнивают по обычным пробелам. */
 const norm = (s: string) => s.replace(/[  ]/g, ' ');
+/**
+ * Обрамление inline-искры (аудит #554, D7): искра стоит СРАЗУ ЗА СВОИМ ЧИСЛОМ.
+ *
+ * Раньше она замыкала предложение ПОСЛЕ точки — и места в макете не имела: переносилась одна
+ * на новую строку (TG) или болталась в пробеле после точки (IG). Теперь она привязана к числу,
+ * которое объясняет, а рендерер держит пару одним неразрывным словом.
+ *
+ * Следующий текст обязан начинаться с пробела или запятой: SVG для скринридера aria-hidden, и без
+ * НАСТОЯЩЕГО разделителя в тексте число склеится со следующим словом. Проверка идёт по абзацам:
+ * сегмент из СЛЕДУЮЩЕГО абзаца соседом не считается. Возвращает число искр.
+ */
+function assertSparkFraming(nar: ReturnType<typeof buildWeekNarrative>): number {
+  let sparks = 0;
+  for (const p of nar.paragraphs) {
+    for (let i = 1; i < p.length; i += 1) {
+      if (p[i]?.kind !== 'spark') continue;
+      sparks += 1;
+      expect(p[i - 1]?.kind).toBe('number');
+      const after = p[i + 1];
+      if (after?.kind === 'text') expect(after.text).toMatch(/^[ ,]/u);
+    }
+  }
+  return sparks;
+}
+
 const day = (i: number) => `2026-06-${String(8 + i).padStart(2, '0')}`;
 const mkSeries = (vals: number[]) => vals.map((v, i) => ({ day: day(i), v }));
 const post = (title: string, views: number, re: number, erv: number, fw = 1): NarrativeInput['posts'][number] => ({
@@ -32,15 +57,11 @@ describe('buildWeekNarrative', () => {
     expect(plain).not.toContain('тишина'); // по одному нулевому дню в обеих неделях — гейт молчит
   });
 
-  it('не оставляет скрытый пробел перед точкой вокруг inline-спарка', () => {
+  it('закрывает предложение точкой ДО inline-спарка и не вешает пунктуацию после него', () => {
     const nar = buildWeekNarrative(base);
-    const segments = nar.paragraphs.flat();
-    for (let i = 1; i < segments.length; i += 1) {
-      if (segments[i]?.kind !== 'spark') continue;
-      const before = segments[i - 1];
-      expect(before?.kind).toBe('text');
-      if (before?.kind === 'text') expect(before.text).not.toMatch(/\s$/u);
-    }
+    expect(assertSparkFraming(nar)).toBeGreaterThan(0);
+    // Plain-версия печатает искру пробелом — иначе точка склеилась бы со следующей фразой.
+    expect(norm(narrativeToPlain(nar))).toMatch(/предыдущей\. \S/u);
   });
 
   it('атрибутирует тишине, когда пустых дней стало на 2+ больше', () => {
@@ -156,6 +177,13 @@ describe('Instagram + кросс-сетевой контраст', () => {
     // IG reach spark — ПОСЛЕДНИЙ spark (TG-views spark идёт первым в объединённом рассказе).
     const spark = nar.paragraphs.flat().filter((s) => s.kind === 'spark').at(-1);
     expect(spark && spark.kind === 'spark' ? spark.values.slice(-7) : []).toEqual(Array(7).fill(1000));
+  });
+
+  it('IG-ветки тоже закрывают предложение до спарка (общий рассказ и IG-фокусный)', () => {
+    const igInp = ig(flat600, Array(7).fill(648), [2, 3, -1, 4, 0, 1, 2]);
+    for (const nar of [buildWeekNarrative({ ...base, ig: igInp }), buildIgWeekNarrative(igInp)]) {
+      expect(assertSparkFraming(nar)).toBeGreaterThan(0);
+    }
   });
 
   it('контраст при расхождении: TG вниз, IG вверх → «просадка касается только Telegram»', () => {
@@ -320,5 +348,127 @@ describe('plural', () => {
     expect(pluralKpi(2639, 'просмотр', 'просмотра', 'просмотров')).toBe('просмотров');
     expect(pluralKpi(9863, 'просмотр', 'просмотра', 'просмотров')).toBe('просмотра'); // ещё полная запись
     expect(pluralKpi(12683, 'просмотр', 'просмотра', 'просмотров')).toBe('просмотров'); // «12.7k …»
+  });
+});
+
+/**
+ * ТЗ-11 (аудит #554) — СВОДКА НЕДЕЛИ ОДНИМ ОБЪЕКТОМ.
+ *
+ * Карточку «Неделя канала» пересобрали: наверху число со сдвигом, справа ритм двух недель, ниже
+ * ОДНА мысль-объяснение и факты списком. Из абзацев `buildWeekNarrative` верхнюю строку не
+ * собрать — числа спрятаны внутри предложений, — поэтому рядом живёт чистая `buildWeekSummary`
+ * на тех же окнах.
+ *
+ * Две функции на одних данных обязаны говорить одно и то же: приоритет находок для `insight`
+ * тот же, что у атрибуции большого движка. Здесь это и пришпилено — на общих фикстурах файла.
+ */
+describe('buildWeekSummary', () => {
+  it('сумма, прошлая неделя и сдвиг совпадают с абзацем большого движка', () => {
+    const s = buildWeekSummary(base);
+    expect(s.curSum).toBe(2639);
+    expect(s.prevSum).toBe(3252);
+    expect(s.pct).toBeCloseTo(-18.85, 1);
+    // Тот же сдвиг, что печатает нарратив: обе функции не должны разъезжаться.
+    expect(norm(narrativeToPlain(buildWeekNarrative(base)))).toContain('↓19%');
+  });
+
+  it('полоска — ровно 14 дней в порядке старые → новые', () => {
+    const s = buildWeekSummary(base);
+    expect(s.days14).toHaveLength(14);
+    expect(s.days14[0].v).toBe(980);
+    expect(s.days14[13].v).toBe(166);
+  });
+
+  it('пик — максимум ТЕКУЩЕЙ недели с долей в её сумме', () => {
+    const s = buildWeekSummary(base);
+    // Текущая неделя — вторая семёрка: 845 против 980 в прошлой.
+    expect(s.peak).toEqual({ day: '2026-06-15', v: 845, share: (845 / 2639) * 100 });
+  });
+
+  it('лучшая публикация — по просмотрам, с индексом для чипа поста', () => {
+    const s = buildWeekSummary(base);
+    expect(s.best).toEqual({ views: 440, title: 'Ещё один', postIndex: 2 });
+  });
+
+  it('без сравнения (короткая история) pct = null, а не ноль и не бесконечность', () => {
+    const s = buildWeekSummary({ ...base, viewsDaily: mkSeries([10, 20, 30]) });
+    expect(s.pct).toBeNull();
+    expect(s.curSum).toBe(60);
+  });
+
+  it('нулевое прошлое окно тоже даёт null: делить не на что', () => {
+    const s = buildWeekSummary({ ...base, viewsDaily: mkSeries([0, 0, 0, 0, 0, 0, 0, 5, 5, 5, 5, 5, 5, 5]) });
+    expect(s.pct).toBeNull();
+  });
+
+  it('Instagram приходит числом и сдвигом, а не абзацем', () => {
+    const s = buildWeekSummary({
+      ...base,
+      ig: {
+        reachDaily: mkSeries([100, 100, 100, 100, 100, 100, 100, 130, 130, 130, 130, 130, 130, 130]),
+        reachWeek: { cur: 910, prev: 700, hasCur: true, hasPrev: true },
+        followsDaily: [],
+        followersNow: 20_000,
+      },
+    });
+    expect(s.ig).toEqual({ reach: 910, pct: 30 });
+  });
+
+  it('без Instagram строки нет', () => {
+    expect(buildWeekSummary(base).ig).toBeNull();
+  });
+});
+
+describe('buildWeekSummary: приоритет одной мысли', () => {
+  const plain = (p: ReturnType<typeof buildWeekSummary>['insight']) =>
+    norm(narrativeToPlain({ paragraphs: p ? [p] : [], quiet: false }));
+
+  it('1. тихая неделя вытесняет всё остальное', () => {
+    const s = buildWeekSummary({ ...base, posts: [], viewsDaily: mkSeries([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]) });
+    expect(plain(s.insight)).toContain('Тихая неделя');
+  });
+
+  it('2. тишина объясняет падение, когда пауз стало на два дня больше', () => {
+    const s = buildWeekSummary({
+      ...base,
+      viewsDaily: mkSeries([400, 400, 400, 400, 400, 400, 400, 300, 0, 0, 0, 300, 300, 300]),
+    });
+    expect(plain(s.insight)).toContain('тишина');
+    expect(plain(s.insight)).toContain('3 дня без публикаций');
+  });
+
+  it('3. неповторённый пик — когда пауз столько же, но прошлый пик не повторился', () => {
+    const s = buildWeekSummary(base);
+    expect(plain(s.insight)).toContain('980');
+    expect(plain(s.insight)).toContain('30% её суммы');
+    expect(plain(s.insight)).not.toContain('тишина');
+  });
+
+  it('4. герой по ERV — когда неделя выросла и объяснять просадку нечем', () => {
+    const s = buildWeekSummary({
+      ...base,
+      viewsDaily: mkSeries([100, 100, 100, 100, 100, 100, 100, 300, 300, 300, 300, 300, 300, 300]),
+    });
+    expect(plain(s.insight)).toContain('Герой недели');
+    expect(plain(s.insight)).toContain('Герой процесса');
+  });
+
+  it('5. рекорд месяца — последняя версия, когда других находок нет', () => {
+    const s = buildWeekSummary({
+      ...base,
+      posts: [],
+      avgErv: null,
+      viewsDaily: mkSeries([
+        100, 9000, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100,
+      ]),
+    });
+    expect(plain(s.insight)).toContain('Рекорд месяца старше недели');
+  });
+
+  it('искр в мысли нет: у карточки для ритма есть полоска', () => {
+    for (const inp of [base, { ...base, posts: [] }]) {
+      const insight = buildWeekSummary(inp).insight;
+      expect((insight ?? []).some((seg) => seg.kind === 'spark')).toBe(false);
+    }
   });
 });

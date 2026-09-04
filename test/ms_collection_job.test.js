@@ -10,6 +10,9 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { createMsCollectionJob } = require('../server/jobs/msCollectionJob');
+const { anchor, dayKey } = require('./helpers/dates');
+// Якорь прогона — один на файл: см. test/helpers/dates.
+const T = anchor();
 
 const ACC1 = { channel_id: 7, ms_account_id: 'acc-1', org_name: 'ООО Ромашка', access_token_enc: 'enc1' };
 const ACC2 = { channel_id: 9, ms_account_id: 'acc-2', org_name: 'ООО Пион', access_token_enc: 'enc2' };
@@ -92,7 +95,7 @@ test('happy path: оба отчёта → upsert строк, сводка {chann
   assert.equal(db.upserts[0].channelId, 7);
   assert.equal(db.upserts[0].rows.length, 2);
   // День-гейт: ключ содержит и канал, и идентичность склада (reconnect не наследует succeeded).
-  const day = new Date().toISOString().slice(0, 10);
+  const day = dayKey(T);
   assert.deepEqual(db.jobKeys, [`ms_collect|7:acc-1:${day}`]);
   // Оба отчёта одного окна, interval=day, токен из decrypt.
   assert.equal(fetches.length, 2);
@@ -126,7 +129,7 @@ test('сбой одного отчёта: НИКАКОЙ частичной за
 });
 
 test('day-gate skip: сегодня уже собрано → ни fetch\'а, ни upsert\'а, skipped++', async () => {
-  const day = new Date().toISOString().slice(0, 10);
+  const day = dayKey(T);
   const db = makeDb({ accounts: [ACC1], skipKeys: [`7:acc-1:${day}`] });
   const { job, fetches } = makeJob({ db, handlers: benign });
   const stats = await job.runMsCollectionPass();

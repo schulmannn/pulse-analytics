@@ -59,7 +59,7 @@ export const LEGACY_SUPPORTED_VIZ: Record<LegacyKey, WidgetViz[]> = {
   kpi: ['kpi'],
   growth: ['kpi'],
   'top-posts': ['kpi'],
-  history: ['line', 'bar'],
+  history: ['line'],
   velocity: ['line', 'bar'],
   heatmap: ['kpi'],
   mentions: ['bar', 'line'],
@@ -77,15 +77,15 @@ export const LEGACY_DEFAULT_VIZ: Record<LegacyKey, WidgetViz> = {
 
 // Composite blocks are fixed compositions, not single metrics — none of the metric-level controls
 // apply, so they edit shell-only (period / source / title / size / style). Richer per-legacy
-// capabilities can be enabled per adapter as the body learns to consume them; the three chart
-// composites already expose their line/bar presentation switch.
+// capabilities can be enabled per adapter as the body learns to consume them. Subscriber history
+// intentionally has one presentation: the total audience curve, never day-over-day bars.
 const SHELL_ONLY: WidgetCapabilities = { metric: false, viz: false, grain: false, comparison: false, target: false, filter: false };
 
 export const LEGACY_CAPABILITIES: Record<LegacyKey, WidgetCapabilities> = {
   kpi: SHELL_ONLY,
   growth: SHELL_ONLY,
   'top-posts': SHELL_ONLY,
-  history: { ...SHELL_ONLY, viz: true },
+  history: SHELL_ONLY,
   velocity: { ...SHELL_ONLY, viz: true },
   heatmap: SHELL_ONLY,
   mentions: { ...SHELL_ONLY, viz: true },

@@ -304,8 +304,24 @@ function withGoalCtx<T extends { rows: readonly Record<string, unknown>[] }>(
   } as T;
 }
 
-async function bootMetrika(page: Page, path: string, { connected = true } = {}) {
-  const state = { connected, connectCalls: [] as Array<Record<string, unknown>> };
+async function bootMetrika(
+  page: Page,
+  path: string,
+  { connected = true, orphan = false, holdSummary = false } = {},
+) {
+  // Задержка /api/ym/summary держит борд в состоянии скелетона столько, сколько нужно замеру.
+  let releaseSummary: () => void = () => {};
+  const summaryGate = holdSummary ? new Promise<void>((r) => { releaseSummary = r; }) : null;
+  // Счётчиков может быть НЕСКОЛЬКО: у каждого свой канал (сервер дедупит их по counter_id),
+  // поэтому стенд держит список, а /api/ym/status отвечает ПО КАНАЛУ из заголовка.
+  const state = {
+    connected,
+    connectCalls: [] as Array<Record<string, unknown>>,
+    connectHeaders: [] as Array<string | null>,
+    counters: connected ? [{ channelId: 9, id: '65383336', name: 'nōtem', site: 'notem.ru' }] : [],
+    // Канал БЕЗ учётки: остаётся после «Отключить» вместе с дневным архивом.
+    orphans: orphan ? [{ channelId: 12, title: 'старый счётчик' }] : [],
+  };
   await page.route(/^https?:\/\/[^/]+\/api\//, async (route) => {
     const request = route.request();
     const urlPath = new URL(request.url()).pathname;
@@ -316,19 +332,33 @@ async function bootMetrika(page: Page, path: string, { connected = true } = {}) 
     if (urlPath === '/api/channels' && request.method() === 'GET') {
       return json(200, {
         enabled: true,
-        channels: state.connected
-          ? [{ id: 9, username: null, title: 'nōtem', status: 'active', source: 'ym', ig_connected: false }]
+        channels: state.counters.length || state.orphans.length
+          ? [
+              ...state.counters.map((c) => ({
+                id: c.channelId, username: null, title: c.name, status: 'active', source: 'ym', ig_connected: false,
+              })),
+              ...state.orphans.map((o) => ({
+                id: o.channelId, username: null, title: o.title, status: 'active', source: 'ym', ig_connected: false,
+              })),
+            ]
           : [{ id: 7, username: 'demo_channel', title: 'Demo Channel', status: 'active', source: 'collector', ig_connected: false }],
       });
     }
     if (urlPath === '/api/ym/status') {
-      return json(200, state.connected
-        ? { connected: true, counter_name: 'nōtem', counter_id: '65383336', site: 'notem.ru' }
+      const scoped = request.headers()['x-channel-id'];
+      const counter = scoped
+        ? state.counters.find((c) => String(c.channelId) === scoped)
+        : state.counters[0];
+      return json(200, counter
+        ? { connected: true, counter_name: counter.name, counter_id: counter.id, site: counter.site }
         : { connected: false, counter_name: null, counter_id: null, site: null });
     }
     const goalId = new URL(request.url()).searchParams.get('goal_id');
     const attributed = goalId === '11';
-    if (urlPath === '/api/ym/summary') return json(200, SUMMARY);
+    if (urlPath === '/api/ym/summary') {
+      if (summaryGate) await summaryGate;
+      return json(200, SUMMARY);
+    }
     if (urlPath === '/api/ym/sources') return json(200, attributed ? withGoalCtx(SOURCES, 6, 3.1) : SOURCES);
     if (urlPath === '/api/ym/goals') return json(200, GOALS);
     if (urlPath === '/api/ym/utm') return json(200, attributed ? withGoalCtx(UTM, 8, 5.3) : UTM);
@@ -347,6 +377,7 @@ async function bootMetrika(page: Page, path: string, { connected = true } = {}) 
     if (urlPath === '/api/ym/connect' && request.method() === 'POST') {
       const body = request.postDataJSON() as Record<string, unknown>;
       state.connectCalls.push(body);
+      state.connectHeaders.push(request.headers()['x-channel-id'] ?? null);
       // Первый шаг (без counter_id): на аккаунте два счётчика — сервер просит выбрать.
       if (!body.counter_id) {
         return json(200, {
@@ -359,7 +390,13 @@ async function bootMetrika(page: Page, path: string, { connected = true } = {}) 
         });
       }
       state.connected = true;
-      return json(200, { ok: true, channel_id: 9, counter_name: 'nōtem', site: 'notem.ru' });
+      const scopedTo = Number(request.headers()['x-channel-id'] ?? '') || null;
+      const picked = String(body.counter_id) === '111'
+        ? { channelId: scopedTo ?? 10, id: '111', name: 'второй проект', site: 'b.ru' }
+        : { channelId: scopedTo ?? 9, id: '65383336', name: 'nōtem', site: 'notem.ru' };
+      if (scopedTo) state.orphans = state.orphans.filter((o) => o.channelId !== scopedTo);
+      if (!state.counters.some((c) => c.id === picked.id)) state.counters.push(picked);
+      return json(200, { ok: true, channel_id: picked.channelId, counter_name: picked.name, site: picked.site });
     }
     if (urlPath === '/api/tg/qr/status') return json(200, { connected: false, server_ready: false });
     if (urlPath === '/api/ig/oauth/status') return json(200, { connected: false, server_ready: false, env_fallback: false });
@@ -371,7 +408,7 @@ async function bootMetrika(page: Page, path: string, { connected = true } = {}) 
   }, { channel: connected ? '9' : '7' });
   await page.goto(path);
   await page.locator('main').waitFor({ state: 'visible', timeout: 25_000 });
-  return state;
+  return { ...state, releaseSummary: () => releaseSummary() };
 }
 
 test('Обзор Метрики: карточки метрик, источники трафика, свой FeedBlock-заголовок без дублей', async ({ page }, testInfo) => {
@@ -402,11 +439,12 @@ test('Обзор Метрики: карточки метрик, источник
   await expect(sourcesHeading).toBeVisible();
   await expect(page.getByText('Переходы из поисковых систем')).toBeVisible();
   await expect(page.getByText('Прямые заходы')).toBeVisible();
-  await expect(page.getByText('Внутренние переходы')).toHaveCount(0);
-  // Хвост компакта: знаменатель (145) остался — он и есть честная часть строки; изменилась
-  // только форма (строка «Прочее» с собственной дорожкой вместо текста под списком).
-  await expect(page.getByText('Прочее · 1', { exact: true }).first()).toBeVisible();
-  await expect(page.getByText(/Ещё 4 визитов из 145/)).toBeVisible();
+  // ПЯТЫЙ ИСТОЧНИК ТЕПЕРЬ ВИДЕН (аудит #554, D16). Раньше здесь стояло `toHaveCount(0)` — то есть
+  // тест закреплял ИМЕННО ТО, на что жалуется аудит: четыре строки в теле, куда влезает
+  // шесть, и пятая в хвосте при пустой нижней половине карточки. Смена контракта сознательная.
+  await expect(page.getByText('Внутренние переходы')).toBeVisible();
+  // Сворачивать больше нечего: все пять источников на виду, хвостовой строки нет.
+  await expect(page.getByText(/Ещё \d+ визитов из 145/)).toHaveCount(0);
 
   // Карточки-разрезы грузятся ПРОГРЕССИВНО (deferData): офскрин-карточка не шлёт свой запрос,
   // пока не подойдёт к вьюпорту. Поэтому перед проверкой содержимого доскролливаем заголовок —
@@ -420,29 +458,33 @@ test('Обзор Метрики: карточки метрик, источник
   // Слайс 2 — цели: имя + reaches + конверсия отдельной метрикой.
   await revealed('Цели');
   await expect(page.getByText('Оформление заказа')).toBeVisible();
-  await expect(page.getByText(/CR 2,4%/)).toBeVisible();
+  await expect(page.getByText(/CR 2\.4%/)).toBeVisible();
 
   // Слайс 2 — UTM: размеченные строки + честная сноска о визитах без метки.
   await revealed('UTM-метки');
   await expect(page.getByText('instagram', { exact: true })).toBeVisible();
   await expect(page.getByText(/Без метки — 100 визитов из 145/)).toBeVisible();
 
-  // Слайс 2 — топ-страницы: пути, компактный топ-4 (5-я строка спрятана) + хвост «из полного отчёта».
+  // Слайс 2 — топ-страницы: пути + хвост «из полного отчёта» (его даёт серверный лимит, не тайл).
   await revealed('Топ-страницы');
   await expect(page.getByText('/catalog/notebooks')).toBeVisible();
-  await expect(page.getByText('/blog/new-collection')).toHaveCount(0);
-  await expect(page.getByText(/Ещё 20 просмотров из 402/)).toBeVisible();
+  // Строка больше НЕ прячется: тайл вмещает шесть строк, и прятать пятую при пустой
+  // нижней половине карточки — ровно то, на что жалуется аудит #554 (D16).
+  await expect(page.getByText('/blog/new-collection')).toBeVisible();
+  await expect(page.getByText(/Ещё \d+ просмотров из 402/)).toHaveCount(0);
 
   // Слайс аудитории/источников — реферальные сайты: внешние домены + хвост своего total.
   await revealed('Реферальные сайты');
   await expect(page.getByText('vc.ru', { exact: true })).toBeVisible();
-  await expect(page.getByText('pikabu.ru')).toHaveCount(0);
-  await expect(page.getByText(/Ещё 10 визитов из 210/)).toBeVisible();
+  // Строка больше НЕ прячется: тайл вмещает шесть строк, и прятать пятую при пустой
+  // нижней половине карточки — ровно то, на что жалуется аудит #554 (D16).
+  await expect(page.getByText('pikabu.ru')).toBeVisible();
+  await expect(page.getByText(/Ещё \d+ визитов из 210/)).toHaveCount(0);
 
   // Соцсети: конкретные сети (lastsignSocialNetwork) + отказы вторичным контекстом.
   await revealed('Соцсети');
   await expect(page.getByText('ВКонтакте', { exact: true })).toBeVisible();
-  await expect(page.getByText(/35,4% отказов/)).toBeVisible();
+  await expect(page.getByText(/35\.4% отказов/)).toBeVisible();
 
   // Telegram у Метрики относится к отдельной размерности Messenger, а не SocialNetwork.
   await revealed('Мессенджеры');
@@ -456,12 +498,14 @@ test('Обзор Метрики: карточки метрик, источник
   // Слайс качества — полоса качества трафика: отказы/средний визит/глубина/новые/доля новых.
   await expect(page.getByRole('heading', { name: 'Качество трафика', exact: true })).toBeVisible();
   await expect(page.getByText('Отказы', { exact: true })).toBeVisible();
-  await expect(page.getByText('34,2%')).toBeVisible();
-  await expect(page.getByText('Глубина', { exact: true })).toBeVisible();
-  await expect(page.getByText('2,77')).toBeVisible();
   const qualityStrip = page.getByTestId('ym-quality-strip');
+  // Числа полосы идут через KpiValue с `morph={false}`: рецепт общий, но без барабана
+  // цифр — шесть штук в одной строке были бы шестью движениями рядом (аудит #554).
+  await expect(qualityStrip).toContainText('34.2%');
+  await expect(page.getByText('Глубина', { exact: true })).toBeVisible();
+  await expect(qualityStrip).toContainText('2.77');
   await expect(qualityStrip.getByText('Роботы', { exact: true })).toBeVisible();
-  await expect(qualityStrip.getByText('6,9% · 10', { exact: true })).toBeVisible();
+  await expect(qualityStrip.getByText('6.9% · 10', { exact: true })).toBeVisible();
   await expect(qualityStrip.getByText(/не исключены автоматически/)).toBeVisible();
   await expect(qualityStrip.locator('svg[aria-hidden="true"]')).toHaveCount(6);
   await expect(page.getByText(/выборка 50%/)).toBeVisible();
@@ -482,7 +526,7 @@ test('Обзор Метрики: карточки метрик, источник
   await landingHeading.scrollIntoViewIfNeeded();
   await expect(landingHeading).toHaveCount(1);
   await expect(page.getByText('/lp/promo')).toBeVisible();
-  await expect(page.getByText(/22,5% отказов/)).toBeVisible();
+  await expect(page.getByText(/22\.5% отказов/)).toBeVisible();
   // Селектор цели виден, так как на счётчике есть цели.
   await expect(page.getByLabel('Цель для страниц входа')).toBeVisible();
 
@@ -491,17 +535,19 @@ test('Обзор Метрики: карточки метрик, источник
   await exitsHeading.scrollIntoViewIfNeeded();
   await expect(exitsHeading).toBeVisible();
   await expect(page.getByText('/checkout/success')).toBeVisible();
-  await expect(page.getByText(/12,5% отказов/)).toBeVisible();
-  await expect(page.getByText('/faq')).toHaveCount(0);
-  await expect(page.getByText(/Ещё 5 визитов из 140/)).toBeVisible();
+  await expect(page.getByText(/12\.5% отказов/)).toBeVisible();
+  // Пятая строка больше не прячется — тайл её вмещает (аудит #554, D16).
+  await expect(page.getByText('/faq')).toBeVisible();
+  await expect(page.getByText(/Ещё \d+ визитов из 140/)).toHaveCount(0);
 
   // Слайс географии — страны (regionCountry): русское имя, отказы по строке, хвост своего total (320).
   const countriesHeading = page.getByRole('heading', { name: 'Страны', exact: true });
   await countriesHeading.scrollIntoViewIfNeeded();
   await expect(countriesHeading).toBeVisible();
   await expect(page.getByText('Россия', { exact: true })).toBeVisible();
-  await expect(page.getByText('Германия', { exact: true })).toHaveCount(0); // пятая строка — в хвосте
-  await expect(page.getByText(/Ещё 10 визитов из 320/)).toBeVisible();
+  // Пятая строка больше не прячется — тайл её вмещает (аудит #554, D16).
+  await expect(page.getByText('Германия', { exact: true })).toBeVisible();
+  await expect(page.getByText(/Ещё \d+ визитов из 320/)).toHaveCount(0);
   await expect(page.getByText('География определяется Метрикой по данным визита, а не по GPS.')).toBeVisible();
 
   // Слайс географии — города (regionCity): отдельная от страны карточка, свой total (275).
@@ -509,7 +555,8 @@ test('Обзор Метрики: карточки метрик, источник
   await citiesHeading.scrollIntoViewIfNeeded();
   await expect(citiesHeading).toBeVisible();
   await expect(page.getByText('Москва', { exact: true })).toBeVisible();
-  await expect(page.getByText(/Ещё 10 визитов из 275/)).toBeVisible();
+  // Сворачивать нечего: тайл вмещает все строки разреза (аудит #554, D16).
+  await expect(page.getByText(/Ещё \d+ визитов из 275/)).toHaveCount(0);
 
   // Слайс демографии — возраст (ageInterval): локализация по СТАБИЛЬНОМУ id ('25' → «25–34 года»),
   // сырое имя API не показывается; пятая строка — в хвосте своего total (410); оговорка об оценке.
@@ -519,14 +566,15 @@ test('Обзор Метрики: карточки метрик, источник
   await expect(page.getByText('25–34 года', { exact: true })).toBeVisible();
   await expect(page.getByText('age_25_34')).toHaveCount(0); // локализуем по id, не сырое имя
   await expect(page.getByText('age_under_18')).toHaveCount(0); // локализуем по id, не сырое имя
-  // Компакт возраста — полукольцо: оно показывает ВСЕ группы (хвоста нет) плюс нераспознанный
-  // остаток, который Метрика скрывает при малой выборке. Прежний ассерт про свёрнутый хвост
-  // («Ещё 15 визитов из 500») к этой форме неприменим — сама доля 82% проверяется строкой ниже.
+  // Компакт возраста — полукольцо: дуга несёт ВСЕ группы, а ЛЕГЕНДА фикс-тайла компактится до
+  // топ-4 + сводного хвоста «Ещё N …» (иначе 7 строк съедали высоту тайла и кольцо схлопывалось —
+  // фидбек владельца). Сноска — только реальная оговорка (покрытие <100% / redaction), без
+  // постоянного «Оценка Метрики (Crypta)»-префикса (методология живёт в «О метрике»).
   const ageCard = ageHeading.locator('xpath=ancestor::section[1]');
-  await expect(ageCard.getByText('До 18 лет', { exact: true })).toBeVisible();
-  await expect(ageCard.getByText('Не определено', { exact: true })).toBeVisible();
+  await expect(ageCard.getByText('25–34 года', { exact: true })).toBeVisible();
+  await expect(ageCard.getByText(/^Ещё \d+ · /)).toBeVisible();
   await expect(
-    page.getByText('Оценка Метрики (Crypta) · определено для 82% визитов. Часть данных скрыта при малой выборке.'),
+    page.getByText('Определено для 82% визитов · часть данных скрыта при малой выборке.'),
   ).toBeVisible();
 
   // Слайс демографии — пол (gender): локализация по id ('female' → «Женщины»), свой total (360).
@@ -535,7 +583,8 @@ test('Обзор Метрики: карточки метрик, источник
   await expect(genderHeading).toBeVisible();
   await expect(page.getByText('Женщины', { exact: true })).toBeVisible();
   await expect(page.getByText('Мужчины', { exact: true })).toBeVisible();
-  await expect(page.getByText('Оценка Метрики (Crypta) · определено для 90% визитов.')).toBeVisible();
+  // Покрытие <100% — честная оговорка остаётся (без Crypta-префикса); при 100% строки нет вовсе.
+  await expect(page.getByText('Определено для 90% визитов.')).toBeVisible();
 
   // Период-чипсы (общий page-period контракт) на месте.
   await expect(page.getByRole('group', { name: 'Период', exact: true })).toHaveCount(1);
@@ -575,16 +624,16 @@ test('Атрибуция цели: синхронные селекторы ис�
   await expect(landingsSel).toContainText('Оформление заказа');
 
   // Честный контекст цели по строке: конверсия (CR — уникальна на карточку) + число достижений.
-  await expect(page.getByText(/CR 3,1%/).first()).toBeVisible(); // источники
+  await expect(page.getByText(/CR 3\.1%/).first()).toBeVisible(); // источники
   await expect(page.getByText(/6 достиж\./).first()).toBeVisible();
   await devicesSel.scrollIntoViewIfNeeded();
-  await expect(page.getByText(/CR 4,2%/).first()).toBeVisible(); // устройства
+  await expect(page.getByText(/CR 4\.2%/).first()).toBeVisible(); // устройства
   await utmSel.scrollIntoViewIfNeeded();
-  await expect(page.getByText(/CR 5,3%/).first()).toBeVisible(); // UTM
+  await expect(page.getByText(/CR 5\.3%/).first()).toBeVisible(); // UTM
 
   // Страницы входа — последняя карточка (content-visibility): доскроллим и проверим CR/достижения.
   await page.getByRole('heading', { name: 'Страницы входа', exact: true }).scrollIntoViewIfNeeded();
-  await expect(page.getByText(/CR 6,4%/).first()).toBeVisible();
+  await expect(page.getByText(/CR 6\.4%/).first()).toBeVisible();
   await expect(page.getByText(/9 достиж\./).first()).toBeVisible();
 });
 
@@ -594,7 +643,8 @@ test('Подключение Метрики: токен → выбор счёт�
 
   // Панель источника выбрана дип-линком.
   await expect(page.getByRole('heading', { name: 'Яндекс.Метрика' })).toBeVisible();
-  const tokenInput = page.getByPlaceholder('OAuth-токен Яндекса');
+  const tokenInput = page.getByLabel('OAuth-токен Яндекса');
+  await expect(tokenInput).toHaveAttribute('aria-describedby', 'yandex-metrika-token-help');
   await tokenInput.fill('y0_test_oauth_token');
   await page.getByRole('button', { name: 'Подключить', exact: true }).click();
 
@@ -603,13 +653,173 @@ test('Подключение Метрики: токен → выбор счёт�
   await expect(page.getByRole('button', { name: /второй проект/ })).toBeVisible();
   await page.getByRole('button', { name: /nōtem/ }).click();
 
-  // Мгновенный connected-отклик панели + ссылка в Обзор.
-  await expect(page.getByText(/Подключён счётчик/)).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Открыть Обзор Метрики →' })).toBeVisible();
+  // Счётчик встал строкой источника со своими действиями.
+  const counters = page.getByRole('listitem').filter({ hasText: 'nōtem' });
+  await expect(counters).toHaveCount(1);
+  await expect(counters.getByRole('button', { name: 'Открыть' })).toBeVisible();
+  await expect(counters.getByRole('button', { name: 'Отключить' })).toBeVisible();
 
   // Контракт connect-флоу: первый вызов без counter_id, второй — с выбранным; токен один и тот же.
   expect(state.connectCalls).toEqual([
     { token: 'y0_test_oauth_token' },
     { token: 'y0_test_oauth_token', counter_id: '65383336' },
   ]);
+});
+
+/**
+ * ВТОРОЙ СЧЁТЧИК. Панель приколачивалась к ПЕРВОМУ ym-каналу, и подключённый счётчик закрывал
+ * собой форму: добавить второй сайт было нечем, хотя сервер это умеет с самого начала (канал на
+ * счётчик, дедуп по counter_id). Форма подключения доступна и при подключённом источнике.
+ */
+test('второй счётчик Метрики добавляется отдельным источником', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop-1440', 'Метрика — desktop-first поверхность');
+  const state = await bootMetrika(page, '/connect?source=metrika', { connected: true });
+
+  await expect(page.getByRole('listitem').filter({ hasText: 'nōtem' })).toHaveCount(1);
+  await page.getByRole('button', { name: 'Добавить счётчик' }).click();
+
+  await page.getByLabel('OAuth-токен Яндекса').fill('y0_test_oauth_token');
+  await page.getByRole('button', { name: 'Подключить', exact: true }).click();
+  await page.getByRole('button', { name: /второй проект/ }).click();
+
+  // Оба счётчика — соседними строками, первый не подменён.
+  await expect(page.getByRole('listitem').filter({ hasText: 'второй проект' })).toHaveCount(1);
+  await expect(page.getByRole('listitem').filter({ hasText: 'nōtem' })).toHaveCount(1);
+
+  await page.setViewportSize({ width: 430, height: 900 });
+  // На телефоне карточки счётчиков не должны разъезжаться в горизонтальную прокрутку.
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow, 'горизонтальной прокрутки на 430px быть не должно').toBeLessThanOrEqual(1);
+  await page.setViewportSize({ width: 1440, height: 900 });
+
+  // Запрос НЕ несёт X-Channel-Id: иначе счётчик приклеился бы к каналу свитчера вместо своего.
+  expect(state.connectHeaders.every((h) => h == null)).toBe(true);
+  expect(state.connectCalls.at(-1)).toEqual({ token: 'y0_test_oauth_token', counter_id: '111' });
+});
+
+/**
+ * ВОЗВРАТ СЧЁТЧИКА В СВОЙ ИСТОЧНИК. «Отключить» щадит дневной архив и оставляет канал, но пока
+ * подключение всегда заводило НОВЫЙ канал, старый навсегда висел в переключателе пустым: архив
+ * есть, данных нет, и добраться до него нечем.
+ */
+test('отключённый счётчик подключается обратно в тот же источник', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop-1440', 'Метрика — desktop-first поверхность');
+  const state = await bootMetrika(page, '/connect?source=metrika', { connected: false, orphan: true });
+
+  const orphanRow = page.getByRole('listitem').filter({ hasText: 'Счётчик отключён' });
+  await expect(orphanRow).toHaveCount(1);
+  await orphanRow.getByRole('button', { name: 'Подключить снова' }).click();
+  await expect(page.getByText('вернётся в этот же источник')).toBeVisible();
+
+  await page.getByLabel('OAuth-токен Яндекса').fill('y0_test_oauth_token');
+  await page.getByRole('button', { name: 'Подключить', exact: true }).click();
+  await page.getByRole('button', { name: /nōtem/ }).click();
+
+  // Запрос адресован ИМЕННО этому каналу — сервер вернёт счётчик к его архиву.
+  expect(state.connectHeaders.at(-1)).toBe('12');
+  await expect(page.getByRole('listitem').filter({ hasText: 'nōtem' })).toHaveCount(1);
+});
+
+/**
+ * ИНСТРУКЦИЯ ЖИВЁТ В ПАНЕЛИ. Раньше здесь стояла одна фраза «выпустить токен можно на
+ * oauth.yandex.ru для своего приложения»: она называет место, но не говорит ни какое право
+ * отметить, ни какой Redirect URI вписать, ни где потом искать сам токен — а без любого из трёх
+ * шаг не проходится.
+ */
+test('панель Метрики объясняет, где взять токен', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop-1440', 'Метрика — desktop-first поверхность');
+  await bootMetrika(page, '/connect?source=metrika', { connected: false });
+
+  // Пока счётчика нет, инструкция РАЗВЁРНУТА: это первый шаг подключения, прятать его не за чем.
+  const guide = page.locator('details', { hasText: 'Где взять токен' });
+  await expect(guide).toHaveAttribute('open', '');
+  await expect(guide.getByText('metrika:read')).toBeVisible();
+  await expect(guide.getByText('https://oauth.yandex.ru/verification_code')).toBeVisible();
+});
+
+/**
+ * ССЫЛКА ВЫДАЧИ СОБИРАЕТСЯ ЗА ЧЕЛОВЕКА. Адрес авторизации отличается от обычного только
+ * идентификатором приложения — склеивать его руками в адресной строке ровно то место, где
+ * инструкции и рвутся. До правильного ClientID кнопка неактивна: по битой ссылке Яндекс отвечает
+ * «unknown client», и человек решает, что ошибся правами.
+ */
+test('ссылка выдачи токена собирается из ClientID и не ведёт по битому адресу', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop-1440', 'Метрика — desktop-first поверхность');
+  await bootMetrika(page, '/connect?source=metrika', { connected: false });
+
+  const cta = page.getByRole('button', { name: /Открыть страницу выдачи/ });
+  await expect(cta).toBeDisabled();
+
+  await page.getByLabel('ClientID приложения Яндекса').fill('a1b2c3d4e5f60718293a4b5c6d7e8f90');
+  const link = page.getByRole('link', { name: /Открыть страницу выдачи/ });
+  await expect(link).toHaveAttribute(
+    'href',
+    'https://oauth.yandex.ru/authorize?response_type=token&client_id=a1b2c3d4e5f60718293a4b5c6d7e8f90',
+  );
+  // Внешние ссылки открываются новой вкладкой и без передачи referrer.
+  await expect(link).toHaveAttribute('target', '_blank');
+  await expect(link).toHaveAttribute('rel', /noreferrer/);
+});
+
+const RE_TAIL = /ещё\s+\d/;
+
+/**
+ * D16 (аудит #554) — СКЕЛЕТОН ДЕРЖИТ МЕСТО БОРДА.
+ *
+ * Обзор Метрики рисовал ДВЕ половинные плитки там, где загрузится девятнадцать карточек: страница
+ * на время загрузки была высотой в один ряд, а потом вырастала в разы. Скролл и всё, что было
+ * под курсором, уезжало. Тот же скелетон стоит на обзоре МойСклада — один компонент на оба.
+ */
+test('Обзор Метрики: скелетон занимает место борда, а не один ряд', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop-1440', 'Метрика — desktop-first поверхность');
+  const state = await bootMetrika(page, '/metrika', { holdSummary: true });
+
+  const tiles = page.locator('[data-board-skeleton-tile]');
+  await expect(tiles.first()).toBeVisible({ timeout: 20_000 });
+  const skeleton = await page.evaluate(() => ({
+    height: document.documentElement.scrollHeight,
+    tiles: document.querySelectorAll('[data-board-skeleton-tile]').length,
+  }));
+
+  state.releaseSummary();
+  const cards = page.locator('section[data-widget-size]');
+  await expect(cards.first()).toBeVisible({ timeout: 25_000 });
+  await expect.poll(async () => cards.count(), { timeout: 20_000 }).toBeGreaterThan(2);
+  await page.waitForTimeout(1200);
+  const loaded = await page.evaluate(() => ({
+    height: document.documentElement.scrollHeight,
+    cards: document.querySelectorAll('section[data-widget-size]').length,
+  }));
+
+  // Плиток не меньше, чем карточек: форма скелетона повторяет форму борда.
+  expect(
+    skeleton.tiles,
+    `плитки ${skeleton.tiles} против карточек ${loaded.cards}`,
+  ).toBeGreaterThanOrEqual(loaded.cards);
+  // И высота страницы почти не меняется: скачок был кратным.
+  expect(
+    Math.abs(loaded.height - skeleton.height) / loaded.height,
+    `скачок высоты: скелетон ${skeleton.height}px → борд ${loaded.height}px`,
+  ).toBeLessThan(0.35);
+});
+
+/**
+ * D16 (аудит #554) — КАРТОЧКА-СПИСОК ЗАПОЛНЯЕТ СВОЙ ТАЙЛ.
+ *
+ * `ShareRows` умел только СЖИМАТЬ число строк ниже `compactRows`, но не вырастать до того,
+ * что тайл реально вмещает: четыре строки в теле на 181px, куда влезает шесть, а пятая
+ * строка пряталась в хвост «ещё 1» при пустой нижней половине карточки.
+ */
+test('Обзор Метрики: все пять источников стоят в карточке, а не четыре и «ещё 1»', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop-1440', 'Метрика — desktop-first поверхность');
+  await bootMetrika(page, '/metrika');
+
+  const card = page
+    .locator('section[data-widget-size]')
+    .filter({ has: page.getByRole('heading', { name: 'Источники трафика' }) });
+  await expect(card).toBeVisible({ timeout: 20_000 });
+  const rows = card.locator('ul[aria-label^="Распределение"] > li');
+  await expect.poll(async () => rows.count(), { timeout: 10_000 }).toBe(SOURCES.rows.length);
+  // Прятать больше нечего — хвоста нет.
+  await expect(card.getByText(RE_TAIL)).toHaveCount(0);
 });

@@ -35,15 +35,17 @@ jobs:
       TEST_DATABASE_URL: postgresql://postgres@localhost:5432/pulse
       PGSSL: disable
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 20
           cache: npm
           cache-dependency-path: |
             package-lock.json
             frontend/package-lock.json
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
       - run: npm ci
@@ -58,6 +60,17 @@ jobs:
         env:
           DATABASE_URL: postgresql://postgres@localhost:5432/pulse
       - run: npm run check
+      # ВТОРОЙ прогон бэкенд-суиты на ТОЙ ЖЕ базе и в чужом часовом поясе. Гейтит два класса
+      # дефектов, которые прежде ловились только случайно и на проде:
+      #   • неидемпотентность — тест, оставивший след в базе, красит повтор (так жил central-канал
+      #     из channels_repo и partial unique index channels_one_central);
+      #   • полуночные расхождения — окно, посчитанное в локальной зоне рантайма, а не в UTC.
+      # Asia/Tokyo (UTC+9) выбран потому, что при нём «сегодня» в CI и «сегодня» в UTC расходятся
+      # почти весь рабочий день.
+      - name: Backend suite — second run, foreign timezone
+        run: npm test
+        env:
+          TZ: Asia/Tokyo
       - run: python -m py_compile mtproto/service.py collector/pulse_collector.py
       # Версия пиннится: новый релиз ruff с новыми правилами не должен внезапно красить CI.
       - name: Lint Python (ruff)
@@ -71,15 +84,6 @@ jobs:
           pip install mypy==2.3.0
           mypy mtproto collector --ignore-missing-imports
       - run: python -m unittest discover -s test -p "test_*.py"
-      - name: Parse inline browser scripts
-        run: |
-          node - <<'NODE'
-          const fs = require('fs'), vm = require('vm');
-          const html = fs.readFileSync('public/index.html', 'utf8');
-          const re = /<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/gi;
-          let match;
-          while ((match = re.exec(html))) new vm.Script(match[1]);
-          NODE
 
   # Аудит известных CVE в зависимостях. Гейтим только production-поверхность (--omit=dev) на
   # high+: dev-тулинг (vite/biome/playwright) обновляет Dependabot, а падение CI на каждом
@@ -88,21 +92,62 @@ jobs:
   security:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 20
+      # Три попытки с паузой: 2026-09-04 гейт покраснел на ВСЁМ main из-за
+      # «503 Service Unavailable» от registry.npmjs.org — уязвимостей не было ни одной.
+      # Красный CI по чужому сбою учит игнорировать красный CI, поэтому сетевой отказ
+      # ретраится, а настоящая находка по-прежнему валит джоб с первой попытки
+      # (npm audit отдаёт ненулевой код и без сети, и на уязвимости — различаем их по тексту).
+      # УСТАНОВКА ПЕРЕД АУДИТОМ — не прихоть. Без дерева зависимостей `npm audit` уходит на
+      # старый эндпоинт `/security/audits/quick`, который сам npm помечает как retiring и который
+      # отвечает то 503, то «400 Invalid package tree» (оба вида пойманы на одном прогоне 2026-09-04).
+      # С установленным деревом npm спрашивает поддерживаемый bulk-эндпоинт advisories.
+      # `--ignore-scripts`: аудиту нужен СПИСОК пакетов, а не их postinstall-код.
+      - name: Install server deps for a real audit tree
+        run: npm ci --ignore-scripts
       - name: Audit npm dependencies (server)
-        run: npm audit --omit=dev --audit-level=high
-      # GHSA-qwww-vcr4-c8h2 (react-router: CSRF в RSC-режиме) приложение не затрагивает: RSC/server-
-      # режим react-router не используется (клиентский BrowserRouter поверх Express-статики, RSC-API
-      # в коде нет), а фикс существует только в мажоре v8. audit-ci даёт точечный allowlist поверх
-      # той же npm-audit базы — новые advisories по-прежнему валят джоб. Снять allowlist при бампе
-      # react-router-dom на исправленную версию (Dependabot предложит).
-      - name: Audit npm dependencies (frontend)
-        run: npx -y audit-ci@^7 --high --skip-dev --allowlist GHSA-qwww-vcr4-c8h2
+        run: |
+          for attempt in 1 2 3; do
+            out=$(npm audit --omit=dev --audit-level=high 2>&1) && exit 0
+            echo "$out"
+            if ! printf '%s' "$out" | grep -qiE 'audit endpoint returned an error|Service Unavailable|ENOTFOUND|ETIMEDOUT|ECONNRESET'; then
+              echo "::error::npm audit нашёл уязвимость уровня high и выше"
+              exit 1
+            fi
+            echo "::warning::реестр npm недоступен (попытка $attempt из 3) — повтор через 15с"
+            sleep 15
+          done
+          echo "::error::реестр npm недоступен после трёх попыток"
+          exit 1
+      # Гейт фронта спрашивает САМ npm (тот же bulk-эндпоинт, что и серверный шаг), а не audit-ci:
+      # тот делает СВОЙ запрос на ретирящийся `/security/audits/quick` и 2026-09-04 три попытки
+      # подряд вернули «code undefined» за двадцать минут при нуле уязвимостей. Скрипт отличает
+      # сетевой отказ (код 75) от находки (код 1) — ретраится только первое, находка валит сразу.
+      # Allowlist живёт в самом скрипте рядом с обоснованием.
+      # Дерево нужно и здесь — по той же причине, что серверному шагу выше: без него npm уходит
+      # на ретирящийся `/security/audits/quick` и получает «400 Invalid package tree». Первый
+      # прогон этого гейта поймал ровно это: скрипт был прав, установки не хватало.
+      - name: Install frontend deps for a real audit tree
         working-directory: frontend
-      - uses: actions/setup-python@v6
+        run: npm ci --ignore-scripts
+      - name: Audit npm dependencies (frontend)
+        working-directory: frontend
+        run: |
+          for attempt in 1 2 3; do
+            node scripts/audit-gate.mjs && exit 0
+            code=$?
+            if [ "$code" != "75" ]; then exit "$code"; fi
+            echo "::warning::реестр npm недоступен (попытка $attempt из 3) — повтор через 15с"
+            sleep 15
+          done
+          echo "::error::реестр npm недоступен после трёх попыток"
+          exit 1
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
       # Аудитим lock-файлы (pip-compile --generate-hashes) — тот же точный прод-набор с
@@ -122,8 +167,10 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 20
           cache: npm
@@ -141,7 +188,7 @@ jobs:
         run: npm run test:e2e:smoke
       - name: Upload Playwright failure artifacts
         if: failure()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: playwright-smoke-${{ github.run_attempt }}
           path: frontend/test-results/
@@ -153,15 +200,13 @@ jobs:
   # самым долгим job'ом, а не суммой, поэтому полный набор не удлиняет frontend-гейт — там остаётся
   # быстрый smoke на 3 файла как ранний сигнал.
   #
-  # Шардинг обязателен: playwright.config форсит workers=1 под CI, а desktop-1440 это 267 тестов.
+  # Шардинг обязателен: playwright.config форсит workers=1 под CI, а desktop-1440 suite постоянно
+  # растёт; не фиксируем число тестов в комментарии, чтобы документация не устаревала.
   # Шарды делят набор по тестам, каждый укладывается в разумный бюджет job'а.
   #
   # fail-fast: false — падение одного шарда НЕ отменяет остальные: за один прогон нужен полный
   # список падений, иначе починка превращается в серию «поправил → нашёл следующее». Сам job при
   # любом падении красный (обычный exit code Playwright), артефакты грузятся per-shard.
-  #
-  # Что гейт НЕ покрывает: тесты, помеченные `test.fixme` (размер мобильных тач-целей — отложенный
-  # долг, см. PROJECT_MEMORY). Они видны в отчёте как skipped и красными не делают.
   e2e:
     runs-on: ubuntu-latest
     strategy:
@@ -172,8 +217,10 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 20
           cache: npm
@@ -185,9 +232,40 @@ jobs:
         run: npm run test:e2e:desktop -- --shard=${{ matrix.shard }}/6
       - name: Upload Playwright failure artifacts
         if: failure()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: playwright-e2e-shard${{ matrix.shard }}-${{ github.run_attempt }}
+          path: frontend/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # Compact mandatory phone gate. mobile-nav explicitly measures 360/390/430 widths in one
+  # Chromium project; a11y adds the representative 430px route/dialog scan. This keeps touch,
+  # horizontal-overflow and focus semantics blocking without tripling the full desktop suite.
+  e2e-phone:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Run mandatory 360/390/430 phone and a11y gate
+        run: npm run test:e2e:phone
+      - name: Upload Playwright phone failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: playwright-phone-${{ github.run_attempt }}
           path: frontend/test-results/
           if-no-files-found: ignore
           retention-days: 7

@@ -8,7 +8,9 @@
  * не попадали вовсе) и фильтровала источники по одному `ig_connected`, из-за чего у любого канала
  * появлялись строки почти всех сетей — вплоть до «Метрики» у телеграм-канала (внешний аудит).
  */
-import { NETWORKS, type ChannelSourceLike } from '@/lib/networks';
+import { NETWORKS, type ChannelSourceLike, type NavLinkDef } from '@/lib/networks';
+import { ANALYTICS_TABS } from '@/lib/analyticsTabs';
+import { CAMPAIGNS_LIST } from '@/components/campaigns/routes';
 import type { IconName } from '@/components/nav-icons';
 
 /** Запись реестра сетей — литеральный тип (а не расширенный `NetworkDef`), чтобы `key` оставался
@@ -58,6 +60,12 @@ const SECTION_SEARCH_SYNONYMS: Record<string, string> = {
   Аудитория: 'audience',
   Клиенты: 'покупатели clients',
   Каналы: 'источники продаж channels',
+  // Подразделы (см. buildTgSectionCommands): те же ключи-подписи, что у вкладок и второго
+  // представления «Контента».
+  Кампании: 'кампания campaign campaigns промо',
+  Динамика: 'dynamics рост',
+  Форматы: 'формат типы форматов formats content',
+  Сравнение: 'сравнить compare comparison',
 };
 
 /** То же для названий сетей (реестр хранит одно каноничное имя). */
@@ -105,10 +113,22 @@ export function hasNetwork(channels: PaletteChannel[], key: string): boolean {
   return availableNetworks(channels).some((net) => net.key === key);
 }
 
-/** Команды «Разделы» для сетевых маршрутов — прямо из `NETWORKS[].nav`. */
-export function buildNetworkRouteCommands(channels: PaletteChannel[]): RouteCommandSpec[] {
+/**
+ * Команды «Разделы» для сетевых маршрутов — прямо из `NETWORKS[].nav`.
+ *
+ * `gates` — состояние фичефлагов разделов. Без него палитра предлагала бы переход в раздел,
+ * которого для этого пользователя ещё нет: гейт, закрытый только в наве, — это не гейт, а
+ * спрятанная дверь с работающей ручкой. Дефолт — всё выключено (консервативно: показать раздел
+ * позже безопаснее, чем предложить несуществующий).
+ */
+export function buildNetworkRouteCommands(
+  channels: PaletteChannel[],
+  gates: Partial<Record<NonNullable<NavLinkDef['gate']>, boolean>> = {},
+): RouteCommandSpec[] {
   return availableNetworks(channels).flatMap((net) =>
-    net.nav.map((link) => ({
+    // `as const` в реестре сужает записи до литералов, и у строк без `gate` свойства просто нет
+    // в выведенном типе — читаем нав через его же интерфейс.
+    (net.nav as readonly NavLinkDef[]).filter((link) => !link.gate || !!gates[link.gate]).map((link) => ({
       id: `route:${link.to}`,
       path: link.to,
       // Сеть по умолчанию (единственная беспрефиксная запись реестра) не подписывается —
@@ -128,6 +148,45 @@ export function buildNetworkRouteCommands(channels: PaletteChannel[]): RouteComm
         .toLowerCase(),
     })),
   );
+}
+
+/**
+ * Подразделы Telegram, до которых из палитры иначе не добраться: «Кампании» — целая вертикаль,
+ * живущая вторым представлением раздела «Контент» (`?view=campaigns`), в сайдбаре её нет вовсе;
+ * и четыре вкладки /analytics (`?tab=`). Гейт — тот же реестровый `hasNetwork('tg')`, что и у
+ * самих разделов. Instagram своих подразделов не получает: его разделы уже плоские (отдельные
+ * маршруты), а IG-кампании открываются с той же страницы кампаний — второй строки не плодим.
+ *
+ * Подписи вкладок берутся из `ANALYTICS_TABS` — второго списка этих строк в приложении нет.
+ * id остаются стабильными `route:<путь>`: на них завязана MRU-история (`pulse_palette_recents`).
+ */
+export function buildTgSectionCommands(channels: PaletteChannel[]): RouteCommandSpec[] {
+  if (!hasNetwork(channels, 'tg')) return [];
+  const entries: ReadonlyArray<{ path: string; label: string; section: string; icon: IconName }> = [
+    { path: CAMPAIGNS_LIST, label: 'Кампании', section: 'Кампании', icon: 'campaigns' },
+    ...ANALYTICS_TABS.map((tab) => ({
+      path: `/analytics?tab=${tab.key}`,
+      label: `Аналитика · ${tab.label}`,
+      section: tab.label,
+      icon: 'analytics' as IconName,
+    })),
+  ];
+  return entries.map(({ path, label, section, icon }) => ({
+    id: `route:${path}`,
+    path,
+    label,
+    icon,
+    search: [
+      'перейти',
+      label.replace(' · ', ' '),
+      SECTION_SEARCH_SYNONYMS[section] ?? '',
+      NETWORK_SEARCH_SYNONYMS.tg,
+    ]
+      .join(' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLowerCase(),
+  }));
 }
 
 /**

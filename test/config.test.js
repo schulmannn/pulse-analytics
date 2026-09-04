@@ -21,6 +21,7 @@ test('loadConfig: дефолты из пустого env', () => {
   assert.equal(c.database.queryTimeoutMs, 35000);
   assert.equal(c.database.allowDbLess, false);
   assert.equal(c.auth.sessionTtlMs, 7 * 24 * 60 * 60 * 1000);
+  assert.equal(c.auth.sessionAbsoluteTtlMs, 30 * 24 * 60 * 60 * 1000);
   assert.equal(c.email.from, 'Atlavue <onboarding@resend.dev>');
   assert.equal(c.telegram.ownerChannel, '@bynotem');
   assert.equal(c.telegram.sessionKey, '');
@@ -31,6 +32,25 @@ test('loadConfig: дефолты из пустого env', () => {
   assert.equal(c.runtime.webReplicas, 1);
   assert.equal(c.instagram.oauthMaxInFlight, 8);
   assert.equal(c.instagram.oauthAcquireTimeoutMs, 2000);
+});
+
+test('SESSION_ABSOLUTE_TTL_DAYS: whole-day 7..365 bound', () => {
+  assert.equal(
+    loadConfig({ SESSION_ABSOLUTE_TTL_DAYS: '45' }).auth.sessionAbsoluteTtlMs,
+    45 * 24 * 60 * 60 * 1000,
+  );
+  assert.deepEqual(
+    validateConfig(loadConfig({ SESSION_ABSOLUTE_TTL_DAYS: '7' }))
+      .filter((error) => error.field === 'auth.sessionAbsoluteTtlMs'),
+    [],
+  );
+  for (const value of ['6', '366', '7.5', 'NaN']) {
+    assert.ok(
+      validateConfig(loadConfig({ SESSION_ABSOLUTE_TTL_DAYS: value }))
+        .some((error) => error.field === 'auth.sessionAbsoluteTtlMs'),
+      `${value} is rejected`,
+    );
+  }
 });
 
 test('validateConfig: границы IG OAuth admission-контроля', () => {

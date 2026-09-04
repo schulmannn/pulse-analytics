@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { getRememberedChannel, setRememberedChannel, setSelectedChannel } from '@/lib/channel';
+import { DEMO_CHANNEL_ID, isDemoMode } from '@/lib/demo';
 import { getActiveNetwork } from '@/lib/networkStore';
 
 interface ChannelContextValue {
@@ -10,12 +11,19 @@ interface ChannelContextValue {
 
 const ChannelContext = createContext<ChannelContextValue | null>(null);
 
+/** Demo must still get source 0 when browser storage is unavailable. */
+export function resolveInitialChannel(): number | null {
+  return isDemoMode()
+    ? DEMO_CHANNEL_ID
+    : getRememberedChannel(getActiveNetwork());
+}
+
 export function ChannelProvider({ children }: { children: ReactNode }) {
   const [channelId, setChannelIdState] = useState<number | null>(() => {
     // Start from the channel remembered for the CURRENTLY active network (falls back to the legacy
     // single value). Sync the module-level active var so the API client's X-Channel-Id header
     // matches the context from the very first fetch, before the switcher's reconcile effect runs.
-    const initial = getRememberedChannel(getActiveNetwork());
+    const initial = resolveInitialChannel();
     setSelectedChannel(initial);
     return initial;
   });

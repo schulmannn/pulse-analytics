@@ -76,7 +76,13 @@ export function SearchField({
         aria-label={ariaLabel}
         data-testid={testId}
         // Hide WebKit's native × so it never doubles our own clear button.
-        className={cn('pl-9 [&::-webkit-search-cancel-button]:appearance-none', hasValue && 'pr-9')}
+        // Тач-канон 44px на телефоне, как у Button (min-h-11 sm:min-h-0): базовые 36px общего Input
+        // ниже минимальной цели касания, а поле поиска на мобильном — первый элемент, в который
+        // человек метит пальцем.
+        className={cn(
+          'min-h-11 pl-9 sm:min-h-0 [&::-webkit-search-cancel-button]:appearance-none',
+          hasValue && 'pr-9',
+        )}
       />
       {hasValue && (
         <Button

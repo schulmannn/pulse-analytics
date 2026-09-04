@@ -3,7 +3,7 @@
 // "what the numbers mean" logic is testable and the panels stay presentational.
 import type { IgBreakdowns, IgHistoryRow, IgInsights, IgOnline, IgPost, IgStory } from '@/api/schemas';
 import { pctDelta, type MetricDelta } from '@/lib/delta';
-import { fmt } from '@/lib/format';
+import { fmt, timeAxisFromDayKeys } from '@/lib/format';
 
 export const DAY_MS = 24 * 60 * 60 * 1000;
 export const DAY_NAMES = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
@@ -149,6 +149,41 @@ export function windowPair(series: Point[], startMs: number, endMs: number): Win
   return { cur, prev, hasCur, hasPrev };
 }
 
+/**
+ * Пара «прошлое/текущее окно» для СИНТЕТИЧЕСКОГО агрегата Instagram.
+ *
+ * Бэкенд (server/routes/ig.js pushAgg) отдаёт такие метрики не дневным рядом, а ровно двумя
+ * точками — прошлое окно и текущее — и дублирует текущее значение в `total_value`. Точки при этом
+ * штампуются временем СЕРВЕРНОГО окна.
+ *
+ * Фильтровать их по дате нельзя, и это была настоящая ошибка: клиент считает верхнюю границу как
+ * `Math.floor(Date.now() / 60_000) * 60_000` (округление ВНИЗ ради стабильности мемоизации), а
+ * сервер штампует точку моментом своего запроса — то есть всегда ПОЗЖЕ. `windowPair` видел
+ * `t > endMs` и молча выбрасывал текущую точку НА КАЖДОМ рендере, после чего охват откатывался на
+ * сумму дневных и завышался втрое (замер на проде: 83.3k против честных 26.1k при 25.4k у самого
+ * Instagram). Фолбэк, задуманный для аккаунтов без метрики, срабатывал всегда.
+ *
+ * Поэтому берём значения ПОЗИЦИОННО, по контракту: `total_value` — текущее окно, первая точка —
+ * прошлое. Никакой арифметики по датам, никакой чувствительности к рассинхрону часов.
+ */
+export function aggregatePair(insights: IgInsights | undefined, name: string): WindowPair {
+  const metric = insights?.data?.find((m) => m.name === name);
+  const values = metric?.values ?? [];
+  // Признак синтетического агрегата — ЗАПОЛНЕННЫЙ `total_value`: его ставит только pushAgg.
+  // Брать «последнюю точку» нельзя: у настоящего ДНЕВНОГО ряда это значение одного дня, а не окна
+  // (тесты поймали ровно это — 166 вместо суммы 2889). Нет total_value ⇒ hasCur=false, и вызывающий
+  // честно падает на сумму дневных.
+  const raw = metric?.total_value?.value;
+  const cur = raw != null ? Number(raw) : null;
+  const prev = raw != null && values.length >= 2 ? Number(values[0]?.value ?? 0) : null;
+  return {
+    cur: cur ?? 0,
+    prev: prev ?? 0,
+    hasCur: cur != null && Number.isFinite(cur),
+    hasPrev: prev != null && Number.isFinite(prev),
+  };
+}
+
 export const pairDelta = (p: WindowPair): MetricDelta | null =>
   p.hasCur && p.hasPrev ? pctDelta(p.cur, p.prev) : null;
 
@@ -167,12 +202,10 @@ export function tvBreakdown(
   return [];
 }
 
-export const fmtDay = (iso: string) => {
-  const t = Date.parse(iso);
-  // Short-month form (7 июл.) — the SAME date grammar TG charts use (аудит тултипов: IG
-  // говорил 07.07, TG — 21 янв на соседних карточках).
-  return Number.isFinite(t) ? new Date(t).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' }) : '';
-};
+// Единый формат дат приложения («7 июл.») — делегат `fmt.day`, а не второй локальный форматтер:
+// он же чинит разбор голого ключа «YYYY-MM-DD» (parseDayKey = локальная полночь; Date.parse читал
+// его как UTC и западнее UTC показывал предыдущий день).
+export const fmtDay = (iso: string) => fmt.day(iso);
 
 export const flag = (iso: string) => {
   const cc = (iso || '').toUpperCase();
@@ -197,6 +230,8 @@ export function windowIgSeries(series: Point[], days: number, unit: string) {
     // FULL per-point labels (not pickLabels' 3) — LineChart picks first/mid/last itself, and
     // BarChart needs one label per bar to stride; the 3-label form mislabels the bars.
     labels: w.map((p) => fmtDay(p.day)),
+    // Буквы короткого дневного окна (ревизия осей 2026-08-14); полные даты держат labels/titles.
+    axisLabels: timeAxisFromDayKeys(w.map((p) => p.day)),
     titles: w.map((p) => `${fmtDay(p.day)}: ${fmt.num(p.value)} ${unit}`),
     total,
     prevTotal,

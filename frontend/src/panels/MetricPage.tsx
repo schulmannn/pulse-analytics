@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { InspectorHandle } from '@/components/InspectorHandle';
 import { Link, Navigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
+import { z } from 'zod';
 import { useAnnotations, useChannels, useHistory, useTgFull } from '@/api/queries';
 import { apiSend } from '@/api/client';
 import { qk } from '@/api/queryKeys';
@@ -14,7 +15,8 @@ import { getDrillMetric } from '@/lib/widgetMetrics';
 import { addWidgetForMetric } from '@/lib/widgetStore';
 import { pinToHome } from '@/lib/widgetPrefsStore';
 import { customKey } from '@/lib/widgetConfig';
-import { fmt, pluralRu } from '@/lib/format';
+import { KpiValue } from '@/components/chartWidget/KpiValue';
+import { fmt, pluralRu, timeAxisFromDayKeys } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { markdownToPlainText } from '@/lib/markdown';
 import { PinnedDayPanel } from '@/components/PinnedDayPanel';
@@ -23,16 +25,15 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { ErrorState } from '@/components/ErrorState';
 import { DeltaPill } from '@/components/DeltaPill';
 import { SegmentedControl } from '@/components/SegmentedControl';
+import { SegSelect } from '@/components/metric/SegSelect';
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
-import { DivergingBars } from '@/components/DivergingBars';
 import { ChartExpandedContext } from '@/components/ExpandableChart';
 import { Breakdown } from '@/components/Breakdown';
 import { RankChart } from '@/components/RankChart';
 import { PivotTable } from '@/components/PivotTable';
 import { PostDetailModal } from '@/components/PostDetailModal';
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
-import { DateRangePicker } from '@/components/DateRangePicker';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { lttbDownsample } from '@/lib/downsample';
 import { DAY_MS, alignGhost, baselineCoveredByPosts, bucketKeyOf, bucketKeysInWindow, comparisonWindow } from '@/lib/metricSeries';
@@ -41,10 +42,22 @@ import { CHART_MAX_POINTS, pickIndexes } from '@/lib/msSeries';
 import { useExplorerChartHeight } from '@/lib/useExplorerChartHeight';
 import { splitDailyWindows } from '@/lib/delta';
 import { MediaThumb } from '@/components/MediaThumb';
-import { AboutRow, MetricBackLink, MetricDescriptor, RailSection } from '@/components/metric/shared';
+
+import { MetricRailToggle } from '@/components/metric/shared';
+import { useMetricRailHidden } from '@/lib/metricRail';
+import { ComparisonDeltaRow, MetricBackLink, MetricDescriptor, RailSection, RailWindowTotal } from '@/components/metric/shared';
 
 /** Короткий день недели для тултипов дневной гранулы («чт, 2 июл») — артефакт v2. */
 const WEEKDAY_FMT = new Intl.DateTimeFormat('ru-RU', { weekday: 'short' });
+const AnnotationMutationSchema = z
+  .object({ id: z.number(), day: z.string(), label: z.string() })
+  .passthrough();
+const AnnotationDeleteSchema = z.object({ ok: z.boolean() }).passthrough();
+const DateRangePicker = lazy(() =>
+  import('@/components/DateRangePicker').then((module) => ({
+    default: module.DateRangePicker,
+  })),
+);
 
 // ── View state (all in the URL so links restore the exact view, like steep) ──────────────
 type ChartType = 'line' | 'bar' | 'rank' | 'pivot';
@@ -179,6 +192,9 @@ function bucketedPostSeries(
   return {
     labels: keys.map((k) => bucketLabelOf(k, grain)),
     values: keys.map((k) => byBucket.get(k) ?? 0),
+    // Временна́я ось (timeAxisCore): короткое окно — буквы дней, длинное — EN-месяцы; недельные
+    // корзины проходят (месяц у якоря-понедельника честный), месячные ключи отсекаются сами.
+    axisLabels: timeAxisFromDayKeys(keys, { monthsOnly: grain !== 'day' }),
   };
 }
 
@@ -199,7 +215,11 @@ function bucketedHistoryFlow(
     byBucket.set(key, (byBucket.get(key) ?? 0) + Number(row.views));
   }
   const keys = fromMs != null ? bucketKeysInWindow(fromMs, toMs, grain) : [...byBucket.keys()].sort();
-  return { labels: keys.map((k) => bucketLabelOf(k, grain)), values: keys.map((k) => byBucket.get(k) ?? 0) };
+  return {
+    labels: keys.map((k) => bucketLabelOf(k, grain)),
+    values: keys.map((k) => byBucket.get(k) ?? 0),
+    axisLabels: timeAxisFromDayKeys(keys, { monthsOnly: grain !== 'day' }),
+  };
 }
 
 /** Subscriber level per bucket (last archive value inside the bucket) — sparse, data-only. */
@@ -217,7 +237,11 @@ function bucketedSubsSeries(
     byBucket.set(bucketKeyOf(t, grain), Number(row.subscribers)); // later rows overwrite = last-of-bucket
   }
   const keys = [...byBucket.keys()].sort();
-  return { labels: keys.map((k) => bucketLabelOf(k, grain)), values: keys.map((k) => byBucket.get(k)!) };
+  return {
+    labels: keys.map((k) => bucketLabelOf(k, grain)),
+    values: keys.map((k) => byBucket.get(k)!),
+    axisLabels: timeAxisFromDayKeys(keys, { monthsOnly: grain !== 'day' }),
+  };
 }
 
 /**
@@ -229,6 +253,9 @@ function bucketedSubsSeries(
  */
 export function MetricPage() {
   const { key: rawKey } = useParams();
+  // ДО ранних возвратов: ниже страница уходит в скелетон и в ошибку, и хук после них дал бы
+  // «Rendered more hooks than during the previous render» — известная грабля этого репо.
+  const railHidden = useMetricRailHidden();
   const { days, setDays, range, setRange, inRange } = usePeriod();
   // «Свой диапазон» calendar popover (the DateRangePicker → global period `range`, URL-persisted).
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -285,7 +312,10 @@ export function MetricPage() {
   const metricKey = rawKey;
   const field = FIELD[metricKey];
   const chartType: ChartType =
-    rawChart === 'bar' || (field && (rawChart === 'rank' || rawChart === 'pivot')) ? (rawChart as ChartType) : 'line';
+    metricKey !== 'subscribers' &&
+    (rawChart === 'bar' || (field && (rawChart === 'rank' || rawChart === 'pivot')))
+      ? (rawChart as ChartType)
+      : 'line';
 
   if (isPending) return <MetricSkeleton />;
   if (isError) {
@@ -352,7 +382,7 @@ export function MetricPage() {
     : false;
 
   let series: DailySeries;
-  let ghost: number[] | undefined;
+  let ghost: Array<number | null> | undefined;
   const viewsFromArchive = metricKey === 'views' && activeViewsRows.some((row) => row.views != null);
   if (metricKey === 'subscribers') {
     const inWin = historyRows.filter((r) => inRange(r.day));
@@ -376,7 +406,7 @@ export function MetricPage() {
     if (baseWin && baselineViewsRows.length > 0) {
       const base = bucketedHistoryFlow(baselineViewsRows, baseWin.from, baseWin.to, effGrain);
       const gv = alignGhost(base.values, series.values.length);
-      if (gv.some((v) => v > 0)) ghost = gv;
+      if (gv.some((v) => v != null && v > 0)) ghost = gv;
     }
   } else if (field) {
     series =
@@ -389,7 +419,7 @@ export function MetricPage() {
       // not silently drop the comparison): the previous period can overshoot by a day at the
       // tail, so keep the leading buckets; pad the front with zeros if short.
       const gv = alignGhost(base.values, series.values.length);
-      if (gv.some((v) => v > 0)) ghost = gv;
+      if (gv.some((v) => v != null && v > 0)) ghost = gv;
     }
   } else {
     series = { labels: [], values: [] };
@@ -426,27 +456,6 @@ export function MetricPage() {
       byIndex.set(i, byIndex.has(i) ? `${byIndex.get(i)} · ${a.label}` : a.label);
     }
     return byIndex.size > 0 ? [...byIndex].map(([i, label]) => ({ i, label })) : undefined;
-  })();
-
-  // Уровневая метрика (Подписчики): бары УРОВНЯ от нуля почти все во всю высоту — падение
-  // визуально теряется (скриншот владельца: «непонятно, что происходит падение»). Как на
-  // домашней «Истории подписчиков», режим «Столбцы» рисует ДНЕВНОЕ ИЗМЕНЕНИЕ дивергентными
-  // барами вокруг нуля — так спад читается сразу. Поток-метрики (просмотры/реакции/…) — обычные
-  // столбцы от нуля (сумма имеет смысл).
-  // NB: обычное вычисление, НЕ useMemo — этот код ниже early-return'ов (Navigate/isError выше),
-  // а условный хук = React #310 «rendered more hooks». Цикл ≤~90 точек, дёшев на каждый рендер.
-  const isLevel = !ZERO_BASED[metricKey];
-  const levelDeltas = (() => {
-    const v: number[] = [], l: string[] = [], t: string[] = [];
-    if (isLevel) {
-      for (let i = 1; i < series.values.length; i++) {
-        const d = series.values[i] - series.values[i - 1];
-        v.push(d);
-        l.push(series.labels[i]);
-        t.push(`${series.labels[i]}: ${d >= 0 ? '+' : '−'}${fmt.num(Math.abs(d))}`);
-      }
-    }
-    return { values: v, labels: l, titles: t };
   })();
 
   // ── Rank + pivot data (dimension-aggregated) ──────────────────────────────────────────
@@ -635,7 +644,7 @@ export function MetricPage() {
           .map((r) => localDayKey(Date.parse(r.day)))
       )
     : null;
-  const gapAware = (vals: number[], fromMs: number | null): Array<number | null> => {
+  const gapAware = (vals: Array<number | null>, fromMs: number | null): Array<number | null> => {
     if (!archiveDays || effGrain !== 'day' || fromMs == null) return vals;
     return vals.map((v, i) => (archiveDays.has(localDayKey(fromMs + i * DAY_MS)) ? v : null));
   };
@@ -660,10 +669,12 @@ export function MetricPage() {
     ? {
         values: sampledLineIdx.map((i) => lineValues[i] ?? null),
         labels: sampledLineIdx.map((i) => series.labels[i] ?? ''),
+        // Прореженная серия длиннее порога букв (≤ 8) по построению — ось остаётся датами.
+        axisLabels: undefined as string[] | undefined,
         titles: sampledLineIdx.map((i) => titles[i] ?? ''),
         ghost: lineGhost ? sampledLineIdx.map((i) => lineGhost[i] ?? null) : undefined,
       }
-    : { values: lineValues, labels: series.labels, titles, ghost: lineGhost };
+    : { values: lineValues, labels: series.labels, axisLabels: series.axisLabels, titles, ghost: lineGhost };
 
   // ── События дня (chart_annotations): создание/удаление из панели пина ────────────────────
   const addAnnotation = async (dayKey: string) => {
@@ -672,7 +683,12 @@ export function MetricPage() {
     setAnnBusy(true);
     setAnnError(null);
     try {
-      await apiSend('POST', `/api/channels/${channelId}/annotations`, { day: dayKey, label });
+      await apiSend(
+        'POST',
+        `/api/channels/${channelId}/annotations`,
+        { day: dayKey, label },
+        AnnotationMutationSchema,
+      );
       setAnnLabel('');
       await queryClient.invalidateQueries({ queryKey: qk.annotations(channelId) });
     } catch {
@@ -686,7 +702,12 @@ export function MetricPage() {
     setAnnBusy(true);
     setAnnError(null);
     try {
-      await apiSend('DELETE', `/api/channels/${channelId}/annotations/${annId}`);
+      await apiSend(
+        'DELETE',
+        `/api/channels/${channelId}/annotations/${annId}`,
+        undefined,
+        AnnotationDeleteSchema,
+      );
       await queryClient.invalidateQueries({ queryKey: qk.annotations(channelId) });
     } catch {
       setAnnError('Не удалось удалить событие.');
@@ -696,13 +717,19 @@ export function MetricPage() {
   };
 
   const chartTitle =
-    chartType === 'rank'
+    metricKey === 'subscribers'
+      ? 'Динамика подписчиков'
+      : chartType === 'rank'
       ? `Рейтинг · ${DIM_LABEL[dim].toLowerCase()}`
       : chartType === 'pivot'
         ? `Сводная · ${DIM_LABEL[dim].toLowerCase()} × по ${GRAIN_WORD[effGrain]}`
         : `${SERIES_PREFIX[metricKey] ?? 'По '}${GRAIN_WORD[effGrain]}`;
 
-  const chartTypes: ChartType[] = field ? ['line', 'bar', 'rank', 'pivot'] : ['line', 'bar'];
+  const chartTypes: ChartType[] = metricKey === 'subscribers'
+    ? ['line']
+    : field
+      ? ['line', 'bar', 'rank', 'pivot']
+      : ['line', 'bar'];
 
   // ── Pinned point resolution ────────────────────────────────────────────────────────────
   // Posts are addressable only on the DAY grain of a bounded window (bucket keys run
@@ -716,9 +743,7 @@ export function MetricPage() {
     const pos = sampledLineIdx.indexOf(pinnedValid);
     return pos === -1 ? null : pos;
   })();
-  // Дельта-бары уровневой метрики (DivergingBars) кликов не несут — пин только для line и
-  // обычных столбцов потока.
-  const pinnedIsChart = chartType === 'line' || (chartType === 'bar' && !isLevel);
+  const pinnedIsChart = chartType === 'line' || chartType === 'bar';
   const canResolveDay = field != null && effGrain === 'day' && winFrom != null;
   const pinnedDayKey = pinnedValid != null && canResolveDay ? localDayKey(winFrom! + pinnedValid * DAY_MS) : null;
   const pinnedDayFlags = pinnedDayKey ? annotations.filter((a) => a.day === pinnedDayKey) : [];
@@ -728,13 +753,20 @@ export function MetricPage() {
         .sort((a, b) => Number(b[field!] ?? 0) - Number(a[field!] ?? 0))
         .slice(0, 5)
     : [];
-  const pinnedDiff = pinnedValid != null && pinnedValid > 0 ? series.values[pinnedValid] - series.values[pinnedValid - 1] : null;
+  // Пропуск (null-день) в паре — дельты нет: «изменение от дня без данных» было бы выдумкой.
+  const pinnedCur = pinnedValid != null && pinnedValid > 0 ? series.values[pinnedValid] : null;
+  const pinnedPrevVal = pinnedValid != null && pinnedValid > 0 ? series.values[pinnedValid - 1] : null;
+  const pinnedDiff = pinnedCur != null && pinnedPrevVal != null ? pinnedCur - pinnedPrevVal : null;
+
 
   return (
     <div className="space-y-4">
       {/* Breadcrumb + страничные действия (артефакт v2): «Закрепить» кладёт метрику на Главную. */}
       <div className="flex items-center justify-between gap-3">
         <MetricBackLink to="/">Обзор</MetricBackLink>
+        {/* Действия страницы — ОДНОЙ группой у правого края. Без обёртки justify-between разносил
+            три элемента по краям и центру, и «Закрепить» повисало посреди строки. */}
+        <span className="flex shrink-0 items-center gap-2">
         <button
           type="button"
           onClick={pinMetricToHome}
@@ -743,6 +775,8 @@ export function MetricPage() {
         >
           {pinnedToHome ? '✓ На Главной' : 'Закрепить на Главной'}
         </button>
+          <MetricRailToggle />
+        </span>
       </div>
 
       {/* Headline v2 (артефакт владельца): страница ведёт ИМЕНЕМ метрики — тихая шапка, только
@@ -756,7 +790,7 @@ export function MetricPage() {
           <div className="mt-1 text-xs tracking-wide text-muted-foreground">Telegram {channelHandle}</div>
         ) : null}
         <div className="mt-2 flex flex-wrap items-baseline gap-x-2.5 gap-y-1 lg:hidden">
-          <span className="text-3xl font-medium leading-none tabular-nums tracking-tight">{meta.total}</span>
+          <KpiValue size="compact" text={meta.total} />
           <DeltaPill delta={meta.trend} />
           <span className="text-xs tracking-wide text-muted-foreground">{periodLabel}</span>
         </div>
@@ -764,8 +798,15 @@ export function MetricPage() {
       </div>
 
       {/* relative + InspectorHandle: тянущаяся ширина инспектора (см. components/InspectorHandle). */}
-      <div className="relative grid grid-cols-1 gap-6 xl:gap-7 lg:grid-cols-[minmax(0,1fr)_var(--inspector-w,280px)]">
-        <InspectorHandle defaultWidth={280} controlsId="tg-metric-inspector" />
+      <div
+        className={cn(
+          'relative grid grid-cols-1 gap-6 xl:gap-7',
+          // Свёрнутая колонка уходит ИЗ ПОТОКА: у инспектора СВОЯ тянущаяся ширина, поэтому общий
+          // MetricColumns здесь не подходит, а правило одно на все источники (см. metricRail).
+          !railHidden && 'lg:grid-cols-[minmax(0,1fr)_var(--inspector-w,280px)]',
+        )}
+      >
+        {!railHidden && <InspectorHandle defaultWidth={280} controlsId="tg-metric-inspector" />}
         {/* Main column — the big chart in four projections + contributing posts. */}
         <div className="min-w-0 space-y-6">
           {/* Chart card (артефакт: связная карточка) — заголовок + переключатель типа + меню одной
@@ -782,7 +823,7 @@ export function MetricPage() {
             noExpand
             strip
             stripToolbar
-            action={
+            action={chartTypes.length > 1 ? (
               <SegmentedControl
                 ariaLabel="Тип графика"
                 className="shrink-0"
@@ -801,7 +842,7 @@ export function MetricPage() {
                   title: CHART_TYPE_LABEL[kind],
                 }))}
               />
-            }
+            ) : undefined}
           >
             {chartType === 'line' && (
               /* Expanded context: the metric page's big chart always renders the full y-axis
@@ -810,6 +851,7 @@ export function MetricPage() {
                 <LineChart
                   values={lineChart.values}
                   labels={lineChart.labels}
+                  axisLabels={lineChart.axisLabels}
                   titles={lineChart.titles}
                   hoverTitles={hoverTitles}
                   ghostTitles={ghostTitles}
@@ -837,31 +879,21 @@ export function MetricPage() {
             {chartType === 'bar' && (
               /* Expanded context switches BarChart into its rich mode (y ticks + value labels). */
               <ChartExpandedContext.Provider value={true}>
-                {isLevel ? (
-                  // Уровень → дневное изменение (дивергентные бары вокруг нуля). Без ghost/пина —
-                  // DivergingBars их не несёт, паритет с домашней «Историей».
-                  <DivergingBars
-                    values={levelDeltas.values}
-                    labels={levelDeltas.labels}
-                    titles={levelDeltas.titles}
-                    height={chartH}
-                  />
-                ) : (
-                  <BarChart
-                    values={series.values}
-                    labels={series.labels}
-                    titles={titles}
-                    height={chartH}
-                    appearance="comparison"
-                    ghost={ghost}
-                    primaryLabel="Текущий период"
-                    ghostLabel={cmp !== 'off' ? CMP_CHIP[cmp] : undefined}
-                    comparisonStyle="stacked"
-                    legendToggle={false}
-                    onPointClick={(i) => setPinned((p) => (p === i ? null : i))}
-                    pinnedIndex={pinnedValid}
-                  />
-                )}
+                <BarChart
+                  values={series.values}
+                  labels={series.labels}
+                  axisLabels={series.axisLabels}
+                  titles={titles}
+                  height={chartH}
+                  appearance="comparison"
+                  ghost={ghost}
+                  primaryLabel="Текущий период"
+                  ghostLabel={cmp !== 'off' ? CMP_CHIP[cmp] : undefined}
+                  comparisonStyle="stacked"
+                  legendToggle={false}
+                  onPointClick={(i) => setPinned((p) => (p === i ? null : i))}
+                  pinnedIndex={pinnedValid}
+                />
               </ChartExpandedContext.Provider>
             )}
             {chartType === 'rank' && (
@@ -873,8 +905,8 @@ export function MetricPage() {
           </ChartWidget>
 
           {/* Тайм-бар — футер карточки графика (артефакт v2): гранулярность слева, пресеты окна,
-              свой диапазон и пейджер окон одной строкой под канвасом. Контролы держат единую
-              высоту (h-7) и радиусы, поэтому читаются одной панелью. Пикер открывается вниз. */}
+              свой диапазон и пейджер окон одной строкой под канвасом. На телефоне контролы
+              держат 44px touch-target, на sm+ — компактную высоту 28px. Пикер открывается вниз. */}
           <div
             data-metric-toolbar
             className="mt-3 flex flex-wrap items-center gap-2 border-t border-border pt-3 dark:border-white/6 print:hidden"
@@ -890,8 +922,8 @@ export function MetricPage() {
               }))}
             />
             <span className="flex-1" />
-            {/* Presets on the shared sliding-glider primitive; a picked custom range deselects every
-                preset (value matches nothing → the glider hides). */}
+            {/* Presets on the shared shadcn/Radix ToggleGroup; a picked custom range deselects every
+                preset. */}
             <SegmentedControl
               ariaLabel="Период"
               value={range ? '' : String(days)}
@@ -909,55 +941,63 @@ export function MetricPage() {
               <PopoverTrigger asChild>
                 <button
                   type="button"
-                  className={`inline-flex h-7 items-center rounded-full border px-3 text-xs font-medium transition-colors ${
+                  data-mobile-touch-target=""
+                  className={`inline-flex h-11 items-center rounded-full border px-3 text-xs font-medium transition-colors sm:h-7 ${
                     range ? 'border-primary/40 text-primary' : 'border-border text-muted-foreground hover:text-foreground'
                   }`}
                 >
                   Свой диапазон
                 </button>
               </PopoverTrigger>
-              <PopoverContent align="end" sideOffset={8} className="w-auto p-3">
-                <DateRangePicker
-                  value={range}
-                  onApply={(nextRange) => {
-                    setRange(nextRange);
-                    setPickerOpen(false);
-                  }}
-                  onReset={() => {
-                    setRange(null);
-                    setPickerOpen(false);
-                  }}
-                />
+              <PopoverContent align="end" sideOffset={8} className="w-auto p-0">
+                <Suspense fallback={<Skeleton className="h-80 w-80 rounded-none" />}>
+                  <DateRangePicker
+                    value={range}
+                    onApply={(nextRange) => {
+                      setRange(nextRange);
+                      setPickerOpen(false);
+                    }}
+                    onReset={() => {
+                      setRange(null);
+                      setPickerOpen(false);
+                    }}
+                  />
+                </Suspense>
               </PopoverContent>
             </Popover>
             {range && (
               <button
                 type="button"
+                data-mobile-touch-target=""
                 onClick={() => setRange(null)}
                 title="Сбросить произвольный период"
-                className="inline-flex h-7 items-center gap-1 rounded-full border border-primary/40 bg-primary/10 px-3 text-xs font-medium text-primary"
+                className="inline-flex h-11 items-center gap-1 rounded-full border border-primary/40 bg-primary/10 px-3 text-xs font-medium text-accent-foreground sm:h-7"
               >
                 {fmt.day(range.from)} – {fmt.day(range.to)} <span aria-hidden="true">×</span>
               </button>
             )}
             {/* Пейджер окон — единой пилюлей с бордером (как одна двухкнопочная деталь тулбара). */}
-            <div className="inline-flex h-7 items-center rounded-full border border-border">
+            {/* The 1px border subtracts 2px from the content box; 46px keeps each h-full child at
+                the required 44px touch height while preserving the single outlined pager. */}
+            <div className="inline-flex h-[46px] items-center rounded-full border border-border sm:h-7">
               <button
                 type="button"
+                data-mobile-touch-target=""
                 onClick={() => shiftWindow(-1)}
                 disabled={winFrom == null}
                 aria-label="Предыдущее окно"
-                className="inline-flex h-full items-center rounded-l-full px-2 text-sm text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+                className="inline-flex h-full min-w-11 items-center justify-center rounded-l-full px-2 text-sm text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none disabled:opacity-40 sm:min-w-0"
               >
                 ‹
               </button>
               <span aria-hidden="true" className="h-4 w-px bg-border" />
               <button
                 type="button"
+                data-mobile-touch-target=""
                 onClick={() => shiftWindow(1)}
                 disabled={!range}
                 aria-label="Следующее окно"
-                className="inline-flex h-full items-center rounded-r-full px-2 text-sm text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+                className="inline-flex h-full min-w-11 items-center justify-center rounded-r-full px-2 text-sm text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none disabled:opacity-40 sm:min-w-0"
               >
                 ›
               </button>
@@ -1014,11 +1054,12 @@ export function MetricPage() {
                             <span className="min-w-0 flex-1 truncate text-foreground">{a.label}</span>
                             <button
                               type="button"
+                              data-mobile-touch-target=""
                               aria-label={`Удалить событие «${a.label}»`}
                               title="Удалить событие"
                               disabled={annBusy}
                               onClick={() => void removeAnnotation(a.id)}
-                              className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-destructive disabled:opacity-40"
+                              className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-destructive disabled:opacity-40 sm:h-6 sm:w-6"
                             >
                               <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
                                 <path d="M6 6l12 12M18 6 6 18" strokeLinecap="round" />
@@ -1036,16 +1077,18 @@ export function MetricPage() {
                       }}
                     >
                       <input
+                        data-mobile-touch-target=""
                         value={annLabel}
                         onChange={(e) => setAnnLabel(e.target.value)}
                         maxLength={80}
                         placeholder="Отметить событие дня — реклама, пост-хит…"
-                        className="h-9 min-w-0 flex-1 rounded-lg border border-border bg-card px-3 text-xs text-foreground outline-hidden placeholder:text-muted-foreground focus:ring-2 focus:ring-primary/40"
+                        className="h-11 min-w-0 w-full rounded-lg border border-border bg-card px-3 text-xs text-foreground outline-hidden placeholder:text-muted-foreground focus:ring-2 focus:ring-primary/40 sm:h-9 sm:w-auto sm:flex-1"
                       />
                       <button
                         type="submit"
+                        data-mobile-touch-target=""
                         disabled={!annLabel.trim() || annBusy}
-                        className="btn-pill inline-flex h-9 shrink-0 items-center justify-center border border-border px-3 text-xs font-medium text-foreground transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-40"
+                        className="btn-pill inline-flex h-11 shrink-0 items-center justify-center border border-border px-3 text-xs font-medium text-foreground transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-40 sm:h-9"
                       >
                         ⚑ Отметить
                       </button>
@@ -1065,7 +1108,7 @@ export function MetricPage() {
               <header className="flex items-end justify-between gap-3 border-b border-border px-4 py-4 sm:px-5">
                 <div className="min-w-0">
                   <div className="text-2xs font-medium tracking-wide text-muted-foreground">Публикации</div>
-                  <h3 className="mt-1 truncate text-sm font-semibold tracking-tight text-foreground">
+                  <h3 className="mt-1 truncate text-sm font-medium tracking-tight text-foreground">
                     Топ постов по {CONTRIB_LABEL[metricKey] ?? 'метрике'}
                   </h3>
                 </div>
@@ -1118,11 +1161,11 @@ export function MetricPage() {
                             >
                               <span
                                 className={cn(
-                                  'flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-2xs font-semibold tabular-nums',
+                                  'flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-2xs font-medium tabular-nums',
                                   i === 0
                                     ? 'bg-primary text-primary-foreground'
                                     : i < 3
-                                      ? 'bg-primary/10 text-primary'
+                                      ? 'bg-primary/10 text-accent-foreground'
                                       : 'text-muted-foreground',
                                 )}
                               >
@@ -1154,7 +1197,7 @@ export function MetricPage() {
                                 </span>
                               </span>
                               <span className="min-w-15 shrink-0 text-right sm:min-w-0">
-                                <span className="block text-sm font-semibold tabular-nums text-foreground">
+                                <span className="block text-sm font-medium tabular-nums text-foreground">
                                   {fmt.short(value)}
                                 </span>
                                 {share > 0 && (
@@ -1189,11 +1232,17 @@ export function MetricPage() {
         {/* Composer rail (артефакт): аналитические карточки вместо волосяных секций у бордюра.
             «Сравнение» первым и с явной иерархией — итог окна доминирует, база и Δ вторичны;
             ниже — Разбивка и «О метрике» той же карточной иерархией. */}
-        <aside id="tg-metric-inspector" className="space-y-4">
-          <RailSection title="Сравнение" mark="comparison" variant="card">
-            {/* Итог окна — доминанта карточки (hero переехал сюда после тихой шапки). */}
-            <div className="text-2xs tracking-wide text-muted-foreground">Текущий период</div>
-            <div className="mt-1 text-3xl font-medium leading-none tabular-nums text-foreground">{meta.total}</div>
+        {/* Панель НЕ выбрасывается из разметки: она гаснет только на широком экране, как это делает
+            общий MetricColumns. Пока её снимали совсем, на ноутбуке в половину экрана и на телефоне
+            вместе с ней исчезала и кнопка возврата — итог окна, база сравнения, разбивка и «О
+            метрике» пропадали, и вернуть их можно было только через чистку хранилища браузера. */}
+        <aside id="tg-metric-inspector" className={cn('space-y-6', railHidden && 'lg:hidden')}>
+          {/* Рейл — ТОГО ЖЕ ВИДА, что у остальных четырёх вертикалей (аудит #554, D12). Карточная
+              подача была только здесь: IG, Метрика, Rusender и упоминания всегда рисовали рейл flat,
+              и одна сущность в двух макетах читалась как две разные. */}
+          <RailSection title="Сравнение" mark="comparison">
+            {/* Итог окна — доминанта рейла (hero переехал сюда после тихой шапки); разметка общая. */}
+            <RailWindowTotal label="Текущий период" value={meta.total} />
             {winFrom == null ? (
               <p className="mt-3 text-xs text-muted-foreground">Для окна «Всё» прошлого периода не существует.</p>
             ) : (
@@ -1212,17 +1261,13 @@ export function MetricPage() {
                   <p className="text-xs text-muted-foreground">Выберите базу — серия сравнения, пары в рейтинге и Δ появятся автоматически.</p>
                 ) : compare ? (
                   <div className="space-y-3">
-                    {/* Значение базы — вторичный вес; Δ — цветной бейдж (прирост/спад). */}
+                    {/* Значение базы — вторичный вес; Δ — общая строка «Изменение» (одна на все
+                        вертикали): цветной ТЕКСТ без заливки, направление в глифе. */}
                     <div className="flex items-baseline justify-between gap-3">
                       <span className="text-xs text-muted-foreground">{cmpLabel}</span>
                       <span className="text-base font-medium tabular-nums text-ink2">{compare.previous}</span>
                     </div>
-                    {compareDelta != null && (
-                      <div className="flex items-center justify-between gap-3 border-t border-border pt-3 dark:border-white/6">
-                        <span className="text-xs text-muted-foreground">Изменение</span>
-                        <DeltaBadge value={compareDelta} />
-                      </div>
-                    )}
+                    {compareDelta != null && <ComparisonDeltaRow delta={compareDelta} />}
                   </div>
                 ) : (
                   <p className="text-xs text-muted-foreground">
@@ -1234,7 +1279,7 @@ export function MetricPage() {
           </RailSection>
 
           {field && (
-            <RailSection title="Разбивка" mark="breakdown" variant="card">
+            <RailSection title="Разбивка" mark="breakdown">
               <SegSelect
                 ariaLabel="Измерение разбивки"
                 value={dim}
@@ -1248,14 +1293,8 @@ export function MetricPage() {
             </RailSection>
           )}
 
-          <RailSection title="О метрике" mark="about" variant="card">
-            <dl className="space-y-3 text-sm">
-              {def.formula && <AboutRow label="Как считается" text={def.formula} />}
-              {def.included && <AboutRow label="Что учитывается" text={def.included} />}
-              {def.source && <AboutRow label="Источник" text={def.source} />}
-            </dl>
-          </RailSection>
-
+          {/* Блок «О метрике» (формула/источник) убран со всех детальных страниц — техническая
+              информация не для конечного пользователя (владелец, 2026-07-27). */}
           <Link
             to="/analytics"
             className="inline-flex items-center gap-1 text-xs font-medium text-primary transition-colors hover:text-primary/80"
@@ -1274,32 +1313,6 @@ export function MetricPage() {
         />
       )}
     </div>
-  );
-}
-
-/** Bounded segmented control for the rail selects (dimension / comparison baseline) — a thin,
-    full-width wrapper over the shared {@link SegmentedControl} so the rail matches every other
-    segmented group by construction. */
-export function SegSelect<T extends string>({
-  value,
-  onChange,
-  options,
-  ariaLabel,
-}: {
-  value: T;
-  onChange: (next: T) => void;
-  options: { value: T; label: string }[];
-  ariaLabel: string;
-}) {
-  return (
-    <SegmentedControl
-      ariaLabel={ariaLabel}
-      className="mb-3 w-full"
-      segmentClassName="px-2"
-      value={value}
-      onChange={onChange}
-      options={options.map((opt) => ({ value: opt.value, content: opt.label }))}
-    />
   );
 }
 
@@ -1337,23 +1350,6 @@ function ChartTypeIcon({ kind }: { kind: 'line' | 'bar' | 'rank' | 'pivot' }) {
         </svg>
       )}
     </>
-  );
-}
-
-/** Colour-coded change badge for the comparison card — the one evaluated Δ that leans on tone
-    (gain = verdant, loss = ember); direction also rides the ▲/▼ glyph for colour-blind safety. */
-function DeltaBadge({ value }: { value: number }) {
-  const up = value > 0;
-  const down = value < 0;
-  return (
-    <span
-      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium tabular-nums ${
-        up ? 'bg-verdant/10 text-verdant' : down ? 'bg-ember/10 text-ember' : 'bg-muted text-muted-foreground'
-      }`}
-    >
-      <span aria-hidden="true">{up ? '▲' : down ? '▼' : '—'}</span>
-      {Math.abs(value).toFixed(1)}%
-    </span>
   );
 }
 

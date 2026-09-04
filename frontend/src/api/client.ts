@@ -1,6 +1,5 @@
 import type { z } from 'zod';
 import { getSelectedChannel } from '@/lib/channel';
-import { getSessionToken, setSessionToken } from '@/lib/session';
 import { isDemoMode } from '@/lib/demo';
 import { demoFixture } from '@/lib/demoFixtures';
 
@@ -10,6 +9,9 @@ export class ApiError extends Error {
   retryAfter?: number;
   /** Запрос не дошёл до сервера (обрыв сети/DNS/офлайн) — ретраится как 5xx, см. main.tsx. */
   network?: boolean;
+  /** Машинный код ошибки от сервера (snake_case), когда ответ нужно РАЗЛИЧАТЬ, а не просто показать:
+   *  'ig_reauth' = токен Instagram истёк. Текст сообщения для этого негодный ключ. */
+  code?: string;
   constructor(status: number, message: string, retryAfter?: number) {
     super(message);
     this.name = 'ApiError';
@@ -54,10 +56,14 @@ function isMachineErrorCode(value: string): boolean {
 async function readApiError(res: Response): Promise<ApiError> {
   let message = humanHttpMessage(res.status);
   let retryAfter: number | undefined;
+  let code: string | undefined;
   try {
     const body = await res.json();
     // Машинный код оставляем серверу (логи/мониторинг), пользователю — фолбэк по статусу.
     if (body && typeof body.error === 'string' && !isMachineErrorCode(body.error)) message = body.error;
+    // Отдельное поле `code` — не текст для человека, а ключ состояния: по нему экран решает,
+    // показать «переподключите Instagram» или общий ErrorState.
+    if (body && typeof body.code === 'string' && isMachineErrorCode(body.code)) code = body.code;
     const rawRetry = body && body.retry_after;
     const parsedRetry = rawRetry === '' || rawRetry == null ? NaN : Number(rawRetry);
     if (Number.isFinite(parsedRetry) && parsedRetry >= 0) retryAfter = parsedRetry;
@@ -69,7 +75,9 @@ async function readApiError(res: Response): Promise<ApiError> {
     const header = rawHeader == null ? NaN : Number(rawHeader);
     if (Number.isFinite(header) && header >= 0) retryAfter = header;
   }
-  return new ApiError(res.status, message, retryAfter);
+  const error = new ApiError(res.status, message, retryAfter);
+  if (code) error.code = code;
+  return error;
 }
 
 /**
@@ -86,6 +94,8 @@ export interface ApiOptions {
   signal?: AbortSignal;
   channelId?: number | null;
 }
+
+export type ApiWriteMethod = 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
 function parseResponse<S extends z.ZodTypeAny>(
   method: string,
@@ -121,41 +131,25 @@ async function fetchApi(path: string, init: RequestInit): Promise<Response> {
 
 function buildHeaders(channelId: number | null): Record<string, string> {
   const headers: Record<string, string> = { Accept: 'application/json' };
-  const token = getSessionToken();
-  if (token) headers['X-Session-Token'] = token;
   if (channelId != null) headers['X-Channel-Id'] = String(channelId);
   return headers;
 }
 
 /**
- * Sliding session: past its half-life the server re-issues a fresh token on the `X-Session-Refresh`
- * response header (see server requireAuth). Persist it so an active user's idle window keeps sliding
- * forward and they are never logged out mid-work. Same-origin fetch → the header is readable.
- */
-function persistSessionRefresh(res: Response): void {
-  const fresh = res.headers.get('X-Session-Refresh');
-  // Продлеваем ТОЛЬКО живую сессию: после logout / удаления аккаунта (clearSessionToken)
-  // in-flight ответ, долетевший тиком позже, не должен воскрешать токен своим
-  // refresh-заголовком (тихая ре-аутентификация до hard reload). JS в табе однопоточный —
-  // между проверкой и записью clear вклиниться не может.
-  if (fresh && getSessionToken()) setSessionToken(fresh);
-}
-
-/**
- * Typed GET against the existing Express API. Auth mirrors the legacy dashboard: the
- * HMAC session token lives in localStorage (shared with '/' — same origin) and is sent
- * as the `X-Session-Token` header (NOT a cookie). The JSON is then validated/narrowed
- * through a Zod schema so the return type is inferred — no `any` leaks into panels.
+ * Typed GET against the existing Express API. Authentication is the same-origin
+ * HttpOnly cookie carried by fetch; browser JavaScript never receives the token.
+ * JSON is validated/narrowed through a Zod schema so no `any` leaks into panels.
  */
 export async function apiGet<S extends z.ZodTypeAny>(
   path: string,
   schema: S,
   opts: ApiOptions = {},
 ): Promise<z.infer<S>> {
-  // Demo mode: serve bundled sample data for covered endpoints; anything not covered (Instagram,
-  // auth) falls through to the real server below.
+  // Demo mode: serve bundled sample data for covered endpoints; anything not covered (auth, media
+  // proxy) falls through to the real server below. await — IG-ветка фикстур лениво подгружает свой
+  // модуль отдельным чанком (bundle-size бюджеты роутов) и потому отвечает промисом.
   if (isDemoMode()) {
-    const fixture = demoFixture(path);
+    const fixture = await demoFixture(path);
     if (fixture !== undefined) return parseResponse('GET', path, schema, fixture);
   }
   const channelId = opts.channelId !== undefined ? opts.channelId : getSelectedChannel();
@@ -167,31 +161,25 @@ export async function apiGet<S extends z.ZodTypeAny>(
   if (!res.ok) {
     throw await readApiError(res);
   }
-  persistSessionRefresh(res);
   const data: unknown = await res.json();
   return parseResponse('GET', path, schema, data);
 }
 
 /**
- * Typed write (POST/PATCH/DELETE) against the API. Same auth as apiGet (X-Session-Token).
+ * Typed write (POST/PATCH/DELETE) against the API. Same cookie auth as apiGet.
  * JSON body when provided; validates the response through the given Zod schema. Throws
  * ApiError (with .status + server `error` message) on non-2xx.
  */
 export async function apiSend<S extends z.ZodTypeAny>(
-  method: string,
+  method: ApiWriteMethod,
   path: string,
   body: unknown,
   schema: S,
-  opts?: ApiOptions,
-): Promise<z.infer<S>>;
-export async function apiSend(method: string, path: string, body?: unknown): Promise<unknown>;
-export async function apiSend(
-  method: string,
-  path: string,
-  body?: unknown,
-  schema?: z.ZodTypeAny,
   opts: ApiOptions = {},
-): Promise<unknown> {
+): Promise<z.infer<S>> {
+  // No untyped overload by design: every successful write response crosses the same runtime
+  // contract boundary as apiGet. A 204 becomes null and must be accepted explicitly by the
+  // caller's schema instead of silently widening to unknown.
   // Demo mode is read-only: block writes (except auth, so login/logout still work) with a clear
   // message rather than silently no-op'ing or hitting the server.
   if (isDemoMode() && !path.startsWith('/api/auth/')) {
@@ -208,8 +196,37 @@ export async function apiSend(
   if (!res.ok) {
     throw await readApiError(res);
   }
-  persistSessionRefresh(res);
-  if (res.status === 204) return null;
-  const data: unknown = await res.json().catch(() => null);
-  return schema ? parseResponse(method, path, schema, data) : data;
+  const data: unknown = res.status === 204 ? null : await res.json().catch(() => null);
+  return parseResponse(method, path, schema, data);
+}
+
+/**
+ * Загрузка ФАЙЛА сырым телом (`application/octet-stream`), имя — заголовком `X-Filename`.
+ * Отдельный вход, а не ветка apiSend: тот по построению сериализует тело в JSON, а файл на
+ * 10 МБ через base64 распух бы на треть. Multipart не берём — ради одного поля он потребовал бы
+ * зависимости и на сервере, и здесь. Ответ проходит тот же Zod-контракт, что у остальных записей.
+ */
+export async function apiUpload<S extends z.ZodTypeAny>(
+  path: string,
+  file: File,
+  schema: S,
+  opts: ApiOptions = {},
+): Promise<z.infer<S>> {
+  if (isDemoMode()) throw new ApiError(400, 'Действие недоступно в демо-режиме');
+  const channelId = opts.channelId !== undefined ? opts.channelId : getSelectedChannel();
+  const headers = buildHeaders(channelId);
+  headers['Content-Type'] = 'application/octet-stream';
+  // Имя файла едет заголовком, а значит обязано быть латиницей по HTTP: кириллическое
+  // «выгрузка.xlsx» ломает заголовок, поэтому кодируем и раскодируем на сервере.
+  headers['X-Filename'] = encodeURIComponent(file.name);
+  const res = await fetchApi(path, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers,
+    body: file,
+    signal: opts.signal,
+  });
+  if (!res.ok) throw await readApiError(res);
+  const data: unknown = res.status === 204 ? null : await res.json().catch(() => null);
+  return parseResponse('POST', path, schema, data);
 }

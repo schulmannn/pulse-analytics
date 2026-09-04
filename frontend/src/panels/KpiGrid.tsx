@@ -1,18 +1,24 @@
 import { useMemo } from 'react';
 import type { ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { KpiNumber } from '@/components/KpiNumber';
+import { ChartBand } from '@/components/ChartBand';
 import { useChannels, useHistory, useTgFull } from '@/api/queries';
 import { useSelectedChannel } from '@/lib/channel-context';
-import { fmt } from '@/lib/format';
+import { lttbDownsample } from '@/lib/downsample';
+import { CHART_MAX_POINTS } from '@/lib/msSeries';
+import { fmt, timeAxisFromDayKeys } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { ErrorState } from '@/components/ErrorState';
 import { Sparkline } from '@/components/Sparkline';
+import { BarChart } from '@/components/BarChart';
 import { MetricInfo } from '@/components/InfoTooltip';
 import { DeltaPill } from '@/components/DeltaPill';
 import { Skeleton } from '@/components/ui/skeleton';
-import { ChartCardBody } from '@/components/ChartWidget';
-import { CompactStatHeadline } from '@/components/CompareStat';
-import { usePagePeriod, useWidgetPeriod, widgetPeriodValue } from '@/lib/period';
+import { ChartCardBody, seriesRange } from '@/components/ChartWidget';
+import type { RangeSummary } from '@/components/ChartWidget';
+import { StackedStat, CompactStatHeadline } from '@/components/CompareStat';
+import { useCardShowsPeriod, usePagePeriod, useWidgetPeriod, widgetPeriodValue } from '@/lib/period';
 import { useWidgetInView } from '@/lib/widgetViewport';
 import type { MetricDelta } from '@/lib/delta';
 import { getDrillMetric, type MetricDef } from '@/lib/widgetMetrics';
@@ -62,12 +68,6 @@ function CompactSkeleton() {
   );
 }
 
-/** Split a formatted value ("7.9k" / "8.20%") into [number, unit] so the unit reads quieter. */
-function splitUnit(value: string): [string, string] {
-  const match = value.match(/^([\d\s.,]+)(.*)$/);
-  return match ? [match[1], match[2]] : [value, ''];
-}
-
 /**
  * Telegram KPI cards with a clear hierarchy: two featured metrics (large number + gradient
  * sparkline) lead, the rest follow as a compact stat strip with trend-coloured sparklines.
@@ -101,6 +101,7 @@ export function KpiGrid() {
         trend={viewsTrend}
         caption={viewsCaption}
         spark={viewsSpark}
+        range={seriesRange(viewsSpark?.values)}
         info={getDrillMetric('views')}
         onDrill={() => openMetric('views')}
       />
@@ -113,7 +114,7 @@ export function KpiGrid() {
         <StatTile label="Реакции" value={fmt.kpi(totalReactions)} trend={reactionsTrend} deltaText={reactionsDelta} info={getDrillMetric('reactions')} onDrill={() => openMetric('reactions')} />
         <StatTile
           label="Вовлечённость"
-          value={er > 0 ? er.toFixed(2) + '%' : '—'}
+          value={er > 0 ? fmt.pctAbs(er) : '—'}
           trend={erTrend}
           deltaText={erCaption}
           info={getDrillMetric('er')}
@@ -131,9 +132,12 @@ export function KpiGrid() {
  * compact TG cards below carry their own active-window publication-date sparklines — see
  * TgTrendStat.)
  */
-export function TgViewsBody({ state }: { state: TgKpiState }) {
+export function TgViewsBody({ state, viz }: { state: TgKpiState; viz?: 'line' | 'bar' }) {
   const { derived, isPending, isError, error } = state;
   const navigate = useNavigate();
+  // На ленте окно уже стоит полосой в шапке страницы — повтор в подписи только шумит (владелец).
+  // На Главной страничного периода нет, там подпись остаётся единственным ответом «за что число».
+  const showPeriod = useCardShowsPeriod();
   if (isPending) return <ViewsSkeleton />;
   if (isError) {
     return <ErrorState title="Не удалось загрузить метрики" reason={error instanceof Error ? error.message : 'ошибка'} />;
@@ -141,11 +145,16 @@ export function TgViewsBody({ state }: { state: TgKpiState }) {
   const { channelViews, viewsTrend, viewsCaption, viewsSpark, periodLabel } = derived;
   return (
     <FeaturedKpi
-      label={`Просмотры · ${periodLabel}`}
+      label={showPeriod ? `Просмотры · ${periodLabel}` : 'Просмотры'}
+      // Без периода подпись схлопывается в голое «Просмотры» — дубль заголовка карточки. Текст
+      // уходит в sr-only (имя для скринридера остаётся), слот держит ⓘ на прежнем месте.
+      labelHidden={!showPeriod}
       value={fmt.kpi(channelViews)}
       trend={viewsTrend}
       caption={viewsCaption}
       spark={viewsSpark}
+      range={seriesRange(viewsSpark?.values)}
+      viz={viz}
       info={getDrillMetric('views')}
       onDrill={() => navigate('/metrics/views')}
     />
@@ -153,7 +162,7 @@ export function TgViewsBody({ state }: { state: TgKpiState }) {
 }
 
 /** «Ср. охват» — average views per post; the active-window publication-date sparkline below. */
-export function TgAvgReachBody({ state }: { state: TgKpiState }) {
+export function TgAvgReachBody({ state, viz }: { state: TgKpiState; viz?: 'line' | 'bar' }) {
   const { derived, isPending, isError } = state;
   const navigate = useNavigate();
   if (isPending) return <CompactSkeleton />;
@@ -164,6 +173,7 @@ export function TgAvgReachBody({ state }: { state: TgKpiState }) {
       value={avgViews}
       delta={avgReachTrend}
       spark={avgReachSpark}
+      viz={viz}
       format={(n) => fmt.short(Math.round(n))}
       hasValue={normPosts.length > 0}
       onDrill={() => navigate('/metrics/avgReach')}
@@ -173,7 +183,7 @@ export function TgAvgReachBody({ state }: { state: TgKpiState }) {
 }
 
 /** «Реакции» — total reactions; the active-window publication-date sparkline below. */
-export function TgReactionsBody({ state }: { state: TgKpiState }) {
+export function TgReactionsBody({ state, viz }: { state: TgKpiState; viz?: 'line' | 'bar' }) {
   const { derived, isPending, isError } = state;
   const navigate = useNavigate();
   if (isPending) return <CompactSkeleton />;
@@ -184,6 +194,7 @@ export function TgReactionsBody({ state }: { state: TgKpiState }) {
       value={totalReactions}
       delta={reactionsTrend}
       spark={reactionsSpark}
+      viz={viz}
       format={(n) => fmt.short(Math.round(n))}
       hasValue={normPosts.length > 0}
       onDrill={() => navigate('/metrics/reactions')}
@@ -192,22 +203,34 @@ export function TgReactionsBody({ state }: { state: TgKpiState }) {
   );
 }
 
-/** «Вовлечённость» — ER headline; the active-window publication-date sparkline below (percent). */
+/** «Вовлечённость» — ER в той же анатомии, что у соседей по ряду (аудит #554, D9):
+    число с дельтой слева, пояснение внизу. Центрирование снято — см. StackedStat. */
 export function TgErBody({ state }: { state: TgKpiState }) {
   const { derived, isPending, isError } = state;
   const navigate = useNavigate();
   if (isPending) return <CompactSkeleton />;
   if (isError) return <ErrorState title="Не удалось загрузить" reason="ошибка" />;
-  const { er, erTrend, erSpark, members, normPosts } = derived;
+  const { er, erTrend, erCaption, members, normPosts } = derived;
+  const live = members > 0 && normPosts.length > 0 && er != null && Number.isFinite(er);
+  // БЕЗ искры. ER — это вовлечение, делённое на аудиторию, а аудитория за окно меняется на
+  // проценты, тогда как вовлечение — в десятки раз. Значит нормализованная по min–max кривая ER
+  // повторяет кривую «Реакций» почти в точности (замерено на проде: корреляция 0.996 при
+  // расхождении форм 5.4% высоты плота — меньше двух пикселей на искре 200×32). Соседняя карточка
+  // уже показывает эту форму. Дельта — в честных «п.п.» (erCaption), не в относительных процентах.
   return (
-    <TgTrendStat
-      value={er}
+    <StackedStat
+      text={live ? fmt.pctAbs(er as number) : '—'}
       delta={erTrend}
-      spark={erSpark}
-      format={(n) => `${n.toFixed(2)}%`}
-      hasValue={members > 0 && normPosts.length > 0}
+      deltaText={erCaption}
       onDrill={() => navigate('/metrics/er')}
       drillLabel="Вовлечённость"
+      live={live}
+      note={
+        <>
+          Реакции, репосты и комментарии к постам периода — к текущей базе подписчиков.
+          {live && normPosts.length > 0 ? ` По ${normPosts.length} публикациям.` : ''}
+        </>
+      }
     />
   );
 }
@@ -220,6 +243,13 @@ export function TgErBody({ state }: { state: TgKpiState }) {
  * coverage. ≥2 publication-day buckets draw it (caption «по датам публикаций»); fewer keep the
  * headline and say so. NOT shared with Instagram — its CompareStat cards are untouched.
  */
+/**
+ * `viz` — то, что кормит «Линия»/«Столбцы» в редакторе карточки. Переключатель типа графика на
+ * карточках фида это НЕ отдельный контрол: `EditWidgetDialog` уже показывает VariantCarousel, как
+ * только карточка объявит два варианта, — до сих пор эти KPI-карточки не объявляли ни одного, и
+ * карусели нечего было показывать (владелец: «не любой график можно настроить на bar или line»).
+ * Анатомия карточки при смене не едет: меняется только примитив под хедлайном.
+ */
 function TgTrendStat({
   value,
   delta,
@@ -228,6 +258,7 @@ function TgTrendStat({
   onDrill,
   drillLabel,
   hasValue = true,
+  viz = 'line',
 }: {
   value: number | null;
   delta?: MetricDelta | null;
@@ -236,6 +267,7 @@ function TgTrendStat({
   onDrill?: () => void;
   drillLabel?: string;
   hasValue?: boolean;
+  viz?: 'line' | 'bar';
 }) {
   const live = hasValue && value != null && Number.isFinite(value);
   const hasChart = live && spark.values.length >= 2;
@@ -248,14 +280,31 @@ function TgTrendStat({
         drillLabel={drillLabel}
         live={live}
       />
-      {hasChart ? (
+      {hasChart && viz === 'bar' ? (
+        <ChartBand>
+          <BarChart
+            values={spark.values}
+            labels={spark.labels}
+            axisLabels={spark.axisLabels}
+            // Тултип столбца несёт ту же пару «дата · значение», что ховер-тултип искры.
+            // Пропуск (день окна без публикаций, «вариант 2» 2026-08-14) подписывается словами.
+            titles={spark.values.map((v, i) =>
+              v == null ? `${spark.labels[i] ?? ''}: нет публикаций` : `${spark.labels[i] ?? ''}: ${format(v)}`,
+            )}
+            formatValue={format}
+          />
+        </ChartBand>
+      ) : hasChart ? (
         <Sparkline
           values={spark.values}
           labels={spark.labels}
+          axisLabels={spark.axisLabels}
           area
           strokeWidth={2}
           interactive
-          caption="по датам публикаций"
+          // caption="" — резервирует строку оси; ховер-детали несёт плавающий тултип, idle-подпись
+          // «по датам публикаций» убрана (владелец: лишняя строка на лице карточки).
+          caption=""
           formatValue={format}
           className="h-full min-h-14 w-full"
         />
@@ -281,44 +330,93 @@ function ViewsSkeleton() {
 
 interface FeaturedKpiProps {
   label: string;
+  /** Подпись остаётся только для AT (визуально скрыта) — когда она дублирует заголовок карточки. */
+  labelHidden?: boolean;
   value: string;
   trend?: MetricDelta | null;
   caption?: string | null;
   spark?: DailySeries;
   info?: MetricDef;
   onDrill?: () => void;
+  /** «Линия» / «Столбцы» из карусели вариантов карточки — см. TgTrendStat. */
+  viz?: 'line' | 'bar';
+  /** Мин/макс окна (только потоковые серии — см. seriesRange). */
+  range?: RangeSummary | null;
 }
 
 /** Hero KPI — the steep card anatomy (owner rule): label + big number + comparison pinned
     bottom-LEFT, the area sparkline filling the width to the RIGHT of the number block. The ledger
     below is untouched — the hero zone just turned horizontal. */
-function FeaturedKpi({ label, value, trend, caption, spark, info, onDrill }: FeaturedKpiProps) {
+function FeaturedKpi({ label, labelHidden = false, value, trend, caption, spark, info, onDrill, viz = 'line', range }: FeaturedKpiProps) {
+  // Кап длинной серии перед рендером (канон CLAUDE.md): на окне «Всё» архивный viewsSpark несёт
+  // до 730 дневных точек — в 200×32-спарклайне это суб-пиксельная мазня. Пары {value,label}
+  // прореживаются ВМЕСТЕ, чтобы hover-читалка называла именно отобранные LTTB точки; хедлайн,
+  // дельта и caption считаются от полного окна в deriveKpis и капом не затрагиваются.
+  const sparkShown = useMemo(() => {
+    if (!spark || spark.values.length <= CHART_MAX_POINTS) return spark;
+    // Пропуски (null) при LTTB-капе отбрасываются вместе с подписями: viewsSpark их не несёт
+    // (архив/пост-фолбэк), а прореживать «дырку» алгоритму нечем. Ось пересчитывается ПО КЛЮЧАМ
+    // выбранных точек (timeAxisFromDayKeys): длинное окно после капа несёт EN-месяцы, а не даты.
+    const rows = spark.values.flatMap((value, i) =>
+      value == null ? [] : [{ value, label: spark.labels[i] ?? '', key: spark.dayKeys?.[i] }],
+    );
+    const sampled = lttbDownsample(rows, CHART_MAX_POINTS, (r) => r.value);
+    return {
+      labels: sampled.map((r) => r.label),
+      values: sampled.map((r) => r.value),
+      axisLabels: timeAxisFromDayKeys(sampled.map((r) => r.key)),
+    };
+  }, [spark]);
   return (
     <ChartCardBody
-      hero
       label={
         <span className="flex items-center gap-1">
-          {label}
-          {info && <MetricInfo def={info} />}
+          {/* sr-only абсолютно спозиционирован — из flex-потока выпадает, gap перед ⓘ не растёт. */}
+          <span className={labelHidden ? 'sr-only' : undefined}>{label}</span>
+          {/* При скрытой подписи ⓘ переезжает к числу (valueAdornment) — одна в пустой строке
+              над числом она читалась как случайный артефакт. */}
+          {info && !labelHidden && <MetricInfo def={info} />}
         </span>
       }
+      valueAdornment={info && labelHidden ? <MetricInfo def={info} /> : undefined}
       value={value}
       delta={trend}
+      range={range}
       caption={caption ?? undefined}
       onValueClick={onDrill}
       drillLabel={label}
     >
-      {spark && spark.values.length > 1 ? (
+      {sparkShown && sparkShown.values.length > 1 && viz === 'bar' ? (
+        <div className="min-h-28 w-full flex-1">
+          <BarChart
+            values={sparkShown.values}
+            labels={sparkShown.labels}
+            axisLabels={sparkShown.axisLabels}
+            titles={sparkShown.values.map((v, i) => `${sparkShown.labels[i] ?? ''}: ${fmt.num(v)}`)}
+            formatValue={fmt.num}
+          />
+        </div>
+      ) : sparkShown && sparkShown.values.length > 1 ? (
         <Sparkline
-          values={spark.values}
-          labels={spark.labels}
+          values={sparkShown.values}
+          labels={sparkShown.labels}
+          axisLabels={sparkShown.axisLabels}
           area
           strokeWidth={2}
           interactive
+          // caption="" включает зарезервированную строку под графиком: в покое там ось X, при
+          // наведении — читалка «дата · значение · Δ». Без пропа строки нет вовсе, и этот герой
+          // был единственной интерактивной искрой в продукте БЕЗ читалки — паритет с IG-твином
+          // KpiHero и компактными карточками восстановлен заодно.
+          caption=""
           formatValue={fmt.num}
           className="h-full min-h-28 w-full"
         />
-      ) : null}
+      ) : (
+        // Честное пустое состояние (канон п.8): молчаливый null оставлял пустую полосу без
+        // объяснения — соседние компакт-карточки (TgTrendStat) говорят то же словами.
+        <p className="self-center text-2xs text-muted-foreground">Недостаточно дней для графика.</p>
+      )}
     </ChartCardBody>
   );
 }
@@ -369,7 +467,6 @@ interface StatTileProps {
  * gap-px over a bg-border container draws the 1px dividers; the cell sits on the paper canvas.
  */
 function StatTile({ label, value, trend, deltaText, info, onDrill }: StatTileProps) {
-  const [num, unit] = splitUnit(value);
   // No per-cell background/border now — cells separate by grid SPACING. A drillable cell gets a
   // quiet rounded hover surface; vertical-only padding so it never widens the grid (a horizontal
   // negative-margin bleed overflowed the card by ~12px on the edge cells).
@@ -386,13 +483,13 @@ function StatTile({ label, value, trend, deltaText, info, onDrill }: StatTilePro
       </div>
       <div className="mt-1.5 flex items-baseline gap-2">
         <DrillValue label={label} onDrill={onDrill} className="text-2xl font-medium tabular-nums tracking-tight">
-          {num}
-          {unit ? <span className="text-base font-medium text-muted-foreground">{unit}</span> : null}
+          {/* KpiNumber сам делит строку на число и тихий юнит — раньше это делал splitUnit. */}
+          <KpiNumber text={value} unitClassName="text-base font-medium text-muted-foreground" />
         </DrillValue>
         {deltaText ? (
           <span className={cn('shrink-0 text-xs font-medium tabular-nums', deltaColor)}>{deltaText}</span>
         ) : (
-          <DeltaPill delta={trend} subtle />
+          <DeltaPill delta={trend} />
         )}
       </div>
     </div>

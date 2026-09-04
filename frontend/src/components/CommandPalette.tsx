@@ -1,21 +1,27 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import type { ReactNode } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useChannels, useLogout, useMe } from '@/api/queries';
+import { accountExitLabel, runAccountExit } from '@/lib/accountExit';
 import { useSelectedChannel } from '@/lib/channel-context';
-import { setCommandPaletteOpen, toggleCommandPalette, useCommandPaletteOpen } from '@/lib/command-palette';
+import { useCommandPaletteOpen } from '@/lib/command-palette';
 import { DRILL_KEYS } from '@/lib/kpiDerive';
 import { NetworkGlyph } from '@/lib/networks';
 import { setActiveNetwork } from '@/lib/networkStore';
+import { useDemo } from '@/lib/demo-context';
 import {
   buildIgMetricCommands,
   buildNetworkRouteCommands,
   buildSourceCommands,
+  buildTgSectionCommands,
 } from '@/lib/paletteCommands';
 import type { PaletteChannel } from '@/lib/paletteCommands';
 import { getDrillMetric } from '@/lib/widgetMetrics';
+import { SETTINGS_GROUPS, type SettingsSectionKey } from '@/lib/settingsSections';
 import { Icon } from '@/components/nav-icons';
 import type { IconName } from '@/components/nav-icons';
+import { SettingsIcon } from '@/components/settings/primitives';
+import { Kbd, KbdGroup } from '@/components/ui/kbd';
 import {
   CommandDialog,
   CommandEmpty,
@@ -38,28 +44,6 @@ interface PaletteSection {
   items: PaletteCommand[];
 }
 
-/** Open-state lives in the shared store (lib/command-palette) so any control can call
-    openCommandPalette(); this hook adds the ⌘K / Ctrl+K / Escape keyboard wiring. */
-export function useCommandPalette() {
-  const { open, setOpen } = useCommandPaletteOpen();
-
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
-        event.preventDefault();
-        toggleCommandPalette();
-      } else if (event.key === 'Escape') {
-        setCommandPaletteOpen(false);
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
-
-  return { open, setOpen };
-}
-
 // Сетевые разделы (Обзор/Аналитика/Контент/… каждой сети) строятся из реестра lib/networks —
 // см. lib/paletteCommands. Здесь остаются ТОЛЬКО маршруты вне сетей: их ни один реестр не описывает.
 const EXTRA_ROUTES: Array<{ path: string; label: string; icon: IconName; search: string }> = [
@@ -71,6 +55,16 @@ const SUPERUSER_ROUTES: Array<{ path: string; label: string; icon: IconName; sea
   { path: '/admin', label: 'Админ', icon: 'admin', search: 'админ admin' },
   { path: '/bugs', label: 'Баги', icon: 'bugs', search: 'баги bugs фидбек' },
 ];
+
+const SETTINGS_SEARCH: Record<SettingsSectionKey, string> = {
+  account: 'профиль фото email account profile avatar',
+  appearance: 'оформление тема светлая тёмная appearance theme dark light',
+  security: 'безопасность пароль сменить password security',
+  billing: 'тариф подписка оплата billing plan subscription pro max',
+  team: 'команда участники роли приглашение team members invite',
+  data: 'данные экспорт сбор состояние data export health',
+  channels: 'каналы ключи api telegram collector channels keys instagram инстаграм oauth подключение',
+};
 
 // Search history (MRU command ids) — the palette opens on «Недавнее», like Claude's search.
 const RECENTS_KEY = 'pulse_palette_recents';
@@ -95,7 +89,7 @@ function saveRecent(id: string) {
 }
 
 export function CommandPalette() {
-  const { open, setOpen } = useCommandPalette();
+  const { open, setOpen } = useCommandPaletteOpen();
   // Mount-per-open (как и раньше): query/recents сбрасываются естественно, cmdk строит список
   // заново на каждое открытие (recents другой вкладки подтягиваются при следующем ⌘K).
   if (!open) return null;
@@ -107,9 +101,11 @@ function PaletteDialog({ close }: { close: () => void }) {
   // History is read at mount — i.e. per open (another tab may have added entries since last time).
   const [recents] = useState<string[]>(loadRecents);
   const navigate = useNavigate();
+  const location = useLocation();
   const me = useMe();
   const channelsQuery = useChannels();
   const logout = useLogout();
+  const { demo, exitDemo } = useDemo();
   const { setChannelId } = useSelectedChannel();
 
   const iconFor = (name: IconName) => <Icon name={name} className="h-4 w-4 shrink-0" />;
@@ -118,7 +114,12 @@ function PaletteDialog({ close }: { close: () => void }) {
   // мастерской: тот же предикат hasChannel, что у сайдбара и SourceSwitcher), затем внесетевые.
   const channels: PaletteChannel[] = channelsQuery.data?.channels ?? [];
   const routeCommands: PaletteCommand[] = [
-    ...buildNetworkRouteCommands(channels),
+    // Фичефлаги разделов — из того же bootstrap-ответа /api/auth/me, что читает нав: иначе
+    // палитра предлагала бы переход в раздел, скрытый гейтом.
+    ...buildNetworkRouteCommands(channels, { rusenderSurfaces: !!me.data?.rusender_surfaces }),
+    // Подразделы ТГ (Кампании + вкладки аналитики) — сразу за плоскими разделами сети: реестр их
+    // не описывает, а без палитры до них добираются только кликом внутри страницы.
+    ...buildTgSectionCommands(channels),
     ...EXTRA_ROUTES.map((route) => ({ ...route, id: `route:${route.path}`, search: `перейти ${route.search}`.toLowerCase() })),
     ...(me.data?.role === 'superuser'
       ? SUPERUSER_ROUTES.map((route) => ({ ...route, id: `route:${route.path}`, search: `перейти ${route.search}`.toLowerCase() }))
@@ -128,7 +129,12 @@ function PaletteDialog({ close }: { close: () => void }) {
     label: route.label,
     search: route.search,
     icon: iconFor(route.icon),
-    run: () => navigate(route.path),
+    // Настройки — модальный оверлей: текущая страница остаётся за ним фоном.
+    run: () =>
+      navigate(
+        route.path,
+        route.path === '/settings' ? { state: { settingsBackground: location } } : undefined,
+      ),
   }));
 
   // Metric pages — first-class search targets (steep's «Jump to» reaches metrics too).
@@ -150,6 +156,19 @@ function PaletteDialog({ close }: { close: () => void }) {
     icon: iconFor('analytics'),
     run: () => navigate(`/metrics/${metric.key}`),
   }));
+
+  const settingsCommands: PaletteCommand[] = SETTINGS_GROUPS.flatMap((group) => group.items).map(
+    (item) => ({
+      id: `settings:${item.key}`,
+      label: `Настройки: ${item.label}`,
+      search: `настройки settings ${item.label} ${item.description} ${SETTINGS_SEARCH[item.key]}`.toLowerCase(),
+      icon: <SettingsIcon name={item.icon} className="h-4 w-4 shrink-0" />,
+      run: () =>
+        navigate(item.key === 'account' ? '/settings' : `/settings?section=${item.key}`, {
+          state: { settingsBackground: location },
+        }),
+    }),
+  );
 
   // Sources = (channel × network), где пара реально существует (реестровый hasChannel): выбор
   // селектит канал И приземляет на эту сеть — ⌘K-двойник сайдбарного SourceSwitcher. Глиф — тот же
@@ -183,24 +202,30 @@ function PaletteDialog({ close }: { close: () => void }) {
 
   const logoutCommand: PaletteCommand = {
     id: 'logout',
-    label: 'Выйти',
-    search: 'выйти выход logout',
+    label: accountExitLabel(demo, logout.isPending),
+    search: demo ? 'выйти из демо выход demo' : 'выйти выход logout',
     icon: (
       <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="h-4 w-4 shrink-0" aria-hidden="true">
         <path d="M6 3H3.5v10H6M10 5l3 3-3 3M13 8H6.5" strokeLinecap="round" strokeLinejoin="round" />
       </svg>
     ),
     run: () => {
-      // Navigate synchronously: PaletteDialog unmounts right after run(), and React Query drops
-      // mutate-level callbacks (like an onSettled navigate) when their observer unmounts before
-      // the response. Local session state is cleared by useLogout's own config either way.
-      logout.mutate();
-      navigate('/login', { replace: true });
+      runAccountExit({
+        demo,
+        exitDemo,
+        // HttpOnly cookie can only be cleared by a successful server response. Keep the
+        // authenticated surface on network failure instead of creating a login bounce.
+        logout: () =>
+          logout.mutate(undefined, {
+            onSuccess: () => navigate('/login', { replace: true }),
+          }),
+      });
     },
   };
 
   const groups: PaletteSection[] = [
     { title: 'Разделы', items: routeCommands },
+    { title: 'Настройки', items: settingsCommands },
     { title: 'Метрики', items: [...metricCommands, ...igMetricCommands] },
     ...(sourceCommands.length > 0 ? [{ title: 'Источники', items: sourceCommands }] : []),
     { title: 'Аккаунт', items: [logoutCommand] },
@@ -236,7 +261,7 @@ function PaletteDialog({ close }: { close: () => void }) {
           onValueChange={setQuery}
           placeholder="Поиск: разделы, метрики, источники…"
         />
-        <kbd className="rounded border border-border px-1.5 py-0.5 font-mono text-2xs text-muted-foreground">esc</kbd>
+        <Kbd className="h-6 px-1.5">esc</Kbd>
       </div>
       <CommandList className="max-h-[46vh] border-t border-border p-2">
         <CommandEmpty className="px-3 py-8 text-center text-sm text-muted-foreground">Ничего не нашлось</CommandEmpty>
@@ -255,11 +280,11 @@ function PaletteDialog({ close }: { close: () => void }) {
           </CommandGroup>
         ))}
       </CommandList>
-      {/* Footer hints (steep/Claude): quiet keyboard legend, no chrome. */}
+      {/* Footer hints: клавиши — Kbd-чипами (shadcn Kbd, единый чип шортката по продукту). */}
       <div className="flex items-center gap-4 border-t border-border px-4 py-2 text-2xs text-muted-foreground">
-        <span>↑↓ — навигация</span>
-        <span>⏎ — открыть</span>
-        <span>esc — закрыть</span>
+        <span className="inline-flex items-center gap-1.5"><KbdGroup><Kbd>↑</Kbd><Kbd>↓</Kbd></KbdGroup> навигация</span>
+        <span className="inline-flex items-center gap-1.5"><Kbd>⏎</Kbd> открыть</span>
+        <span className="inline-flex items-center gap-1.5"><Kbd>esc</Kbd> закрыть</span>
       </div>
     </CommandDialog>
   );
