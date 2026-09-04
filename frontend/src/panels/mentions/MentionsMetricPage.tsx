@@ -89,7 +89,7 @@ function MentionsMetricShell({
       <MetricColumns
         rail={
           <>
-            <RailSection title="Сравнение">{comparison}</RailSection>
+            <RailSection title="Сравнение" mark="comparison">{comparison}</RailSection>
             {/* «О метрике» убран — техническая информация не для конечного пользователя (владелец). */}
             <Link
               to={backTo}
