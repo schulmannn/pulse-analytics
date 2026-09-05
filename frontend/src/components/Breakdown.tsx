@@ -1,4 +1,5 @@
 import { useContext } from 'react';
+import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
 import { EmptyState } from '@/components/EmptyState';
@@ -47,6 +48,16 @@ interface BreakdownProps {
       источники). У долей одного целого (тональность, состав вовлечённости) номер ничего не значит. */
   ranked?: boolean;
   more?: BreakdownMore;
+  /**
+   * Одна строка примечания ПОД списком — живой факт о самой разбивке (например: демографией
+   * охвачено ≈90% базы), а не подпись колонок и не действие.
+   *
+   * Живёт внутри разбивки, а не абзацем под сеткой карточек, по двум причинам. Оговорка
+   * относится к КОНКРЕТНОМУ списку и считается из его же чисел — под сеткой она читалась как
+   * общее правило всех соседних карточек. И только здесь её высота попадает в бюджет строк:
+   * снаружи тайла её никто не считал, а внутри она молча срезала бы нижнюю строку.
+   */
+  footnote?: ReactNode;
 }
 
 // One row's vertical pitch: p-2 row (36px) + space-y-2 gap.
@@ -59,6 +70,8 @@ const HINT_H = 15;
 const FOOTER_H = 20;
 /** Предположение о высоте шапки на ПЕРВЫЙ кадр; дальше она меряется — см. useMeasuredBox. */
 const HEADER_H = 20;
+/** Предположение о высоте примечания на ПЕРВЫЙ кадр — одна строка text-2xs; дальше меряется. */
+const FOOTNOTE_H = 15;
 
 /**
  * Сколько строк списка реально показать при данном бюджете. Вынесено функцией, потому что счёт
@@ -72,13 +85,18 @@ function fitCount(total: number, avail: number | null, expanded: boolean, tailH:
   return Math.max(1, Math.floor((avail - tailH) / ROW_PITCH));
 }
 
-export function Breakdown({ items, reserve = 0, columns, ranked = false, more }: BreakdownProps) {
+export function Breakdown({ items, reserve = 0, columns, ranked = false, more, footnote }: BreakdownProps) {
   // Inside a fixed-height tile the card feeds its body height here — show only the rows that
   // FIT plus a «+N ещё» line, so a widget never scrolls (steep). The expand overlay
   // (ChartExpandedContext) and free-height surfaces keep the full list.
   const expanded = useContext(ChartExpandedContext);
   const ctxHeight = useContext(ExpandedChartHeightContext);
   const { ref: headerRef, height: headerH } = useMeasuredBox(columns ? HEADER_H : 0);
+  // Примечание меряется по той же причине, что и шапка: на узкой карточке текст переносится во
+  // вторую строку, и константа обещала бы бюджету на 15px меньше, чем занято, — ровно те лишние
+  // пиксели, которыми нижняя строка уезжает под кромку (замерено на 430px). Замер не зациклится:
+  // примечание рисуется всегда, его высота от собственной видимости не зависит.
+  const { ref: footRef, height: footH } = useMeasuredBox(footnote != null ? FOOTNOTE_H : 0);
 
   if (!items || items.length === 0) {
     return <EmptyState compact size="chart" ghost="rows" title="Нет данных" />;
@@ -91,7 +109,13 @@ export function Breakdown({ items, reserve = 0, columns, ranked = false, more }:
   // свободной высотой — там прежний естественный ритм.
   const fillSlot = !expanded && ctxHeight != null;
   const tailH = more ? FOOTER_H : HINT_H;
-  const room = ctxHeight != null ? ctxHeight - reserve : null;
+  // Примечание вычитается из бюджета ДО решения о шапке — и это осознанный размен, а не экономия
+  // пикселей. Замерено на «Возрасте» демо (тело тайла 181px, семь групп): не пройди примечание
+  // через бюджет, оно съело бы ТРЕТЬЮ строку данных из трёх. Пройдя — вытесняет ШАПКУ, по уже
+  // принятому здесь правилу «шапка не стоит строки данных»: имена колонок повторяют заголовок
+  // карточки, а охват демографии не повторяет ничего.
+  const footBudget = footnote != null && footH > 0 ? footH + ROW_GAP : 0;
+  const room = ctxHeight != null ? ctxHeight - reserve - footBudget : null;
 
   // ШАПКА НЕ СТОИТ СТРОКИ ДАННЫХ. В фикс-тайле она съедает половину строки, и на тесном S-тайле
   // вытеснила бы восьмой язык ради слова «Язык» — а имя измерения уже стоит в заголовке карточки,
@@ -221,6 +245,15 @@ export function Breakdown({ items, reserve = 0, columns, ranked = false, more }:
         ) : (
           <div className="shrink-0 px-2 text-2xs text-muted-foreground">+{extra} ещё — полный список в «Развернуть»</div>
         ))}
+      {/* Полный muted, а не приглушённый: у примечания ЕСТЬ что сказать, и это текст, а не
+          декорация. Прежний `muted-foreground/70` того же абзаца под сеткой даёт 2.96 на светлой
+          карточке и 3.59 на тёмной (посчитано по палитрам index.css той же формулой, что и в
+          scripts/contrast-tokens.mjs) — обе ниже AA 4.5; полный токен даёт 5.48 и 6.08. */}
+      {footnote != null && (
+        <div ref={footRef} data-breakdown-footnote className="shrink-0 px-2 text-2xs text-muted-foreground">
+          {footnote}
+        </div>
+      )}
     </div>
   );
 }
