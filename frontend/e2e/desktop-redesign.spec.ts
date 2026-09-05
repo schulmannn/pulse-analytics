@@ -6,7 +6,7 @@ import { bootDemo, overflowingCards } from './helpers';
 // заголовков. На телефоне этих поверхностей нет вовсе, и прогон здесь проверял бы не мобильное
 // поведение, а отсутствие десктопного. Раньше гейт mobile-430 гонял только два файла, поэтому
 // промах не был виден (аудит #554, проход №2, N8).
-test.beforeEach(({}, testInfo) => {
+test.beforeEach(({ browserName: _b }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop-1440', 'десктопная раскладка');
 });
 
