@@ -77,17 +77,16 @@ const OUTLINE = {
  * кольцом, поэтому у него `meet` и, как следствие, штрих масштабируется честно и без vector-effect.
  */
 export function EmptyGhostShape({ kind, className }: { kind: EmptyGhost; className?: string }): JSX.Element {
-  const common = {
-    'aria-hidden': true as const,
-    focusable: 'false' as const,
-    'data-slot': 'empty-ghost',
-    'data-ghost': kind,
-  };
-
+  // `aria-hidden`/`focusable` выписаны на каждом svg буквально, а не спредом общего объекта:
+  // biome `a11y/noSvgWithoutTitle` требует у картинки либо <title>, либо ЛИТЕРАЛЬНЫЙ aria-hidden —
+  // через спред он его не видит и требует заголовок, которого у чистой декорации быть не должно.
   if (kind === 'ring') {
     return (
       <svg
-        {...common}
+        aria-hidden="true"
+        focusable="false"
+        data-slot="empty-ghost"
+        data-ghost={kind}
         viewBox="0 0 48 48"
         preserveAspectRatio="xMidYMid meet"
         className={cn(EMPTY_GHOST_INK, className)}
@@ -113,7 +112,10 @@ export function EmptyGhostShape({ kind, className }: { kind: EmptyGhost; classNa
 
   return (
     <svg
-      {...common}
+      aria-hidden="true"
+      focusable="false"
+      data-slot="empty-ghost"
+      data-ghost={kind}
       viewBox="0 0 160 48"
       preserveAspectRatio="none"
       className={cn(EMPTY_GHOST_INK, className)}
