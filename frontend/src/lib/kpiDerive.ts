@@ -152,6 +152,17 @@ export function deriveKpis(
   const channelViews = hasChannelViews
     ? viewsArchiveRows.reduce((sum, r) => sum + Number(r.views), 0)
     : totalViews;
+  // «В СРЕДНЕМ ЗА ДЕНЬ» — вторая цифра героя: итог окна не отвечает, каким был обычный день, а
+  // ответ до сих пор жил только в тултипе графика, то есть был недоступен без мыши.
+  //
+  // Делитель — ИЗМЕРЕННЫЕ дни архива, а не длина окна. Окно «Всё» приходит как days = 0 (длину
+  // меряет размах серии), и деление на него дало бы Infinity; а на канале, подключённом посреди
+  // окна, трёхдневная сумма делилась бы на тридцать и печатала вдесятеро заниженное «среднее».
+  // Среднее по точкам ряда — то же правило, по которому считает IG-твин (KpiHero).
+  //
+  // Без архива числа нет вовсе: headline тогда падает в пост-сумму (просмотры постов,
+  // ОПУБЛИКОВАННЫХ в окне), и «за день» из неё было бы враньём про природу числа.
+  const viewsPerDay = hasChannelViews ? channelViews / viewsArchiveRows.length : null;
   // ПАРА ОКОН, а не голый процент (было `dailyWindowDelta`, который внутри делает ровно это же):
   // пилюле нужны ещё ГРАНИЦЫ и СУММА базы, иначе основание пришлось бы считать вторым проходом
   // по тем же строкам — и оно смогло бы разойтись с процентом, под которым напечатано.
@@ -449,7 +460,7 @@ export function deriveKpis(
   };
 
   return {
-    members, displayMembers, totalViews, channelViews, totalReactions, avgViews, er,
+    members, displayMembers, totalViews, channelViews, viewsPerDay, totalReactions, avgViews, er,
     subscriberTrend, viewsTrend, reactionsTrend, erTrend, avgReachTrend,
     viewsSpark, subsSpark, periodLabel, viewsCaption, subDelta, reactionsDelta, erCaption,
     avgReachSpark, reactionsSpark, erSpark,
