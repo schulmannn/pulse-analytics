@@ -29,7 +29,8 @@ import { usePeriod, type PeriodDays } from '@/lib/period';
 import { useExplorerChartHeight } from '@/lib/useExplorerChartHeight';
 import { SegSelect } from '@/components/metric/SegSelect';
 import { isMentionsMetricKey } from '@/panels/mentions/mentionsMetricKeys';
-import { ComparisonDeltaRow, MetricColumns, MetricDescriptor, WindowBarShell, RailSection, MetricPageHeader} from '@/components/metric/shared';
+import { MetricColumns, MetricDescriptor, WindowBarShell, RailComparison, RailSection, MetricPageHeader} from '@/components/metric/shared';
+import { dayRangeOf, windowRangeLabel } from '@/lib/metricSeries';
 
 type ChartKind = 'line' | 'bar';
 type CompareMode = 'off' | 'prev';
@@ -179,6 +180,10 @@ function MentionsTimelinePage() {
     showComparison && previousTotal != null && previousTotal > 0
       ? ((currentTotal - previousTotal) / previousTotal) * 100
       : null;
+  // Даты базы приходят ИЗ ТОГО ЖЕ билдера, что выровнял ghost (timeline.ghostDays): считать их на
+  // странице значило бы завести второе правило выравнивания базы.
+  const currentRange = dayRangeOf(timeline.days);
+  const ghostRange = dayRangeOf(timeline.ghostDays ?? []);
   const backTo = mentionsBackTo(days, source);
 
   return (
@@ -216,22 +221,29 @@ function MentionsTimelinePage() {
             </div>
             {showComparison && (
               <>
-                <div className="flex items-baseline justify-between gap-3">
-                  <span className="text-xs text-muted-foreground">Пред. период</span>
-                  <span className="text-sm tabular-nums text-foreground">
-                    {fmt.num(previousTotal ?? 0)}
-                  </span>
-                </div>
-                {delta == null ? (
+                {/* Та же легенда, что над полотном: маркер + даты окна + итог. Без дат «Пред.
+                    период» не отвечал, какая неделя сравнивается с какой. Дельта — БЕЗ вердикта:
+                    объём упоминаний бренда сентимента не несёт (та же причина, что у `DeltaLine`
+                    на /mentions — «never green/red»). */}
+                <RailComparison
+                  marker={kind === 'bar' ? 'bar' : 'line'}
+                  current={{
+                    dates: currentRange ? windowRangeLabel(currentRange) : '',
+                    value: fmt.num(currentTotal),
+                  }}
+                  comparison={{
+                    label: 'Пред. период',
+                    dates: ghostRange ? windowRangeLabel(ghostRange) : '',
+                    value: fmt.num(previousTotal ?? 0),
+                  }}
+                  delta={delta}
+                  evaluative={false}
+                />
+                {delta == null && (
                   <div className="flex items-baseline justify-between gap-3 border-t border-border pt-2">
                     <span className="text-xs text-muted-foreground">Изменение</span>
                     <span className="text-xs font-medium tabular-nums text-muted-foreground">нет базы</span>
                   </div>
-                ) : (
-                  // Общая разметка рейла, но БЕЗ вердикта: объём упоминаний бренда сентимента не
-                  // несёт (та же причина, что у `DeltaLine` на /mentions — «never green/red»),
-                  // поэтому строка остаётся muted, как была до унификации.
-                  <ComparisonDeltaRow delta={delta} evaluative={false} />
                 )}
               </>
             )}
