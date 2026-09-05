@@ -838,7 +838,7 @@ export function IgContentDesktop({ ig }: { ig: IgData }) {
                     );
                   })}
                   <td className="px-3 pr-4 text-right text-xs tabular-nums text-muted-foreground sm:pr-5">
-                    {post.timestamp ? <TwoLineDate iso={post.timestamp} /> : <span className="text-muted-foreground/40">—</span>}
+                    {post.timestamp ? <TwoLineDate iso={post.timestamp} /> : <span className="text-ink3">—</span>}
                   </td>
                   <td className="sticky right-0 ig-sticky-action-cell w-10 border-l border-border/0 bg-inherit px-2 text-center transition-colors group-hover:border-border/40">
                     {clickable && (
@@ -1123,7 +1123,7 @@ function MedianCell({
   tone: 'signal' | 'muted';
   format: (v: number) => string;
 }) {
-  if (value == null) return <span className="text-muted-foreground/40">—</span>;
+  if (value == null) return <span className="text-ink3">—</span>;
   const cmp = compareToMedian(value, median);
   return (
     <>

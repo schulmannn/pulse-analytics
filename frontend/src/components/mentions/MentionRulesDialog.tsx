@@ -7,7 +7,7 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/compone
 import { cn } from '@/lib/utils';
 
 const INPUT_CLASS =
-  'mt-1.5 w-full resize-none rounded border border-border bg-background px-3 py-2.5 text-sm leading-5 text-foreground outline-hidden placeholder:text-muted-foreground/70 focus:border-primary focus:ring-1 focus:ring-primary read-only:cursor-default read-only:text-muted-foreground';
+  'mt-1.5 w-full resize-none rounded border border-border bg-background px-3 py-2.5 text-sm leading-5 text-foreground outline-hidden placeholder:text-muted-foreground focus:border-primary focus:ring-1 focus:ring-primary read-only:cursor-default read-only:text-muted-foreground';
 
 function lines(value: string): string[] {
   return value
