@@ -47,7 +47,7 @@ test('overlays follow the layering scale (modal above nav, covers content)', asy
  * modal scrim sits at z-modal above all app chrome, a click on a top-corner pixel lands on the scrim
  * (not the sidebar/topbar beneath it) and closes the overlay — dismissal and layering in one.
  */
-test('detail overlay dismisses on outside-click (scrim) and Escape', async ({ page }) => {
+test('detail overlay dismisses on outside-click (scrim) and Escape', async ({ page }, testInfo) => {
   await bootDemo(page, '/');
   // Кнопка «Развернуть» — цель ФОКУСА (sr-only после #351); открываем оверлей кликом по карточке,
   // как это делает пользователь мышью, а фокус-возврат проверяем по самой кнопке.
@@ -55,10 +55,18 @@ test('detail overlay dismisses on outside-click (scrim) and Escape', async ({ pa
 
   // Outside-click: open, then click a top-corner pixel — that hits the z-modal scrim (proof it's
   // above the app chrome) whose onClick closes the overlay.
-  await openDetailOverlay(page);
-  await expect(page.locator('[role="dialog"]')).toBeVisible();
-  await page.mouse.click(6, 6);
-  await expect(page.locator('[role="dialog"]')).toHaveCount(0);
+  //
+  // Ниже sm оверлей — лист во весь экран (`p-0`, `h-full`, `rounded-none` в DetailShell:109-117):
+  // «снаружи» у него попросту нет, пиксель (6,6) принадлежит самой панели, а гвард закрытия
+  // требует попадания именно в контейнер. Это записанный мобильный контракт, а не дефект, поэтому
+  // на телефоне проверяется только половина про Escape. Раньше об этом никто не знал: гейт
+  // mobile-430 гонял два файла из восьмидесяти шести (аудит #554, проход №2, N8).
+  if (testInfo.project.name === 'desktop-1440') {
+    await openDetailOverlay(page);
+    await expect(page.locator('[role="dialog"]')).toBeVisible();
+    await page.mouse.click(6, 6);
+    await expect(page.locator('[role="dialog"]')).toHaveCount(0);
+  }
 
   // Escape: reopen and dismiss via the keyboard (capture-phase Escape in DetailShell); focus returns
   // to the opener so a keyboard user isn't dropped to <body>. Открываем ИМЕННО с клавиатуры — это
