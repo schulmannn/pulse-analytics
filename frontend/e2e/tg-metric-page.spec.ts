@@ -72,6 +72,39 @@ test.describe('Telegram extra-chart metric pages', () => {
     await expect(page.getByRole('heading', { name: 'Скорость набора просмотров', level: 1 })).toBeVisible();
   });
 
+  /**
+   * Вердикт над сеткой (R6). Ответ «когда лучше публиковать» жил ПОД доказательством: сначала
+   * 7×24 клеток, и только потом строка, ради которой карточку открывали. Порядок в DOM — не
+   * косметика: он же порядок чтения скринридером и порядок табуляции.
+   */
+  test('вердикт стоит НАД сеткой, «лучший слот» снизу больше не печатается', async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== 'desktop-1440', 'Аналитика — desktop-first поверхность');
+    await bootDemo(page, '/metrics/tg-heatmap');
+
+    const verdict = page.locator('[data-slot="heatmap-verdict"]');
+    await expect(verdict).toContainText('Пик');
+    // Сетка нарисована (значит вердикт сравнивается с реальным соседом, а не с пустотой).
+    await expect(page.locator('[role="img"][aria-label*="Тепловая карта"]')).toBeVisible();
+
+    // Порядок в документе: вердикт РАНЬШЕ сетки.
+    const verdictFirst = await page.evaluate(() => {
+      const v = document.querySelector('[data-slot="heatmap-verdict"]');
+      const g = document.querySelector('[role="img"][aria-label*="Тепловая карта"]');
+      if (!v || !g) return null;
+      return (v.compareDocumentPosition(g) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+    });
+    expect(verdictFirst).toBe(true);
+
+    // Старая строка-дубль под сеткой снята.
+    await expect(page.getByText('лучший слот')).toHaveCount(0);
+    // …и сетка больше не пересказывает вердикт своим aria-label: иначе скринридер прочёл бы один
+    // и тот же факт дважды подряд.
+    await expect(page.locator('[role="img"][aria-label*="Тепловая карта"]')).toHaveAttribute(
+      'aria-label',
+      'Тепловая карта публикаций по дням и часам',
+    );
+  });
+
   test('stale ?detail=<migrated-id> канонизируется в /metrics/tg-heatmap без dialog', async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== 'desktop-1440', 'Аналитика — desktop-first поверхность');
     // Устаревший deep-link на generic оверлей мигрированной карточки должен увести на выделенный route.

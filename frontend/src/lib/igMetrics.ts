@@ -304,6 +304,14 @@ export interface OnlineAgg {
   grid: number[][];
   max: number;
   best: { w: number; h: number; v: number };
+  /**
+   * Второй конец шкалы — час, когда аудитории меньше всего. Считается ТОЛЬКО по ненулевым
+   * ячейкам: ноль в этой метрике неотличим от «Instagram не отдал этот час» (ради той же
+   * неотличимости существует `hasSignal` ниже), поэтому назвать нулевую ячейку затишьем — значит
+   * выдать пробел в данных за измерение. `null`, пока ненулевых ячеек меньше двух или минимум
+   * пришёлся на ту же ячейку, что и максимум: тогда шкалы нет и «тише всего» = «пик».
+   */
+  quiet: { w: number; h: number; v: number } | null;
   /** True only when the metric actually returned activity — the new API often returns empty hour
       maps, and without this guard the all-zero grid would still yield a bogus "best slot" (Пн 0:00). */
   hasSignal: boolean;
@@ -329,8 +337,20 @@ export function aggregateOnline(online: IgOnline | undefined): OnlineAgg {
   const grid = sum.map((row, w) => row.map((s, h) => (cnt[w][h] ? s / cnt[w][h] : 0)));
   const max = Math.max(1, ...grid.flat());
   let best = { w: -1, h: -1, v: -1 };
-  grid.forEach((row, w) => row.forEach((v, h) => { if (v > best.v) best = { w, h, v }; }));
-  return { dayValues, grid, max, best, hasSignal: best.v > 0 };
+  let quiet: OnlineAgg['quiet'] = null;
+  let liveCells = 0;
+  for (let w = 0; w < grid.length; w++) {
+    const row = grid[w];
+    for (let h = 0; h < row.length; h++) {
+      const v = row[h];
+      if (v > best.v) best = { w, h, v };
+      if (v <= 0) continue;
+      liveCells++;
+      if (quiet === null || v < quiet.v) quiet = { w, h, v };
+    }
+  }
+  if (quiet !== null && (liveCells < 2 || (quiet.w === best.w && quiet.h === best.h))) quiet = null;
+  return { dayValues, grid, max, best, quiet, hasSignal: best.v > 0 };
 }
 
 // ── hashtags ──

@@ -244,6 +244,18 @@
   }
 }
 
+/* `tile-narrow:` — тот же порог с другой стороны, для НЕОБЯЗАТЕЛЬНОЙ добавки к строке.
+   Разница с `tile-wide:` не косметическая. Запрос к контейнеру, которого у элемента нет,
+   ложен ВСЕГДА, поэтому `hidden tile-wide:inline` прячет добавку не только в тесном тайле, но и
+   на страницах метрик (/metrics/tg-heatmap, /metrics/ig-best-time) и в развороте карточки — там
+   контейнера `tile` не существует, хотя места как раз больше всего. Правило «по умолчанию видно,
+   прячем только в узком слоте» на тех же поверхностях ведёт себя правильно. */
+@custom-variant tile-narrow {
+  @container tile (width < 30rem) {
+    @slot;
+  }
+}
+
 @utility data-table-surface {
   /* Shared dashboard data-table treatment. The shell owns the card chrome and horizontal
      overflow; the table class owns only typography, dividers and interaction states so complex

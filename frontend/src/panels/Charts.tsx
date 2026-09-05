@@ -15,7 +15,8 @@ import { pctDelta } from '@/lib/delta';
 import type { WidgetViz } from '@/lib/widgetMetrics';
 import type { WidgetSize } from '@/lib/widgetPrefsStore';
 import { lazyWithReload } from '@/lib/lazyWithReload';
-import { TG_DAY_NAMES, type HeatmapBestSlot, type HeatmapCell } from '@/lib/tgHeatmap';
+import { buildHeatmap, TG_DAY_NAMES } from '@/lib/tgHeatmap';
+import { HeatmapVerdict } from '@/components/HeatmapVerdict';
 
 interface SubscriberRow {
   day: string;
@@ -189,61 +190,6 @@ export function HistoryWidgetBody() {
   );
 }
 
-/** Aggregate posts into the 7×24 ERV grid + the best slot. Pure — memoized by the block. */
-function buildHeatmap(
-  posts: NonNullable<TgFull['posts']>,
-  inRange: (dateISO: string | null | undefined) => boolean,
-): { grid: HeatmapCell[][]; maxErv: number; bestSlot: HeatmapBestSlot | null } {
-  const grid: HeatmapCell[][] = Array.from({ length: 7 }, () =>
-    Array.from({ length: 24 }, () => ({ n: 0, ervSum: 0, reachSum: 0 })),
-  );
-
-  posts.forEach((p) => {
-    if (!inRange(p.date) || !p.date) return;
-    const d = new Date(p.date);
-    if (isNaN(d.getTime())) return;
-
-    const weekday = (d.getDay() + 6) % 7;
-    const hour = d.getHours();
-
-    const row = grid[weekday];
-    if (!row) return;
-    const cell = row[hour];
-    if (!cell) return;
-
-    const reach = Number(p.views ?? 0);
-    const eng = Number(p.reactions ?? 0) + Number(p.forwards ?? 0) + Number(p.replies ?? 0);
-    const erv = reach > 0 ? (eng / reach) * 100 : null;
-
-    cell.n++;
-    cell.reachSum += reach;
-    if (erv !== null) cell.ervSum += erv;
-  });
-
-  let maxErv = 0;
-  let bestSlot: HeatmapBestSlot | null = null;
-  let maxScore = -1;
-
-  for (let w = 0; w < 7; w++) {
-    const row = grid[w];
-    if (!row) continue;
-    for (let hr = 0; hr < 24; hr++) {
-      const cell = row[hr];
-      if (cell && cell.n > 0) {
-        const avgErv = cell.ervSum / cell.n;
-        if (avgErv > maxErv) maxErv = avgErv;
-        const score = avgErv * (cell.n >= 2 ? 1.15 : 1);
-        if (score > maxScore) {
-          maxScore = score;
-          bestSlot = { weekday: w, hour: hr, avgErv, n: cell.n, reachSum: cell.reachSum };
-        }
-      }
-    }
-  }
-
-  return { grid, maxErv, bestSlot };
-}
-
 export function HeatmapChartBlock({ id, homeKey }: HomeBlockProps = {}) {
   return (
     // The 7×24 grid is genuinely wide content → a full-row tile wherever the section lands in a
@@ -293,7 +239,7 @@ export function HeatmapWidgetBody() {
     lives further down in HeatmapSurface, so a mousemove never re-runs this aggregation. */
 function HeatmapBody({ posts }: { posts: NonNullable<TgFull['posts']> }) {
   const { inRange } = useWidgetPeriod();
-  const { grid, maxErv, bestSlot } = useMemo(() => buildHeatmap(posts, inRange), [posts, inRange]);
+  const { grid, maxErv, bestSlot, quietSlot } = useMemo(() => buildHeatmap(posts, inRange), [posts, inRange]);
   // Пустые края суток не рисуем: 7д-окно на полной 0–23 решётке = 90% мёртвых клеток («у канала
   // нет жизни»). Диапазон = активные часы ±1 для контекста; шире 16 колонок не сжимаем (экономия
   // нечитаема); совсем пустая решётка — полные сутки (внизу честное «мало постов»).
@@ -316,28 +262,34 @@ function HeatmapBody({ posts }: { posts: NonNullable<TgFull['posts']> }) {
   const trimmed = hourRange.from > 0 || hourRange.to < 23;
   return (
     <>
+      {/* Вердикт ВЫШЕ сетки: ответ раньше доказательства (см. HeatmapVerdict). Заодно снимается
+          дубль — тот же факт печатался и строкой снизу, и внутри aria-label самой сетки. */}
+      <HeatmapVerdict
+        peak={bestSlot ? { day: TG_DAY_NAMES[bestSlot.weekday] ?? '', hour: bestSlot.hour, value: ervVerdictValue(bestSlot.avgErv, bestSlot.n) } : null}
+        quiet={quietSlot ? { day: TG_DAY_NAMES[quietSlot.weekday] ?? '', hour: quietSlot.hour, value: ervVerdictValue(quietSlot.avgErv, quietSlot.n) } : null}
+      />
       <Suspense fallback={<ChartSkeletonBody />}>
         <HeatmapSurface grid={grid} maxErv={maxErv} bestSlot={bestSlot} hourRange={hourRange} />
       </Suspense>
-      <div className="mt-3 text-xs font-medium text-muted-foreground">
-        {bestSlot ? (
-          <span>
-            лучший слот:{' '}
-            <strong className="font-medium text-foreground">
-              {TG_DAY_NAMES[bestSlot.weekday] ?? ''} {bestSlot.hour}:00
-            </strong>{' '}
-            · ERV {bestSlot.avgErv.toFixed(1)}%
-            {trimmed ? (
-              <span className="text-muted-foreground"> · часы {hourRange.from}:00–{hourRange.to}:00</span>
-            ) : null}
-          </span>
-        ) : (
-          'Мало постов для тепловой карты.'
-        )}
-      </div>
+      {/* Снизу остаётся только то, что относится к САМОЙ сетке: обрезанные края суток и честное
+          «данных мало». Вердикта здесь больше нет — он наверху. */}
+      {bestSlot ? (
+        trimmed ? (
+          <div className="mt-3 text-xs text-muted-foreground">
+            Показаны часы {hourRange.from}:00–{hourRange.to}:00
+          </div>
+        ) : null
+      ) : (
+        <div className="mt-3 text-xs text-muted-foreground">Мало постов для тепловой карты.</div>
+      )}
     </>
   );
 }
+
+/** «ERV 4.8% по 6 постам» — среднее слота вместе с тем, на скольких постах оно измерено: без `n`
+    вердикт по одному посту выглядел бы так же уверенно, как по десяти. */
+const ervVerdictValue = (avgErv: number, n: number) =>
+  `ERV ${fmt.pctFixed(avgErv)} по ${n} ${pluralRu(n, ['посту', 'постам', 'постам'])}`;
 
 export function VelocityChartBlock({ id, homeKey }: HomeBlockProps = {}) {
   const { data, isPending } = useVelocity();
