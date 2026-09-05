@@ -1,5 +1,5 @@
 {
-  "total": 1152,
+  "total": 1151,
   "rules": {
     "lint/complexity/noImportantStyles": 7,
     "lint/complexity/noUselessCatch": 1,
@@ -25,6 +25,6 @@
     "lint/suspicious/noGlobalIsNan": 14,
     "lint/suspicious/noPrototypeBuiltins": 2,
     "lint/suspicious/noShadowRestrictedNames": 8,
-    "lint/suspicious/useIterableCallbackReturn": 27
+    "lint/suspicious/useIterableCallbackReturn": 26
   }
 }

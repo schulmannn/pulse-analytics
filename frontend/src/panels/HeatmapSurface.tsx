@@ -21,12 +21,12 @@ export function HeatmapSurface({
   const hours = Array.from({ length: hourRange.to - hourRange.from + 1 }, (_, i) => hourRange.from + i);
   const cols = `30px repeat(${hours.length}, minmax(14px, 1fr))`;
   const labelStride = hours.length <= 8 ? 1 : hours.length <= 16 ? 2 : 3;
-  const ariaSummary = bestSlot
-    ? `Тепловая карта публикаций по дням и часам. Лучший слот: ${TG_DAY_NAMES[bestSlot.weekday] ?? ''} ${bestSlot.hour}:00, ERV ${bestSlot.avgErv.toFixed(1)}%.`
-    : 'Тепловая карта публикаций по дням и часам. Недостаточно данных, чтобы определить лучший слот.';
 
   return (
-    <div ref={wrapRef} role="img" aria-label={ariaSummary} className="relative">
+    // Сетка называет ТОЛЬКО себя. Вывод про лучший слот переехал в видимую строку-вердикт над
+    // картой (HeatmapVerdict) и здесь был бы дублем: скринридер читал бы один и тот же факт
+    // дважды подряд — сначала текстом, потом как описание картинки.
+    <div ref={wrapRef} role="img" aria-label="Тепловая карта публикаций по дням и часам" className="relative">
       <div ref={scrollFadeRef} className="scroll-fade-x overflow-x-auto pb-2">
         <div className="min-w-[420px] space-y-[2px]">
           <div className="grid gap-[2px]" style={{ gridTemplateColumns: cols }}>
