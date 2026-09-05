@@ -111,12 +111,6 @@ function loadConfig(env = process.env) {
       // Ключ шифрования API-ключей Rusender (AES-256-GCM, lib/rusender_crypto) — по образцу
       // metrika.tokenKey: пусто = connect-флоу inert (/api/rusender/connect отвечает 503).
       tokenKey: env.RUSENDER_KEY || '',
-      // ФИЧЕФЛАГ ВИТРИН. Сбор в архив идёт всегда (у подключённого аккаунта), а вот ЭКРАНЫ
-      // (обзор, лента рассылок, база) и их data-роуты включаются только этим флагом: числа
-      // Rusender ещё не сверены с живыми данными, и показывать их всем участникам воркспейса
-      // до сверки нельзя. Архив тем временем копится — к моменту включения история уже есть.
-      // Выключено = data-роуты отвечают 404 (поверхности ещё нет), нав их не показывает.
-      surfaces: /^(1|true|yes|on)$/i.test(String(env.RUSENDER_SURFACES || '')),
     }),
     telegram: Object.freeze({
       botToken: env.TG_BOT_TOKEN || '',

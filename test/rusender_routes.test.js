@@ -16,7 +16,7 @@ const { registerRusenderRoutes } = require('../server/routes/rusender');
 
 const OK_SCOPES = ['campaigns.read', 'contacts.read', 'senders.read'];
 
-function build({ db = {}, fetchImpl, surfacesEnabled = false, crypto = {} } = {}) {
+function build({ db = {}, fetchImpl, crypto = {} } = {}) {
   const routes = new Map();
   const app = {
     get(path, ...h) { routes.set(`GET ${path}`, h); },
@@ -47,7 +47,6 @@ function build({ db = {}, fetchImpl, surfacesEnabled = false, crypto = {} } = {}
     audit: async (_req, event, meta) => { audits.push({ event, meta }); },
     rusenderCrypto: { configured: () => true, encrypt: (v) => `enc(${v})`, decrypt: () => 'plain', ...crypto },
     rusenderFetch: fetchImpl || (async () => ({ data: { accountId: 18416, accountEmail: 'a@b.ru', scopes: OK_SCOPES }, meta: null })),
-    surfacesEnabled,
     log: () => {},
   });
   return { routes, audits, saved };
@@ -74,33 +73,8 @@ async function call(routes, key, req = {}) {
   return out;
 }
 
-// ── Фичефлаг витрин ───────────────────────────────────────────────────────────────────────────
-
-test('флаг ВЫКЛ: все витринные роуты отвечают 404 — поверхности ещё нет', async () => {
-  const { routes } = build({ surfacesEnabled: false });
-  for (const key of [
-    'GET /api/rusender/summary',
-    'GET /api/rusender/campaigns',
-    'GET /api/rusender/campaign/:id',
-  ]) {
-    // eslint-disable-next-line no-await-in-loop
-    const res = await call(routes, key, { params: { id: '1' } });
-    assert.equal(res.status, 404, key);
-    // Именно 404, а НЕ пустой 200: пустой ответ выключенной поверхности неотличим от «данных нет».
-    assert.match(String(res.body.error), /не включены/);
-  }
-});
-
-test('флаг ВЫКЛ: connect/status/account продолжают работать — подключение живёт без витрин', async () => {
-  const { routes } = build({ surfacesEnabled: false });
-  const status = await call(routes, 'GET /api/rusender/status');
-  assert.equal(status.status, 200);
-  assert.equal(status.body.connected, true);
-  assert.equal(status.body.surfaces, false, 'флаг едет эхом, чтобы экран не рисовал пустые оси');
-});
-
 test('флаг ВКЛ: summary отдаёт ДВЕ независимые группы величин и не складывает их', async () => {
-  const { routes } = build({ surfacesEnabled: true });
+  const { routes } = build();
   const res = await call(routes, 'GET /api/rusender/summary', { query: { days: '30' } });
   assert.equal(res.status, 200);
   assert.ok(res.body.events, 'события периода');
@@ -109,13 +83,13 @@ test('флаг ВКЛ: summary отдаёт ДВЕ независимые гру
 });
 
 test('флаг ВКЛ: days вне узкого enum падает в дефолт 30 (кэш не плодит per-value записи)', async () => {
-  const { routes } = build({ surfacesEnabled: true });
+  const { routes } = build();
   const res = await call(routes, 'GET /api/rusender/summary', { query: { days: '37' } });
   assert.equal(res.body.days, 30);
 });
 
 test('флаг ВКЛ: days=0 («Всё») берёт окно из границ архива', async () => {
-  const { routes } = build({ surfacesEnabled: true });
+  const { routes } = build();
   const res = await call(routes, 'GET /api/rusender/summary', { query: { days: '0' } });
   assert.equal(res.body.from, '2026-06-01');
   assert.equal(res.body.to, '2026-08-31');
@@ -123,7 +97,6 @@ test('флаг ВКЛ: days=0 («Всё») берёт окно из границ
 
 test('флаг ВКЛ: пустой архив в «Всё» даёт null-окно, а не выдуманный диапазон', async () => {
   const { routes } = build({
-    surfacesEnabled: true,
     db: { getRusenderBoundsForActor: async () => ({ first_day: null, last_day: null, campaigns: 0 }) },
   });
   const res = await call(routes, 'GET /api/rusender/summary', { query: { days: '0' } });
@@ -133,7 +106,6 @@ test('флаг ВКЛ: пустой архив в «Всё» даёт null-ок�
 
 test('диагностика — только admin воркспейса (отладочная поверхность, не продуктовая)', async () => {
   const { routes } = build({
-    surfacesEnabled: true,
     db: { getChannelOrDefault: async () => ({ id: 9, owner_uid: 99, source: 'rusender', member_role: 'viewer' }) },
   });
   const res = await call(routes, 'GET /api/rusender/diagnostics');
@@ -142,7 +114,7 @@ test('диагностика — только admin воркспейса (отл
 
 test('диагностика доступна и при ВЫКЛЮЧЕННОМ флаге — ею и решают, включать ли его', async () => {
   // Спрятать диагностику за тем самым флагом, который она помогает открыть, значит замкнуть круг.
-  const { routes } = build({ surfacesEnabled: false });
+  const { routes } = build();
   const res = await call(routes, 'GET /api/rusender/diagnostics');
   assert.equal(res.status, 200);
   assert.ok(res.body.coverage !== undefined);

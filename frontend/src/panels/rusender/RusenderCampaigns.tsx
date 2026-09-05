@@ -3,7 +3,6 @@ import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { TableSkeleton } from '@/components/ui/dataSkeleton';
 import { useRusenderCampaigns, type RusenderCampaign } from '@/api/rusender';
-import { useGatedSurfaces } from '@/components/layout/nav';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { fmt } from '@/lib/format';
 import { useMsPagePeriod } from '@/lib/msPeriod';
@@ -41,9 +40,8 @@ const STATUS_LABEL: Record<string, string> = {
 
 export function RusenderCampaigns() {
   const { channelId } = useSelectedChannel();
-  const { rusenderSurfaces } = useGatedSurfaces();
   const period = useMsPagePeriod();
-  const query = useRusenderCampaigns(channelId, period, rusenderSurfaces);
+  const query = useRusenderCampaigns(channelId, period);
   const [q, setQ] = useState('');
 
   const rows = useMemo(() => {
@@ -54,18 +52,6 @@ export function RusenderCampaigns() {
       (c) => (c.name ?? '').toLowerCase().includes(needle) || (c.subject ?? '').toLowerCase().includes(needle),
     );
   }, [query.data, q]);
-
-  // Раздел за фичефлагом: попасть сюда можно только deep-link'ом, пока флаг выключен (нав его
-  // не показывает). Честно говорим, что раздела ещё нет, вместо пустой таблицы.
-  if (!rusenderSurfaces) {
-    return (
-      <EmptyState
-        title="Раздел ещё не включён"
-        reason="Рассылки появятся, когда числа Rusender сверены с живыми данными. Архив тем временем копится."
-        action={{ to: '/rusender', label: 'К обзору' }}
-      />
-    );
-  }
 
   if (query.isPending) return <TableSkeleton />;
   if (query.isError) return <ErrorState onRetry={() => void query.refetch()} />;

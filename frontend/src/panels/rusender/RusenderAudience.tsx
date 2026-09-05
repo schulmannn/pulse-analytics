@@ -8,7 +8,6 @@ import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { ChartSkeleton } from '@/components/ui/dataSkeleton';
 import { useRusenderSummary } from '@/api/rusender';
-import { useGatedSurfaces } from '@/components/layout/nav';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { lttbDownsample } from '@/lib/downsample';
 import { CHART_MAX_POINTS } from '@/lib/msSeries';
@@ -29,9 +28,8 @@ import { WidgetGrid } from '@/components/widgets/WidgetGrid';
  */
 export function RusenderAudience() {
   const { channelId } = useSelectedChannel();
-  const { rusenderSurfaces } = useGatedSurfaces();
   const period = useMsPagePeriod();
-  const summary = useRusenderSummary(channelId, period, rusenderSurfaces);
+  const summary = useRusenderSummary(channelId, period);
 
   const series = summary.data?.series ?? [];
   const model = useMemo(() => {
@@ -43,16 +41,6 @@ export function RusenderAudience() {
       unsub: shown.map((r) => r.unsub),
     };
   }, [series]);
-
-  if (!rusenderSurfaces) {
-    return (
-      <EmptyState
-        title="Раздел ещё не включён"
-        reason="База появится, когда числа Rusender сверены с живыми данными. Архив тем временем копится."
-        action={{ to: '/rusender', label: 'К обзору' }}
-      />
-    );
-  }
 
   if (summary.isError) return <ErrorState onRetry={() => void summary.refetch()} />;
 
