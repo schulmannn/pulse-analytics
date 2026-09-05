@@ -147,14 +147,22 @@ test('раскрытая ссылка: пароль открывшего НЕ с
     'иначе подтверждение почты владельцем активировало бы аккаунт с паролем атакующего');
 });
 
-test('раскрытая ссылка + засеянный unverified: пароль строки не перезаписывается', async () => {
+test('раскрытая ссылка + засеянный unverified: пароль гасится, а не сохраняется', async () => {
+  // Прежняя версия проверки требовала ОБРАТНОГО — «пароль строки не перезаписывается» — и тем
+  // закрепляла дыру: засеянный атакующим пароль переживал подтверждение почты владельцем, и
+  // аккаунт активировался с ним (аудит #554, проход №2, N10). Ни выбранный сейчас пароль, ни
+  // засеянный ранее не должны пережить этот путь.
   const existing = { id: 55, email: 'victim@example.com', pass_hash: 'hash(seeded-by-attacker)', role: 'user', status: 'unverified', token_version: 1 };
   const { handlers, state } = harness({ invite: { link_exposed: true, invitee_status: 'unverified' }, existingUser: existing });
   const res = await claim(handlers, { password: 'new-attacker-password' });
 
   assert.equal(res.body.verify_required, true);
-  assert.deepEqual(state.passwordWrites, [], 'перезаписать пароль по раскрытой ссылке мог бы ровно тот, кто её раскрыл');
-  assert.deepEqual(state.statusWrites, [], 'аккаунт остаётся unverified');
+  assert.equal(state.passwordWrites.length, 1, 'засеянный пароль обязан быть перезаписан');
+  const written = state.passwordWrites[0];
+  assert.equal(written.id, 55);
+  assert.equal(written.hash.includes('new-attacker-password'), false, 'выбранный по раскрытой ссылке пароль не сохраняется');
+  assert.equal(written.hash.includes('seeded-by-attacker'), false, 'и засеянный ранее — тоже');
+  assert.deepEqual(state.statusWrites, [], 'аккаунт остаётся unverified: активирует только письмо');
   assert.deepEqual(state.cookies, []);
 });
 
