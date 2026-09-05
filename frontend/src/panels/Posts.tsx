@@ -539,11 +539,14 @@ function PostsTable({ allPosts, loadedCount }: { allPosts: NormalizedPost[]; loa
                   <td className="px-3 py-2.5">
                     {isClickable ? (
                       // A real, focusable control in the row — the tr onClick alone is mouse-only,
-                      // leaving keyboard users no desktop path to the post details.
+                      // leaving keyboard users no desktop path to the post details. Кольцо — тот же
+                      // рецепт, что у трёх соседних таблиц (IgContentDesktop, CampaignPostsTable,
+                      // MetricPage): без него фокус рисовала браузерная обводка по умолчанию.
                       <button
                         type="button"
                         onClick={() => setOpenId(post.id)}
-                        className="block w-full space-y-1 text-left"
+                        data-post-open-trigger
+                        className="block w-full space-y-1 rounded text-left focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/45"
                       >
                         <span className={cn('line-clamp-1 font-medium', post.caption ? 'text-foreground' : 'italic text-muted-foreground')}>
                           {post.caption ? markdownToPlainText(post.caption) : 'Без подписи'}
