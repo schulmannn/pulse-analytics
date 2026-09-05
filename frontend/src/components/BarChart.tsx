@@ -77,8 +77,84 @@ interface BarChartProps {
    * её на две серии значило бы поставить два столбца на одну дату — враньё про сами данные.
    */
   barTone?: (index: number) => 'default' | 'ghost' | 'peak';
+  /**
+   * ОРИЕНТИР ОТ ХОСТА — горизонтальный пунктирный штрих на уровне `value` (R8: среднее окна у
+   * hero-карточки, референс Mercury Insights). `label` идёт в `<title>` штриха, а не на полотно:
+   * почему — см. `printed` у RefMarker.
+   *
+   * Третий повод для такой линии и первый, приходящий ПРОПОМ: цель виджета живёт в
+   * `WidgetTargetContext`, «Мин/Макс/Среднее» разворота — в `ChartRefLinesContext`, и оба
+   * контекста ставит оболочка карточки, а не тело. Среднее знает только тело (оно считает его по
+   * тому же окну, из которого взяло столбцы), поэтому ему нужен обычный проп.
+   */
+  referenceLine?: { value: number; label: string } | null;
   /** Compact shadcn-style tooltip and higher-contrast series treatment for the metric explorer. */
   appearance?: 'default' | 'comparison';
+}
+
+/**
+ * Пунктирный ориентир поверх столбцов — ОДИН рецепт на три повода (цель виджета, линии разворота,
+ * среднее окна). Пара `<line>` + `<text>` уже жила в двух копиях, и копии успели разойтись по
+ * непрозрачности (0.8 у цели против 0.7 у линий разворота); третья копия разошлась бы так же.
+ * Непрозрачность осталась параметром, чтобы правка не двигала пиксели существующих двух.
+ */
+function RefMarker({
+  y,
+  text,
+  from,
+  to,
+  opacity,
+  printed = true,
+  slot,
+}: {
+  y: number;
+  text: string;
+  from: number;
+  to: number;
+  opacity: number;
+  /**
+   * Печатать подпись НА полотне.
+   *
+   * Цель и линии разворота печатают: цель обычно стоит ВЫШЕ данных (её ещё не достигли), линии
+   * разворота включаются кнопкой и живут в высоком оверлее, где над крайними столбцами есть воздух.
+   * Среднее окна — другой случай: оно по определению внутри размаха, то есть подпись ВСЕГДА ложится
+   * на столбцы, и серый текст поверх заливки серии не читается (замер на демо). Хосту, который уже
+   * печатает это число на лице карточки, вторая копия не нужна — остаётся штрих и `<title>`.
+   */
+  printed?: boolean;
+  /** Крюк для гейтов; у цели и линий разворота его нет — их видно по тексту подписи. */
+  slot?: string;
+}) {
+  return (
+    <g className="pointer-events-none" data-chart-ref-line={slot}>
+      {/* <title> — имя линии для читалки и подсказка по наведению; краски на полотне не добавляет. */}
+      {!printed && <title>{text}</title>}
+      {/* vector-effect обязателен: viewBox растягивается неравномерно (CLAUDE.md), без него
+          штрих «размазывает». */}
+      <line
+        x1={from}
+        y1={y}
+        x2={to}
+        y2={y}
+        stroke="hsl(var(--chart-role-neutral))"
+        strokeDasharray="6 4"
+        strokeWidth="1.2"
+        opacity={opacity}
+        vectorEffect="non-scaling-stroke"
+      />
+      {/* Подпись уходит ПОД линию, когда та стоит у самой кромки: сверху её обрезал бы viewBox. */}
+      {printed && (
+        <text
+          x={to - 4}
+          y={y - 4 < 10 ? y + 12 : y - 4}
+          textAnchor="end"
+          className="pointer-events-none select-none fill-muted-foreground text-2xs font-medium tabular-nums"
+        >
+          {text}
+        </text>
+      )}
+    </g>
+  );
 }
 
 interface Hover {
@@ -151,6 +227,7 @@ export function BarChart({
   comparisonStyle = 'grouped',
   ghostVisible = true,
   barTone,
+  referenceLine = null,
   appearance = 'default',
 }: BarChartProps) {
   // Геометрия столбцов числовая, а пропуск в ней невыразим — сводим его к нулевой высоте ОДИН
@@ -272,7 +349,12 @@ export function BarChart({
     // уровень сплющил бы столбцы в полоску у самого низа.
     const barVals = [...values, ...(activeGhost ?? []), ...stackedTotals];
     const clamped = clampTargetToDomain(target, 0, Math.max(...barVals, 1));
-    const rawMax = Math.max(...values, 1, clamped.value ?? 0, ...(activeGhost ?? []), ...stackedTotals);
+    // Уровень ориентира входит в домен: среднее считается по ПОЛНОМУ окну, а столбцы могут прийти
+    // прорежёнными (LTTB-кап длинной серии), и уровень способен оказаться выше видимого максимума —
+    // тогда линия ушла бы за верхнюю кромку. Клампа, как у цели, ей не нужно: ориентир приходит из
+    // тех же данных, что и столбцы, и оторваться от них на порядок не может.
+    const refLevel = referenceLine != null && Number.isFinite(referenceLine.value) ? referenceLine.value : null;
+    const rawMax = Math.max(...values, 1, clamped.value ?? 0, refLevel ?? 0, ...(activeGhost ?? []), ...stackedTotals);
     const scale = expanded ? niceScale(0, rawMax) : null;
     const max = scale ? scale.hi : rawMax;
     const n = values.length;
@@ -524,21 +606,30 @@ export function BarChart({
           );
         })}
 
+        {/* Ориентир хоста (среднее окна у hero-карточки) — под целью владельца: цель важнее,
+            и на пересечении читаться должна она. */}
+        {refLevel != null && (
+          <RefMarker
+            slot="host"
+            printed={false}
+            y={barTop(refLevel)}
+            from={gutterW}
+            to={chartWidth}
+            opacity={0.7}
+            text={`${referenceLine?.label} ${fmt.short(refLevel)}`}
+          />
+        )}
+
         {/* Target level (widget pref) — dashed goal line + right-aligned label, above the bars */}
         {clamped.value != null && (
-          <>
-            {/* Линия — на УРЕЗАННОМ уровне, число в подписи настоящее, стрелка говорит «выше окна». */}
-            <line x1={gutterW} y1={barTop(clamped.value)} x2={chartWidth} y2={barTop(clamped.value)} stroke="hsl(var(--chart-role-neutral))" strokeDasharray="6 4" strokeWidth="1.2" opacity="0.8" vectorEffect="non-scaling-stroke" className="pointer-events-none" />
-            <text
-              x={chartWidth - 4}
-              y={barTop(clamped.value) - 4 < 10 ? barTop(clamped.value) + 12 : barTop(clamped.value) - 4}
-              textAnchor="end"
-              className="pointer-events-none select-none fill-muted-foreground text-2xs font-medium tabular-nums"
-            >
-              цель {fmt.short(target ?? clamped.value)}
-              {clamped.clipped ? ' ↑' : ''}
-            </text>
-          </>
+          // Линия — на УРЕЗАННОМ уровне, число в подписи настоящее, стрелка говорит «выше окна».
+          <RefMarker
+            y={barTop(clamped.value)}
+            from={gutterW}
+            to={chartWidth}
+            opacity={0.8}
+            text={`цель ${fmt.short(target ?? clamped.value)}${clamped.clipped ? ' ↑' : ''}`}
+          />
         )}
 
         {/* Min/Max/Average reference lines (overlay «Линии» toggle) — dashed hairlines at the visible
@@ -546,17 +637,7 @@ export function BarChart({
         {refLines && (
           <>
             {([['макс', refLines.max], ['сред.', refLines.avg], ['мин', refLines.min]] as const).map(([lbl, v]) => (
-              <g key={lbl} className="pointer-events-none">
-                <line x1={gutterW} y1={barTop(v)} x2={chartWidth} y2={barTop(v)} stroke="hsl(var(--chart-role-neutral))" strokeDasharray="6 4" strokeWidth="1.2" opacity="0.7" vectorEffect="non-scaling-stroke" />
-                <text
-                  x={chartWidth - 4}
-                  y={barTop(v) - 4 < 10 ? barTop(v) + 12 : barTop(v) - 4}
-                  textAnchor="end"
-                  className="pointer-events-none select-none fill-muted-foreground text-2xs font-medium tabular-nums"
-                >
-                  {lbl} {fmt.short(v)}
-                </text>
-              </g>
+              <RefMarker key={lbl} y={barTop(v)} from={gutterW} to={chartWidth} opacity={0.7} text={`${lbl} ${fmt.short(v)}`} />
             ))}
           </>
         )}
@@ -564,7 +645,7 @@ export function BarChart({
     );
 
     return { chartWidth, chartHeight, graphHeight, offsetX, itemWidth, bars, ghostBars, stacked, barTop, barCenterX, underLayer, overLayer };
-  }, [values, labels, axisLabels, activeGhost, hasGhost, target, refLines, width, ctxHeight, hostHeight, height, expanded, comparisonStyle, gapIdx, gapPatternId]);
+  }, [values, labels, axisLabels, activeGhost, hasGhost, target, refLines, referenceLine, width, ctxHeight, hostHeight, height, expanded, comparisonStyle, gapIdx, gapPatternId]);
 
   // ── UPDATE morph: the silhouette flows into the new shape on a data change ────────────────
   // Heights (the ONE dimension the data owns — x/width are layout) tween from the previously

@@ -91,7 +91,7 @@ export function KpiGrid() {
     displayMembers, channelViews, totalReactions, avgViews, er,
     subscriberTrend, viewsTrend, reactionsTrend, erTrend, avgReachTrend,
     viewsSpark, periodLabel, viewsCaption, subDelta, reactionsDelta, erCaption,
-    deltaBasis, captionBasis,
+    deltaBasis, captionBasis, viewsPerDay,
   } = derived;
   return (
     <div className="space-y-5">
@@ -104,6 +104,7 @@ export function KpiGrid() {
         caption={viewsCaption}
         spark={viewsSpark}
         range={seriesRange(viewsSpark?.values)}
+        perDay={viewsPerDay}
         info={getDrillMetric('views')}
         onDrill={() => openMetric('views')}
       />
@@ -148,7 +149,7 @@ export function TgViewsBody({ state, viz }: { state: TgKpiState; viz?: 'line' | 
   if (isError) {
     return <ErrorState title="Не удалось загрузить метрики" reason={error instanceof Error ? error.message : 'ошибка'} />;
   }
-  const { channelViews, viewsTrend, viewsCaption, viewsSpark, periodLabel, deltaBasis } = derived;
+  const { channelViews, viewsTrend, viewsCaption, viewsSpark, periodLabel, deltaBasis, viewsPerDay } = derived;
   return (
     <FeaturedKpi
       label={showPeriod ? `Просмотры · ${periodLabel}` : 'Просмотры'}
@@ -161,6 +162,7 @@ export function TgViewsBody({ state, viz }: { state: TgKpiState; viz?: 'line' | 
       caption={viewsCaption}
       spark={viewsSpark}
       range={seriesRange(viewsSpark?.values)}
+      perDay={viewsPerDay}
       viz={viz}
       info={getDrillMetric('views')}
       onDrill={() => navigate('/metrics/views')}
@@ -365,12 +367,18 @@ interface FeaturedKpiProps {
   viz?: 'line' | 'bar';
   /** Мин/макс окна (только потоковые серии — см. seriesRange). */
   range?: RangeSummary | null;
+  /**
+   * СРЕДНЕЕ ЗА ДЕНЬ (R8) — одно число в двух подачах: цифрой в колонке героя и штрихом поверх
+   * столбцов. Подача разная, источник один, поэтому и проп один: две ветки разошлись бы по
+   * округлению, и карточка печатала бы «9.1k» рядом со штрихом на 9 148.
+   */
+  perDay?: number | null;
 }
 
 /** Hero KPI — the steep card anatomy (owner rule): label + big number + comparison pinned
     bottom-LEFT, the area sparkline filling the width to the RIGHT of the number block. The ledger
     below is untouched — the hero zone just turned horizontal. */
-function FeaturedKpi({ label, labelHidden = false, value, trend, basis, caption, spark, info, onDrill, viz = 'line', range }: FeaturedKpiProps) {
+function FeaturedKpi({ label, labelHidden = false, value, trend, basis, caption, spark, info, onDrill, viz = 'line', range, perDay = null }: FeaturedKpiProps) {
   // Кап длинной серии перед рендером (канон CLAUDE.md): на окне «Всё» архивный viewsSpark несёт
   // до 730 дневных точек — в 200×32-спарклайне это суб-пиксельная мазня. Пары {value,label}
   // прореживаются ВМЕСТЕ, чтобы hover-читалка называла именно отобранные LTTB точки; хедлайн,
@@ -405,6 +413,9 @@ function FeaturedKpi({ label, labelHidden = false, value, trend, basis, caption,
       value={value}
       delta={trend}
       deltaBasis={basis}
+      // Подпись БЕЗ периода (вето владельца на дубль окна в теле карточки): окно уже стоит либо в
+      // подписи героя, либо в шапке страницы, и третья копия была бы шумом.
+      secondary={perDay != null ? { label: 'в среднем за день', value: fmt.short(perDay) } : null}
       range={range}
       caption={caption ?? undefined}
       onValueClick={onDrill}
@@ -418,6 +429,11 @@ function FeaturedKpi({ label, labelHidden = false, value, trend, basis, caption,
             axisLabels={sparkShown.axisLabels}
             titles={sparkShown.values.map((v, i) => `${sparkShown.labels[i] ?? ''}: ${fmt.num(v)}`)}
             formatValue={fmt.num}
+            // Столбец отвечает «сколько в этот день», но не отвечает «это выше или ниже обычного»:
+            // глаз сравнивает соседей, а не всё окно. Линия делает сравнение с окном видимым, не
+            // добавляя ни одного числа в шапку. У линейного варианта её нет: там форму окна уже
+            // держит сама кривая.
+            referenceLine={perDay != null ? { value: perDay, label: 'ср.' } : null}
           />
         </div>
       ) : sparkShown && sparkShown.values.length > 1 ? (
