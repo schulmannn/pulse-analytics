@@ -259,7 +259,15 @@ jobs:
       - run: npm ci
       - name: Install Playwright Chromium
         run: npx playwright install --with-deps chromium
-      - name: Run mandatory 360/390/430 phone and a11y gate
+      # ВЕСЬ набор на проекте mobile-430, а не два файла. Мобильные ветки спеков (18 гвардов
+      # test.skip по имени проекта в 11 файлах) не выполнялись НИГДЕ: десктопные шарды их
+      # пропускают по проекту, а сюда попадали только mobile-nav и a11y. Гейт «не сломать
+      # существующее» на мобиле не работал (аудит #554, проход №2, N8).
+      #
+      # Джоба остаётся ОДНОЙ и с прежним именем: шардирование превратило бы её в матрицу
+      # (e2e-phone (1), e2e-phone (2)) и сломало бы обязательную проверку branch protection.
+      # Замер: 476 тестов, 144 выполняются, 332 пропуск — 6.5 минуты, вровень с шардом десктопа.
+      - name: Run mandatory mobile-430 gate (весь набор)
         run: npm run test:e2e:phone
       - name: Upload Playwright phone failure artifacts
         if: failure()
