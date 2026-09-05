@@ -365,7 +365,7 @@ function MentionsSourcesPage() {
         ) : items.length === 0 ? (
           <EmptyState compact size="chart" title="За выбранный период упоминающих каналов нет." />
         ) : (
-          <Breakdown items={items} />
+          <Breakdown items={items} columns={{ label: 'Канал', value: 'Упоминания' }} ranked />
         )}
       </MentionsReportCard>
       <WindowBar />

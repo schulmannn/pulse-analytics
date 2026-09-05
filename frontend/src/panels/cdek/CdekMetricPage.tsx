@@ -771,6 +771,8 @@ interface BreakdownDef {
   dict: (id: string) => string;
   fallback: string;
   tailWord: string;
+  /** Имя левой колонки списка; правую диктует выбранная метрика (выручка/заказы). */
+  dimLabel: string;
 }
 
 const BREAKDOWN_DEFS: Record<BreakdownKey, BreakdownDef> = {
@@ -781,6 +783,7 @@ const BREAKDOWN_DEFS: Record<BreakdownKey, BreakdownDef> = {
     dim: 'channel',
     dict: (id: string) => CHANNEL_LABEL[id] ?? id,
     fallback: 'Без канала',
+    dimLabel: 'Канал',
     tailWord: 'рублей',
   },
   'cdek-statuses': {
@@ -790,6 +793,7 @@ const BREAKDOWN_DEFS: Record<BreakdownKey, BreakdownDef> = {
     dim: 'status',
     dict: cdekStatusLabel,
     fallback: 'Без статуса',
+    dimLabel: 'Статус',
     tailWord: 'рублей',
   },
   'cdek-products': {
@@ -800,6 +804,7 @@ const BREAKDOWN_DEFS: Record<BreakdownKey, BreakdownDef> = {
     // У товаров подписи приходят с сервера (title), словарь ключей не нужен.
     dict: (id: string) => id,
     fallback: 'Без названия',
+    dimLabel: 'Товар',
     tailWord: 'рублей',
   },
 };
@@ -829,6 +834,8 @@ function CdekBreakdownPage({ def }: { def: BreakdownDef }) {
         total={total}
         format={metric === 'revenue' ? rub : fmt.num}
         tailWord={metric === 'revenue' ? def.tailWord : 'заказов'}
+        columns={{ label: def.dimLabel, value: metric === 'revenue' ? 'Выручка' : 'Заказы' }}
+        ranked
         expanded
         cumulative
       />

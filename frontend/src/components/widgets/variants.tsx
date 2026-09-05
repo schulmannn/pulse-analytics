@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { fmt } from '@/lib/format';
 import { displayWithShare } from '@/lib/breakdownShare';
 import { BarChart } from '@/components/BarChart';
-import { Breakdown } from '@/components/Breakdown';
+import { Breakdown, type BreakdownColumns } from '@/components/Breakdown';
 import { PieChart } from '@/components/PieChart';
 import { DivergingBars } from '@/components/DivergingBars';
 import type { WidgetSize } from '@/lib/widgetPrefsStore';
@@ -72,7 +72,12 @@ export function BarValuesLayout({ chart, rows }: { chart: ReactNode; rows: Ledge
 
 /** The common «tint-row list ↔ bar chart ↔ pie» set for Breakdown-style category data, plus
     the wide «Столбцы + значения» presentation (bar chart + value ledger, needs the full row). */
-export function breakdownVariants(items: BreakdownLikeItem[]): WidgetVariant[] {
+export function breakdownVariants(
+  items: BreakdownLikeItem[],
+  /** Анатомия списка: имена колонок и нумерация. Столбцам и круговой они не нужны — там измерение
+      называет ось и легенда, а в списке правое число иначе остаётся без единицы измерения. */
+  list: { columns?: BreakdownColumns; ranked?: boolean } = {},
+): WidgetVariant[] {
   const values = items.map((i) => i.value);
   const labels = items.map((i) => i.label);
   const shares = items.map((i) => i.share);
@@ -81,7 +86,11 @@ export function breakdownVariants(items: BreakdownLikeItem[]): WidgetVariant[] {
   const pieTitles = items.map((i) => `${i.label}: ${i.display ?? i.value}`);
   const titles = items.map((i, n) => displayWithShare(pieTitles[n]!, i.share));
   return [
-    { key: 'list', label: 'Список', render: <Breakdown items={items} /> },
+    {
+      key: 'list',
+      label: 'Список',
+      render: <Breakdown items={items} columns={list.columns} ranked={list.ranked} />,
+    },
     {
       key: 'bar',
       label: 'Столбцы',

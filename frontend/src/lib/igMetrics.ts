@@ -2,6 +2,7 @@
 // useIgData hook gather raw API payloads and lean on this to shape them. Kept separate so the
 // "what the numbers mean" logic is testable and the panels stay presentational.
 import type { IgBreakdowns, IgHistoryRow, IgInsights, IgOnline, IgPost, IgStory } from '@/api/schemas';
+import { withShares } from '@/lib/breakdownShare';
 import { pctDelta, type MetricDelta } from '@/lib/delta';
 import { fmt, timeAxisFromDayKeys } from '@/lib/format';
 
@@ -406,14 +407,21 @@ export interface IgBreakdownItem {
   display: string;
   /** Optional HSL fill (gender/format keep a stable hue across sorts). */
   color?: string;
+  /** Доля от полной суммы разреза — печатается ОТДЕЛЬНОЙ колонкой (см. components/Breakdown). */
+  share?: number;
 }
 
 /** Возраст — buckets in AGE_ORDER (histogram order), dropping segments Instagram didn't return. */
 export function igAgeItems(breakdowns: IgBreakdowns | undefined): IgBreakdownItem[] {
   const raw = tvBreakdown(breakdowns?.data, 'follower_demographics', 'age');
-  return AGE_ORDER.map((bucket) => raw.find((a) => a.label === bucket))
-    .filter((a): a is { label: string; value: number } => !!a)
-    .map((a) => ({ label: a.label, value: a.value, display: fmt.short(a.value) }));
+  // Доля живёт ЗДЕСЬ, а не в карточке: карточка и её страница разбора (/metrics/ig-age) читают
+  // один и тот же список, поэтому один и тот же процент. Пока склейку собирала карточка, она
+  // печатала «71.0%» мимо formatShare, а на странице доли не было вовсе.
+  return withShares(
+    AGE_ORDER.map((bucket) => raw.find((a) => a.label === bucket))
+      .filter((a): a is { label: string; value: number } => !!a)
+      .map((a) => ({ label: a.label, value: a.value, display: fmt.short(a.value) })),
+  );
 }
 
 /** Пол — ranked high→low, each slice keeping its categorical hue. */
@@ -430,16 +438,22 @@ export function igGenderItems(breakdowns: IgBreakdowns | undefined): IgBreakdown
 
 /** Страны — full ranked list, localized country name (card slices a top-N preview). */
 export function igCountryItems(breakdowns: IgBreakdowns | undefined): IgBreakdownItem[] {
-  return tvBreakdown(breakdowns?.data, 'follower_demographics', 'country')
-    .sort((a, b) => b.value - a.value)
-    .map((c) => ({ label: countryName(c.label), value: c.value, display: fmt.short(c.value) }));
+  // withShares — до среза топ-N у карточки: доля считается от ПОЛНОГО рейтинга, иначе показанная
+  // восьмёрка отчиталась бы за 100% аудитории, а хвост исчез бы (см. lib/breakdownShare).
+  return withShares(
+    tvBreakdown(breakdowns?.data, 'follower_demographics', 'country')
+      .sort((a, b) => b.value - a.value)
+      .map((c) => ({ label: countryName(c.label), value: c.value, display: fmt.short(c.value) })),
+  );
 }
 
 /** Города — full ranked list, localized city name (card slices a top-N preview). */
 export function igCityItems(breakdowns: IgBreakdowns | undefined): IgBreakdownItem[] {
-  return tvBreakdown(breakdowns?.data, 'follower_demographics', 'city')
-    .sort((a, b) => b.value - a.value)
-    .map((c) => ({ label: cityName(c.label), value: c.value, display: fmt.short(c.value) }));
+  return withShares(
+    tvBreakdown(breakdowns?.data, 'follower_demographics', 'city')
+      .sort((a, b) => b.value - a.value)
+      .map((c) => ({ label: cityName(c.label), value: c.value, display: fmt.short(c.value) })),
+  );
 }
 
 /** Вовлечённость по форматам — account total_interactions by media_product_type, ranked high→low. */

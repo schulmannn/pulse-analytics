@@ -7,7 +7,7 @@ import { SegmentedControl } from '@/components/SegmentedControl';
 import { PeriodChips } from '@/components/PeriodChips';
 import { SourceIdentity } from '@/components/SourceIdentity';
 import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
-import { Breakdown } from '@/components/Breakdown';
+import { Breakdown, type BreakdownColumns } from '@/components/Breakdown';
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
 import { EmptyState } from '@/components/EmptyState';
@@ -350,6 +350,10 @@ interface TgBreakdownDef {
   derive: (ctx: DeriveCtx) => BreakdownLikeItem[];
   footer?: (ctx: DeriveCtx) => ReactNode;
   empty: { title: string; reason?: string };
+  /** Имена колонок: без них правое число остаётся без единицы измерения. */
+  columns: BreakdownColumns;
+  /** Номер позиции — там, где порядок сам по себе является ответом (источники, языки, эмодзи). */
+  ranked?: boolean;
 }
 
 /**
@@ -394,7 +398,7 @@ function TgBreakdownPage({ def }: { def: TgBreakdownDef }) {
           <EmptyState compact size="chart" title={def.empty.title} reason={def.empty.reason} />
         ) : (
           <>
-            <Breakdown items={items} />
+            <Breakdown items={items} columns={def.columns} ranked={def.ranked} />
             {def.footer?.(ctx)}
           </>
         )}
@@ -513,6 +517,7 @@ function TgChurnPage() {
         ) : (
           <>
             <Breakdown
+              columns={{ label: 'Событие', value: 'Подписчики' }}
               items={[
                 {
                   label: 'Отписалось',
@@ -563,6 +568,7 @@ const BREAKDOWN_DEFS: Record<BreakdownKey, TgBreakdownDef> = {
     campaignScoped: false,
     comparison: LIST_COMPARISON,
     derive: (ctx) => deriveFormatViews(windowedPosts(ctx.full, ctx.period.inRange)),
+    columns: { label: 'Формат', value: 'Просмотры' },
     empty: { title: 'Нет публикаций за период' },
   },
   'tg-hashtag-erv': {
@@ -585,6 +591,8 @@ const BREAKDOWN_DEFS: Record<BreakdownKey, TgBreakdownDef> = {
         </div>
       );
     },
+    columns: { label: 'Хэштег', value: 'Прирост ERV' },
+    ranked: true,
     empty: { title: 'Мало данных для хэштегов', reason: 'Нужно ≥2 поста с одним хэштегом' },
   },
   'tg-emoji': {
@@ -599,6 +607,8 @@ const BREAKDOWN_DEFS: Record<BreakdownKey, TgBreakdownDef> = {
     comparison: LIST_COMPARISON,
     derive: (ctx) =>
       deriveEmojis(ctx.full, ctx.period.inRange, ctx.keep).map((e) => ({ label: e.label, value: e.value, display: fmt.num(e.value), share: e.share })),
+    columns: { label: 'Эмодзи', value: 'Реакции' },
+    ranked: true,
     empty: { title: 'Нет реакций за период' },
   },
   'tg-engagement-mix': {
@@ -619,6 +629,7 @@ const BREAKDOWN_DEFS: Record<BreakdownKey, TgBreakdownDef> = {
         color: c.color,
         share: c.share,
       })),
+    columns: { label: 'Вид вовлечённости', value: 'События' },
     empty: { title: 'Нет вовлечённости за период' },
   },
   'tg-reach-by-type': {
@@ -633,6 +644,7 @@ const BREAKDOWN_DEFS: Record<BreakdownKey, TgBreakdownDef> = {
     comparison: LIST_COMPARISON,
     derive: (ctx) =>
       deriveViewsByTypeFromPosts(ctx.full, ctx.period.inRange, ctx.keep).map((t) => ({ label: t.label, value: t.value, display: fmt.num(t.value) })),
+    columns: { label: 'Тип публикации', value: 'Ср. охват' },
     empty: { title: 'Нет публикаций за период' },
   },
   'tg-erv-by-format': {
@@ -651,6 +663,7 @@ const BREAKDOWN_DEFS: Record<BreakdownKey, TgBreakdownDef> = {
         value: f.avgErv,
         display: `${f.avgErv.toFixed(1)}% ERV · ${f.n} ${pluralRu(f.n, ['пост', 'поста', 'постов'])}`,
       })),
+    columns: { label: 'Формат', value: 'Ср. ERV' },
     empty: { title: 'Нет публикаций за период' },
   },
   'tg-views-by-source': {
@@ -664,6 +677,8 @@ const BREAKDOWN_DEFS: Record<BreakdownKey, TgBreakdownDef> = {
     campaignScoped: false,
     comparison: GRAPHS_COMPARISON,
     derive: (ctx) => tgViewsBySourceItems(ctx.graphs),
+    columns: { label: 'Источник', value: 'Просмотры' },
+    ranked: true,
     empty: { title: 'Нет данных по источникам' },
   },
   'tg-followers-by-source': {
@@ -677,6 +692,8 @@ const BREAKDOWN_DEFS: Record<BreakdownKey, TgBreakdownDef> = {
     campaignScoped: false,
     comparison: GRAPHS_COMPARISON,
     derive: (ctx) => tgNewFollowersBySourceItems(ctx.graphs),
+    columns: { label: 'Источник', value: 'Подписчики' },
+    ranked: true,
     empty: { title: 'Нет данных по источникам' },
   },
   'tg-languages': {
@@ -690,6 +707,8 @@ const BREAKDOWN_DEFS: Record<BreakdownKey, TgBreakdownDef> = {
     campaignScoped: false,
     comparison: GRAPHS_COMPARISON,
     derive: (ctx) => tgLanguageItems(ctx.graphs),
+    columns: { label: 'Язык', value: 'Подписчики' },
+    ranked: true,
     empty: { title: 'Нет данных по языкам' },
   },
   'tg-sentiment': {
@@ -703,6 +722,7 @@ const BREAKDOWN_DEFS: Record<BreakdownKey, TgBreakdownDef> = {
     campaignScoped: false,
     comparison: GRAPHS_COMPARISON,
     derive: (ctx) => tgSentimentItems(ctx.graphs),
+    columns: { label: 'Тональность', value: 'Реакции' },
     empty: { title: 'Нет данных по тональности' },
   },
 };

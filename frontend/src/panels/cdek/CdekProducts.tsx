@@ -130,6 +130,8 @@ export function CdekProducts() {
               total={totalRevenue}
               format={rub}
               tailWord="рублей"
+              columns={{ label: 'Товар', value: 'Выручка' }}
+              ranked
               // Накопленный процент — то самое «первые пять дают 78%», ради чего разбор и нужен.
               cumulative
               compactRows={8}

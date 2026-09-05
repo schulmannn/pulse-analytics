@@ -1289,7 +1289,12 @@ export function MetricPage() {
                   { value: 'weekday' as Dim, label: 'День недели' },
                 ]}
               />
-              <Breakdown items={breakdownItems} />
+              {/* Имя левой колонки — выбранное измерение, правой — сама метрика: рейл висит
+                  сбоку от графика, и «Видео 12.4k» без шапки читается как что угодно. */}
+              <Breakdown
+                items={breakdownItems}
+                columns={{ label: dim === 'weekday' ? 'День недели' : 'Формат', value: def.label }}
+              />
             </RailSection>
           )}
 
