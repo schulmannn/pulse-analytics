@@ -182,6 +182,7 @@ export function YmOverview() {
       // Канал есть, а счётчика Метрики на нём нет — честный onboarding вместо пустых карточек.
       return (
         <EmptyState
+          ghost="bars"
           title="Яндекс.Метрика не подключена"
           reason="Укажите OAuth-токен — и здесь появятся визиты, посетители и источники трафика."
           action={{ to: '/connect?source=metrika', label: 'Подключить Метрику' }}

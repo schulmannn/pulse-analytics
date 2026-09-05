@@ -26,6 +26,29 @@ if (!ghostAlphaMatch) {
 }
 const GHOST_ALPHA = Number(ghostAlphaMatch[1]);
 
+// Призрак ФОРМЫ пустой карточки (components/EmptyGhost.tsx) — полная противоположность призраку
+// прошлого периода выше. Тот рисует реальные числа и обязан БРАТЬ non-text 3.0; этот — чистая
+// декорация в смысле WCAG 1.4.11 (aria-hidden, никакой информации), и его планка ДВУСТОРОННЯЯ и
+// перевёрнутая сверху: он обязан остаться заведомо бледнее любой линии данных, иначе пустая
+// карточка притворится наполненной, — и при этом не бледнее волосяной линии, иначе исчезнет.
+// Альфа читается из литерала класса в коде по той же причине, что и GHOST_ALPHA: гейт, у которого
+// своя копия числа, зеленеет вхолостую.
+let emptyGhostSrc = '';
+try {
+  emptyGhostSrc = readFileSync(join(srcDir, 'components', 'EmptyGhost.tsx'), 'utf8');
+} catch {
+  console.error('contrast-tokens: src/components/EmptyGhost.tsx не читается — гейт призрака формы потерян');
+  process.exit(1);
+}
+const emptyGhostInkMatch = emptyGhostSrc.match(/EMPTY_GHOST_INK = 'text-muted-foreground\/(\d+)'/);
+if (!emptyGhostInkMatch) {
+  console.error(
+    'contrast-tokens: EMPTY_GHOST_INK не найдена в src/components/EmptyGhost.tsx — гейт призрака формы потерян',
+  );
+  process.exit(1);
+}
+const EMPTY_GHOST_ALPHA = Number(emptyGhostInkMatch[1]) / 100;
+
 /** Extract `--name: H S% L%;` tokens from a css block (first block matching `selector`). */
 function palette(selectorRe) {
   const start = css.search(selectorRe);
@@ -254,6 +277,28 @@ console.log('\n=== dark · story card accent ===');
       if (!pass) failures++;
       console.log(`  ${pass ? 'ok  ' : 'FAIL'}  ${r.toFixed(2).padStart(5)} (need ${target})  ${label}`);
     }
+  }
+}
+
+// Коридор призрака формы: строго НИЖЕ пола данных (3.0) и не ниже волосяной линии на той же
+// поверхности. Верхняя граница — не придирка: подняв альфу «чтобы было виднее», силуэт становится
+// неотличим от настоящей серии, и пустая карточка начинает врать. Нижняя — чтобы он не растворился
+// в фоне при следующей правке палитры.
+console.log('\n=== призрак формы пустой карточки (EmptyGhost) ===');
+for (const [themeName, tokens] of [
+  ['light', light],
+  ['dark', dark],
+]) {
+  for (const surface of ['card', 'background']) {
+    const bg = hslToRgb(tokens[surface]);
+    const ghost = ratio(over(hslToRgb(tokens['muted-foreground']), bg, EMPTY_GHOST_ALPHA), bg);
+    const hairline = ratio(hslToRgb(tokens.border), bg);
+    const pass = ghost < 3.0 && ghost >= hairline;
+    if (!pass) failures++;
+    console.log(
+      `  ${pass ? 'ok  ' : 'FAIL'}  ${ghost.toFixed(2).padStart(5)} (нужно ${hairline.toFixed(2)} ≤ x < 3.00)  ` +
+        `${themeName}: muted/${EMPTY_GHOST_ALPHA * 100} на ${surface}`,
+    );
   }
 }
 

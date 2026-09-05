@@ -360,7 +360,7 @@ export function DivergingBars({
 
   const hasFiniteValue = values?.some((value) => Number.isFinite(value)) ?? false;
   if (!values || values.length === 0 || !hasFiniteValue || !plot || !bars || !frame) {
-    return <EmptyState compact size="chart" title="Нет данных" />;
+    return <EmptyState compact size="chart" ghost="bars" title="Нет данных" />;
   }
 
   const { W, h, labelPad } = plot;

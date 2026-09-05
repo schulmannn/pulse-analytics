@@ -1,7 +1,7 @@
-import { Link } from 'react-router-dom';
 import { useIgData, type IgData } from '@/lib/useIgData';
 import { useDemo } from '@/lib/demo-context';
 import { ChartSection } from '@/components/ChartWidget';
+import { EmptyState } from '@/components/EmptyState';
 import { TrendCard, IgKpiBlock, SubscriberMovement, igPeriodRows } from '@/components/instagram/shared';
 import { InsightsBlock, PeriodCompareBlock } from '@/components/instagram/insights';
 
@@ -16,15 +16,22 @@ import { InsightsBlock, PeriodCompareBlock } from '@/components/instagram/insigh
 
 type PromptProps = { id?: string; homeKey?: string; title: string };
 
+/** Своя разметка тут держалась только потому, что общего пустого состояния с ФОРМОЙ не было:
+ *  на доске из шести неподключённых карточек шесть одинаковых полос воздуха читались как одна
+ *  сломанная страница. Теперь это общий EmptyState с призраком линии — ровно той, которую
+ *  карточка нарисует после подключения; заодно уходит стрелочная ссылка (канон действия —
+ *  кнопка, а не «Подключить →»). */
 function IgConnectPrompt({ id, homeKey, title }: PromptProps) {
   return (
     <ChartSection id={id} homeKey={homeKey} title={title} noExpand>
-      <div className="flex h-full min-h-40 flex-col items-center justify-center gap-2 text-center">
-        <p className="text-sm text-muted-foreground">Подключите Instagram — карточка покажет реальные данные.</p>
-        <Link to="/connect" className="text-xs font-medium text-primary hover:underline">
-          Подключить →
-        </Link>
-      </div>
+      <EmptyState
+        compact
+        size="chart"
+        ghost="line"
+        title="Instagram не подключён"
+        reason="Карточка покажет реальные данные после подключения"
+        action={{ to: '/connect', label: 'Подключить' }}
+      />
     </ChartSection>
   );
 }
@@ -34,12 +41,14 @@ function IgConnectPrompt({ id, homeKey, title }: PromptProps) {
 function IgReauthPrompt({ id, homeKey, title }: PromptProps) {
   return (
     <ChartSection id={id} homeKey={homeKey} title={title} noExpand>
-      <div className="flex h-full min-h-40 flex-col items-center justify-center gap-2 text-center">
-        <p className="text-sm text-muted-foreground">Доступ к Instagram истёк — данные не обновляются.</p>
-        <Link to="/connect?source=instagram" className="text-xs font-medium text-primary hover:underline">
-          Переподключить →
-        </Link>
-      </div>
+      <EmptyState
+        compact
+        size="chart"
+        ghost="line"
+        title="Доступ к Instagram истёк"
+        reason="Данные не обновляются, пока доступ не продлён"
+        action={{ to: '/connect?source=instagram', label: 'Переподключить' }}
+      />
     </ChartSection>
   );
 }

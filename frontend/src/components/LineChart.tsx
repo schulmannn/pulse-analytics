@@ -772,7 +772,7 @@ export function LineChart({
   // lone-кружком, не пустым состоянием (паритет со столбцами).
   if (!plot) {
     return (
-      <EmptyState compact size="chart" title="Нет данных за период" />
+      <EmptyState compact size="chart" ghost="line" title="Нет данных за период" />
     );
   }
 
