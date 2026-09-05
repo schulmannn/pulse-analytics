@@ -547,7 +547,11 @@ export function buildWeekSummary(inp: NarrativeInput): WeekSummary {
   const last7 = series.slice(-7);
   const prev7 = series.slice(-14, -7);
   const curSum = sum(last7.map((p) => p.v));
-  const prevSum = sum(prev7.map((p) => p.v));
+  // НЕПОЛНОЕ прошлое окно — это его ОТСУТСТВИЕ, а не короткая неделя: на истории в 8–13 дней
+  // `slice(-14, -7)` отдаёт 1–6 дней, и их сумма уходила в карточку подписью «Прошлая неделя N»
+  // прямо под честным «без сравнения». Контракт поля («0, когда окна нет») теперь держит код,
+  // а не только комментарий над ним.
+  const prevSum = prev7.length === 7 ? sum(prev7.map((p) => p.v)) : 0;
   // Сравнение живёт только при ОБОИХ полных окнах и ненулевой базе — иначе «+∞%».
   const pct =
     last7.length === 7 && prev7.length === 7 && prevSum > 0 ? ((curSum - prevSum) / prevSum) * 100 : null;

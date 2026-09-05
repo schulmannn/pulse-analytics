@@ -401,6 +401,16 @@ describe('buildWeekSummary', () => {
     expect(s.pct).toBeNull();
   });
 
+  it('НЕПОЛНОЕ прошлое окно — это его отсутствие, а не маленькая неделя', () => {
+    // История в 10 дней: `slice(-14, -7)` отдаёт ТРИ дня, и их сумма выходила наружу как
+    // `prevSum` — карточка печатала её подписью «Прошлая неделя 60» рядом с «без сравнения».
+    // Три дня неделей не называются, поэтому поле держит ровно то, что обещает его контракт.
+    const s = buildWeekSummary({ ...base, viewsDaily: mkSeries([10, 20, 30, 40, 50, 60, 70, 80, 90, 100]) });
+    expect(s.pct).toBeNull();
+    expect(s.curSum).toBe(490);
+    expect(s.prevSum).toBe(0);
+  });
+
   it('Instagram приходит числом и сдвигом, а не абзацем', () => {
     const s = buildWeekSummary({
       ...base,

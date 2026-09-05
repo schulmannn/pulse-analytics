@@ -52,6 +52,11 @@ async function revealWeek(page: Page) {
     .toBeGreaterThan(40);
 }
 
+/** Сама карточка как локатор — ссылки внутри неё ищем, не путая с одноимёнными на странице. */
+function weekSection(page: Page) {
+  return page.locator('section[data-widget-size]').filter({ has: page.locator('h2, h3', { hasText: CARD }) });
+}
+
 test.describe('«Неделя канала»', () => {
   test.beforeEach(async ({ browserName: _b }, testInfo) => {
     test.skip(testInfo.project.name !== 'desktop-1440', 'Карточка недели — desktop-раскладка');
@@ -101,10 +106,27 @@ test.describe('«Неделя канала»', () => {
       expect(card?.sparks).toBe(0);
       // Четыре факта числом вперёд.
       expect(card?.facts).toBe(4);
-      expect(card?.text).toContain('просмотров за неделю');
+      // Форма слова считается от числа (N14), поэтому демо-данные вправе дать любую из трёх.
+      expect(card?.text).toMatch(/просмотр(|а|ов) за неделю/);
       expect(card?.text).toContain('пик недели');
+      // R7: слово-подпись факта ведёт на свою страницу, число рядом остаётся текстом.
+      await expect(weekSection(page).getByRole('link', { name: /^подписчик(|а|ов)$/ })).toHaveAttribute(
+        'href',
+        '/metrics/subscribers',
+      );
       // И всё это влезает в фикс-тайл.
       expect(card?.innerScroll, 'список обязан влезать в 264px').toBe(false);
     });
   }
+
+  test('R7: подпись факта уводит на свою страницу метрики, а карточка не перехватывает клик', async ({ page }) => {
+    await bootDemo(page, '/');
+    await revealWeek(page);
+    const base = weekSection(page).getByRole('link', { name: 'База', exact: true });
+    await expect(base).toHaveAttribute('href', '/metrics/subscribers');
+    await base.click();
+    // У «Недели» noExpand, поэтому обработчик клика по карточке даже не навешан, а ChartSection
+    // в любом случае выходит на closest('button, a, …') — ссылка и разворот не спорят.
+    await expect(page).toHaveURL(/\/metrics\/subscribers$/);
+  });
 });
