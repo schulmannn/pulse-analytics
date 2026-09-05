@@ -14,6 +14,7 @@ import { tgWeekMetrics } from '@/lib/tgWeekMetrics';
 import {
   buildWeekSummary,
   narrativeToPlain,
+  plural,
   type NarrativeIgInput,
   type NarrativeInput,
   type NarrativeParagraph,
@@ -29,6 +30,7 @@ import { KpiValue } from '@/components/chartWidget/KpiValue';
 import { DeltaPill, deltaLabel } from '@/components/DeltaPill';
 import { InlineSpark } from '@/components/InlineSpark';
 import { PostDetailModal } from '@/components/PostDetailModal';
+import { QuietLink } from '@/components/QuietLink';
 import { ErrorState } from '@/components/ErrorState';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
@@ -45,6 +47,29 @@ import { cn } from '@/lib/utils';
 
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * Куда ведёт каждый факт недели. Числа внутри мысли ссылками были всегда (`NarrativeSeg 'number'`
+ * несёт `to`), а факты леджера и списка — нет, хотя считаются по тем же рядам, что и эти страницы.
+ *
+ * Таблица живёт ЗДЕСЬ, а не в `lib/narrative.ts`: тот модуль собирается в серверный бандл письма
+ * (`narrative.gen.cjs`), где маршрутов браузера не существует.
+ */
+const WEEK_FACT_ROUTES = {
+  views: '/metrics/views',
+  posts: '/posts',
+  subs: '/metrics/subscribers',
+  igReach: '/metrics/ig-reach',
+} as const;
+
+/**
+ * Существительное согласуется с НАПЕЧАТАННЫМ числом, а не с исходным: «1.2k» читается «одна и
+ * две десятых тысячи» и требует родительного множественного, иначе выходит «1.2k просмотра».
+ * Порог аббревиатуры не зашит числом (у `fmt.short` он 1e3, у `fmt.kpi` — 1e4): её видно по
+ * хвосту самой строки, поэтому одно правило обслуживает оба формата.
+ */
+const pluralFor = (printed: string, count: number, one: string, few: string, many: string) =>
+  /[kMB]$/.test(printed) ? many : plural(count, one, few, many);
 
 
 function useWeekNarrativeInput(): { input: NarrativeInput | null; posts: NormalizedPost[]; loading: boolean; error: boolean; retry: () => void } {
@@ -271,11 +296,14 @@ function WeekLedger({
   onPost,
   median,
 }: { summary: WeekSummary; onPost: (i: number) => void; median: number | null }) {
-  const rows: { label: string; value: ReactNode }[] = [];
-  rows.push({ label: 'Постов за неделю', value: fmt.num(summary.posts) });
+  // `to` — страница метрики этого факта; строки без него ведут не на страницу, а в карточку
+  // поста (см. «Лучшая публикация»), поэтому подпись у них ссылкой не становится.
+  const rows: { label: string; to?: string; value: ReactNode }[] = [];
+  rows.push({ label: 'Постов за неделю', to: WEEK_FACT_ROUTES.posts, value: fmt.num(summary.posts) });
   if (summary.subsNow != null) {
     rows.push({
       label: 'База',
+      to: WEEK_FACT_ROUTES.subs,
       value: (
         <>
           {fmt.kpi(summary.subsNow)}
@@ -291,20 +319,22 @@ function WeekLedger({
     });
   }
   if (summary.best) {
+    const best = summary.best;
+    const bestViews = fmt.short(best.views);
     rows.push({
       label: 'Лучшая публикация',
       value: (
         <>
-          {fmt.short(summary.best.views)}{' '}
+          {bestViews}{' '}
           <button
             type="button"
-            onClick={() => onPost(summary.best!.postIndex)}
+            onClick={() => onPost(best.postIndex)}
             // Медиана недели — в тултипе, а не отдельной строкой леджера (аудит #554, ТЗ-11):
             // она нужна ровно затем, чтобы понять, насколько лучшая публикация выделяется.
             title={median != null ? `Медианный охват недели — ${fmt.short(median)}` : undefined}
             className="rounded font-normal text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40"
           >
-            {`просмотра · «${summary.best.title}»`}
+            {`${pluralFor(bestViews, best.views, 'просмотр', 'просмотра', 'просмотров')} · «${best.title}»`}
           </button>
         </>
       ),
@@ -313,6 +343,7 @@ function WeekLedger({
   if (summary.ig) {
     rows.push({
       label: 'Instagram, та же неделя',
+      to: WEEK_FACT_ROUTES.igReach,
       value: (
         <>
           {fmt.kpi(summary.ig.reach)}
@@ -328,7 +359,9 @@ function WeekLedger({
     <aside className="flex shrink-0 flex-wrap gap-x-10 gap-y-3 border-t border-border pt-3">
       {rows.map((r) => (
         <div key={r.label}>
-          <div className="text-2xs tracking-wide text-muted-foreground">{r.label}</div>
+          <div className="text-2xs tracking-wide text-muted-foreground">
+            {r.to ? <QuietLink to={r.to}>{r.label}</QuietLink> : r.label}
+          </div>
           <div className="mt-0.5 text-sm font-medium tabular-nums text-foreground">{r.value}</div>
         </div>
       ))}
@@ -439,33 +472,47 @@ export function WeekCompact({
     ? narrativeToPlain({ paragraphs: [summary.insight], quiet: false })
     : '';
   const delta = summary.pct == null ? null : deltaLabel({ dir: summary.pct < 0 ? 'down' : 'up', pct: Math.abs(summary.pct) });
-  const facts: { value: string; rest: ReactNode }[] = [];
+  // `key` — имя факта, а не его напечатанное значение: значение повторяется (пик недели и лучшая
+  // публикация легко печатаются одним «440»), и ключ из него схлопывал две строки в одну для
+  // React. Прежний `f.value + String(f.rest)` этого не спасал: `String(JSX)` — «[object Object]».
+  const facts: { key: string; value: string; rest: ReactNode }[] = [];
+  const curViews = fmt.kpi(summary.curSum);
   facts.push({
-    value: fmt.kpi(summary.curSum),
+    key: 'views',
+    value: curViews,
     rest: (
       <>
-        просмотров за неделю
+        <QuietLink to={WEEK_FACT_ROUTES.views}>
+          {`${pluralFor(curViews, summary.curSum, 'просмотр', 'просмотра', 'просмотров')} за неделю`}
+        </QuietLink>
         {delta && <span className="text-muted-foreground">{` · ${delta} к прошлой`}</span>}
       </>
     ),
   });
   if (summary.peak) {
+    const peak = summary.peak;
     facts.push({
-      value: fmt.short(summary.peak.v),
+      key: 'peak',
+      value: fmt.short(peak.v),
       rest: (
         <>
-          пик недели
-          <span className="text-muted-foreground">{` · ${fmt.day(summary.peak.day)}, ${fmt.pctAbs(summary.peak.share)} суммы`}</span>
+          <QuietLink to={WEEK_FACT_ROUTES.views}>пик недели</QuietLink>
+          <span className="text-muted-foreground">{` · ${fmt.day(peak.day)}, ${fmt.pctAbs(peak.share)} суммы`}</span>
         </>
       ),
     });
   }
   if (summary.subsNow != null) {
+    const subsNow = summary.subsNow;
+    const subsValue = fmt.kpi(subsNow);
     facts.push({
-      value: fmt.kpi(summary.subsNow),
+      key: 'subs',
+      value: subsValue,
       rest: (
         <>
-          подписчиков
+          <QuietLink to={WEEK_FACT_ROUTES.subs}>
+            {pluralFor(subsValue, subsNow, 'подписчик', 'подписчика', 'подписчиков')}
+          </QuietLink>
           {summary.subsD7 != null && summary.subsD7 !== 0 && (
             <span className="text-muted-foreground">
               {` · ${summary.subsD7 > 0 ? '+' : '−'}${fmt.num(Math.abs(summary.subsD7))} за неделю`}
@@ -476,20 +523,24 @@ export function WeekCompact({
     });
   }
   if (summary.best) {
+    const best = summary.best;
+    const bestViews = fmt.short(best.views);
     facts.push({
-      value: fmt.short(summary.best.views),
+      key: 'best',
+      value: bestViews,
       rest: (
         <>
+          {/* Единственный факт без страницы метрики: у публикации есть карточка, а не маршрут. */}
           <button
             type="button"
-            onClick={() => onPost(summary.best!.postIndex)}
+            onClick={() => onPost(best.postIndex)}
             className="rounded text-left transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40"
           >
-            просмотра у лучшей публикации
+            {`${pluralFor(bestViews, best.views, 'просмотр', 'просмотра', 'просмотров')} у лучшей публикации`}
             {/* Заголовок поста — контекст, а не факт: в узкой S он раздувал строку до трёх
                 и выталкивал список за 264px (замер: тайл 313px). Сокращаем КОНТЕКСТ, а не факты (ТЗ-11);
                 полное название остаётся в карточке поста по клику. */}
-            <span className="hidden text-muted-foreground tile-wide:inline">{` · «${summary.best.title}»`}</span>
+            <span className="hidden text-muted-foreground tile-wide:inline">{` · «${best.title}»`}</span>
           </button>
         </>
       ),
@@ -506,7 +557,7 @@ export function WeekCompact({
         {facts.map((f) => (
           // items-start, а не items-baseline: в grid-строке базовой считается линия ПОСЛЕДНЕЙ строки
           // двухстрочной подписи, и число уезжало вниз, теряя связь со своей первой строкой.
-          <li key={f.value + String(f.rest)} className="grid grid-cols-[96px_1fr] items-start gap-x-2">
+          <li key={f.key} className="grid grid-cols-[96px_1fr] items-start gap-x-2">
             <span className="text-base font-medium tabular-nums text-foreground">{f.value}</span>
             <span className="min-w-0 text-sm leading-snug text-foreground">{f.rest}</span>
           </li>

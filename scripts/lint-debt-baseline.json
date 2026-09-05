@@ -1,5 +1,5 @@
 {
-  "total": 1153,
+  "total": 1151,
   "rules": {
     "lint/complexity/noImportantStyles": 7,
     "lint/complexity/noUselessCatch": 1,
@@ -12,7 +12,7 @@
     "lint/correctness/useExhaustiveDependencies": 32,
     "lint/correctness/useParseIntRadix": 4,
     "lint/style/noDescendingSpecificity": 47,
-    "lint/style/noNonNullAssertion": 386,
+    "lint/style/noNonNullAssertion": 384,
     "lint/style/useConst": 16,
     "lint/style/useExponentiationOperator": 2,
     "lint/style/useImportType": 3,
