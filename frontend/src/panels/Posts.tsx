@@ -578,13 +578,13 @@ function PostsTable({ allPosts, loadedCount }: { allPosts: NormalizedPost[]; loa
                     <MedianCell value={post.shares} median={sharesMedian} tone="muted" format={fmt.num} />
                   </td>
                   <td className="px-3 py-2.5 text-right font-medium tabular-nums text-muted-foreground last:pr-0">
-                    {post.virality != null ? `${post.virality.toFixed(1)}%` : <span className="text-muted-foreground/40">—</span>}
+                    {post.virality != null ? `${post.virality.toFixed(1)}%` : <span className="text-ink3">—</span>}
                   </td>
                   <td className="px-3 py-2.5 text-right last:pr-0">
                     <MedianCell value={post.erv} median={ervMedian} tone="muted" format={(v) => `${v.toFixed(1)}%`} />
                   </td>
                   <td className="px-3 py-2.5 pr-0 text-right font-medium tabular-nums text-muted-foreground">
-                    {post.er != null ? `${post.er.toFixed(1)}%` : <span className="text-muted-foreground/40">—</span>}
+                    {post.er != null ? `${post.er.toFixed(1)}%` : <span className="text-ink3">—</span>}
                   </td>
                   <td className="px-3 py-2.5 pr-0 text-right text-xs tabular-nums text-muted-foreground">
                     {post.date ? <TwoLineDate iso={post.date} /> : '—'}
@@ -713,7 +713,7 @@ function MedianCell({
   tone: 'signal' | 'muted';
   format: (v: number) => string;
 }) {
-  if (value == null) return <span className="text-muted-foreground/40">—</span>;
+  if (value == null) return <span className="text-ink3">—</span>;
   const cmp = compareToMedian(value, median);
   const deltaShort = cmp ? medianDeltaShort(cmp) : null;
   return (

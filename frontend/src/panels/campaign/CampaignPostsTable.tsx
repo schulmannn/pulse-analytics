@@ -597,7 +597,7 @@ function CampaignMetricCell({ metric }: { metric: CampaignPostMetric }) {
   return (
     <td className="min-w-[190px] px-3 py-3 text-right tabular-nums">
       <div className="font-medium text-foreground">
-        {metric.value == null ? <span className="text-muted-foreground/40">—</span> : fmt.short(metric.value)}
+        {metric.value == null ? <span className="text-ink3">—</span> : fmt.short(metric.value)}
       </div>
       <div className="mt-0.5 text-2xs text-muted-foreground" title={metric.label}>
         {metric.label}
@@ -609,7 +609,7 @@ function CampaignMetricCell({ metric }: { metric: CampaignPostMetric }) {
 function LegacyMetricCell({ value, accessible }: { value: number | null | undefined; accessible: boolean }) {
   return (
     <td className="px-3 py-3 text-right font-medium tabular-nums text-muted-foreground">
-      {!accessible || value == null ? <span className="text-muted-foreground/40">—</span> : fmt.short(value)}
+      {!accessible || value == null ? <span className="text-ink3">—</span> : fmt.short(value)}
     </td>
   );
 }

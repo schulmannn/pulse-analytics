@@ -193,7 +193,7 @@ export function ChartTooltip({ tip, appearance = 'default' }: { tip: TooltipStat
                   )}
                   <span className="min-w-0">
                     {r.label}
-                    {r.sub && <span className="block text-2xs text-muted-foreground/80">{r.sub}</span>}
+                    {r.sub && <span className="block text-2xs text-muted-foreground">{r.sub}</span>}
                   </span>
                 </span>
                 <span className="shrink-0 text-right">
