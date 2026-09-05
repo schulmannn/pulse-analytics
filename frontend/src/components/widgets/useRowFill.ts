@@ -41,6 +41,34 @@ export interface RowFillOptions {
   subscribe?: (cb: () => void) => () => void;
 }
 
+/**
+ * Карточка со СВОИМ размером: владелец выбрал его сам либо содержимое шириной не пользуется.
+ * Такую правило не трогает — ни растягивая, ни сжимая.
+ */
+export function isFixedWidth(el: HTMLElement): boolean {
+  return el.hasAttribute('data-widget-user-sized') || el.hasAttribute('data-widget-no-stretch');
+}
+
+/**
+ * Кому в ряду достаётся остаток свободных колонок: индекс ПОСЛЕДНЕЙ карточки, которую можно
+ * растянуть, или −1, если растягивать нечего.
+ *
+ * Раньше правило смотрело только на последнюю карточку и, если она не подходила, отступалось.
+ * На Аналитике так и вышло: ряд «Просмотры» (M) + «Динамика оттока» (S) занимал пять колонок из
+ * шести, а замыкающая его карточка помечена и user-sized, и no-stretch — остаток в 230px просто
+ * оставался дырой (аудит #554, проход №2, N4).
+ *
+ * Вытолкнуть соседей рост не может, вопреки прежнему комментарию: остаток добирается РОВНО до
+ * полного ряда, поэтому карточки правее сдвигаются вправо, но остаются в своём ряду.
+ *
+ * Функция чистая и экспортируется ради теста: воспроизвести случай в e2e нельзя без сохранённых
+ * настроек владельца, а решение здесь — вся суть правила.
+ */
+export function fillTargetIndex(fixed: readonly boolean[]): number {
+  for (let i = fixed.length - 1; i >= 0; i -= 1) if (!fixed[i]) return i;
+  return -1;
+}
+
 /** Сколько колонок занимает карточка: меряем по факту, а не по классу — тогда правило одинаково
  *  работает и для карточек с сохранённым размером, и для чужих детей сетки. */
 function spanOf(el: HTMLElement, colW: number, gap: number): number {
@@ -98,9 +126,12 @@ export function useRowFill(rootRef: RefObject<HTMLElement | null>, options: RowF
           row.sort((a, b) => a.offsetLeft - b.offsetLeft);
           const free = tracks.length - row.reduce((sum, el) => sum + spanOf(el, colW, gap), 0);
           if (free <= 0) continue;
-          // Растёт ПОСЛЕДНЯЯ карточка ряда: любая другая вытолкнула бы соседей в следующий ряд.
-          const target = row[row.length - 1];
-          if (target.hasAttribute('data-widget-user-sized') || target.hasAttribute('data-widget-no-stretch')) continue;
+          // Остаток достаётся последней ПОДХОДЯЩЕЙ карточке ряда — не обязательно последней
+          // (разбор и причина — у fillTargetIndex). Ряд целиком из карточек со своим размером
+          // законно короткий: правило молчит.
+          const at = fillTargetIndex(row.map(isFixedWidth));
+          if (at < 0) continue;
+          const target = row[at];
           target.style.gridColumn = `span ${spanOf(target, colW, gap) + free}`;
           stretchedRef.current.push(target);
         }

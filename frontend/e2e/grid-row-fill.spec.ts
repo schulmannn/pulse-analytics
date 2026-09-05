@@ -57,9 +57,14 @@ async function auditGrids(page: Page): Promise<Audit> {
         out.rows += 1;
         row.sort((a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left);
         const last = row[row.length - 1];
-        // Собственный размер владельца и явный отказ от растяжки — законные основания
-        // для короткого ряда, правило их не трогает.
-        if (last.hasAttribute('data-widget-user-sized') || last.hasAttribute('data-widget-no-stretch')) continue;
+        // Ряд извиняется, только если В НЁМ НЕТ НИ ОДНОЙ карточки, которую можно растянуть.
+        //
+        // Раньше здесь стояло то же условие, что и в самом правиле — «не подходит последняя,
+        // значит ряд законный», — и гейт повторял ошибку реализации вместо того, чтобы её ловить:
+        // дыра в 230px на Аналитике жила при зелёном тесте (аудит #554, проход №2, N4).
+        const fixed = (el: HTMLElement) =>
+          el.hasAttribute('data-widget-user-sized') || el.hasAttribute('data-widget-no-stretch');
+        if (row.every(fixed)) continue;
         const gapPx = right - last.getBoundingClientRect().right;
         // 4px — субпиксельная сдача округления треков, а не дыра: колонка тут ≥ 150px.
         if (gapPx > 4) {
