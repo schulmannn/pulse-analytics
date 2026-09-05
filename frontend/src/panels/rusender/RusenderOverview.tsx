@@ -170,6 +170,7 @@ export function RusenderOverview() {
   if (status.isSuccess && !connected) {
     return (
       <EmptyState
+        ghost="bars"
         title="Rusender не подключён"
         reason="Подключи аккаунт по API-ключу — после этого сюда приедут рассылки, открытия и размер базы."
         action={{ to: '/connect', label: 'Подключить Rusender' }}

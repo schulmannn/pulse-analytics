@@ -152,6 +152,7 @@ export function MsOverview() {
       // Канал есть, а токена МойСклада на нём нет — честный onboarding вместо пустых карточек.
       return (
         <EmptyState
+          ghost="bars"
           title="МойСклад не подключён"
           reason="Укажите токен API — и здесь появятся выручка, заказы и топ товаров."
           action={{ to: '/connect', label: 'Подключить МойСклад' }}

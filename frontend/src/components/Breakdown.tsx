@@ -37,7 +37,7 @@ export function Breakdown({ items, reserve = 0 }: BreakdownProps) {
   const ctxHeight = useContext(ExpandedChartHeightContext);
 
   if (!items || items.length === 0) {
-    return <EmptyState compact size="chart" title="Нет данных" />;
+    return <EmptyState compact size="chart" ghost="rows" title="Нет данных" />;
   }
 
   // Внутри фикс-тайла строки ДЕЛЯТ высоту тела поровну, а не жмутся к верхней кромке: у разбивки

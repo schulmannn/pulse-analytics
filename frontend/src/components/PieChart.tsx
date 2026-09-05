@@ -190,7 +190,7 @@ export function PieChart({ values, labels, titles, colors, shares, height = 200 
   );
 
   if (!values || values.length === 0 || total <= 0) {
-    return <EmptyState compact size="chart" title="Нет данных за период" />;
+    return <EmptyState compact size="chart" ghost="ring" title="Нет данных за период" />;
   }
 
   const chartHeight = ctxHeight ?? height;

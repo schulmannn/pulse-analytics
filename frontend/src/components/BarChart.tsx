@@ -670,7 +670,7 @@ export function BarChart({
   }, [onPointClick, plot, values.length]);
 
   if (!values || values.length === 0 || !plot || !morphed) {
-    return <EmptyState compact size="chart" title="Нет данных за период" />;
+    return <EmptyState compact size="chart" ghost="bars" title="Нет данных за период" />;
   }
 
   const { chartWidth, chartHeight, graphHeight, offsetX, itemWidth, stacked, barTop, barCenterX } = plot;
