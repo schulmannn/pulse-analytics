@@ -25,6 +25,7 @@ import {
   DAY_NAMES,
   DAY_MS,
 } from '@/lib/igMetrics';
+import { NO_BASIS_CUSTOM_RANGE, NO_BASIS_SHORT_ARCHIVE } from '@/lib/delta';
 import { igWindowMetrics } from '@/lib/igWindowMetrics';
 import { buildIgInsights } from '@/lib/igInsights';
 
@@ -83,8 +84,20 @@ export function useIgData() {
   const ins = insightsQ.data;
   const histRows = historyQ.data?.rows;
   const windowMetrics = useMemo(
-    () => igWindowMetrics({ profile: profileQ.data, insights: ins, historyRows: histRows, since, until }),
-    [profileQ.data, ins, histRows, since, until],
+    () => igWindowMetrics({
+      profile: profileQ.data,
+      insights: ins,
+      historyRows: histRows,
+      since,
+      until,
+      // ОКНО СЕРВЕРНЫХ АГРЕГАТОВ. `/api/ig/insights` режет `total_value` по СВОЕМУ `days` и
+      // снапит его к 7/30/90 (server/routes/ig.js). Пресеты периода — ровно 7/30/90 и «Всё»→90,
+      // поэтому БЕЗ своего периода клиентское окно совпадает с серверным день в день. Со своим
+      // периодом не совпадает (и якорь другой: сервер считает от «сейчас», а не от конца
+      // диапазона) — там границ у агрегата нет вовсе: лучше без подписи, чем не те даты.
+      aggPrevRange: range ? null : { from: since - windowDays * DAY_MS, to: since - 1 },
+    }),
+    [profileQ.data, ins, histRows, since, until, windowDays, range],
   );
   const {
     series,
@@ -197,6 +210,8 @@ export function useIgData() {
     lastSync,
     profile: profileQ.data,
     window: { since, until, days: windowDays },
+    // Почему у дельты нет базы — подсказка слота «нет базы» (см. lib/delta).
+    noBasisReason: range ? NO_BASIS_CUSTOM_RANGE : NO_BASIS_SHORT_ARCHIVE,
     inWindow,
     series,
     pairs,

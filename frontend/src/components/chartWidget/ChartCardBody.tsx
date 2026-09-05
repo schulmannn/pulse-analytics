@@ -1,6 +1,7 @@
 import { useContext, type ReactNode } from 'react';
 import { KpiValue } from '@/components/chartWidget/KpiValue';
 import { DeltaPill } from '@/components/DeltaPill';
+import type { DeltaBasis } from '@/components/DeltaPill';
 import { ChartCardTitleContext, ChartExpandedContext } from '@/components/ExpandableChart';
 import { fmt } from '@/lib/format';
 import type { MetricDelta } from '@/lib/delta';
@@ -28,6 +29,9 @@ export interface ChartCardBodyProps {
   label?: ReactNode;
   value: string;
   delta?: MetricDelta | null;
+  /** С чем сравнена `delta` — даты базы и её число. Герой-карточка — единственное место, где
+      пилюля стоит ОТДЕЛЬНОЙ строкой, а не рядом с числом, поэтому основание идёт своим пропом. */
+  deltaBasis?: DeltaBasis | null;
   /** Мин/макс окна под DeltaPill — вынос леджера разворота на лицо карточки (владелец
       2026-08-18, «hi/lo chrome»). Только ≥ md: структурная строка, мобильную вёрстку не меняем. */
   range?: RangeSummary | null;
@@ -54,6 +58,7 @@ export function ChartCardBody({
   label,
   value,
   delta,
+  deltaBasis,
   range,
   caption,
   onValueClick,
@@ -104,7 +109,7 @@ export function ChartCardBody({
           />
           {valueAdornment}
         </div>
-        <DeltaPill delta={delta} />
+        <DeltaPill delta={delta} basis={deltaBasis} />
         {range != null && (
           <div
             data-chart-card-range

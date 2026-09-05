@@ -5,10 +5,13 @@ import {
   dailyWindowDelta,
   pctDelta,
   splitDailyWindows,
+  subscriberBaseline,
   subscriberChange,
   subscriberDelta,
   sumPostWindows,
 } from '@/lib/delta';
+
+const DAY = 24 * 60 * 60 * 1000;
 
 describe('subscriberChange', () => {
   const now = Date.parse('2026-06-25T12:00:00.000Z');
@@ -60,6 +63,12 @@ describe('sumPostWindows', () => {
     expect(totals).toEqual({
       current: { views: 100, reactions: 10, forwards: 2, replies: 3 },
       previous: { views: 80, reactions: 8, forwards: 1, replies: 1 },
+      // Границы отдаются ВМЕСТЕ с суммами: подпись под дельтой называет их, и разъехаться с
+      // разложением постов они не могут — считаются из тех же currentStart/previousStart.
+      ranges: {
+        current: { from: now - 7 * DAY, to: now },
+        previous: { from: now - 14 * DAY, to: now - 7 * DAY - 1 },
+      },
     });
   });
 
@@ -169,7 +178,14 @@ describe('avgReachWindows', () => {
 
   it('returns the current and previous average views/post for the paired windows', () => {
     // current avg = (100+200)/2 = 150, previous avg = 100/1 = 100 (feeds the compact two-bar)
-    expect(avgReachWindows(posts, 7, now)).toEqual({ current: 150, previous: 100 });
+    expect(avgReachWindows(posts, 7, now)).toEqual({
+      current: 150,
+      previous: 100,
+      ranges: {
+        current: { from: now - 7 * DAY, to: now },
+        previous: { from: now - 14 * DAY, to: now - 7 * DAY - 1 },
+      },
+    });
   });
 
   it('agrees with avgReachWindowDelta (single source for the delta and the bars)', () => {
@@ -180,5 +196,86 @@ describe('avgReachWindows', () => {
   it('returns null for all-time or when a window is empty', () => {
     expect(avgReachWindows(posts, 0, now)).toBeNull();
     expect(avgReachWindows([{ date: '2026-06-24T00:00:00.000Z', views: 100 }], 7, now)).toBeNull();
+  });
+});
+
+
+/**
+ * R2 — ОСНОВАНИЕ ДЕЛЬТЫ. Процент без базы проверить нечем: «↑12.3%» рядом со словом «пред. период»
+ * не говорил ни какие это дни, ни какое число взято за единицу. Границы теперь возвращаются рядом
+ * с суммами, и здесь пришпилено, что они описывают ИМЕННО ТО разложение, по которому посчитана
+ * дельта, а не арифметическое окно рядом с ним.
+ *
+ * Даты — ОТНОСИТЕЛЬНЫЕ от Date.now() (канон репо, гейт check:clockdrift): литеральные протухают
+ * молча, зелёные сегодня и красные через полгода.
+ */
+describe('R2 — границы окон рядом с суммами', () => {
+  const now = Date.now();
+  const iso = (offset: number) => new Date(now - offset * DAY).toISOString();
+  const key = (offset: number) => iso(offset).slice(0, 10);
+
+  it('прошлое окно постов вплотную к текущему и той же длины', () => {
+    const totals = sumPostWindows(
+      [
+        { date: iso(2), views: 100, reactions: 10, forwards: 2, replies: 3 },
+        { date: iso(9), views: 80, reactions: 8, forwards: 1, replies: 1 },
+        // выборка должна ДОСТАВАТЬ до начала прошлого окна, иначе сумма занижена и пары нет
+        { date: iso(20), views: 1, reactions: 0, forwards: 0, replies: 0 },
+      ],
+      7,
+      now,
+    );
+    // Полуинтервал: текущее окно ВКЛЮЧАЕТ свою левую границу, прошлое обрывается за миллисекунду
+    // до неё — иначе граничный пост попал бы в обе суммы разом.
+    expect(totals?.ranges.previous.to).toBe((totals as NonNullable<typeof totals>).ranges.current.from - 1);
+    expect(totals?.ranges.previous.from).toBe((totals as NonNullable<typeof totals>).ranges.current.from - 7 * DAY);
+  });
+
+  it('границы дневных окон — РЕАЛЬНЫЕ крайние дни архива, а не края окна', () => {
+    // Дырявый архив (бэкфилл не дошёл до краёв): арифметическая граница назвала бы дни, которых
+    // в сумме нет. Порядок строк намеренно перемешан — сортировки на входе никто не обещал.
+    const rows = [
+      { day: key(9), views: 4 },
+      { day: key(1), views: 5 },
+      { day: key(13), views: 4 },
+      { day: key(5), views: 5 },
+    ];
+    const pair = splitDailyWindows(rows, (r) => r.views, 7, now);
+    expect(pair?.current.range).toEqual({ from: key(5), to: key(1) });
+    expect(pair?.previous.range).toEqual({ from: key(13), to: key(9) });
+    // И это те же окна, по которым посчитан процент.
+    expect(dailyWindowDelta(rows, (r) => r.views, 7, now)).toEqual(
+      pctDelta((pair as NonNullable<typeof pair>).current.total, (pair as NonNullable<typeof pair>).previous.total),
+    );
+  });
+
+  it('база подписчиков — точка архива, от которой считаются и процент, и «+N»', () => {
+    const rows = [
+      { day: key(40), subscribers: 4800 },
+      { day: key(31), subscribers: 4950 },
+      { day: key(1), subscribers: 4892 },
+    ];
+    // Базовая точка — последняя НЕ ПОЗЖЕ границы окна: 31 день назад, а не самая старая строка.
+    expect(subscriberBaseline(rows, 30, now)).toEqual({ day: key(31), subscribers: 4950 });
+    expect(subscriberChange(rows, 30, now)).toBe(4892 - 4950);
+    expect(subscriberDelta(rows, 30, now)).toEqual(pctDelta(4892, 4950));
+    // «Всё» (days<=0) базы не имеет — и подписывать нечего.
+    expect(subscriberBaseline(rows, 0, now)).toBeNull();
+  });
+
+  it('окна среднего охвата совпадают с окнами постов — одно окно на число и на его подпись', () => {
+    const posts = [
+      { date: iso(1), views: 100 },
+      { date: iso(3), views: 200 },
+      { date: iso(9), views: 100 },
+      { date: iso(20), views: 1 },
+    ];
+    const windows = avgReachWindows(posts, 7, now);
+    const totals = sumPostWindows(
+      posts.map((p) => ({ ...p, reactions: 0, forwards: 0, replies: 0 })),
+      7,
+      now,
+    );
+    expect(windows?.ranges).toEqual(totals?.ranges);
   });
 });

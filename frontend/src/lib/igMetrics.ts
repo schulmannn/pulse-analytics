@@ -3,8 +3,10 @@
 // "what the numbers mean" logic is testable and the panels stay presentational.
 import type { IgBreakdowns, IgHistoryRow, IgInsights, IgOnline, IgPost, IgStory } from '@/api/schemas';
 import { withShares } from '@/lib/breakdownShare';
-import { pctDelta, type MetricDelta } from '@/lib/delta';
+import { pctDelta, type MetricDelta, type WindowRange } from '@/lib/delta';
 import { fmt, timeAxisFromDayKeys } from '@/lib/format';
+import { windowRangeLabel } from '@/lib/metricSeries';
+import type { DeltaBasis } from '@/components/DeltaPill';
 
 export const DAY_MS = 24 * 60 * 60 * 1000;
 export const DAY_NAMES = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
@@ -130,6 +132,9 @@ export interface WindowPair {
   prev: number;
   hasCur: boolean;
   hasPrev: boolean;
+  /** Границы окна, давшего `prev` — для подписи «против 29 июл. – 4 авг.». `null` там, где они
+      НЕИЗВЕСТНЫ (агрегат сервера, см. `aggregatePair`): выдумать их значило бы солгать датами. */
+  prevRange?: WindowRange | null;
 }
 
 /** Sum a daily series over [startMs, endMs] vs the equal-length window right before it. Explicit
@@ -147,7 +152,9 @@ export function windowPair(series: Point[], startMs: number, endMs: number): Win
     if (t >= startMs) { cur += p.value; hasCur = true; }
     else if (t >= prevStart) { prev += p.value; hasPrev = true; }
   }
-  return { cur, prev, hasCur, hasPrev };
+  // Границы прошлого окна — те же, по которым только что просуммировано: подпись под дельтой
+  // обязана называть ровно этот интервал, а не пересчитанный где-то ещё.
+  return { cur, prev, hasCur, hasPrev, prevRange: { from: prevStart, to: startMs - 1 } };
 }
 
 /**
@@ -182,11 +189,25 @@ export function aggregatePair(insights: IgInsights | undefined, name: string): W
     prev: prev ?? 0,
     hasCur: cur != null && Number.isFinite(cur),
     hasPrev: prev != null && Number.isFinite(prev),
+    // ГРАНИЦ ЗДЕСЬ НЕТ, и вытащить их из полезной нагрузки НЕЛЬЗЯ: `end_time` прошлой точки —
+    // это СЕРЕДИНА окна (server/routes/ig.js: `prevSince + days/2`), синтетический якорь для
+    // рисования, а не его край. Подписать им границу значило бы промахнуться на пол-окна —
+    // ровно та ложь, против которой заведено само основание. Окно знает вызывающий (оно же
+    // задано параметром запроса) — он и проставляет `prevRange`.
+    prevRange: null,
   };
 }
 
 export const pairDelta = (p: WindowPair): MetricDelta | null =>
   p.hasCur && p.hasPrev ? pctDelta(p.cur, p.prev) : null;
+
+/** Основание дельты пары окон — даты прошлого окна и его значение тем же форматом, что число
+    карточки. `null`, когда прошлого окна нет ИЛИ его границы неизвестны: подпись без дат — это
+    прежнее «пред. период», от которого читателю не легче. */
+export const pairBasis = (p: WindowPair, format: (n: number) => string): DeltaBasis | null =>
+  p.hasCur && p.hasPrev && p.prevRange
+    ? { label: windowRangeLabel(p.prevRange), value: format(p.prev) }
+    : null;
 
 /** total_value breakdown reader → {label,value}[] for a metric+dimension. */
 export function tvBreakdown(

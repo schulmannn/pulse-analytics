@@ -12,7 +12,8 @@ import { ErrorState } from '@/components/ErrorState';
 import { Sparkline } from '@/components/Sparkline';
 import { BarChart } from '@/components/BarChart';
 import { MetricInfo } from '@/components/InfoTooltip';
-import { DeltaPill } from '@/components/DeltaPill';
+import { DeltaNote, DeltaPill, deltaBasisTitle } from '@/components/DeltaPill';
+import type { DeltaBasis } from '@/components/DeltaPill';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ChartCardBody, seriesRange } from '@/components/ChartWidget';
 import type { RangeSummary } from '@/components/ChartWidget';
@@ -90,6 +91,7 @@ export function KpiGrid() {
     displayMembers, channelViews, totalReactions, avgViews, er,
     subscriberTrend, viewsTrend, reactionsTrend, erTrend, avgReachTrend,
     viewsSpark, periodLabel, viewsCaption, subDelta, reactionsDelta, erCaption,
+    deltaBasis, captionBasis,
   } = derived;
   return (
     <div className="space-y-5">
@@ -98,6 +100,7 @@ export function KpiGrid() {
         label={`Просмотры · ${periodLabel}`}
         value={fmt.kpi(channelViews)}
         trend={viewsTrend}
+        basis={deltaBasis.views}
         caption={viewsCaption}
         spark={viewsSpark}
         range={seriesRange(viewsSpark?.values)}
@@ -108,14 +111,18 @@ export function KpiGrid() {
           not a hairline grid: the card border already frames them, so inner dividers just read as
           "lines within lines" (technical). One quiet top hairline splits ledger from the hero. */}
       <div className="grid grid-cols-2 gap-x-6 gap-y-4 border-t border-border pt-4 lg:grid-cols-4">
-        <StatTile label="Подписчики" value={fmt.kpi(displayMembers)} trend={subscriberTrend} deltaText={subDelta} info={getDrillMetric('subscribers')} onDrill={() => openMetric('subscribers')} />
-        <StatTile label="Ср. охват" value={fmt.kpi(avgViews)} trend={avgReachTrend} info={getDrillMetric('avgReach')} onDrill={() => openMetric('avgReach')} />
-        <StatTile label="Реакции" value={fmt.kpi(totalReactions)} trend={reactionsTrend} deltaText={reactionsDelta} info={getDrillMetric('reactions')} onDrill={() => openMetric('reactions')} />
+        {/* Основание идёт ПАРАЛЛЕЛЬНО тексту дельты: «+531» и «↑4.5%» считаются по разным
+            источникам (окно постов vs дневной архив), поэтому у ячейки с готовой строкой —
+            captionBasis, а у ячейки с пилюлей — deltaBasis. */}
+        <StatTile label="Подписчики" value={fmt.kpi(displayMembers)} trend={subscriberTrend} deltaText={subDelta} basis={deltaBasis.subscribers} info={getDrillMetric('subscribers')} onDrill={() => openMetric('subscribers')} />
+        <StatTile label="Ср. охват" value={fmt.kpi(avgViews)} trend={avgReachTrend} basis={deltaBasis.avgReach} info={getDrillMetric('avgReach')} onDrill={() => openMetric('avgReach')} />
+        <StatTile label="Реакции" value={fmt.kpi(totalReactions)} trend={reactionsTrend} deltaText={reactionsDelta} basis={reactionsDelta ? captionBasis.reactions : deltaBasis.reactions} info={getDrillMetric('reactions')} onDrill={() => openMetric('reactions')} />
         <StatTile
           label="Вовлечённость"
           value={er > 0 ? fmt.pctAbs(er) : '—'}
           trend={erTrend}
           deltaText={erCaption}
+          basis={erCaption ? captionBasis.er : deltaBasis.er}
           info={getDrillMetric('er')}
           onDrill={() => openMetric('er')}
         />
@@ -141,7 +148,7 @@ export function TgViewsBody({ state, viz }: { state: TgKpiState; viz?: 'line' | 
   if (isError) {
     return <ErrorState title="Не удалось загрузить метрики" reason={error instanceof Error ? error.message : 'ошибка'} />;
   }
-  const { channelViews, viewsTrend, viewsCaption, viewsSpark, periodLabel } = derived;
+  const { channelViews, viewsTrend, viewsCaption, viewsSpark, periodLabel, deltaBasis } = derived;
   return (
     <FeaturedKpi
       label={showPeriod ? `Просмотры · ${periodLabel}` : 'Просмотры'}
@@ -150,6 +157,7 @@ export function TgViewsBody({ state, viz }: { state: TgKpiState; viz?: 'line' | 
       labelHidden={!showPeriod}
       value={fmt.kpi(channelViews)}
       trend={viewsTrend}
+      basis={deltaBasis.views}
       caption={viewsCaption}
       spark={viewsSpark}
       range={seriesRange(viewsSpark?.values)}
@@ -166,11 +174,13 @@ export function TgAvgReachBody({ state, viz }: { state: TgKpiState; viz?: 'line'
   const navigate = useNavigate();
   if (isPending) return <CompactSkeleton />;
   if (isError) return <ErrorState title="Не удалось загрузить" reason="ошибка" />;
-  const { avgViews, avgReachTrend, avgReachSpark, normPosts } = derived;
+  const { avgViews, avgReachTrend, avgReachSpark, normPosts, deltaBasis, noBasisReason } = derived;
   return (
     <TgTrendStat
       value={avgViews}
       delta={avgReachTrend}
+      basis={deltaBasis.avgReach}
+      noBasisReason={noBasisReason}
       spark={avgReachSpark}
       viz={viz}
       format={(n) => fmt.short(Math.round(n))}
@@ -187,11 +197,13 @@ export function TgReactionsBody({ state, viz }: { state: TgKpiState; viz?: 'line
   const navigate = useNavigate();
   if (isPending) return <CompactSkeleton />;
   if (isError) return <ErrorState title="Не удалось загрузить" reason="ошибка" />;
-  const { totalReactions, reactionsTrend, reactionsSpark, normPosts } = derived;
+  const { totalReactions, reactionsTrend, reactionsSpark, normPosts, deltaBasis, noBasisReason } = derived;
   return (
     <TgTrendStat
       value={totalReactions}
       delta={reactionsTrend}
+      basis={deltaBasis.reactions}
+      noBasisReason={noBasisReason}
       spark={reactionsSpark}
       viz={viz}
       format={(n) => fmt.short(Math.round(n))}
@@ -209,7 +221,7 @@ export function TgErBody({ state }: { state: TgKpiState }) {
   const navigate = useNavigate();
   if (isPending) return <CompactSkeleton />;
   if (isError) return <ErrorState title="Не удалось загрузить" reason="ошибка" />;
-  const { er, erTrend, erCaption, members, normPosts } = derived;
+  const { er, erTrend, erCaption, members, normPosts, deltaBasis, captionBasis, noBasisReason } = derived;
   const live = members > 0 && normPosts.length > 0 && er != null && Number.isFinite(er);
   // БЕЗ искры. ER — это вовлечение, делённое на аудиторию, а аудитория за окно меняется на
   // проценты, тогда как вовлечение — в десятки раз. Значит нормализованная по min–max кривая ER
@@ -221,6 +233,8 @@ export function TgErBody({ state }: { state: TgKpiState }) {
       text={live ? fmt.pctAbs(er as number) : '—'}
       delta={erTrend}
       deltaText={erCaption}
+      basis={erCaption ? captionBasis.er : deltaBasis.er}
+      noBasisReason={noBasisReason}
       onDrill={() => navigate('/metrics/er')}
       drillLabel="Вовлечённость"
       live={live}
@@ -252,6 +266,8 @@ export function TgErBody({ state }: { state: TgKpiState }) {
 function TgTrendStat({
   value,
   delta,
+  basis,
+  noBasisReason,
   spark,
   format,
   onDrill,
@@ -261,6 +277,10 @@ function TgTrendStat({
 }: {
   value: number | null;
   delta?: MetricDelta | null;
+  /** С чем сравнена `delta` — даты базы и её число (подсказка у слота дельты). */
+  basis?: DeltaBasis | null;
+  /** Почему базы нет — подсказка у «нет базы». */
+  noBasisReason?: string;
   spark: DailySeries;
   format: (n: number) => string;
   onDrill?: () => void;
@@ -275,6 +295,8 @@ function TgTrendStat({
       <CompactStatHeadline
         text={live ? format(value as number) : '—'}
         delta={delta}
+        basis={basis}
+        noBasisReason={noBasisReason}
         onDrill={onDrill}
         drillLabel={drillLabel}
         live={live}
@@ -333,6 +355,8 @@ interface FeaturedKpiProps {
   labelHidden?: boolean;
   value: string;
   trend?: MetricDelta | null;
+  /** С чем сравнён `trend` — даты базы и её число (подсказка у пилюли). */
+  basis?: DeltaBasis | null;
   caption?: string | null;
   spark?: DailySeries;
   info?: MetricDef;
@@ -346,7 +370,7 @@ interface FeaturedKpiProps {
 /** Hero KPI — the steep card anatomy (owner rule): label + big number + comparison pinned
     bottom-LEFT, the area sparkline filling the width to the RIGHT of the number block. The ledger
     below is untouched — the hero zone just turned horizontal. */
-function FeaturedKpi({ label, labelHidden = false, value, trend, caption, spark, info, onDrill, viz = 'line', range }: FeaturedKpiProps) {
+function FeaturedKpi({ label, labelHidden = false, value, trend, basis, caption, spark, info, onDrill, viz = 'line', range }: FeaturedKpiProps) {
   // Кап длинной серии перед рендером (канон CLAUDE.md): на окне «Всё» архивный viewsSpark несёт
   // до 730 дневных точек — в 200×32-спарклайне это суб-пиксельная мазня. Пары {value,label}
   // прореживаются ВМЕСТЕ, чтобы hover-читалка называла именно отобранные LTTB точки; хедлайн,
@@ -380,6 +404,7 @@ function FeaturedKpi({ label, labelHidden = false, value, trend, caption, spark,
       valueAdornment={info && labelHidden ? <MetricInfo def={info} /> : undefined}
       value={value}
       delta={trend}
+      deltaBasis={basis}
       range={range}
       caption={caption ?? undefined}
       onValueClick={onDrill}
@@ -457,6 +482,8 @@ interface StatTileProps {
   trend?: MetricDelta | null;
   /** Short inline delta (signed-absolute / п.п.); falls back to the percent pill when omitted. */
   deltaText?: string | null;
+  /** С чем сравнили — даты базы и её число; подсказка стоит на ОБОИХ вариантах слота. */
+  basis?: DeltaBasis | null;
   info?: MetricDef;
   onDrill?: () => void;
 }
@@ -465,15 +492,13 @@ interface StatTileProps {
  * One ledger cell (no card — a hairline-delimited column in the StatTile grid). The grid's
  * gap-px over a bg-border container draws the 1px dividers; the cell sits on the paper canvas.
  */
-function StatTile({ label, value, trend, deltaText, info, onDrill }: StatTileProps) {
+function StatTile({ label, value, trend, deltaText, basis, info, onDrill }: StatTileProps) {
   // No per-cell background/border now — cells separate by grid SPACING. A drillable cell gets a
   // quiet rounded hover surface; vertical-only padding so it never widens the grid (a horizontal
   // negative-margin bleed overflowed the card by ~12px on the edge cells).
   const cell = onDrill
     ? { onClick: onDrill, title: 'Подробный разбор', className: 'cursor-pointer rounded-md py-1 transition-colors hover:bg-muted/40' }
     : {};
-  // Quiet register (steep): the ↑/↓ arrow carries direction, the colour stays muted.
-  const deltaColor = 'text-muted-foreground';
   return (
     <div {...cell}>
       <div className="flex items-center gap-1 text-2xs tracking-wide text-muted-foreground">
@@ -485,10 +510,12 @@ function StatTile({ label, value, trend, deltaText, info, onDrill }: StatTilePro
           {/* KpiNumber сам делит строку на число и тихий юнит — раньше это делал splitUnit. */}
           <KpiNumber text={value} unitClassName="text-base font-medium text-muted-foreground" />
         </DrillValue>
+        {/* Quiet register (steep): the ↑/↓ arrow carries direction, the colour stays muted —
+            DeltaNote держит этот рецепт одним местом на все слоты дельты. */}
         {deltaText ? (
-          <span className={cn('shrink-0 text-xs font-medium tabular-nums', deltaColor)}>{deltaText}</span>
+          <DeltaNote text={deltaText} title={basis ? deltaBasisTitle(basis) : undefined} />
         ) : (
-          <DeltaPill delta={trend} />
+          <DeltaPill delta={trend} basis={basis} />
         )}
       </div>
     </div>
