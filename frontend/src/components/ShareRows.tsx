@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
-import { useContext } from 'react';
+import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
+import { observeSize } from '@/lib/observeSize';
 import { useMediaQuery } from '@/lib/useMediaQuery';
 import { fmt } from '@/lib/format';
 
@@ -122,12 +123,60 @@ export interface ShareRowsProps {
 }
 
 
-// Шаг строки списка. На ширине ≥640px строка однострочная, ниже — двухколоночная и занимает
-// две линии (см. grid-классы <li> ниже), поэтому шаг там вдвое больше.
+// Шаг строки списка ДО ПЕРВОГО ЗАМЕРА. Дальше он меряется по факту — см. useRowPitch ниже.
+//
+// Константа уже один раз разошлась с вёрсткой и порезала карточки. D6 сделал правую колонку
+// двухстрочной (число с долей сверху, примечание «1 596 чел. · 24.6% отказов» снизу), строка
+// выросла с 26 до ~36px, а делитель остался прежним — вместимость считалась на треть больше
+// реальной, и последняя строка вылезала за низ тайла на восьми разрезах Метрики разом
+// (аудит #554, проход №2, N1).
+//
+// Поэтому число здесь — только предположение на первый кадр, а не источник правды: примечание
+// приходит из данных, кегль и отступы — из токенов, и обе стороны меняются независимо от этого
+// файла. Замер самоисправляется, константа — нет.
 const ROW_PITCH_WIDE = 26;
 const ROW_PITCH_NARROW = 48;
 // Строка хвоста «ещё N» и сноска — не строки списка, но место занимают.
 const TAIL_H = 18;
+
+/**
+ * Замер идёт в LAYOUT-фазе, а не после кадра. Иначе первый кадр рисуется по константе-предположению,
+ * второй — по факту, и список на глазах схлопывается с пяти строк до четырёх: пользователь видит
+ * дёрганье, а тест ловит промежуточное состояние и становится флаки. На сервере (юниты через
+ * renderToStaticMarkup) layout-эффект недоступен и не нужен — разметка там всё равно не меряется.
+ */
+const useIsoLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect;
+
+/**
+ * Фактический шаг строки списка: расстояние между верхами двух соседних `<li>`.
+ *
+ * Двух соседних, а не высота одной: между строками стоит `space-y-1`, и шаг — это высота ПЛЮС
+ * зазор. При единственной строке зазор взять неоткуда, поэтому там остаётся её собственная высота
+ * (ошибка в один зазор ничего не решает: одна строка и так влезает).
+ *
+ * Состояние обновляется только при расхождении больше пикселя — иначе округления гоняли бы
+ * ре-рендер по кругу. Пере-замер по ResizeObserver: ширина тайла меняет и
+ * перенос подписи, и число колонок.
+ */
+function useRowPitch(listRef: React.RefObject<HTMLUListElement | null>, fallback: number): number {
+  const [pitch, setPitch] = useState<number | null>(null);
+  useIsoLayoutEffect(() => {
+    const measure = () => {
+      const list = listRef.current;
+      if (!list) return;
+      const items = list.children as HTMLCollectionOf<HTMLElement>;
+      if (items.length === 0) return;
+      const next = items.length >= 2 ? items[1].offsetTop - items[0].offsetTop : items[0].offsetHeight;
+      if (next > 0) setPitch((prev) => (prev != null && Math.abs(prev - next) <= 1 ? prev : next));
+    };
+    measure();
+    const list = listRef.current;
+    return list ? observeSize(list, measure) : undefined;
+    // Подписка ставится один раз: дальше ResizeObserver сам будит замер на смене ширины тайла и
+    // на смене числа строк (и то и другое меняет высоту списка). Ссылка на ref стабильна.
+  }, [listRef]);
+  return pitch ?? fallback;
+}
 
 export function ShareRows({
   rows,
@@ -169,11 +218,10 @@ export function ShareRows({
   // Теперь бюджет — авторитет в ОБЕ стороны, а compactRows остаётся подсказкой для тех мест, где
   // высота не опубликована (страница разреза, оверлей «Развернуть»). Переполнить тайл рост не может:
   // строк ровно floor(бюджет / шаг), а хвост вычтен из бюджета заранее.
+  const listRef = useRef<HTMLUListElement | null>(null);
+  const rowPitch = useRowPitch(listRef, wideRow ? ROW_PITCH_WIDE : ROW_PITCH_NARROW);
   const budget = ctxHeight == null ? null : ctxHeight - (ranked.length > compactRows || footnote != null ? TAIL_H : 0);
-  const fitRows =
-    budget == null || expandedCtx
-      ? compactRows
-      : Math.max(1, Math.floor(budget / (wideRow ? ROW_PITCH_WIDE : ROW_PITCH_NARROW)));
+  const fitRows = budget == null || expandedCtx ? compactRows : Math.max(1, Math.floor(budget / rowPitch));
   const head = expanded ? ranked : ranked.slice(0, fitRows);
   const tail = ranked.slice(head.length);
   const tailValue = tail.reduce((acc, r) => acc + Math.max(0, r.value), 0);
@@ -182,6 +230,7 @@ export function ShareRows({
   return (
     <div>
       <ul
+        ref={listRef}
         aria-label={
           safeTotal == null
             ? `Распределение: ${tailWord}`

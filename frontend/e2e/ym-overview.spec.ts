@@ -223,6 +223,9 @@ const COUNTRIES = {
     { id: '149', name: 'Беларусь', visits: 30, users: 22, bounce_rate: 33.3 },
     { id: '187', name: 'Украина', visits: 20, users: 15, bounce_rate: 44.0 },
     { id: '96', name: 'Германия', visits: 10, users: 8, bounce_rate: 55.0 },
+    { id: '84', name: 'США', visits: 6, users: 5, bounce_rate: 52.0 },
+    { id: '983', name: 'Узбекистан', visits: 3, users: 3, bounce_rate: 60.0 },
+    { id: '169', name: 'Армения', visits: 1, users: 1, bounce_rate: 100.0 },
   ],
   meta: {},
 };
@@ -439,12 +442,15 @@ test('Обзор Метрики: карточки метрик, источник
   await expect(sourcesHeading).toBeVisible();
   await expect(page.getByText('Переходы из поисковых систем')).toBeVisible();
   await expect(page.getByText('Прямые заходы')).toBeVisible();
-  // ПЯТЫЙ ИСТОЧНИК ТЕПЕРЬ ВИДЕН (аудит #554, D16). Раньше здесь стояло `toHaveCount(0)` — то есть
-  // тест закреплял ИМЕННО ТО, на что жалуется аудит: четыре строки в теле, куда влезает
-  // шесть, и пятая в хвосте при пустой нижней половине карточки. Смена контракта сознательная.
-  await expect(page.getByText('Внутренние переходы')).toBeVisible();
-  // Сворачивать больше нечего: все пять источников на виду, хвостовой строки нет.
-  await expect(page.getByText(/Ещё \d+ визитов из 145/)).toHaveCount(0);
+  // Пятый источник снова в хвосте — и это ЧЕСТНЕЕ, чем было (аудит #554, проход №2, N1).
+  //
+  // D16 нарастил список, опираясь на шаг строки 26px, но после D6 строка стала двухстрочной и
+  // занимает ~36px. «Влезает шесть» было арифметикой, а не фактом: пятая строка рисовалась и
+  // резалась по нижнему краю тайла (замер: вылезала на 44px). С замеренным шагом тело на 181px
+  // честно вмещает четыре двухстрочные строки, остальное уходит в хвост — видимый и кликабельный,
+  // а не обрезанный. Правило D16 при этом живо: там, где строка ОДНОстрочная, список по-прежнему
+  // дорастает до вместимости тайла.
+  await expect(page.getByText(/Ещё \d+ визитов из 145/)).toBeVisible();
 
   // Карточки-разрезы грузятся ПРОГРЕССИВНО (deferData): офскрин-карточка не шлёт свой запрос,
   // пока не подойдёт к вьюпорту. Поэтому перед проверкой содержимого доскролливаем заголовок —
@@ -468,18 +474,24 @@ test('Обзор Метрики: карточки метрик, источник
   // Слайс 2 — топ-страницы: пути + хвост «из полного отчёта» (его даёт серверный лимит, не тайл).
   await revealed('Топ-страницы');
   await expect(page.getByText('/catalog/notebooks')).toBeVisible();
-  // Строка больше НЕ прячется: тайл вмещает шесть строк, и прятать пятую при пустой
-  // нижней половине карточки — ровно то, на что жалуется аудит #554 (D16).
-  await expect(page.getByText('/blog/new-collection')).toBeVisible();
-  await expect(page.getByText(/Ещё \d+ просмотров из 402/)).toHaveCount(0);
+  // Пятая строка снова в хвосте: D16 наращивал список по шагу 26px, а после D6 строка стала
+  // двухстрочной (~36px) — «влезает шесть» было арифметикой, а не фактом (аудит #554, проход №2, N1).
+  await expect(page.getByText('/blog/new-collection')).toHaveCount(0);
+  // Пятая строка — в хвосте: с ЗАМЕРЕННЫМ шагом тайл вмещает четыре двухстрочные строки, а не
+  // шесть однострочных, как считала константа до N1. Хвост виден и кликабелен — в отличие от
+  // строки, обрезанной нижним краем.
+  await expect(page.getByText(/Ещё \d+ просмотров из 402/)).toBeVisible();
 
   // Слайс аудитории/источников — реферальные сайты: внешние домены + хвост своего total.
   await revealed('Реферальные сайты');
   await expect(page.getByText('vc.ru', { exact: true })).toBeVisible();
-  // Строка больше НЕ прячется: тайл вмещает шесть строк, и прятать пятую при пустой
-  // нижней половине карточки — ровно то, на что жалуется аудит #554 (D16).
-  await expect(page.getByText('pikabu.ru')).toBeVisible();
-  await expect(page.getByText(/Ещё \d+ визитов из 210/)).toHaveCount(0);
+  // Пятая строка снова в хвосте: D16 наращивал список по шагу 26px, а после D6 строка стала
+  // двухстрочной (~36px) — «влезает шесть» было арифметикой, а не фактом (аудит #554, проход №2, N1).
+  await expect(page.getByText('pikabu.ru')).toHaveCount(0);
+  // Пятая строка — в хвосте: с ЗАМЕРЕННЫМ шагом тайл вмещает четыре двухстрочные строки, а не
+  // шесть однострочных, как считала константа до N1. Хвост виден и кликабелен — в отличие от
+  // строки, обрезанной нижним краем.
+  await expect(page.getByText(/Ещё \d+ визитов из 210/)).toBeVisible();
 
   // Соцсети: конкретные сети (lastsignSocialNetwork) + отказы вторичным контекстом.
   await revealed('Соцсети');
@@ -536,18 +548,23 @@ test('Обзор Метрики: карточки метрик, источник
   await expect(exitsHeading).toBeVisible();
   await expect(page.getByText('/checkout/success')).toBeVisible();
   await expect(page.getByText(/12\.5% отказов/)).toBeVisible();
-  // Пятая строка больше не прячется — тайл её вмещает (аудит #554, D16).
-  await expect(page.getByText('/faq')).toBeVisible();
-  await expect(page.getByText(/Ещё \d+ визитов из 140/)).toHaveCount(0);
+  // Пятая строка снова в хвосте: D16 наращивал список по шагу 26px, а после D6 строка стала
+  // двухстрочной (~36px) — «влезает шесть» было арифметикой, а не фактом (аудит #554, проход №2, N1).
+  await expect(page.getByText('/faq')).toHaveCount(0);
+  // Пятая строка — в хвосте: с ЗАМЕРЕННЫМ шагом тайл вмещает четыре двухстрочные строки, а не
+  // шесть однострочных, как считала константа до N1. Хвост виден и кликабелен — в отличие от
+  // строки, обрезанной нижним краем.
+  await expect(page.getByText(/Ещё \d+ визитов из 140/)).toBeVisible();
 
   // Слайс географии — страны (regionCountry): русское имя, отказы по строке, хвост своего total (320).
   const countriesHeading = page.getByRole('heading', { name: 'Страны', exact: true });
   await countriesHeading.scrollIntoViewIfNeeded();
   await expect(countriesHeading).toBeVisible();
   await expect(page.getByText('Россия', { exact: true })).toBeVisible();
-  // Пятая строка больше не прячется — тайл её вмещает (аудит #554, D16).
-  await expect(page.getByText('Германия', { exact: true })).toBeVisible();
-  await expect(page.getByText(/Ещё \d+ визитов из 320/)).toHaveCount(0);
+  // Восемь стран в тайл не влезают — и это ПРАВИЛЬНО: остаток уходит в хвост, а не за нижний край.
+  // Пять влезали и хвоста не давали (D16); плотный разрез добавлен, чтобы гейт ниже вообще мог
+  // покраснеть (аудит #554, проход №2, N19).
+  await expect(page.getByText(/Ещё \d+ визитов из 320/)).toBeVisible();
   await expect(page.getByText('География определяется Метрикой по данным визита, а не по GPS.')).toBeVisible();
 
   // Слайс географии — города (regionCity): отдельная от страны карточка, свой total (275).
@@ -556,7 +573,10 @@ test('Обзор Метрики: карточки метрик, источник
   await expect(citiesHeading).toBeVisible();
   await expect(page.getByText('Москва', { exact: true })).toBeVisible();
   // Сворачивать нечего: тайл вмещает все строки разреза (аудит #554, D16).
-  await expect(page.getByText(/Ещё \d+ визитов из 275/)).toHaveCount(0);
+  // Пятая строка — в хвосте: с ЗАМЕРЕННЫМ шагом тайл вмещает четыре двухстрочные строки, а не
+  // шесть однострочных, как считала константа до N1. Хвост виден и кликабелен — в отличие от
+  // строки, обрезанной нижним краем.
+  await expect(page.getByText(/Ещё \d+ визитов из 275/)).toBeVisible();
 
   // Слайс демографии — возраст (ageInterval): локализация по СТАБИЛЬНОМУ id ('25' → «25–34 года»),
   // сырое имя API не показывается; пятая строка — в хвосте своего total (410); оговорка об оценке.
@@ -804,13 +824,48 @@ test('Обзор Метрики: скелетон занимает место б
 });
 
 /**
+ * N1 (аудит #554, проход №2) — СТРОКИ РАЗРЕЗА НЕ ВЫЛЕЗАЮТ ЗА НИЗ ТАЙЛА.
+ *
+ * Вместимость считалась как floor(бюджет / 26px), а после D6 правая колонка стала двухстрочной
+ * и строка выросла до ~36px. Делитель остался прежним, поэтому карточка рисовала на треть больше
+ * строк, чем помещается, и последняя резалась по нижнему краю — на восьми разрезах Метрики разом.
+ *
+ * Гейт СЧИТАЕТ ГЕОМЕТРИЮ, а не строки: сколько именно строк влезает — это следствие кегля,
+ * отступов и данных, и закреплять число значило бы переписывать тест после каждой правки вёрстки.
+ * Инвариант же неизменен: низ последней строки не ниже низа тела тайла.
+ */
+test('Обзор Метрики: ни одна строка разреза не выходит за низ тайла', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop-1440', 'Метрика — desktop-first поверхность');
+  await bootMetrika(page, '/metrika');
+
+  const card = page
+    .locator('section[data-widget-size]')
+    .filter({ has: page.getByRole('heading', { name: 'Страны', exact: true }) });
+  await expect(card).toBeVisible({ timeout: 20_000 });
+  await card.scrollIntoViewIfNeeded();
+  await expect(card.locator('ul[aria-label^="Распределение"] > li').first()).toBeVisible();
+
+  const overflow = await card.evaluate((el) => {
+    const list = el.querySelector('ul[aria-label^="Распределение"]');
+    const body = el.querySelector('.widget-tile, .widget-tile-fixed') ?? el;
+    if (!list) return { rows: 0, worst: 0 };
+    const bottom = body.getBoundingClientRect().bottom;
+    const rows = [...list.children].map((li) => li.getBoundingClientRect().bottom);
+    return { rows: rows.length, worst: Math.round(Math.max(...rows) - bottom) };
+  });
+  expect(overflow.rows).toBeGreaterThan(1);
+  // Ноль или отрицательное: последняя строка кончается не ниже тела тайла. Допуск в 1px — округления.
+  expect(overflow.worst, `последняя строка вылезает на ${overflow.worst}px`).toBeLessThanOrEqual(1);
+});
+
+/**
  * D16 (аудит #554) — КАРТОЧКА-СПИСОК ЗАПОЛНЯЕТ СВОЙ ТАЙЛ.
  *
  * `ShareRows` умел только СЖИМАТЬ число строк ниже `compactRows`, но не вырастать до того,
  * что тайл реально вмещает: четыре строки в теле на 181px, куда влезает шесть, а пятая
  * строка пряталась в хвост «ещё 1» при пустой нижней половине карточки.
  */
-test('Обзор Метрики: все пять источников стоят в карточке, а не четыре и «ещё 1»', async ({ page }, testInfo) => {
+test('Обзор Метрики: карточка-список показывает столько строк, сколько ВМЕЩАЕТ', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop-1440', 'Метрика — desktop-first поверхность');
   await bootMetrika(page, '/metrika');
 
@@ -819,7 +874,12 @@ test('Обзор Метрики: все пять источников стоят
     .filter({ has: page.getByRole('heading', { name: 'Источники трафика' }) });
   await expect(card).toBeVisible({ timeout: 20_000 });
   const rows = card.locator('ul[aria-label^="Распределение"] > li');
-  await expect.poll(async () => rows.count(), { timeout: 10_000 }).toBe(SOURCES.rows.length);
-  // Прятать больше нечего — хвоста нет.
-  await expect(card.getByText(RE_TAIL)).toHaveCount(0);
+  // Число строк — СЛЕДСТВИЕ замера, а не константа: закреплять «ровно пять» значило бы вернуть ту
+  // самую арифметику, которая резала карточку (N1). Проверяем инвариант D16 в его настоящем виде:
+  // строк ровно столько, сколько влезает, — не меньше двух и не больше, чем есть данных.
+  await expect.poll(async () => rows.count(), { timeout: 10_000 }).toBeGreaterThan(1);
+  expect(await rows.count()).toBeLessThanOrEqual(SOURCES.rows.length);
+  // Спрятанное не теряется: остаток уходит в видимый хвост.
+  const hidden = SOURCES.rows.length - (await rows.count());
+  await expect(card.getByText(RE_TAIL)).toHaveCount(hidden > 0 ? 1 : 0);
 });
