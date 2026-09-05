@@ -110,9 +110,12 @@ test.describe('«Неделя канала»', () => {
       expect(card?.text).toMatch(/просмотр(|а|ов) за неделю/);
       expect(card?.text).toContain('пик недели');
       // R7: слово-подпись факта ведёт на свою страницу, число рядом остаётся текстом.
+      // Бюджет ожидания тот же, что у revealWeek: факт базы приезжает ОТДЕЛЬНЫМ запросом
+      // (useHistory), поэтому карточка уже видна и наполнена, когда этой строки ещё нет.
       await expect(weekSection(page).getByRole('link', { name: /^подписчик(|а|ов)$/ })).toHaveAttribute(
         'href',
         '/metrics/subscribers',
+        { timeout: 25_000 },
       );
       // И всё это влезает в фикс-тайл.
       expect(card?.innerScroll, 'список обязан влезать в 264px').toBe(false);
@@ -123,7 +126,9 @@ test.describe('«Неделя канала»', () => {
     await bootDemo(page, '/');
     await revealWeek(page);
     const base = weekSection(page).getByRole('link', { name: 'База', exact: true });
-    await expect(base).toHaveAttribute('href', '/metrics/subscribers');
+    // Строка «База» живёт в леджере и зависит от useHistory — она приезжает ПОЗЖЕ остального
+    // тела карточки, поэтому ждём её тем же бюджетом, что и саму карточку.
+    await expect(base).toHaveAttribute('href', '/metrics/subscribers', { timeout: 25_000 });
     await base.click();
     // У «Недели» noExpand, поэтому обработчик клика по карточке даже не навешан, а ChartSection
     // в любом случае выходит на closest('button, a, …') — ссылка и разворот не спорят.
