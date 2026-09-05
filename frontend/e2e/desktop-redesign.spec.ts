@@ -2,6 +2,14 @@ import { test, expect } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 import { bootDemo, overflowingCards } from './helpers';
 
+// Весь файл — про ДЕСКТОПНУЮ раскладку: экспорт из шапки, шестиколоночная сетка, разделение
+// заголовков. На телефоне этих поверхностей нет вовсе, и прогон здесь проверял бы не мобильное
+// поведение, а отсутствие десктопного. Раньше гейт mobile-430 гонял только два файла, поэтому
+// промах не был виден (аудит #554, проход №2, N8).
+test.beforeEach(({}, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop-1440', 'десктопная раскладка');
+});
+
 test('desktop analytics exports current and equal-previous windows for both networks', async ({ page }) => {
   await bootDemo(page, '/analytics', { theme: 'dark' });
   await page.getByRole('group', { name: 'Период', exact: true }).getByRole('button', { name: '7д' }).click();
