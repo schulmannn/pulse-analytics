@@ -1,7 +1,10 @@
 import { renderToStaticMarkup } from 'react-dom/server';
+import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it } from 'vitest';
 import { ChartCardBody } from './ChartCardBody';
+import { ChartSection } from './ChartSection';
 import { ChartCardTitleContext } from '@/components/ExpandableChart';
+import { PeriodProvider } from '@/lib/period';
 
 /**
  * D8 (аудит #554): подпись внутри карточки повторяла её заголовок.
@@ -45,5 +48,46 @@ describe('ChartCardBody: подпись не дублирует заголово
 
   it('пустая подпись не рисует пустую строку', () => {
     expect(headlineText(render('Охват'))).toEqual([]);
+  });
+});
+
+/**
+ * Правило выше с самого своего появления было мёртвым на ЛИЦЕ карточки, и тесты этого не видели:
+ * они сами подавали `ChartCardTitleContext`, которого в проде там не было. Заголовок публиковал
+ * ТОЛЬКО оверлей развёртки (useChartSectionModel → overlayBody), а лицо жило с `null` — и D8 молча
+ * отключался на каждой карточке продукта. На IG-обзоре это и увидел владелец: карточка «Охват»
+ * печатала «Охват» в шапке и второй раз над числом 146.4k. TG-твин «Просмотры» выглядел здоровым
+ * не потому, что правило работало, а потому что гасил подпись руками (FeaturedKpi.labelHidden).
+ *
+ * Поэтому гейт идёт через НАСТОЯЩУЮ композицию ChartSection → WidgetBody → ChartCardBody: контекст
+ * не подставляется тестом, а обязан прийти от карточки.
+ */
+const renderCard = (title: string, label?: string) =>
+  renderToStaticMarkup(
+    <MemoryRouter>
+      <PeriodProvider>
+        <ChartSection id="ig-overview-reach" title={title}>
+          <ChartCardBody label={label} value="146.4k">{null}</ChartCardBody>
+        </ChartSection>
+      </PeriodProvider>
+    </MemoryRouter>,
+  );
+
+describe('ChartSection: лицо карточки объявляет свой заголовок телу', () => {
+  it('подпись, равная заголовку карточки, не печатается (IG-обзор, «Охват»)', () => {
+    const html = renderCard('Охват', 'Охват');
+    expect(headlineText(html)).toEqual([]);
+    // Заголовок при этом обязан остаться на месте: дубль снимается подписью, а не шапкой.
+    expect(html).toContain('>Охват</h3>');
+  });
+
+  it('от «заголовок · окно» на лице остаётся только окно', () => {
+    // Та же карточка на Главной: страничного периода нет, подпись несёт окно (useCardShowsPeriod).
+    expect(headlineText(renderCard('Охват', 'Охват · 30 дн.'))).toEqual(['30 дн.']);
+  });
+
+  it('своя подпись на лице остаётся как есть', () => {
+    // «Динамика аудитории» со своей подписью «База · 30 дн.» — не дубль, трогать нечего.
+    expect(headlineText(renderCard('Динамика аудитории', 'База · 30 дн.'))).toEqual(['База · 30 дн.']);
   });
 });

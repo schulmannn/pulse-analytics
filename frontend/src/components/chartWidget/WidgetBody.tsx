@@ -1,5 +1,9 @@
 import type { ReactNode, RefObject } from 'react';
-import { ExpandedChartHeightContext, WidgetTargetContext } from '@/components/ExpandableChart';
+import {
+  ChartCardTitleContext,
+  ExpandedChartHeightContext,
+  WidgetTargetContext,
+} from '@/components/ExpandableChart';
 import { WidgetErrorBoundary } from '@/components/WidgetErrorBoundary';
 import { WidgetPeriodProvider } from '@/lib/period';
 import type { WidgetPeriodValue } from '@/lib/period';
@@ -56,6 +60,13 @@ export function WidgetBody({
       style={height ? { height } : undefined}
     >
       <WidgetPeriodProvider value={period}>
+        {/* Заголовок карточки — такой же контекст тела, как период и цель, и объявляется здесь же.
+            Раньше его публиковал ТОЛЬКО оверлей развёртки (useChartSectionModel → overlayBody), а
+            на лицо карточки он не доходил: `ChartCardTitleContext` там оставался `null`, и правило
+            «подпись не повторяет заголовок» (D8, аудит #554) молча выключалось на КАЖДОЙ карточке
+            продукта. Видно это стало на IG-обзоре — «Охват» печатался и в шапке, и над числом;
+            TG-твин выглядел здоровым лишь потому, что гасил подпись руками (`labelHidden`). */}
+        <ChartCardTitleContext.Provider value={label}>
         <WidgetTargetContext.Provider value={target}>
           <div ref={bodyRef} className={`min-h-0 flex-1 overflow-hidden ${fixedTile ? 'widget-tile-fixed' : 'widget-tile'}`}>
             <WidgetErrorBoundary variant="inline" widgetId={widgetId} label={label} resetKeys={resetKeys}>
@@ -66,6 +77,7 @@ export function WidgetBody({
           </div>
           {footer != null && <div className="shrink-0">{footer}</div>}
         </WidgetTargetContext.Provider>
+        </ChartCardTitleContext.Provider>
       </WidgetPeriodProvider>
     </div>
   );
