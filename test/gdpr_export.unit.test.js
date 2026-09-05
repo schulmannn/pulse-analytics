@@ -480,6 +480,16 @@ test('стрим: approved portability matrix использует safe projecti
     ['2024-01-01', '2024-01-02', '2024-01-03']);
   assert.deepStrictEqual(doc.channels[0].snapshot.data, { subscribers: 42 });
   assert.strictEqual(doc.channels[0].moysklad.ms_account_id, 'ms-own');
+  // Экспорт обещает identity ВСЕХ подключений канала, а знал только три источника из пяти: архивы
+  // СДЭКа и Rusender уезжали, а «что именно у вас подключено» — нет (аудит #554, проход №2, N17).
+  // Секции обязаны присутствовать даже при отсутствующем подключении: null — это ответ «не
+  // подключено», а молчание — отсутствие ответа.
+  assert.ok('cdek' in doc.channels[0], 'секция СДЭКа есть всегда');
+  assert.ok('rusender' in doc.channels[0], 'секция Rusender есть всегда');
+  // Ключ Rusender — credential и в выборке отсутствует по построению.
+  const rusenderSql = pool.capture.filter((c) => /rusender_accounts/.test(c.text));
+  assert.ok(rusenderSql.length > 0, 'подключение Rusender запрашивается');
+  assert.ok(rusenderSql.every((c) => !/api_key_enc/.test(c.text)), 'ключ не выгружается никогда');
   assert.deepStrictEqual(doc.channels[0].api_keys.map((k) => k.id), [1, 2, 3]);
 
   const membershipCalls = pool.capture.filter((c) => c.table === 'workspace_members');
