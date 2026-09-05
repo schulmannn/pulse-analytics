@@ -1,5 +1,5 @@
+import { CHART_MAX_POINTS } from '@/lib/downsample';
 import { describe, expect, it } from 'vitest';
-import { CHART_MAX_POINTS } from '@/lib/msSeries';
 import { resolveWidgetMetric } from '@/lib/resolveWidgetMetric';
 import type { WidgetConfig } from '@/lib/widgetConfig';
 import { capResultSeries } from '@/lib/widgetResolver/shared';

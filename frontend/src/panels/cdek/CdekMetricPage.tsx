@@ -53,7 +53,7 @@ import {
   WindowBarShell,
 } from '@/components/metric/shared';
 import { useCdekBreakdown, useCdekSeries, useCdekSummary, type CdekPoint } from '@/api/cdek';
-import { lttbDownsample } from '@/lib/downsample';
+import { CHART_MAX_POINTS, lttbDownsample } from '@/lib/downsample';
 import { bucketWords, cdekGrid, densifyCdekDays, type CdekBucket } from '@/lib/cdekSeries';
 import { useExplorerChartHeight } from '@/lib/useExplorerChartHeight';
 import { fmt, pluralRu, timeAxisFromDayKeys } from '@/lib/format';
@@ -422,7 +422,9 @@ function CdekSeriesPage({ def, metricKey }: { def: SeriesDef; metricKey: SeriesK
     series.data?.grain,
   );
   const raw = curPoints.map((p) => ({ day: p.day, value: def.pick(p) }));
-  const shown = lttbDownsample(raw, 400, (r) => r.value ?? 0);
+  // Потолок общий: до этой правки здесь стояло 400 — втрое выше канона, то есть страница СДЭКа
+  // рисовала плотность, которой нет ни у одного другого источника.
+  const shown = lttbDownsample(raw, CHART_MAX_POINTS, (r) => r.value ?? 0);
   const values = shown.map((r) => r.value);
   const labels = shown.map((r) => fmt.day(r.day));
   const axisLabels = timeAxisFromDayKeys(shown.map((r) => r.day));

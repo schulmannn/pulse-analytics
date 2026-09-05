@@ -1,8 +1,8 @@
 import { fmt } from '@/lib/format';
 import { parseContentPeriod, serializeContentPeriod } from '@/lib/contentFilters';
-import { lttbDownsample } from '@/lib/downsample';
+import { CHART_MAX_POINTS, lttbDownsample } from '@/lib/downsample';
 import { bucketKeyOf } from '@/lib/metricSeries';
-import { CHART_MAX_POINTS, pickIndexes } from '@/lib/msSeries';
+import { pickIndexes } from '@/lib/msSeries';
 import type { PeriodDays } from '@/lib/period';
 import type { SortOrder } from '@/lib/contentFilters';
 

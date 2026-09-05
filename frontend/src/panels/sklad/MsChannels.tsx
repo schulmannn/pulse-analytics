@@ -1,3 +1,4 @@
+import { CHART_MAX_POINTS } from '@/lib/downsample';
 import { useContext, useMemo, useState } from 'react';
 import { WidgetGrid } from '@/components/widgets/WidgetGrid';
 import { ShareTrack } from '@/components/ShareRows';
@@ -27,20 +28,7 @@ import {
   type MsChannelContributionMetric,
   type MsSalesByChannelData,
 } from '@/lib/msChannelContribution';
-import {
-  aggregatePlotPoints,
-  bucketPoints,
-  densifyDayPoints,
-  fmtMetric,
-  metricTotal,
-  metricValue,
-  pickIndexes,
-  CHART_MAX_POINTS,
-  GRAIN_BUCKET_WORD,
-  METRIC_LABEL,
-  type Grain,
-  type Metric,
-} from '@/lib/msSeries';
+import { aggregatePlotPoints, bucketPoints, densifyDayPoints, fmtMetric, metricTotal, metricValue, pickIndexes, GRAIN_BUCKET_WORD, METRIC_LABEL, type Grain, type Metric } from '@/lib/msSeries';
 
 /**
  * «Каналы» МойСклада — откуда приходят продажи (salesChannel на заказе) + география доставки.

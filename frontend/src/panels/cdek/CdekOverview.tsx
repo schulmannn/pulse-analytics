@@ -22,9 +22,8 @@ import {
   type CdekPoint,
 } from '@/api/cdek';
 import { pctDelta, type MetricDelta } from '@/lib/delta';
-import { lttbDownsample } from '@/lib/downsample';
+import { CHART_MAX_POINTS, lttbDownsample } from '@/lib/downsample';
 import { densifyCdekDays } from '@/lib/cdekSeries';
-import { CHART_MAX_POINTS } from '@/lib/msSeries';
 import { fmt, timeAxisFromDayKeys } from '@/lib/format';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { useSavedFilter } from '@/lib/widgetPrefsStore';
