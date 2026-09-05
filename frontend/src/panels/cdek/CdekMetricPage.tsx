@@ -47,6 +47,7 @@ import { ErrorState } from '@/components/ErrorState';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   ComparisonDeltaRow,
+  RailComparison,
   MetricColumns,
   MetricPageHeader,
   RailSection,
@@ -59,6 +60,7 @@ import { useExplorerChartHeight } from '@/lib/useExplorerChartHeight';
 import { fmt, pluralRu, timeAxisFromDayKeys } from '@/lib/format';
 import { formatMoney } from '@/lib/metricNumber';
 import { usePeriod } from '@/lib/period';
+import { windowRangeLabel } from '@/lib/metricSeries';
 import { useMsResolvedPeriod } from '@/lib/msPeriod';
 import { isCdekMetricKey } from '@/panels/cdek/cdekMetricKeys';
 
@@ -202,7 +204,7 @@ function CdekMetricShell({
                   {target}
                 </RailSection>
               )}
-              <RailSection title="Сравнение" variant="row" icon={CompareGlyph}>
+              <RailSection title="Сравнение" variant="row" icon={CompareGlyph} mark="comparison">
                 {comparison ?? (
                   <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
                     У этого разреза нет одной канонической величины периода — сравнение не
@@ -494,6 +496,17 @@ function CdekSeriesPage({ def, metricKey }: { def: SeriesDef; metricKey: SeriesK
   const cur = summary.data?.current ? def.total(summary.data.current) : null;
   const prev = summary.data?.previous ? def.total(summary.data.previous) : null;
   const hasPrevWindow = summary.data?.previous_window != null;
+  // Границы обоих окон приходят ОТ СЕРВЕРА (он их и считал) — арифметика на клиенте разошлась бы
+  // с тем, что реально сложено в числах.
+  const curWindow = summary.data?.window;
+  const prevWindow = summary.data?.previous_window;
+  const windowPair =
+    curWindow?.from && curWindow.to && prevWindow?.from && prevWindow.to
+      ? {
+          current: { from: curWindow.from, to: curWindow.to },
+          previous: { from: prevWindow.from, to: prevWindow.to },
+        }
+      : null;
 
   // Контролы графика переехали из-над графика в rail (владелец: «возьми всю правую область из
   // Steep»). Там они и живут у Steep: над полотном остаётся только само полотно, а «чем смотрим» и
@@ -535,24 +548,40 @@ function CdekSeriesPage({ def, metricKey }: { def: SeriesDef; metricKey: SeriesK
           При разбивке прошлое окно не показывается — оно удвоило бы число линий.
         </p>
       )}
-      <div className="flex items-baseline justify-between gap-3">
-        <span className="text-xs text-muted-foreground">Текущее окно</span>
-        <span className="text-sm font-medium tabular-nums text-foreground">
-          {cur != null ? def.format(cur) : '—'}
-        </span>
-      </div>
-      {cur != null && prev != null && prev !== 0 && (
-        <ComparisonDeltaRow delta={((cur - prev) / prev) * 100} evaluative />
-      )}
-      {hasPrevWindow ? (
-        <p className="text-xs text-muted-foreground">
-          Пред. окно: <span className="tabular-nums text-foreground">{prev != null ? def.format(prev) : '—'}</span>
-        </p>
+      {compareShown && !split && windowPair && prev != null ? (
+        /* Та же легенда, что над полотном: маркер + даты окна + итог. Прежняя проза «Пред. окно:
+           X» не называла ни дат базы, ни того, каким штрихом она нарисована на графике. */
+        <RailComparison
+          marker={kind === 'bar' ? 'bar' : 'line'}
+          current={{ dates: windowRangeLabel(windowPair.current), value: cur != null ? def.format(cur) : '—' }}
+          comparison={{ label: 'Пред. период', dates: windowRangeLabel(windowPair.previous), value: def.format(prev) }}
+          delta={cur != null && prev !== 0 ? ((cur - prev) / prev) * 100 : null}
+          evaluative
+        />
       ) : (
-        // «Всё» сравнивать не с чем — выдуманная дельта была бы враньём.
-        <p className="text-xs leading-relaxed text-muted-foreground">
-          Для окна «Всё» предыдущего периода нет — сравнение не рассчитывается.
-        </p>
+        /* Легенда обещает вторую серию на полотне, поэтому вне включённого сравнения (и под
+           разбивкой, где призрак не рисуется) рейл остаётся прежней прозой — дословно. */
+        <>
+          <div className="flex items-baseline justify-between gap-3">
+            <span className="text-xs text-muted-foreground">Текущее окно</span>
+            <span className="text-sm font-medium tabular-nums text-foreground">
+              {cur != null ? def.format(cur) : '—'}
+            </span>
+          </div>
+          {cur != null && prev != null && prev !== 0 && (
+            <ComparisonDeltaRow delta={((cur - prev) / prev) * 100} evaluative />
+          )}
+          {hasPrevWindow ? (
+            <p className="text-xs text-muted-foreground">
+              Пред. окно: <span className="tabular-nums text-foreground">{prev != null ? def.format(prev) : '—'}</span>
+            </p>
+          ) : (
+            // «Всё» сравнивать не с чем — выдуманная дельта была бы враньём.
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              Для окна «Всё» предыдущего периода нет — сравнение не рассчитывается.
+            </p>
+          )}
+        </>
       )}
     </div>
   );

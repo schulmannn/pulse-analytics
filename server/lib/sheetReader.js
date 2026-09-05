@@ -321,6 +321,12 @@ function parseSheet(xml, { shared, dateStyles, maxRows, maxCells, deadlineMs = P
   const rows = [];
   let cells = 0;
   let pos = 0;
+  // Счётчик РАЗОБРАННЫХ тегов <row>. Раньше дедлайн проверялся по `rows.length`, а она растёт не
+  // на единицу: Excel не пишет пустые строки, но помнит их номера, и `while (rows.length < target)`
+  // ниже прыгает через пропуски. Кратности 500 массив мог не коснуться НИ РАЗУ — «последний
+  // рубеж» просто не срабатывал (аудит #554, проход №2, N16). DoS этим не открывается: перед
+  // разбором стоит линейный pre-scan, — но рубеж обязан работать так, как о нём написано.
+  let parsedRows = 0;
   // Дедлайн — последний рубеж: даже линейный разбор гигантского законного листа не должен
   // занимать единственную web-реплику дольше нескольких секунд.
   const until = now() + deadlineMs;
@@ -328,7 +334,8 @@ function parseSheet(xml, { shared, dateStyles, maxRows, maxCells, deadlineMs = P
     const el = readElement(body, 'row', pos);
     if (!el) break;
     pos = el.next;
-    if (rows.length % DEADLINE_CHECK_EVERY === 0 && now() > until) {
+    parsedRows += 1;
+    if (parsedRows % DEADLINE_CHECK_EVERY === 0 && now() > until) {
       throw new SheetReadError('Файл слишком сложный — разбор занял бы слишком много времени');
     }
     // Excel не пишет в XML пустые строки, но помнит их номер в атрибуте r. Держим индекс массива

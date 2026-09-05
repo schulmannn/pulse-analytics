@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  aggregateOnline,
   cityName,
   countryName,
   followerLevelSeries,
@@ -10,7 +11,7 @@ import {
   netFollowerDaily,
   postInteractionsByFormat,
 } from '@/lib/igMetrics';
-import type { IgBreakdowns, IgHistoryRow, IgPost, IgStory } from '@/api/schemas';
+import type { IgBreakdowns, IgHistoryRow, IgOnline, IgPost, IgStory } from '@/api/schemas';
 
 describe('postInteractionsByFormat — campaign-scoped форматы', () => {
   it('агрегирует только переданные посты и использует сумму действий как fallback', () => {
@@ -178,6 +179,43 @@ describe('shared chart-card derivations (card ↔ /metrics/ig-* parity)', () => 
     expect(r.avgWatchAll).toBe(6);
     expect(Math.round(r.totalWatchHours)).toBe(2);
     expect(r.labels).toEqual(['R1', 'R2']);
+  });
+});
+
+/**
+ * `aggregateOnline` отдаёт оба конца шкалы: пик — максимум по сетке, затишье — минимум среди
+ * НЕНУЛЕВЫХ часов. Ноль в этой метрике неотличим от «Instagram не отдал час» (ради той же
+ * неотличимости в агрегате живёт `hasSignal`), поэтому нулевая ячейка не имеет права называться
+ * самым тихим временем.
+ */
+describe('aggregateOnline — пик и затишье', () => {
+  const online = (value: Record<string, number>): IgOnline =>
+    ({ data: [{ values: [{ end_time: '2026-01-05T07:00:00Z', value }] }] }) as unknown as IgOnline;
+
+  it('затишье — минимум среди ненулевых часов, а не ночной ноль', () => {
+    const { best, quiet, hasSignal } = aggregateOnline(online({ '3': 0, '9': 40, '18': 120, '21': 80 }));
+    expect(hasSignal).toBe(true);
+    expect(best).toMatchObject({ h: 18, v: 120 });
+    expect(quiet).toMatchObject({ h: 9, v: 40 });
+    expect(quiet?.w).toBe(best.w);
+  });
+
+  it('при одной ненулевой ячейке затишья нет', () => {
+    const { best, quiet } = aggregateOnline(online({ '0': 0, '18': 120 }));
+    expect(best).toMatchObject({ h: 18, v: 120 });
+    expect(quiet).toBeNull();
+  });
+
+  it('при равных ненулевых ячейках затишье не повторяет пик', () => {
+    const { best, quiet } = aggregateOnline(online({ '9': 50, '18': 50 }));
+    expect(best).toMatchObject({ h: 9, v: 50 });
+    expect(quiet).toBeNull();
+  });
+
+  it('пустая почасовая карта не даёт ни пика, ни затишья', () => {
+    const { hasSignal, quiet } = aggregateOnline(online({ '0': 0, '1': 0 }));
+    expect(hasSignal).toBe(false);
+    expect(quiet).toBeNull();
   });
 });
 

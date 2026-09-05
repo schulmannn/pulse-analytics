@@ -40,7 +40,8 @@ import { useExplorerChartHeight } from '@/lib/useExplorerChartHeight';
 import type { ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 import { useMetricRailHidden } from '@/lib/metricRail';
-import { ComparisonDelta, ComparisonDeltaRow, MetricDescriptor, WindowBarShell, RailSection, RailWindowTotal, MetricPageHeader} from '@/components/metric/shared';
+import { ComparisonDelta, MetricDescriptor, WindowBarShell, RailComparison, RailSection, RailWindowTotal, MetricPageHeader} from '@/components/metric/shared';
+import { dayRangeOf, windowRangeLabel } from '@/lib/metricSeries';
 
 /**
  * Instagram metric pages — the drill target the unified chart contract points IG cards at
@@ -292,14 +293,23 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
   // may have gaps). Either is offered only when the archive fully covers it: a partial baseline
   // would understate the past and fake growth.
   let ghostVals: number[] = [];
+  // Границы базы — РЕАЛЬНЫЕ дни архива, а не арифметика от окна: у IG-серии бывают дыры, и
+  // подписать «29 июл – 4 авг», когда взяты другие дни, значило бы соврать точнее прежнего молчания.
+  let ghostDays: { from: string; to: string } | null = null;
   if (cmp === 'prev' && days > 0 && seriesFull.length >= 2 * n) {
-    ghostVals = seriesFull.slice(-(2 * n), -n).map((p) => p.value);
+    const base = seriesFull.slice(-(2 * n), -n);
+    ghostVals = base.map((p) => p.value);
+    ghostDays = dayRangeOf(base.map((p) => p.day));
   } else if (cmp === 'year' && days > 0) {
     const byDay = new Map(seriesFull.map((p) => [p.day, p.value]));
     const shifted = winPoints.map((p) => byDay.get(shiftYearBack(p.day)));
-    if (shifted.every((v): v is number => v != null)) ghostVals = shifted;
+    if (shifted.every((v): v is number => v != null)) {
+      ghostVals = shifted;
+      ghostDays = dayRangeOf(winPoints.map((p) => shiftYearBack(p.day)));
+    }
   }
   const ghostOk = cmp !== 'off' && days > 0 && n > 1 && ghostVals.length === n;
+  const winDays = dayRangeOf(winPoints.map((p) => p.day));
 
   // Длинный архив («Всё») даунсэмплим до CHART_MAX_POINTS перед рендером (канон CLAUDE.md: серии
   // длиннее порога — суб-пиксельная мазня и дорогие кадры морфа; ig-history приходит за 400 дней).
@@ -618,14 +628,19 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
                   <p className="text-xs text-muted-foreground">Выберите базу — пунктир прошлого окна ляжет на график.</p>
                 ) : days === 0 ? (
                   <p className="text-xs text-muted-foreground">Для окна «Всё» прошлого периода не существует.</p>
-                ) : ghostOk ? (
-                  <div className="space-y-2 text-sm">
-                    <div className="flex items-baseline justify-between gap-3">
-                      <span className="text-xs text-muted-foreground">{cmpLabel}</span>
-                      <span className="tabular-nums">{sumPrev != null ? fmt.kpi(sumPrev) : '—'}</span>
-                    </div>
-                    {compareDelta != null && <ComparisonDeltaRow delta={compareDelta} />}
-                  </div>
+                ) : ghostOk && winDays && ghostDays ? (
+                  /* Та же легенда, что над полотном: маркер + даты окна + итог. Без дат «Пред.
+                     период» не отвечал, какие именно дни архива легли в базу. */
+                  <RailComparison
+                    marker={kind === 'bar' ? 'bar' : 'line'}
+                    current={{ dates: windowRangeLabel(winDays), value: fmt.kpi(sumCur) }}
+                    comparison={{
+                      label: cmpLabel,
+                      dates: windowRangeLabel(ghostDays),
+                      value: sumPrev != null ? fmt.kpi(sumPrev) : '—',
+                    }}
+                    delta={compareDelta}
+                  />
                 ) : cmp === 'year' ? (
                   <p className="text-xs text-muted-foreground">Архив пока не достаёт до прошлого года — дневная история копится в ig_daily, сравнение включится само.</p>
                 ) : (

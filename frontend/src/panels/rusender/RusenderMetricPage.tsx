@@ -10,10 +10,10 @@ import { SourceIdentity } from '@/components/SourceIdentity';
 import { ErrorState } from '@/components/ErrorState';
 import { ChartSkeleton } from '@/components/ui/dataSkeleton';
 import {
-  ComparisonDeltaRow,
   MetricColumns,
   MetricDescriptor,
   MetricPageHeader,
+  RailComparison,
   RailSection,
   WindowBarShell,
 } from '@/components/metric/shared';
@@ -22,7 +22,8 @@ import { useSelectedChannel } from '@/lib/channel-context';
 import { useExplorerChartHeight } from '@/lib/useExplorerChartHeight';
 import { fmt, timeAxisFromDayKeys } from '@/lib/format';
 import { usePeriod } from '@/lib/period';
-import { msPreviousPeriod, useMsResolvedPeriod } from '@/lib/msPeriod';
+import { msPeriodBounds, msPreviousPeriod, useMsResolvedPeriod } from '@/lib/msPeriod';
+import { windowRangeLabel } from '@/lib/metricSeries';
 import { isRusenderMetricKey, type RusenderMetricKey } from '@/panels/rusender/rusenderMetricKeys';
 
 /**
@@ -138,6 +139,9 @@ export function RusenderMetricPage({ metricKey }: { metricKey: RusenderMetricKey
   // Предыдущее РАВНОЕ окно — общий хелпер, а не своя арифметика дат. У «Всё» он честно отдаёт
   // null: у полного диапазона предшественника не существует.
   const prevWindow = useMemo(() => msPreviousPeriod(period), [period]);
+  // Границы окна и подпись этих границ обязаны приходить из ОДНОГО резолвера: посчитать даты
+  // легенды отдельной арифметикой значило бы завести второе правило окна.
+  const curBounds = useMemo(() => msPeriodBounds(period), [period]);
   const previous = useRusenderSummary(
     channelId,
     prevWindow ?? period,
@@ -191,14 +195,22 @@ export function RusenderMetricPage({ metricKey }: { metricKey: RusenderMetricKey
           </div>
           {days === 0 ? (
             <p className="text-xs text-muted-foreground">Для окна «Всё» прошлого периода не существует.</p>
-          ) : prev != null ? (
-            <div className="space-y-2 text-sm">
-              <div className="flex items-baseline justify-between gap-3">
-                <span className="text-xs text-muted-foreground">Пред. период</span>
-                <span className="tabular-nums">{fmt.kpi(prev)}</span>
-              </div>
-              {delta != null && <ComparisonDeltaRow delta={delta} />}
-            </div>
+          ) : prev != null && curBounds && prevWindow?.from && prevWindow.to ? (
+            /* Та же легенда, что над полотном: маркер + даты окна + итог. Без дат «Пред. период»
+               не отвечал, какое окно сравнивается с каким. */
+            <RailComparison
+              marker={kind === 'bar' ? 'bar' : 'line'}
+              current={{
+                dates: windowRangeLabel(curBounds),
+                value: cur != null ? fmt.kpi(cur) : '—',
+              }}
+              comparison={{
+                label: 'Пред. период',
+                dates: windowRangeLabel({ from: prevWindow.from, to: prevWindow.to }),
+                value: fmt.kpi(prev),
+              }}
+              delta={delta}
+            />
           ) : (
             <p className="text-xs text-muted-foreground">
               За прошлое окно данных нет — сравнивать не с чем. Архив копится с момента подключения.

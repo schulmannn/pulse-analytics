@@ -2,6 +2,8 @@ import { useRef, useState } from 'react';
 import { fmt, pluralRu } from '@/lib/format';
 import { ChartTooltip, type TooltipState } from '@/components/ChartTooltip';
 import { Breakdown } from '@/components/Breakdown';
+import { EmptyState } from '@/components/EmptyState';
+import { HeatmapVerdict } from '@/components/HeatmapVerdict';
 import { EmptyChart } from '@/components/instagram/shared';
 import { ChartSection } from '@/components/ChartWidget';
 import { RadialShare } from '@/components/RadialShare';
@@ -117,13 +119,19 @@ export function BestTimeHeatmap({ online }: { online: IgOnline | undefined }) {
   const [tip, setTip] = useState<TooltipState>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const scrollFadeRef = useScrollEdgeFade<HTMLDivElement>();
-  const { grid, max, best, hasSignal } = aggregateOnline(online);
+  const { grid, max, best, quiet, hasSignal } = aggregateOnline(online);
 
   if (!hasSignal) {
+    // Причина не изменилась — изменилась форма: карточка держит свой силуэт (столбцы почасовой
+    // активности) вместо полосы воздуха, как и остальные пустые карточки продукта.
     return (
-      <p className="py-8 text-center text-sm text-muted-foreground">
-        Instagram не предоставил почасовую активность аудитории для этого аккаунта (метрика доступна не всегда и требует 100+ подписчиков).
-      </p>
+      <EmptyState
+        compact
+        size="chart"
+        ghost="bars"
+        title="Нет почасовой активности"
+        reason="Instagram не предоставил почасовую активность аудитории для этого аккаунта (метрика доступна не всегда и требует 100+ подписчиков)."
+      />
     );
   }
 
@@ -146,6 +154,12 @@ export function BestTimeHeatmap({ online }: { online: IgOnline | undefined }) {
 
   return (
     <div ref={wrapRef} className="relative">
+      {/* Вердикт ВЫШЕ сетки: ответ раньше доказательства (см. HeatmapVerdict). «Тише всего» у этой
+          карточки не было вовсе — бледная клетка не отличает «мало» от «нет данных». */}
+      <HeatmapVerdict
+        peak={{ day: DAY_NAMES[best.w] ?? '', hour: best.h, value: `${fmt.short(best.v)} онлайн` }}
+        quiet={quiet ? { day: DAY_NAMES[quiet.w] ?? '', hour: quiet.h, value: `${fmt.short(quiet.v)} онлайн` } : null}
+      />
       <div ref={scrollFadeRef} className="scroll-fade-x overflow-x-auto pb-2">
         <div className="min-w-full space-y-[2px] lg:min-w-[440px]">
           <div className="grid gap-[2px]" style={{ gridTemplateColumns: '30px repeat(24, minmax(14px, 1fr))' }}>
@@ -218,9 +232,6 @@ export function BestTimeHeatmap({ online }: { online: IgOnline | undefined }) {
         </div>
       </div>
       <ChartTooltip tip={tip} />
-      <div className="mt-3 text-xs font-medium text-muted-foreground">
-        лучший слот: <strong className="font-medium text-foreground">{DAY_NAMES[best.w]} {best.h}:00</strong>
-      </div>
     </div>
   );
 }

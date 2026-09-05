@@ -73,6 +73,14 @@ export function comparisonWindow(
     : { from: winFrom - 365 * DAY_MS, to: winTo - 365 * DAY_MS };
 }
 
+/** Границы серии по её РЕАЛЬНЫМ крайним дням (архивы IG/Метрики/упоминаний знают свои дни, а не
+    арифметическое окно). `null` на пустой серии — подписывать нечего, и выдумывать границы нельзя. */
+export function dayRangeOf(days: string[]): { from: string; to: string } | null {
+  const from = days[0];
+  const to = days[days.length - 1];
+  return from && to ? { from, to } : null;
+}
+
 /** Календарный год границы окна. Дневной ключ `YYYY-MM-DD` — это КАЛЕНДАРНАЯ дата в любой зоне
     (тот же разбор, что у `fmt.day`), а не момент; момент читается по локальной зоне читателя. */
 function windowYear(v: number | string): number | null {

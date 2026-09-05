@@ -784,6 +784,22 @@ function createGdprService({ pool, enabled, transaction, exportPageSize }) {
                FROM ms_accounts WHERE channel_id=$1`, [ch.id])).rows[0] || null;
           await w.write(`,"moysklad":${JSON.stringify(ms)}`);
 
+          // Идентичность источника СДЭКа (038) — singleton по каналу, как у Метрики и склада.
+          // Секретов у него нет вовсе: подключение — это склад и часовой пояс, по которым потом
+          // читается загруженный файл. Архив cdek_* уже уезжает выше; без этих трёх полей экспорт
+          // не отвечал на вопрос «а что у вас про МЕНЯ подключено» (аудит #554, проход №2, N17).
+          const cdek = (await q(
+            `SELECT warehouse_code, tz, created_at, updated_at
+               FROM cdek_sources WHERE channel_id=$1`, [ch.id])).rows[0] || null;
+          await w.write(`,"cdek":${JSON.stringify(cdek)}`);
+
+          // То же для Rusender (039). api_key_enc — credential, в SELECT его нет по построению;
+          // account_email и scopes витринные и потому переносимы.
+          const rusender = (await q(
+            `SELECT account_id, account_email, scopes, connected_at, updated_at
+               FROM rusender_accounts WHERE channel_id=$1`, [ch.id])).rows[0] || null;
+          await w.write(`,"rusender":${JSON.stringify(rusender)}`);
+
           // API-key metadata переносимо, но key_hash — credential и не выбирается никогда.
           await w.write(',"api_keys":');
           await streamOwnedById(w, q, 'api_keys', 'channel_id',
