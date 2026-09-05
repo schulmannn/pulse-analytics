@@ -77,7 +77,7 @@ export function MentionRulesDialog({
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-2xl gap-0 overflow-y-auto rounded-lg p-0 shadow-2xl">
+      <DialogContent className="max-w-2xl gap-0 overflow-y-auto p-0">
         <header className="border-b border-border px-6 py-5 pr-12">
           <div>
             <DialogTitle className="pr-0 text-base leading-normal">Правила упоминаний</DialogTitle>

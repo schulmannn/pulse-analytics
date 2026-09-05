@@ -7,7 +7,6 @@ import { BarChart } from '@/components/BarChart';
 import { PeriodChips } from '@/components/PeriodChips';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { SourceIdentity } from '@/components/SourceIdentity';
-import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { ChartSkeleton } from '@/components/ui/dataSkeleton';
 import {
@@ -19,7 +18,6 @@ import {
   WindowBarShell,
 } from '@/components/metric/shared';
 import { useRusenderSummary, type RusenderPoint } from '@/api/rusender';
-import { useGatedSurfaces } from '@/components/layout/nav';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { useExplorerChartHeight } from '@/lib/useExplorerChartHeight';
 import { fmt, timeAxisFromDayKeys } from '@/lib/format';
@@ -129,14 +127,13 @@ export { isRusenderMetricKey };
 export function RusenderMetricPage({ metricKey }: { metricKey: RusenderMetricKey }) {
   const def = DEFS[metricKey];
   const { channelId } = useSelectedChannel();
-  const { rusenderSurfaces } = useGatedSurfaces();
   const { days, setDays, range, setRange } = usePeriod();
   const [kind, setKind] = useState<'line' | 'bar'>(def.viz);
   const chartH = useExplorerChartHeight();
 
   // Окно страницы — тот же резолвер, что у `/metrics/ms-*` и `/metrics/ym-*`.
   const period = useMsResolvedPeriod({ days, range });
-  const summary = useRusenderSummary(channelId, period, rusenderSurfaces);
+  const summary = useRusenderSummary(channelId, period);
 
   // Предыдущее РАВНОЕ окно — общий хелпер, а не своя арифметика дат. У «Всё» он честно отдаёт
   // null: у полного диапазона предшественника не существует.
@@ -144,21 +141,12 @@ export function RusenderMetricPage({ metricKey }: { metricKey: RusenderMetricKey
   const previous = useRusenderSummary(
     channelId,
     prevWindow ?? period,
-    rusenderSurfaces && prevWindow != null,
+    prevWindow != null,
   );
   // ГРАБЛИ prev-периода: при выключенном запросе ключ бы совпал с текущим окном и `.data` отдал
   // бы ТЕКУЩИЙ кэш — дельта вышла бы нулевой. Читаем только когда предыдущее окно существует.
   const prevData = prevWindow != null ? previous.data : undefined;
 
-  if (!rusenderSurfaces) {
-    return (
-      <EmptyState
-        title="Раздел ещё не включён"
-        reason="Метрика появится, когда числа Rusender сверены с живыми данными."
-        action={{ to: '/rusender', label: 'К обзору' }}
-      />
-    );
-  }
   if (summary.isError) return <ErrorState onRetry={() => void summary.refetch()} />;
 
   const series: RusenderPoint[] = summary.data?.series ?? [];

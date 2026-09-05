@@ -9,7 +9,6 @@ import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { ChartSkeleton } from '@/components/ui/dataSkeleton';
 import { useRusenderStatus, useRusenderSummary, type RusenderPoint } from '@/api/rusender';
-import { useGatedSurfaces } from '@/components/layout/nav';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { CHART_MAX_POINTS, lttbDownsample } from '@/lib/downsample';
 import { fmt, timeAxisFromDayKeys } from '@/lib/format';
@@ -134,14 +133,13 @@ function RusenderStory({
 
 export function RusenderOverview() {
   const { channelId } = useSelectedChannel();
-  const { rusenderSurfaces } = useGatedSurfaces();
   const status = useRusenderStatus(channelId);
   const pp = usePagePeriod();
   const days = pp ? pp.days : 30;
   // Тот же сериализатор окна, что у МойСклада/Метрики/СДЭКа: пресеты 7/30/90/«Всё» и точный
   // диапазон топбара приводятся к одному контракту, а не пересчитываются в каждом источнике.
   const period = useMsPagePeriod();
-  const summary = useRusenderSummary(channelId, period, rusenderSurfaces);
+  const summary = useRusenderSummary(channelId, period);
   // Дельта к ПРЕДЫДУЩЕМУ равному окну — канон карточки-метрики (МойСклад/Метрика). Один prev-фетч
   // кормит все карточки. У «Всё» предшественника нет: msPreviousPeriod отдаёт null, запрос не
   // уходит, дельта не показывается.
@@ -149,7 +147,7 @@ export function RusenderOverview() {
   const previous = useRusenderSummary(
     channelId,
     previousPeriod ?? period,
-    rusenderSurfaces && previousPeriod != null,
+    previousPeriod != null,
   );
 
   const connected = status.data?.connected ?? false;
@@ -175,23 +173,6 @@ export function RusenderOverview() {
         title="Rusender не подключён"
         reason="Подключи аккаунт по API-ключу — после этого сюда приедут рассылки, открытия и размер базы."
         action={{ to: '/connect', label: 'Подключить Rusender' }}
-      />
-    );
-  }
-
-  // Витрины за фичефлагом: пока он выключен, роутов данных для клиента НЕ существует. Показываем
-  // честное состояние сбора вместо пустых осей, которые читались бы как «рассылок нет».
-  if (!rusenderSurfaces) {
-    return (
-      <EmptyState
-        title="Источник подключён, собираем данные"
-        reason={
-          <>
-            {status.data?.account_email ? `Аккаунт ${status.data.account_email}. ` : ''}
-            Архив рассылок и дневная активность уже копятся. Витрины включатся, когда числа
-            сверены с живыми данными Rusender.
-          </>
-        }
       />
     );
   }

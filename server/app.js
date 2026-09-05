@@ -59,7 +59,7 @@ function createApp(deps) {
     appBase, sha256, newToken, VERIFY_TTL, RESET_TTL, INVITE_TTL,
     sendEmail, sendEmailDetailed, emailConfigured, emailShell, emailBtn, escHtml,
     igFetch, refreshIgIfNeeded, igConfigured, igCrypto, igMock, msCrypto, msFetch, msBackfill,
-    ymCrypto, ymFetch, rusenderCrypto, rusenderFetch, rusenderSurfaces, cdekImport, nearestOf,
+    ymCrypto, ymFetch, rusenderCrypto, rusenderFetch, cdekImport, nearestOf,
     cacheGet, cacheSet, cache, IG_ACCOUNT, IG_TOKEN, IG_GRAPH, AUTH_SECRET,
     tgCrypto, collectQrChannelsNow, collectManagedPostStatsNow, TG_TOKEN, TG_CHANNEL,
     tgBot, tgBotWebhookSecret, runMentionNotifyTest,
@@ -153,7 +153,6 @@ function createApp(deps) {
     // /api/auth/me отдаёт ai.enabled — фронт гейтит AI-поверхности одним bootstrap-запросом.
     aiEnabledFor: (user) => aiChatService.enabledFor(user),
     // Тем же ответом едет фичефлаг витрин Rusender (см. комментарий в routes/auth.js).
-    rusenderSurfaces,
     setSessionCookie,
     clearSessionCookie,
     // Анти-enumeration хвосты (register/forgot/resend) регистрируются здесь — shutdown их дожидается.
@@ -248,7 +247,7 @@ function createApp(deps) {
   // API-ключу + status/disconnect): витрины приезжают следующим шагом, когда форма живых
   // ответов Rusender подтверждена ключом владельца, а не одной лишь OpenAPI-спекой.
   registerRusenderRoutes({
-    app, requireAuth, db, audit, rusenderCrypto, rusenderFetch, surfacesEnabled: rusenderSurfaces, log,
+    app, requireAuth, db, audit, rusenderCrypto, rusenderFetch, log,
   });
 
   registerChannelsRoutes({ app, db, requireAuth, audit, getDbReady });
