@@ -111,4 +111,46 @@ describe('Breakdown — строка как позиция таблицы', () =
     expect(tight).not.toContain('data-breakdown-header');
     expect(shownLabels(tight, items)).toBe(shownLabels(tightBare, items));
   });
+
+  it('примечание платит ШАПКОЙ, а не строкой данных', () => {
+    // Тело фикс-тайла 264px — ровно 181px (замерено на /instagram/audience): та самая высота,
+    // на которой у «Возраста» из семи групп видно три. Примечание обязано въехать в эту высоту,
+    // не тронув ни одну из трёх — иначе живая оговорка покупается ценой самих данных.
+    const items = geo(7);
+    const columns = { label: 'Возраст', value: 'Подписчики' };
+    const bare = html(
+      <ExpandedChartHeightContext.Provider value={181}>
+        <Breakdown items={items} columns={columns} />
+      </ExpandedChartHeightContext.Provider>,
+    );
+    const noted = html(
+      <ExpandedChartHeightContext.Provider value={181}>
+        <Breakdown items={items} columns={columns} footnote="Демография охватывает ≈90% подписчиков" />
+      </ExpandedChartHeightContext.Provider>,
+    );
+
+    expect(noted).toContain('data-breakdown-footnote');
+    expect(text(noted)).toContain('Демография охватывает ≈90% подписчиков');
+    // Разменяна ровно шапка: её имена колонок повторяют заголовок карточки, а охват не повторяет
+    // ничего — поэтому уходит она, а обе разбивки показывают одно и то же число строк.
+    expect(bare).toContain('data-breakdown-header');
+    expect(noted).not.toContain('data-breakdown-header');
+    expect(shownLabels(noted, items)).toBe(shownLabels(bare, items));
+  });
+
+  it('вне тайла примечание не отменяет шапку — там платить нечем и незачем', () => {
+    // Страница разреза и разворот карточки живут свободной высотой: размен «шапка за примечание»
+    // там был бы потерей без выигрыша.
+    const markup = html(
+      <Breakdown
+        items={geo(7)}
+        columns={{ label: 'Возраст', value: 'Подписчики' }}
+        footnote="Демография охватывает ≈90% подписчиков"
+      />,
+    );
+
+    expect(markup).toContain('data-breakdown-header');
+    expect(markup).toContain('data-breakdown-footnote');
+    expect(shownLabels(markup, geo(7))).toBe(7);
+  });
 });

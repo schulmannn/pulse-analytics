@@ -3,8 +3,9 @@ import { fmt, pluralRu } from '@/lib/format';
 import { ChartTooltip, type TooltipState } from '@/components/ChartTooltip';
 import { Breakdown } from '@/components/Breakdown';
 import { EmptyState } from '@/components/EmptyState';
+import type { EmptyGhost } from '@/components/EmptyGhost';
 import { HeatmapVerdict } from '@/components/HeatmapVerdict';
-import { EmptyChart } from '@/components/instagram/shared';
+import { InfoTooltip } from '@/components/InfoTooltip';
 import { ChartSection } from '@/components/ChartWidget';
 import { RadialShare } from '@/components/RadialShare';
 import { WidgetGroup } from '@/components/widgets/WidgetGroup';
@@ -16,8 +17,38 @@ import {
   igCountryItems,
   igCityItems,
   DAY_NAMES,
+  IG_AUDIENCE_INFO,
+  IG_DEMOGRAPHICS_EMPTY,
+  IG_DEMOGRAPHICS_MIN_FOLLOWERS,
+  igDemographicsCoverage,
 } from '@/lib/igMetrics';
 import { useScrollEdgeFade } from '@/lib/useScrollEdgeFade';
+
+/**
+ * Пустая демография — ОДИН текст на все четыре карточки.
+ *
+ * Отдельный компонент, а не необязательные пропы у общего EmptyChart, именно поэтому: причина у
+ * четырёх карточек буквально одна (порог аккаунта), и четыре её пересказа читались бы как четыре
+ * разные причины. Разъехаться вызовам тут негде — расходится только силуэт, потому что форма у
+ * карточек разная: рейтинг строк против доли целого.
+ */
+function DemographyEmpty({ ghost }: { ghost: EmptyGhost }) {
+  return (
+    <EmptyState
+      compact
+      size="chart"
+      ghost={ghost}
+      title={IG_DEMOGRAPHICS_EMPTY.title}
+      reason={IG_DEMOGRAPHICS_EMPTY.reason}
+    />
+  );
+}
+
+/** ⓘ карточки демографии. Базовый InfoTooltip, а не MetricInfo: см. IG_AUDIENCE_INFO. */
+function AudienceInfo({ term }: { term: keyof typeof IG_AUDIENCE_INFO }) {
+  const info = IG_AUDIENCE_INFO[term];
+  return <InfoTooltip title={info.title}>{info.text}</InfoTooltip>;
+}
 
 export function AudienceBlock({ breakdowns, followers }: { breakdowns: IgBreakdowns | undefined; followers: number }) {
   // Shared derivations (igMetrics): the card and each /metrics/ig-* full page read the SAME math, so
@@ -30,83 +61,104 @@ export function AudienceBlock({ breakdowns, followers }: { breakdowns: IgBreakdo
   const countryItems = allCountries.slice(0, 8);
   const cityItems = allCities.slice(0, 8);
 
-  const covered = ageItems.reduce((acc, a) => acc + a.value, 0);
-  const coverage = followers > 0 && covered > 0 ? covered / followers : 1;
+  // Охват считается из СУММЫ ВОЗРАСТНЫХ ГРУПП — значит, и живёт он примечанием карточки
+  // «Возраст», а не абзацем под сеткой. Под сеткой одно число отвечало сразу за четыре разных
+  // знаменателя (подписчики у возраста и пола, полный рейтинг у стран и городов) и читалось как
+  // общее правило всех соседей, будучи посчитанным ровно по одному из них.
+  //
+  // Примечание несёт ТОЛЬКО живое число, а «почему меньше 100%» переехало в ⓘ карточки. Замерено:
+  // полная фраза переносилась во ВТОРУЮ строку на карточке 430px и отнимала там строку данных, а
+  // мобильная подача обязана остаться прежней (CLAUDE.md).
+  const coverage = igDemographicsCoverage(ageItems, followers);
   // Значение и доля больше НЕ склеиваются здесь вручную: склейка шла мимо formatShare и печатала
   // «71.0%» там, где канон печатает «71%», а страница разбора той же демографии доли не знала вовсе.
   // Теперь доля приходит со слоя данных (igMetrics → withShares) и живёт в СВОЕЙ колонке.
   // Срез топ-8 доли не пересчитывает: они от ПОЛНОГО рейтинга, и сумма видимых честно меньше 100%.
 
+  // One WidgetGroup keeps the four demographic cards on the shared dashboard grid. Whole-card
+  // click drills to a dedicated /metrics/ig-* page instead of the generic ?detail= overlay.
+  //
+  // ЧЕТЫРЕ РАВНЫЕ карточки: half × 4 = два ряда по две. При third их было три плюс одна, и правило
+  // заполнения ряда (useRowFill) честно дотягивало четвёртую до полной ширины — дыры не
+  // оставалось, но «Топ городов» выходил втрое шире «Топ стран». Четыре разреза одной природы
+  // разной ширины читаются как иерархия, которой нет, а растянутая на 1110px разбивка — это ровно
+  // «график посреди пустоты» из правила noStretch. Размер тут ДЕФОЛТНЫЙ: сохранённый выбор
+  // владельца (widgetPrefsStore) по-прежнему сильнее.
   return (
-    <div className="space-y-6">
-      {/* One WidgetGroup keeps the four demographic cards on the shared dashboard grid. Whole-card
-          click drills to a dedicated /metrics/ig-* page instead of the generic ?detail= overlay. */}
-      <WidgetGroup id="ig-audience" className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-6">
-        <ChartSection title="Возраст" drillTo="/metrics/ig-age">
-          {ageItems.length > 0 ? (
-            <Breakdown items={ageItems} columns={{ label: 'Возраст', value: 'Подписчики' }} />
-          ) : (
-            <EmptyChart />
-          )}
-        </ChartSection>
-        {/* Полукольцо (выбор владельца) — та же форма, что «Пол» Метрики: фикс-набор долей целого;
-            непокрытый демографией остаток кольцо честно дорисует из total приглушённым сегментом. */}
-        {genderItems.length > 0 ? (
-          <ChartSection title="Пол" drillTo="/metrics/ig-gender">
-            <RadialShare
-              segments={genderItems.map((g) => ({ key: g.label, label: g.label, value: g.value }))}
-              total={followers > 0 ? followers : null}
-              unitWord="подписчиков"
-              centerCaption="подписчиков"
-              format={(v) => fmt.short(v)}
-            />
-          </ChartSection>
+    <WidgetGroup id="ig-audience" className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-6">
+      <ChartSection title="Возраст" defaultSize="half" drillTo="/metrics/ig-age" action={<AudienceInfo term="age" />}>
+        {ageItems.length > 0 ? (
+          <Breakdown
+            items={ageItems}
+            columns={{ label: 'Возраст', value: 'Подписчики' }}
+            footnote={
+              coverage != null ? `Демография охватывает ≈${Math.round(coverage * 100)}% подписчиков` : undefined
+            }
+          />
         ) : (
-          <ChartSection title="Пол" drillTo="/metrics/ig-gender">
-            <EmptyChart />
-          </ChartSection>
+          <DemographyEmpty ghost="rows" />
         )}
-        {/* Гео — фикс-строки той же плотности, что «Возраст» (виз-переключатель с мини-донатом
-            убран — «выглядит дёшево», владелец): ранг, подпись, значение и доля от полного
-            рейтинга — каждое в своей колонке. Футер ведёт на полный список: «+N ещё» называл
-            спрятанное, но идти за ним было некуда. */}
-        <ChartSection title="Топ стран" drillTo="/metrics/ig-countries">
-          {countryItems.length > 0 ? (
-            <Breakdown
-              items={countryItems}
-              columns={{ label: 'Страна', value: 'Подписчики' }}
-              ranked
-              more={{
-                label: `Все ${allCountries.length} ${pluralRu(allCountries.length, ['страна', 'страны', 'стран'])}`,
-                to: '/metrics/ig-countries',
-              }}
-            />
-          ) : (
-            <EmptyChart />
-          )}
-        </ChartSection>
-        <ChartSection title="Топ городов" drillTo="/metrics/ig-cities">
-          {cityItems.length > 0 ? (
-            <Breakdown
-              items={cityItems}
-              columns={{ label: 'Город', value: 'Подписчики' }}
-              ranked
-              more={{
-                label: `Все ${allCities.length} ${pluralRu(allCities.length, ['город', 'города', 'городов'])}`,
-                to: '/metrics/ig-cities',
-              }}
-            />
-          ) : (
-            <EmptyChart />
-          )}
-        </ChartSection>
-      </WidgetGroup>
-      {coverage < 0.98 && (
-        <p className="px-1 text-2xs text-muted-foreground/70">
-          Охвачено ≈{Math.round(coverage * 100)}% аудитории — Instagram показывает только топ-сегменты.
-        </p>
-      )}
-    </div>
+      </ChartSection>
+      {/* Полукольцо (выбор владельца) — та же форма, что «Пол» Метрики: фикс-набор долей целого;
+          непокрытый демографией остаток кольцо честно дорисует из total приглушённым сегментом. */}
+      <ChartSection title="Пол" defaultSize="half" drillTo="/metrics/ig-gender" action={<AudienceInfo term="gender" />}>
+        {genderItems.length > 0 ? (
+          <RadialShare
+            segments={genderItems.map((g) => ({ key: g.label, label: g.label, value: g.value }))}
+            total={followers > 0 ? followers : null}
+            unitWord="подписчиков"
+            centerCaption="подписчиков"
+            format={(v) => fmt.short(v)}
+          />
+        ) : (
+          <DemographyEmpty ghost="ring" />
+        )}
+      </ChartSection>
+      {/* Гео — фикс-строки той же плотности, что «Возраст» (виз-переключатель с мини-донатом
+          убран — «выглядит дёшево», владелец): ранг, подпись, значение и доля от полного
+          рейтинга — каждое в своей колонке. Футер ведёт на полный список: «+N ещё» называл
+          спрятанное, но идти за ним было некуда. */}
+      <ChartSection
+        title="Топ стран"
+        defaultSize="half"
+        drillTo="/metrics/ig-countries"
+        action={<AudienceInfo term="countries" />}
+      >
+        {countryItems.length > 0 ? (
+          <Breakdown
+            items={countryItems}
+            columns={{ label: 'Страна', value: 'Подписчики' }}
+            ranked
+            more={{
+              label: `Все ${allCountries.length} ${pluralRu(allCountries.length, ['страна', 'страны', 'стран'])}`,
+              to: '/metrics/ig-countries',
+            }}
+          />
+        ) : (
+          <DemographyEmpty ghost="rows" />
+        )}
+      </ChartSection>
+      <ChartSection
+        title="Топ городов"
+        defaultSize="half"
+        drillTo="/metrics/ig-cities"
+        action={<AudienceInfo term="cities" />}
+      >
+        {cityItems.length > 0 ? (
+          <Breakdown
+            items={cityItems}
+            columns={{ label: 'Город', value: 'Подписчики' }}
+            ranked
+            more={{
+              label: `Все ${allCities.length} ${pluralRu(allCities.length, ['город', 'города', 'городов'])}`,
+              to: '/metrics/ig-cities',
+            }}
+          />
+        ) : (
+          <DemographyEmpty ghost="rows" />
+        )}
+      </ChartSection>
+    </WidgetGroup>
   );
 }
 
@@ -130,7 +182,7 @@ export function BestTimeHeatmap({ online }: { online: IgOnline | undefined }) {
         size="chart"
         ghost="bars"
         title="Нет почасовой активности"
-        reason="Instagram не предоставил почасовую активность аудитории для этого аккаунта (метрика доступна не всегда и требует 100+ подписчиков)."
+        reason={`Instagram не предоставил почасовую активность аудитории для этого аккаунта (метрика доступна не всегда и требует ${IG_DEMOGRAPHICS_MIN_FOLLOWERS}+ подписчиков).`}
       />
     );
   }

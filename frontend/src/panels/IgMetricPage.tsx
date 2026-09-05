@@ -13,6 +13,8 @@ import {
   igFormatEngagementItems,
   igReelsWatchTime,
   igStoryNavItems,
+  igDemographicsCoverage,
+  IG_DEMOGRAPHICS_MIN_FOLLOWERS,
 } from '@/lib/igMetrics';
 import type { WindowPair, IgBreakdownItem } from '@/lib/igMetrics';
 import { CHART_MAX_POINTS, lttbDownsample } from '@/lib/downsample';
@@ -1010,14 +1012,17 @@ const IG_BREAKDOWN_DEFS: Record<string, IgBreakdownPageDef> = {
     query: (ig) => ig.queries.breakdowns,
     derive: (ig) => igAgeItems(ig.breakdowns),
     errorTitle: 'Не удалось загрузить демографию',
-    empty: 'Возрастной демографии для этого аккаунта нет (нужно 100+ подписчиков).',
+    empty: `Возрастной демографии для этого аккаунта нет (нужно ${IG_DEMOGRAPHICS_MIN_FOLLOWERS}+ подписчиков).`,
     columns: { label: 'Возраст', value: 'Подписчики' },
+    // Порог «когда молчать» и сама дробь — общие с карточкой «Возраст» (igDemographicsCoverage):
+    // страница и карточка обязаны молчать и говорить на одних и тех же числах.
     footer: (ig, items) => {
-      const covered = items.reduce((acc, a) => acc + a.value, 0);
-      const coverage = ig.followers > 0 && covered > 0 ? covered / ig.followers : 1;
-      if (coverage >= 0.98) return null;
+      const coverage = igDemographicsCoverage(items, ig.followers);
+      if (coverage == null) return null;
       return (
-        <p className="mt-3 text-2xs text-muted-foreground/70">
+        // Полный muted (не /70) — по той же причине, что у примечания разбивки: приглушённый
+        // токен даёт 2.96 на светлой карточке и 3.59 на тёмной, обе ниже AA 4.5.
+        <p className="mt-3 text-2xs text-muted-foreground">
           Охвачено ≈{Math.round(coverage * 100)}% аудитории — Instagram показывает только топ-сегменты.
         </p>
       );
@@ -1034,7 +1039,7 @@ const IG_BREAKDOWN_DEFS: Record<string, IgBreakdownPageDef> = {
     query: (ig) => ig.queries.breakdowns,
     derive: (ig) => igGenderItems(ig.breakdowns),
     errorTitle: 'Не удалось загрузить демографию',
-    empty: 'Демографии по полу для этого аккаунта нет (нужно 100+ подписчиков).',
+    empty: `Демографии по полу для этого аккаунта нет (нужно ${IG_DEMOGRAPHICS_MIN_FOLLOWERS}+ подписчиков).`,
     columns: { label: 'Пол', value: 'Подписчики' },
   },
   'ig-countries': {
@@ -1048,7 +1053,7 @@ const IG_BREAKDOWN_DEFS: Record<string, IgBreakdownPageDef> = {
     query: (ig) => ig.queries.breakdowns,
     derive: (ig) => igCountryItems(ig.breakdowns),
     errorTitle: 'Не удалось загрузить географию',
-    empty: 'Данных по странам для этого аккаунта нет (нужно 100+ подписчиков).',
+    empty: `Данных по странам для этого аккаунта нет (нужно ${IG_DEMOGRAPHICS_MIN_FOLLOWERS}+ подписчиков).`,
     columns: { label: 'Страна', value: 'Подписчики' },
     ranked: true,
   },
@@ -1063,7 +1068,7 @@ const IG_BREAKDOWN_DEFS: Record<string, IgBreakdownPageDef> = {
     query: (ig) => ig.queries.breakdowns,
     derive: (ig) => igCityItems(ig.breakdowns),
     errorTitle: 'Не удалось загрузить географию',
-    empty: 'Данных по городам для этого аккаунта нет (нужно 100+ подписчиков).',
+    empty: `Данных по городам для этого аккаунта нет (нужно ${IG_DEMOGRAPHICS_MIN_FOLLOWERS}+ подписчиков).`,
     columns: { label: 'Город', value: 'Подписчики' },
     ranked: true,
   },
