@@ -307,6 +307,7 @@ export function CdekOverview() {
             total={statusMetric === 'orders' ? statuses.data.total.orders : statuses.data.total.revenue}
             format={statusMetric === 'orders' ? fmt.num : rub}
             tailWord={statusMetric === 'orders' ? 'заказов' : 'рублей'}
+            columns={{ label: 'Статус', value: statusMetric === 'orders' ? 'Заказы' : 'Выручка' }}
           />
         )}
           </ChartFill>

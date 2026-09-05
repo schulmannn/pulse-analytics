@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { fmt } from '@/lib/format';
+import { fmt, pluralRu } from '@/lib/format';
 import { ChartTooltip, type TooltipState } from '@/components/ChartTooltip';
 import { Breakdown } from '@/components/Breakdown';
 import { EmptyChart } from '@/components/instagram/shared';
@@ -30,24 +30,10 @@ export function AudienceBlock({ breakdowns, followers }: { breakdowns: IgBreakdo
 
   const covered = ageItems.reduce((acc, a) => acc + a.value, 0);
   const coverage = followers > 0 && covered > 0 ? covered / followers : 1;
-  // Плотные строки возраста: значение + доля от суммы бакетов, тихий одноцветный трек (без
-  // радужного мини-доната — «выглядит дёшево», владелец). Цвета категорий здесь не несут смысла.
-  const ageRows = ageItems.map(({ label, value }) => ({
-    label,
-    value,
-    display: covered > 0 ? `${fmt.num(value)} · ${((value / covered) * 100).toFixed(1)}%` : fmt.num(value),
-  }));
-  // Гео-строки: доля — от ПОЛНОГО рейтинга (не от показанной восьмёрки), значение компактом.
-  const geoRows = (all: typeof allCountries, shown: typeof allCountries) => {
-    const total = all.reduce((acc, i) => acc + i.value, 0);
-    return shown.map(({ label, value }) => ({
-      label,
-      value,
-      display: total > 0 ? `${fmt.short(value)} · ${((value / total) * 100).toFixed(1)}%` : fmt.short(value),
-    }));
-  };
-  const countryRows = geoRows(allCountries, countryItems);
-  const cityRows = geoRows(allCities, cityItems);
+  // Значение и доля больше НЕ склеиваются здесь вручную: склейка шла мимо formatShare и печатала
+  // «71.0%» там, где канон печатает «71%», а страница разбора той же демографии доли не знала вовсе.
+  // Теперь доля приходит со слоя данных (igMetrics → withShares) и живёт в СВОЕЙ колонке.
+  // Срез топ-8 доли не пересчитывает: они от ПОЛНОГО рейтинга, и сумма видимых честно меньше 100%.
 
   return (
     <div className="space-y-6">
@@ -55,7 +41,11 @@ export function AudienceBlock({ breakdowns, followers }: { breakdowns: IgBreakdo
           click drills to a dedicated /metrics/ig-* page instead of the generic ?detail= overlay. */}
       <WidgetGroup id="ig-audience" className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-6">
         <ChartSection title="Возраст" drillTo="/metrics/ig-age">
-          {ageRows.length > 0 ? <Breakdown items={ageRows} /> : <EmptyChart />}
+          {ageItems.length > 0 ? (
+            <Breakdown items={ageItems} columns={{ label: 'Возраст', value: 'Подписчики' }} />
+          ) : (
+            <EmptyChart />
+          )}
         </ChartSection>
         {/* Полукольцо (выбор владельца) — та же форма, что «Пол» Метрики: фикс-набор долей целого;
             непокрытый демографией остаток кольцо честно дорисует из total приглушённым сегментом. */}
@@ -75,12 +65,38 @@ export function AudienceBlock({ breakdowns, followers }: { breakdowns: IgBreakdo
           </ChartSection>
         )}
         {/* Гео — фикс-строки той же плотности, что «Возраст» (виз-переключатель с мини-донатом
-            убран — «выглядит дёшево», владелец): значение · доля от полного рейтинга. */}
+            убран — «выглядит дёшево», владелец): ранг, подпись, значение и доля от полного
+            рейтинга — каждое в своей колонке. Футер ведёт на полный список: «+N ещё» называл
+            спрятанное, но идти за ним было некуда. */}
         <ChartSection title="Топ стран" drillTo="/metrics/ig-countries">
-          {countryRows.length > 0 ? <Breakdown items={countryRows} /> : <EmptyChart />}
+          {countryItems.length > 0 ? (
+            <Breakdown
+              items={countryItems}
+              columns={{ label: 'Страна', value: 'Подписчики' }}
+              ranked
+              more={{
+                label: `Все ${allCountries.length} ${pluralRu(allCountries.length, ['страна', 'страны', 'стран'])}`,
+                to: '/metrics/ig-countries',
+              }}
+            />
+          ) : (
+            <EmptyChart />
+          )}
         </ChartSection>
         <ChartSection title="Топ городов" drillTo="/metrics/ig-cities">
-          {cityRows.length > 0 ? <Breakdown items={cityRows} /> : <EmptyChart />}
+          {cityItems.length > 0 ? (
+            <Breakdown
+              items={cityItems}
+              columns={{ label: 'Город', value: 'Подписчики' }}
+              ranked
+              more={{
+                label: `Все ${allCities.length} ${pluralRu(allCities.length, ['город', 'города', 'городов'])}`,
+                to: '/metrics/ig-cities',
+              }}
+            />
+          ) : (
+            <EmptyChart />
+          )}
         </ChartSection>
       </WidgetGroup>
       {coverage < 0.98 && (

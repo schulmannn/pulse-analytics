@@ -25,7 +25,7 @@ import { BestTimeHeatmap } from '@/components/instagram/audience';
 import { ChartSection } from '@/components/ChartWidget';
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
-import { Breakdown } from '@/components/Breakdown';
+import { Breakdown, type BreakdownColumns } from '@/components/Breakdown';
 import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
 import { DeltaPill } from '@/components/DeltaPill';
 import { SegmentedControl } from '@/components/SegmentedControl';
@@ -972,6 +972,10 @@ interface IgBreakdownPageDef {
   errorTitle: string;
   empty: string;
   footer?: (ig: IgData, items: IgBreakdownItem[]) => ReactNode;
+  /** Имена колонок: без них правое число остаётся без единицы измерения. */
+  columns: BreakdownColumns;
+  /** Номер позиции — только там, где порядок сам по себе является ответом (гео). */
+  ranked?: boolean;
   /** Content views may be campaign-scoped through the canonical `?campaign=` URL parameter. */
   contentView?: 'formats';
 }
@@ -992,6 +996,7 @@ const IG_BREAKDOWN_DEFS: Record<string, IgBreakdownPageDef> = {
     derive: (ig) => igAgeItems(ig.breakdowns),
     errorTitle: 'Не удалось загрузить демографию',
     empty: 'Возрастной демографии для этого аккаунта нет (нужно 100+ подписчиков).',
+    columns: { label: 'Возраст', value: 'Подписчики' },
     footer: (ig, items) => {
       const covered = items.reduce((acc, a) => acc + a.value, 0);
       const coverage = ig.followers > 0 && covered > 0 ? covered / ig.followers : 1;
@@ -1015,6 +1020,7 @@ const IG_BREAKDOWN_DEFS: Record<string, IgBreakdownPageDef> = {
     derive: (ig) => igGenderItems(ig.breakdowns),
     errorTitle: 'Не удалось загрузить демографию',
     empty: 'Демографии по полу для этого аккаунта нет (нужно 100+ подписчиков).',
+    columns: { label: 'Пол', value: 'Подписчики' },
   },
   'ig-countries': {
     cardId: 'ig-page-countries',
@@ -1028,6 +1034,8 @@ const IG_BREAKDOWN_DEFS: Record<string, IgBreakdownPageDef> = {
     derive: (ig) => igCountryItems(ig.breakdowns),
     errorTitle: 'Не удалось загрузить географию',
     empty: 'Данных по странам для этого аккаунта нет (нужно 100+ подписчиков).',
+    columns: { label: 'Страна', value: 'Подписчики' },
+    ranked: true,
   },
   'ig-cities': {
     cardId: 'ig-page-cities',
@@ -1041,6 +1049,8 @@ const IG_BREAKDOWN_DEFS: Record<string, IgBreakdownPageDef> = {
     derive: (ig) => igCityItems(ig.breakdowns),
     errorTitle: 'Не удалось загрузить географию',
     empty: 'Данных по городам для этого аккаунта нет (нужно 100+ подписчиков).',
+    columns: { label: 'Город', value: 'Подписчики' },
+    ranked: true,
   },
   'ig-format-engagement': {
     cardId: 'ig-page-format-engagement',
@@ -1055,6 +1065,7 @@ const IG_BREAKDOWN_DEFS: Record<string, IgBreakdownPageDef> = {
     derive: (ig) => igFormatEngagementItems(ig.formatItems),
     errorTitle: 'Не удалось загрузить разрез по форматам',
     empty: 'Нет данных о форматах за период.',
+    columns: { label: 'Формат', value: 'Взаимодействия' },
     contentView: 'formats',
   },
   'ig-story-navigation': {
@@ -1070,6 +1081,7 @@ const IG_BREAKDOWN_DEFS: Record<string, IgBreakdownPageDef> = {
     derive: (ig) => igStoryNavItems(ig.stories),
     errorTitle: 'Не удалось загрузить истории',
     empty: 'Нет данных о навигации по историям.',
+    columns: { label: 'Действие', value: 'Переходы' },
   },
 };
 
@@ -1144,7 +1156,7 @@ function IgBreakdownPage({
           <EmptyState compact size="chart" title={def.empty} />
         ) : (
           <>
-            <Breakdown items={items} />
+            <Breakdown items={items} columns={def.columns} ranked={def.ranked} />
             {def.footer?.(ig, items)}
           </>
         )}

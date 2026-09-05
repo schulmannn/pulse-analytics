@@ -140,7 +140,12 @@ export function Hashtags({
       defaultSize="full"
       drillTo={drillTo}
       periodControl
-      variants={(period) => breakdownVariants(deriveHashtags(full, period.inRange, inCampaign).breakdownItems)}
+      variants={(period) =>
+        breakdownVariants(deriveHashtags(full, period.inRange, inCampaign).breakdownItems, {
+          columns: { label: 'Хэштег', value: 'Прирост ERV' },
+          ranked: true,
+        })
+      }
     >
       <HashtagsBase full={full} keep={inCampaign} />
     </ChartSection>

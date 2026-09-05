@@ -304,7 +304,7 @@ export function Compare() {
         >
           {!hasWeekday && <EmptyHint />}
         </ChartSection>
-        <ChartSection title="По форматам (просмотры)" defaultSize="half" drillTo="/metrics/tg-format-views" variants={formatItems.length > 0 ? breakdownVariants(formatItems) : undefined}>
+        <ChartSection title="По форматам (просмотры)" defaultSize="half" drillTo="/metrics/tg-format-views" variants={formatItems.length > 0 ? breakdownVariants(formatItems, { columns: { label: 'Формат', value: 'Просмотры' } }) : undefined}>
           {formatItems.length === 0 && <EmptyHint />}
         </ChartSection>
       </WidgetGroup>

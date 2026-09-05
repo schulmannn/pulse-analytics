@@ -44,7 +44,12 @@ export function FormatsBlock({
   }
   return (
     <WidgetGroup id="ig-formats" className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-6">
-      <ChartSection title="Вовлечённость по форматам" defaultSize="full" drillTo={drillTo} variants={breakdownVariants(list)} />
+      <ChartSection
+        title="Вовлечённость по форматам"
+        defaultSize="full"
+        drillTo={drillTo}
+        variants={breakdownVariants(list, { columns: { label: 'Формат', value: 'Взаимодействия' } })}
+      />
     </WidgetGroup>
   );
 }
@@ -432,7 +437,7 @@ export function StoriesBlock({ stories }: { stories: IgStory[] | undefined }) {
           <ChartSection
             title="Навигация по историям"
             drillTo="/metrics/ig-story-navigation"
-            variants={breakdownVariants(navItems)}
+            variants={breakdownVariants(navItems, { columns: { label: 'Действие', value: 'Переходы' } })}
           />
         ) : (
           <ChartSection title="Навигация по историям" drillTo="/metrics/ig-story-navigation">

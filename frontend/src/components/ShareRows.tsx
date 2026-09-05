@@ -1,7 +1,8 @@
 import type { ReactNode } from 'react';
-import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useContext, useRef, useState } from 'react';
 import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
 import { observeSize } from '@/lib/observeSize';
+import { useIsoLayoutEffect, useMeasuredBox } from '@/lib/useMeasuredBox';
 import { useMediaQuery } from '@/lib/useMediaQuery';
 import { fmt } from '@/lib/format';
 
@@ -120,6 +121,14 @@ export interface ShareRowsProps {
   /** Накопленный процент справа — читается «первые пять дают 78%». */
   cumulative?: boolean;
   footnote?: ReactNode;
+  /**
+   * Имена колонок над списком. Без них правое число — голый абсолют без единицы измерения: «1 240»
+   * одинаково читается заказами, рублями и штуками, и разрез отвечает не на тот вопрос, который
+   * задан заголовком карточки.
+   */
+  columns?: { label: string; value: string };
+  /** «1 2 3» перед подписью — там, где порядок сам является ответом (товары, каналы, площадки). */
+  ranked?: boolean;
 }
 
 
@@ -138,14 +147,8 @@ const ROW_PITCH_WIDE = 26;
 const ROW_PITCH_NARROW = 48;
 // Строка хвоста «ещё N» и сноска — не строки списка, но место занимают.
 const TAIL_H = 18;
-
-/**
- * Замер идёт в LAYOUT-фазе, а не после кадра. Иначе первый кадр рисуется по константе-предположению,
- * второй — по факту, и список на глазах схлопывается с пяти строк до четырёх: пользователь видит
- * дёрганье, а тест ловит промежуточное состояние и становится флаки. На сервере (юниты через
- * renderToStaticMarkup) layout-эффект недоступен и не нужен — разметка там всё равно не меряется.
- */
-const useIsoLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect;
+/** Предположение о высоте шапки колонок на ПЕРВЫЙ кадр; дальше она меряется (useMeasuredBox). */
+const HEADER_H = 22;
 
 /**
  * Фактический шаг строки списка: расстояние между верхами двух соседних `<li>`.
@@ -187,10 +190,12 @@ export function ShareRows({
   compactRows = 4,
   cumulative = false,
   footnote = null,
+  columns,
+  ranked = false,
 }: ShareRowsProps) {
   // Сервер уже сортирует по убыванию; пересортировка — страховка стабильности вида. Невалидное
   // число не превращается ни в отрицательную полосу, ни в «NaN»: для part-to-whole это ноль.
-  const ranked = rows
+  const sorted = rows
     .map((row) => ({
       ...row,
       value: Number.isFinite(row.value) ? Math.max(0, row.value) : 0,
@@ -220,15 +225,47 @@ export function ShareRows({
   // строк ровно floor(бюджет / шаг), а хвост вычтен из бюджета заранее.
   const listRef = useRef<HTMLUListElement | null>(null);
   const rowPitch = useRowPitch(listRef, wideRow ? ROW_PITCH_WIDE : ROW_PITCH_NARROW);
-  const budget = ctxHeight == null ? null : ctxHeight - (ranked.length > compactRows || footnote != null ? TAIL_H : 0);
+  // Шапка съедает высоту тела ДО первой строки. Не вычесть её — значит нарисовать на строку
+  // больше, чем тайл держит: ровно тот клиппинг, ради которого бюджет и считается. Ниже 640px
+  // шапки нет вовсе, и её измеренная высота там честный ноль — мобильный бюджет не меняется.
+  const { ref: headerRef, height: headerH } = useMeasuredBox(columns ? HEADER_H : 0);
+  const room =
+    ctxHeight == null ? null : ctxHeight - (sorted.length > compactRows || footnote != null ? TAIL_H : 0);
+  // ШАПКА НЕ СТОИТ СТРОКИ ДАННЫХ: имя измерения уже стоит в заголовке карточки, и менять восьмой
+  // источник на слово «Источник» — убыточный размен. Где высота не ограничена (страница разреза,
+  // разворот) шапка есть всегда. Решение принимается по КОНСТАНТЕ, а бюджет — по ЗАМЕРУ: если бы
+  // решение зависело от замера, спрятанная шапка мерилась бы в ноль, снова «влезала» и мигала бы.
+  const showHeader =
+    columns != null &&
+    (room == null ||
+      expandedCtx ||
+      Math.floor((room - HEADER_H) / rowPitch) === Math.floor(room / rowPitch));
+  const budget = room == null ? null : room - (showHeader ? headerH : 0);
   const fitRows = budget == null || expandedCtx ? compactRows : Math.max(1, Math.floor(budget / rowPitch));
-  const head = expanded ? ranked : ranked.slice(0, fitRows);
-  const tail = ranked.slice(head.length);
+  const head = expanded ? sorted : sorted.slice(0, fitRows);
+  const tail = sorted.slice(head.length);
   const tailValue = tail.reduce((acc, r) => acc + Math.max(0, r.value), 0);
 
   let running = 0;
   return (
     <div>
+      {showHeader && columns && (
+        // Только с sm: — мобильная разметка разреза (двухстрочная строка) не переделывается до
+        // отдельного mobile-этапа, а строка заголовков там съела бы данные, ради которых открыт
+        // тайл. Сетка та же, что у строк, и последняя колонка в обоих гридах прижата к правому
+        // краю — поэтому «Визиты» и «1 240 · 12.3%» стоят на одной вертикали, хотя гриды разные.
+        // `role="columnheader"` не проставлен намеренно: без предка role="table" он валит
+        // axe-правило aria-required-parent, а список таблицей не является.
+        <div
+          ref={headerRef}
+          data-share-header
+          className="hidden gap-x-2.5 border-b border-border pb-1.5 text-2xs tracking-wide text-muted-foreground sm:grid sm:grid-cols-[minmax(7rem,42%)_minmax(3rem,1fr)_auto]"
+        >
+          <span className="truncate">{columns.label}</span>
+          <span aria-hidden="true" />
+          <span className="text-right">{columns.value}</span>
+        </div>
+      )}
       <ul
         ref={listRef}
         aria-label={
@@ -238,7 +275,7 @@ export function ShareRows({
         }
         className={expanded ? 'space-y-1.5 pt-1' : 'space-y-1'}
       >
-        {head.map((r) => {
+        {head.map((r, i) => {
           const pct = pctOf(r.value);
           if (pct != null) running += pct;
           return (
@@ -252,6 +289,14 @@ export function ShareRows({
                   читается чипом-кнопкой. Колонка держит левый край ровным: список сканируется
                   сверху вниз, чего ради он и существует. */}
               <span className="col-start-1 row-start-1 flex min-w-0 items-center gap-1.5 text-xs text-foreground sm:max-w-56">
+                {/* Ранг — ПЕРВЫМ в колонке подписи и фиксированной ширины: «третье место» должно
+                    читаться без пересчёта строк глазами, а левый край подписей обязан остаться
+                    ровным при переходе с однозначных номеров на двузначные. */}
+                {ranked && (
+                  <span className="w-4 shrink-0 text-right text-2xs tabular-nums text-muted-foreground">
+                    {i + 1}
+                  </span>
+                )}
                 {r.dot && (
                   <span
                     aria-hidden="true"
