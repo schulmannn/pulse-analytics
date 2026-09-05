@@ -4,5 +4,5 @@
 # скомпилирован из ОБОИХ источников — после правки любого из них перегенерируй (python 3.12,
 # pip-tools):
 #   pip-compile --generate-hashes --output-file=collector/requirements.lock collector/requirements.txt mtproto/requirements.txt
-telethon==1.43.2
+telethon==1.44.0
 qrcode>=7.4,<9
