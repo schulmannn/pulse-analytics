@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { KpiValue } from '@/components/chartWidget/KpiValue';
-import { DeltaPill, deltaLabel } from '@/components/DeltaPill';
+import { DeltaNote, DeltaPill, deltaBasisTitle, deltaLabel } from '@/components/DeltaPill';
+import type { DeltaBasis } from '@/components/DeltaPill';
 import type { MetricDelta } from '@/lib/delta';
 
 /**
@@ -22,15 +23,25 @@ import type { MetricDelta } from '@/lib/delta';
  * СЛОТ ДЕЛЬТЫ ДЕРЖИТСЯ ВСЕГДА (аудит #554, D9). Раньше «Ср. охват» печатал голое
  * число (пары окон нет → DeltaPill отдавал null), а соседние «Реакции» — число со стрелкой:
  * две карточки одного размера в одном ряду читались как карточки разных типов. Теперь слот говорит
- * всегда и говорит честно: «0%» — сравнили и изменений нет, «— к пред.» — сравнивать НЕ С ЧЕМ.
+ * всегда и говорит честно: «0%» — сравнили и изменений нет, «нет базы» — сравнивать НЕ С ЧЕМ.
  * Сам DeltaPill не трогаем: его молчание на flat — канон для разбора и таблиц сравнения.
  *
  * `deltaText` — честные «п.п.» там, где относительный процент от процента был бы ложью (ER); выигрывает у пилюли.
+ *
+ * `basis` — с ЧЕМ сравнили (даты базы и её число). Подсказка стоит на ЛЮБОМ варианте слота:
+ * в леджере половина карточек печатает `deltaText`, а не пилюлю, и повесить основание только на
+ * пилюлю значило бы оставить их без него.
+ *
+ * МОЛЧАЩИЙ СЛОТ ГОВОРИТ «нет базы», а не «— к пред.»: прежний текст ссылался на
+ * «пред.», которого читатель нигде не видел, и читался как сбой загрузки. Причину
+ * приносит `noBasisReason` — её знает только считающий.
  */
 export function CompactStatHeadline({
   text,
   delta,
   deltaText,
+  basis,
+  noBasisReason,
   onDrill,
   drillLabel,
   live,
@@ -38,11 +49,13 @@ export function CompactStatHeadline({
   text: string;
   delta?: MetricDelta | null;
   deltaText?: string | null;
+  basis?: DeltaBasis | null;
+  noBasisReason?: string;
   onDrill?: () => void;
   drillLabel?: string;
   live: boolean;
 }) {
-  const quiet = 'shrink-0 text-xs font-medium tabular-nums text-muted-foreground';
+  const basisTitle = basis ? deltaBasisTitle(basis) : undefined;
   return (
     <div className="flex items-baseline gap-2">
       <KpiValue
@@ -52,11 +65,13 @@ export function CompactStatHeadline({
       />
       {live ? (
         deltaText ? (
-          <span className={quiet}>{deltaText}</span>
+          <DeltaNote text={deltaText} title={basisTitle} />
         ) : deltaLabel(delta) ? (
-          <DeltaPill delta={delta} />
+          <DeltaPill delta={delta} basis={basis} />
+        ) : delta ? (
+          <DeltaNote text="0%" title={basisTitle} />
         ) : (
-          <span className={quiet}>{delta ? '0%' : '— к пред.'}</span>
+          <DeltaNote text="нет базы" title={noBasisReason} />
         )
       ) : null}
     </div>
@@ -77,6 +92,8 @@ export function StackedStat({
   text,
   delta,
   deltaText,
+  basis,
+  noBasisReason,
   onDrill,
   drillLabel,
   live,
@@ -85,6 +102,8 @@ export function StackedStat({
   text: string;
   delta?: MetricDelta | null;
   deltaText?: string | null;
+  basis?: DeltaBasis | null;
+  noBasisReason?: string;
   onDrill?: () => void;
   drillLabel?: string;
   live: boolean;
@@ -96,6 +115,8 @@ export function StackedStat({
         text={text}
         delta={delta}
         deltaText={live ? deltaText : null}
+        basis={basis}
+        noBasisReason={noBasisReason}
         onDrill={onDrill}
         drillLabel={drillLabel}
         live={live}
@@ -151,15 +172,19 @@ export interface CompareStatProps {
   hasValue?: boolean;
   /** Row label for the current bar (default «Период»). */
   currentLabel?: string;
+  /** С чем сравнили — даты базы и её число (подсказка у слота дельты). */
+  basis?: DeltaBasis | null;
+  /** Почему сравнивать не с чем — подсказка у «нет базы». */
+  noBasisReason?: string;
 }
 
-export function CompareStat({ value, prev, delta, format, onDrill, drillLabel, hasValue = true, currentLabel = 'Период' }: CompareStatProps) {
+export function CompareStat({ value, prev, delta, format, onDrill, drillLabel, hasValue = true, currentLabel = 'Период', basis, noBasisReason }: CompareStatProps) {
   const live = hasValue && value != null && Number.isFinite(value);
   const bars = live && prev != null && Number.isFinite(prev) && prev >= 0;
   const max = bars ? Math.max(value as number, prev as number) : 0;
   return (
     <div className="flex h-full min-h-0 flex-col justify-between gap-4">
-      <CompactStatHeadline text={live ? format(value as number) : '—'} delta={bars ? delta : null} onDrill={onDrill} drillLabel={drillLabel} live={live} />
+      <CompactStatHeadline text={live ? format(value as number) : '—'} delta={bars ? delta : null} basis={bars ? basis : null} noBasisReason={noBasisReason} onDrill={onDrill} drillLabel={drillLabel} live={live} />
       {bars ? (
         <div className="space-y-2.5">
           <CompareBar label={currentLabel} value={value as number} max={max} format={format} tone="current" />

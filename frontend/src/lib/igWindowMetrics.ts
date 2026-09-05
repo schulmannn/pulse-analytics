@@ -1,5 +1,5 @@
 import type { IgHistoryRow, IgInsights, IgProfile } from '@/api/schemas';
-import { pctDelta, type MetricDelta } from '@/lib/delta';
+import { pctDelta, type MetricDelta, type WindowRange } from '@/lib/delta';
 import { timeAxisLabels } from '@/lib/format';
 import {
   fmtDay,
@@ -22,6 +22,14 @@ export interface IgWindowRaw {
   historyRows: IgHistoryRow[] | undefined;
   since: number;
   until: number;
+  /**
+   * Границы прошлого окна СЕРВЕРНЫХ агрегатов (`total_value`). Сервер режет их сам по `days`
+   * запроса и снапит его к 7/30/90 (server/routes/ig.js), поэтому клиентские `since/until`
+   * совпадают с ними только на ПРЕСЕТНОМ окне — на «своём периоде» серверное окно другое, и
+   * подписывать агрегат клиентскими датами значило бы назвать не те дни. Вызывающий передаёт
+   * границы только там, где они доказуемо те же, иначе `null` — и подписи не будет вовсе.
+   */
+  aggPrevRange?: WindowRange | null;
 }
 
 export interface IgWindowSeries {
@@ -211,7 +219,7 @@ const scalarFromPair = (pair: WindowPair): IgWindowScalar => ({
 });
 
 export function igWindowMetrics(raw: IgWindowRaw): IgWindowMetrics {
-  const { profile, insights, historyRows, since, until } = raw;
+  const { profile, insights, historyRows, since, until, aggPrevRange = null } = raw;
   const canonicalFollowerLevel = followerLevelSeries(historyRows, profile?.followers_count ?? null);
   // Demo mode intentionally disables DB history queries. Its fixture exposes an explicit mock
   // follower_count level series so the sample UI can still demonstrate the audience chart; real
@@ -244,12 +252,15 @@ export function igWindowMetrics(raw: IgWindowRaw): IgWindowMetrics {
   // временем серверного окна и всегда оказываются позже клиентской границы `until` (она округлена
   // вниз до минуты). Прежний date-фильтр выбрасывал текущую точку на каждом рендере — охват молча
   // откатывался на сумму дневных и завышался втрое. См. aggregatePair.
-  const reachWin = aggregatePair(insights, 'reach_window');
+  // Границы агрегата известны только вызывающему (см. IgWindowRaw.aggPrevRange) — проставляем
+  // их здесь, чтобы `aggregatePair` не начал угадывать окно по синтетическим `end_time`.
+  const withAggRange = (pair: WindowPair): WindowPair => ({ ...pair, prevRange: aggPrevRange });
+  const reachWin = withAggRange(aggregatePair(insights, 'reach_window'));
   const reachDaily = windowPair(series.reach, since, until);
   /** Агрегат окна, если бэкенд его отдал; иначе — прежний путь по дневным. */
   const agg = (name: string, daily: Point[]): WindowPair => {
     const pair = aggregatePair(insights, name);
-    return pair.hasCur ? pair : windowPair(daily, since, until);
+    return pair.hasCur ? withAggRange(pair) : windowPair(daily, since, until);
   };
   const pairs: IgWindowPairs = {
     // Дедуплицированный охват окна — то же число, что Instagram показывает как «Viewers».
@@ -281,6 +292,8 @@ export function igWindowMetrics(raw: IgWindowRaw): IgWindowMetrics {
     prev: pairs.follows.prev - pairs.unfollows.prev,
     hasCur: pairs.follows.hasCur || pairs.unfollows.hasCur,
     hasPrev: pairs.follows.hasPrev || pairs.unfollows.hasPrev,
+    // Обе составляющие пришли из одного окна — оно же у разности.
+    prevRange: pairs.follows.prevRange ?? pairs.unfollows.prevRange ?? null,
   };
   const followersLevel = profile?.followers_count ?? 0;
   const erReach = pairs.reach.cur > 0 ? (pairs.ti.cur / pairs.reach.cur) * 100 : 0;

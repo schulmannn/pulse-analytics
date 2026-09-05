@@ -3,8 +3,21 @@ import { fmt, pluralRu, timeAxisLabels as weekdayAxis } from '@/lib/format';
 import { normalizeTgPosts } from '@/lib/posts';
 import type { NormalizedPost } from '@/lib/posts';
 import type { DateRange, PeriodDays } from '@/lib/period';
-import { avgReachWindows, dailyWindowDelta, pctDelta, subscriberChange, subscriberDelta, sumPostWindows } from '@/lib/delta';
-import type { MetricDelta } from '@/lib/delta';
+import {
+  NO_BASIS_ALL_TIME,
+  NO_BASIS_CUSTOM_RANGE,
+  NO_BASIS_SHORT_ARCHIVE,
+  avgReachWindows,
+  pctDelta,
+  splitDailyWindows,
+  subscriberBaseline,
+  subscriberChange,
+  subscriberDelta,
+  sumPostWindows,
+} from '@/lib/delta';
+import type { DailyWindowPair, MetricDelta } from '@/lib/delta';
+import { windowRangeLabel } from '@/lib/metricSeries';
+import type { DeltaBasis } from '@/components/DeltaPill';
 
 /** A daily metric series: aligned day labels + values (sparklines, drills, metric pages).
     `null` = пропуск измерения (день окна без публикаций у avg-метрик): линия рвётся, столбец
@@ -131,7 +144,7 @@ export function deriveKpis(
   // views_graph): честные «просмотры канала за период». Пост-сумма (`totalViews`) меряет УЖЕ —
   // только просмотры постов, ОПУБЛИКОВАННЫХ в окне — и расходится в разы (на проде 10.8k vs 1.8k);
   // она остаётся базой для avg-reach-на-пост ниже и фолбэком, когда архива нет (без БД / малый
-  // канал без stats / day 1). Тренд уже канальный (dailyWindowDelta по historyRows.views).
+  // канал без stats / day 1). Тренд уже канальный (viewsPair по historyRows.views).
   const viewsArchiveRows = historyRows
     .filter((r) => r.views != null && inRange(r.day))
     .sort((a, b) => a.day.localeCompare(b.day));
@@ -139,17 +152,28 @@ export function deriveKpis(
   const channelViews = hasChannelViews
     ? viewsArchiveRows.reduce((sum, r) => sum + Number(r.views), 0)
     : totalViews;
+  // ПАРА ОКОН, а не голый процент (было `dailyWindowDelta`, который внутри делает ровно это же):
+  // пилюле нужны ещё ГРАНИЦЫ и СУММА базы, иначе основание пришлось бы считать вторым проходом
+  // по тем же строкам — и оно смогло бы разойтись с процентом, под которым напечатано.
+  const archivePair = (pick: (r: (typeof historyRows)[number]) => number) =>
+    splitDailyWindows(historyRows, pick, days);
+  const viewsPair = archivePair((r) => Number(r.views ?? 0));
+  const reactionsPair = archivePair((r) => Number(r.reactions ?? 0));
+  const forwardsPair = archivePair((r) => Number(r.forwards ?? 0));
+  const erPair = archivePair((r) => Number(r.reactions ?? 0) + Number(r.forwards ?? 0));
+  const pairTrend = <T,>(pair: DailyWindowPair<T> | null): MetricDelta | null =>
+    pair ? pctDelta(pair.current.total, pair.previous.total) : null;
   const viewsTrend =
-    dailyWindowDelta(historyRows, (r) => Number(r.views ?? 0), days)
+    pairTrend(viewsPair)
     ?? (windowTotals ? pctDelta(windowTotals.current.views, windowTotals.previous.views) : null);
   const reactionsTrend =
-    dailyWindowDelta(historyRows, (r) => Number(r.reactions ?? 0), days)
+    pairTrend(reactionsPair)
     ?? (windowTotals ? pctDelta(windowTotals.current.reactions, windowTotals.previous.reactions) : null);
   const forwardsTrend =
-    dailyWindowDelta(historyRows, (r) => Number(r.forwards ?? 0), days)
+    pairTrend(forwardsPair)
     ?? (windowTotals ? pctDelta(windowTotals.current.forwards, windowTotals.previous.forwards) : null);
   const erTrend =
-    dailyWindowDelta(historyRows, (r) => Number(r.reactions ?? 0) + Number(r.forwards ?? 0), days)
+    pairTrend(erPair)
     ?? (members > 0 && currentEngagement != null && previousEngagement != null
       ? pctDelta(currentEngagement / members, previousEngagement / members)
       : null);
@@ -376,12 +400,61 @@ export function deriveKpis(
   const erPrev =
     !range && members > 0 && previousEngagement != null ? (previousEngagement / members) * 100 : null;
 
+  // ОСНОВАНИЕ ДЕЛЬТЫ — с чем сравнили и сколько там было. Процент без базы проверить нечем:
+  // «↑4.5%» рядом со словом «пред. период» не говорил ни какие это дни, ни какое число взято
+  // за единицу — читателю приходилось уходить со страницы, чтобы поверить карточке.
+  //
+  // Каждое основание описывает ТУ ЖЕ арифметику, что и напечатанная рядом дельта — или НАЗЫВАЕТ свою
+  // единицу там, где она отличается от единицы заголовка (см. ER ниже), и возвращает null, как
+  // только честно описать базу нечем.
+  const noBasisReason = days === 0 ? NO_BASIS_ALL_TIME : range ? NO_BASIS_CUSTOM_RANGE : NO_BASIS_SHORT_ARCHIVE;
+  const archiveBasis = <T,>(pair: DailyWindowPair<T> | null): DeltaBasis | null =>
+    pair?.previous.range
+      ? { label: windowRangeLabel(pair.previous.range), value: fmt.short(pair.previous.total) }
+      : null;
+  const postBasis = (value: number): DeltaBasis | null =>
+    windowTotals ? { label: windowRangeLabel(windowTotals.ranges.previous), value: fmt.short(value) } : null;
+  const subsBase = subscriberBaseline(historyRows, days);
+  // База ER в единицах ER — только пост-окно (`erPrev`), и тем же форматом, что число карточки.
+  const erPostBasis: DeltaBasis | null =
+    erPrev != null && windowTotals
+      ? { label: windowRangeLabel(windowTotals.ranges.previous), value: fmt.pctAbs(erPrev) }
+      : null;
+  const deltaBasis: Record<DrillKey, DeltaBasis | null> = {
+    views: archiveBasis(viewsPair) ?? (windowTotals ? postBasis(windowTotals.previous.views) : null),
+    // У подписчиков база — не окно, а ОДИН замер уровня: подпись называет день архива и значение.
+    subscribers: subsBase ? { label: fmt.day(subsBase.day), value: fmt.num(subsBase.subscribers) } : null,
+    avgReach: avgReachPair
+      ? { label: windowRangeLabel(avgReachPair.ranges.previous), value: fmt.short(Math.round(avgReachPair.previous)) }
+      : null,
+    reactions: archiveBasis(reactionsPair) ?? (windowTotals ? postBasis(windowTotals.previous.reactions) : null),
+    forwards: archiveBasis(forwardsPair) ?? (windowTotals ? postBasis(windowTotals.previous.forwards) : null),
+    // На канале с архивом пилюля ER мерит НЕ ER, а дельту СУММЫ реакций и репостов (база
+    // подписчиков в знаменателе за окно почти не меняется, и процент совпадает с точностью до неё).
+    // Поэтому основание НАЗЫВАЕТ, чем именно является его число: «13.6k реакций и репостов» под
+    // заголовком «28.9%» — это правда о проценте, а голое «13.6k» читалось бы как прошлый ER.
+    er: erPair?.previous.range
+      ? {
+          label: windowRangeLabel(erPair.previous.range),
+          value: `${fmt.short(erPair.previous.total)} реакций и репостов`,
+        }
+      : erPostBasis,
+  };
+  // Готовые строки-дельты («+531», «+1.2 п.п.») считаются НЕ по тому же источнику, что процентные
+  // тренды (реакции — по окну постов, тренд — по дневному архиву), поэтому у них СВОЁ основание:
+  // общее назвало бы читателю число, из которого видимая рядом разница не получается.
+  const captionBasis = {
+    reactions: reactionsPrev != null ? postBasis(reactionsPrev) : null,
+    er: erPostBasis,
+  };
+
   return {
     members, displayMembers, totalViews, channelViews, totalReactions, avgViews, er,
     subscriberTrend, viewsTrend, reactionsTrend, erTrend, avgReachTrend,
     viewsSpark, subsSpark, periodLabel, viewsCaption, subDelta, reactionsDelta, erCaption,
     avgReachSpark, reactionsSpark, erSpark,
     avgViewsPrev, reactionsPrev, erPrev,
+    deltaBasis, captionBasis, noBasisReason,
     normPosts, normPostsAll, drillMeta,
     // Extras the metric pages need beyond the grid: paired-window totals for the
     // «Сравнение» ledger and the raw archive rows for subscriber window math.

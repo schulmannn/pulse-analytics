@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { CHART_MAX_POINTS, lttbDownsample } from '@/lib/downsample';
 import { fmt, timeAxisFromDayKeys, timeAxisLabels } from '@/lib/format';
 import { pctDelta, type MetricDelta } from '@/lib/delta';
-import { DeltaPill } from '@/components/DeltaPill';
+import { DeltaNote, DeltaPill, deltaBasisTitle } from '@/components/DeltaPill';
+import type { DeltaBasis } from '@/components/DeltaPill';
 import { EmptyState } from '@/components/EmptyState';
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
@@ -13,7 +14,8 @@ import { KpiValue } from '@/components/chartWidget/KpiValue';
 import { StackedStat, CompactStatHeadline } from '@/components/CompareStat';
 import { Sparkline } from '@/components/Sparkline';
 import type { WidgetSize } from '@/lib/widgetPrefsStore';
-import { fmtDay, pairDelta, windowIgSeries, type Point, type WindowPair } from '@/lib/igMetrics';
+import { fmtDay, pairBasis, pairDelta, windowIgSeries, type Point, type WindowPair } from '@/lib/igMetrics';
+import { windowRangeLabel } from '@/lib/metricSeries';
 import type { IgOverviewChart } from '@/lib/igWindowMetrics';
 import { calendarWindowForPeriod, periodDateTimestamp, splitCalendarRows, useCardShowsPeriod } from '@/lib/period';
 import type { WidgetPeriodValue } from '@/lib/period';
@@ -63,6 +65,8 @@ export interface KpiCardProps {
   trend?: MetricDelta | null;
   /** A pre-formatted inline delta (e.g. "−23"); shown instead of the percent pill when set. */
   deltaText?: string;
+  /** С чем сравнили — даты базы и её число; подсказка стоит на ОБОИХ вариантах слота. */
+  basis?: DeltaBasis | null;
   deltaTone?: 'up' | 'down' | 'flat';
   /** Drill to the metric's page — the number becomes a real button (TG StatTile parity). */
   onDrill?: () => void;
@@ -72,11 +76,10 @@ export interface KpiCardProps {
     separated by SPACING in a plain grid, not a `gap-px` hairline mesh — the surrounding card
     already frames them, and a bg-background plate inside a card read as a sharp-cornered inset
     box (owner report on the IG «Показатели» hero; the TG KpiGrid rule). */
-export function KpiCard({ label, value, hint, trend, deltaText, deltaTone, onDrill }: KpiCardProps) {
+export function KpiCard({ label, value, hint, trend, deltaText, basis, deltaTone, onDrill }: KpiCardProps) {
   // Quiet register (steep): the delta reads muted — direction lives in its sign/arrow, never in
   // an evaluative colour. deltaTone stays in the props contract for call-site compatibility.
   void deltaTone;
-  const deltaColor = 'text-muted-foreground';
   return (
     <div className="py-1">
       {/* Паритет с TG StatTile (аудит: «twin» расходился кеглем и базовой линией дельты). */}
@@ -84,9 +87,9 @@ export function KpiCard({ label, value, hint, trend, deltaText, deltaTone, onDri
       <div className="mt-1.5 flex items-baseline gap-2">
         <KpiValue size="small" text={value} onDrill={onDrill} drillLabel={label} />
         {deltaText ? (
-          <span className={`shrink-0 text-xs font-medium tabular-nums ${deltaColor}`}>{deltaText}</span>
+          <DeltaNote text={deltaText} title={basis ? deltaBasisTitle(basis) : undefined} />
         ) : (
-          <DeltaPill delta={trend} />
+          <DeltaPill delta={trend} basis={basis} />
         )}
       </div>
       {hint ? <div className="mt-2 text-xs text-muted-foreground">{hint}</div> : null}
@@ -100,6 +103,7 @@ export function KpiHero({
   label,
   value,
   delta,
+  basis,
   series,
   drillTo,
   viz = 'line',
@@ -108,6 +112,8 @@ export function KpiHero({
   label: string;
   value: string;
   delta?: MetricDelta | null;
+  /** С чем сравнена `delta` — даты базы и её число (подсказка у пилюли). */
+  basis?: DeltaBasis | null;
   series?: Point[];
   /** Route of the metric's explorer page (/metrics/ig-*). ТОЛЬКО тихий клик по числу (паритет с
       TG-твином FeaturedKpi): своя ↗-обёртка графика читалась дублем карточной (визуальный аудит). */
@@ -153,7 +159,7 @@ export function KpiHero({
     ));
   // Steep anatomy (owner rule): label + number + delta bottom-left, the chart inset to the RIGHT.
   return (
-    <ChartCardBody label={label} value={value} delta={delta} onValueClick={drillTo ? () => navigate(drillTo) : undefined} drillLabel={label}>
+    <ChartCardBody label={label} value={value} delta={delta} deltaBasis={basis} onValueClick={drillTo ? () => navigate(drillTo) : undefined} drillLabel={label}>
       {chart && <div className="h-full">{chart}</div>}
     </ChartCardBody>
   );
@@ -255,6 +261,21 @@ export function TrendCard({
   );
 }
 
+/** Регистр компактных счётчиков карточек Обзора — один на число и на его основание: подпись
+    «против …: 9.9k» обязана печатать базу тем же форматом, что и число над ней. */
+const COUNT_FMT = (n: number) => fmt.short(Math.round(n));
+
+/** Основание дельты ER: число — прошлый ER в тех же процентах, что и на лице карточки.
+    ER = взаимодействия ÷ охват, поэтому подписывать его окном можно только когда ОБА слагаемых пришли
+    из ОДНОГО: одно может быть агрегатом без границ, другое — фолбэком по дневным со своими. */
+function erBasis(ig: IgData): DeltaBasis | null {
+  if (!(ig.erReach > 0 && ig.pairs.reach.hasCur && ig.pairs.reach.hasPrev && ig.erReachPrev > 0)) return null;
+  const ti = ig.pairs.ti.prevRange;
+  const reach = ig.pairs.reach.prevRange;
+  if (!ti || !reach || ti.from !== reach.from || ti.to !== reach.to) return null;
+  return { label: windowRangeLabel(ti), value: fmt.pctAbs(ig.erReachPrev) };
+}
+
 // A whole window without a single non-zero sample is «нет данных», not a real zero — insights
 // quota burn / missing metrics must read as a dash with no delta, never as a crash (D6.1).
 const isLive = (p: WindowPair) => p.hasCur && p.cur > 0;
@@ -280,10 +301,13 @@ export function IgKpiBlock({ ig }: { ig: IgData }) {
         label={`Охват · ${ig.window.days} дн.`}
         value={fmt.kpi(ig.pairs.reach.cur)}
         delta={pairDelta(ig.pairs.reach)}
+        basis={pairBasis(ig.pairs.reach, fmt.kpi)}
         series={ig.series.reach.filter((p) => ig.inWindow(p.day))}
         drillTo="/metrics/ig-reach"
       />
       <div className="grid grid-cols-2 gap-x-6 gap-y-4 border-t border-border pt-4 lg:grid-cols-4">
+        {/* У «Подписчиков» основания НЕТ намеренно: «+531» — это движение ЗА окно (подписки
+            минус отписки), а не разница с прошлым окном, и подпись «против …» была бы ложью. */}
         <KpiCard
           label="Подписчики"
           value={fmt.kpi(ig.followers)}
@@ -295,6 +319,7 @@ export function IgKpiBlock({ ig }: { ig: IgData }) {
           label="Просмотры"
           value={isLive(ig.pairs.views) ? fmt.kpi(ig.pairs.views.cur) : '—'}
           trend={isLive(ig.pairs.views) ? pairDelta(ig.pairs.views) : null}
+          basis={isLive(ig.pairs.views) ? pairBasis(ig.pairs.views, fmt.kpi) : null}
           onDrill={() => navigate('/metrics/ig-views')}
         />
         <KpiCard
@@ -303,12 +328,14 @@ export function IgKpiBlock({ ig }: { ig: IgData }) {
           // и /metrics/ig-er обязаны печатать одно число одним форматом.
           value={ig.erReach > 0 ? fmt.pctAbs(ig.erReach) : '—'}
           trend={erTrend}
+          basis={erBasis(ig)}
           onDrill={() => navigate('/metrics/ig-er')}
         />
         <KpiCard
           label="Взаимодействия"
           value={isLive(ig.pairs.ti) ? fmt.kpi(ig.pairs.ti.cur) : '—'}
           trend={isLive(ig.pairs.ti) ? pairDelta(ig.pairs.ti) : null}
+          basis={isLive(ig.pairs.ti) ? pairBasis(ig.pairs.ti, fmt.kpi) : null}
           onDrill={() => navigate('/metrics/ig-interactions')}
         />
       </div>
@@ -404,6 +431,7 @@ export function IgReachBody({ ig, viz }: { ig: IgData; viz?: 'line' | 'bar' }) {
       label={showPeriod ? `Охват · ${ig.window.days} дн.` : 'Охват'}
       value={fmt.kpi(ig.pairs.reach.cur)}
       delta={pairDelta(ig.pairs.reach)}
+      basis={pairBasis(ig.pairs.reach, fmt.kpi)}
       series={ig.series.reach.filter((p) => ig.inWindow(p.day))}
       drillTo="/metrics/ig-reach"
       viz={viz}
@@ -480,6 +508,8 @@ export function IgAudienceBody({ ig }: { ig: IgData }) {
 function IgTrendStat({
   value,
   delta,
+  basis,
+  noBasisReason,
   chart,
   format,
   onDrill,
@@ -489,6 +519,10 @@ function IgTrendStat({
 }: {
   value: number | null;
   delta?: MetricDelta | null;
+  /** С чем сравнена `delta` — даты базы и её число (подсказка у слота дельты). */
+  basis?: DeltaBasis | null;
+  /** Почему базы нет — подсказка у «нет базы». */
+  noBasisReason?: string;
   chart: IgOverviewChart;
   format: (n: number) => string;
   onDrill?: () => void;
@@ -501,7 +535,7 @@ function IgTrendStat({
   const hasChart = live && chart.values.length >= 2;
   return (
     <div className="flex h-full min-h-0 flex-col justify-between gap-4">
-      <CompactStatHeadline text={live ? format(value as number) : '—'} delta={delta} onDrill={onDrill} drillLabel={drillLabel} live={live} />
+      <CompactStatHeadline text={live ? format(value as number) : '—'} delta={delta} basis={basis} noBasisReason={noBasisReason} onDrill={onDrill} drillLabel={drillLabel} live={live} />
       {hasChart && viz === 'bar' ? (
         <ChartBand>
           <BarChart
@@ -539,9 +573,11 @@ export function IgViewsBody({ ig, viz }: { ig: IgData; viz?: 'line' | 'bar' }) {
     <IgTrendStat
       value={live ? ig.pairs.views.cur : null}
       delta={live ? pairDelta(ig.pairs.views) : null}
+      basis={live ? pairBasis(ig.pairs.views, COUNT_FMT) : null}
+      noBasisReason={ig.noBasisReason}
       chart={ig.overviewCharts.views}
       viz={viz}
-      format={(n) => fmt.short(Math.round(n))}
+      format={COUNT_FMT}
       hasValue={live}
       onDrill={() => navigate('/metrics/ig-views')}
       drillLabel="Просмотры"
@@ -557,9 +593,11 @@ export function IgInteractionsBody({ ig, viz }: { ig: IgData; viz?: 'line' | 'ba
     <IgTrendStat
       value={live ? ig.pairs.ti.cur : null}
       delta={live ? pairDelta(ig.pairs.ti) : null}
+      basis={live ? pairBasis(ig.pairs.ti, COUNT_FMT) : null}
+      noBasisReason={ig.noBasisReason}
       chart={ig.overviewCharts.interactions}
       viz={viz}
-      format={(n) => fmt.short(Math.round(n))}
+      format={COUNT_FMT}
       hasValue={live}
       onDrill={() => navigate('/metrics/ig-interactions')}
       drillLabel="Взаимодействия"
@@ -582,6 +620,8 @@ export function IgEngagementBody({ ig }: { ig: IgData }) {
     <StackedStat
       text={live ? fmt.pctAbs(ig.erReach) : '—'}
       delta={erTrend}
+      basis={erBasis(ig)}
+      noBasisReason={ig.noBasisReason}
       onDrill={() => navigate('/metrics/ig-er')}
       drillLabel="Вовлечённость"
       live={live}

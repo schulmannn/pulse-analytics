@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { deriveKpis } from '@/lib/kpiDerive';
 import { fmt } from '@/lib/format';
+import { NO_BASIS_ALL_TIME, NO_BASIS_CUSTOM_RANGE } from '@/lib/delta';
+import { windowRangeLabel } from '@/lib/metricSeries';
 
 /**
  * Вариант B (решение владельца): TG «Просмотры» = КАНАЛЬНЫЕ дневные просмотры из архива
@@ -220,5 +222,78 @@ describe('deriveKpis — axisLabels короткого окна', () => {
     expect(withPosts(0).reactionsSpark.axisLabels).toEqual(
       [6, 5, 3].map((ago) => fmt.weekday(utcDayAgo(ago))),
     );
+  });
+});
+
+
+/**
+ * R2 — ОСНОВАНИЕ ДЕЛЬТЫ. Пилюля печатала процент и молчала о базе; «пред. период» рядом с ней был
+ * словом без дат и без числа. Здесь пришпилено, что основание описывает ТУ ЖЕ арифметику, что и
+ * напечатанная дельта, — и молчит там, где описать её честно нельзя.
+ *
+ * Даты — ОТНОСИТЕЛЬНЫЕ от Date.now() (гейт check:clockdrift): deriveKpis режет окна по «сейчас»,
+ * и на литеральной фикстуре тест был бы зелёным ровно до следующего месяца.
+ */
+describe('deriveKpis — основание дельты', () => {
+  const DAY = 24 * 60 * 60 * 1000;
+  const now = Date.now();
+  const key = (offset: number) => new Date(now - offset * DAY).toISOString().slice(0, 10);
+  const iso = (offset: number) => new Date(now - offset * DAY).toISOString();
+  // Архив с ДЫРАМИ по краям окон: арифметическая граница назвала бы дни, которых в сумме нет.
+  const archiveOffsets = [1, 3, 5, 8, 10, 12];
+  const rows = archiveOffsets.map((o) => ({ day: key(o), views: 100, reactions: 10, forwards: 1, subscribers: 5000 - o }));
+  const posts = [1, 3, 9, 11, 20].map((o) => ({ date: iso(o), views: 200, reactions: 20, forwards: 2, replies: 0 }));
+  const derived = (days: 7 | 0, range: { from: number; to: number } | null = null) =>
+    deriveKpis(
+      { channel: { memberCount: 5000 }, posts } as never,
+      { rows } as never,
+      undefined,
+      null,
+      days,
+      range as never,
+      (d) => (d ? Date.parse(d) >= now - (days || 90) * DAY : false),
+    );
+
+  it('база потоковой метрики — РЕАЛЬНЫЕ крайние дни архива и их сумма', () => {
+    const d = derived(7);
+    expect(d.deltaBasis.views).toEqual({
+      label: windowRangeLabel({ from: key(12), to: key(8) }),
+      value: fmt.short(300),
+    });
+    // И это НЕ арифметические края окна — иначе подпись врала бы про непокрытые дни.
+    expect(d.deltaBasis.views?.label).not.toBe(windowRangeLabel({ from: now - 14 * DAY, to: now - 7 * DAY - 1 }));
+  });
+
+  it('база подписчиков — ОДИН день архива, а не диапазон: это уровень, а не поток', () => {
+    const d = derived(7);
+    expect(d.deltaBasis.subscribers).toEqual({ label: fmt.day(key(8)), value: fmt.num(5000 - 8) });
+  });
+
+  it('база среднего охвата живёт в окне ПОСТОВ — там же, где считается сама метрика', () => {
+    const d = derived(7);
+    expect(d.deltaBasis.avgReach?.label).toBe(windowRangeLabel({ from: now - 14 * DAY, to: now - 7 * DAY - 1 }));
+  });
+
+  /**
+   * Самая коварная из подписей. На канале с архивом пилюля ER мерит не ER, а дельту СУММЫ
+   * реакций и репостов. Подписать её базу голым числом значило бы выдать сумму взаимодействий
+   * за прошлый ER — поэтому она говорит, чем является.
+   */
+  it('база ER называет, ЧЕМ является её число — иначе сумму прочтут как прошлый процент', () => {
+    const d = derived(7);
+    expect(d.deltaBasis.er).toEqual({
+      label: windowRangeLabel({ from: key(12), to: key(8) }),
+      value: `${fmt.short(33)} реакций и репостов`,
+    });
+    // А готовая строка «п.п.» считается по ER — её база в процентах, и это ДРУГОЕ основание.
+    expect(d.captionBasis.er?.value).toMatch(/%$/);
+  });
+
+  it('свой период и «Всё» базы не имеют — и слот дельты объясняет, почему именно', () => {
+    expect(derived(0).noBasisReason).toBe(NO_BASIS_ALL_TIME);
+    const custom = derived(7, { from: now - 5 * DAY, to: now });
+    expect(custom.noBasisReason).toBe(NO_BASIS_CUSTOM_RANGE);
+    expect(custom.deltaBasis.avgReach).toBeNull();
+    expect(custom.captionBasis.er).toBeNull();
   });
 });

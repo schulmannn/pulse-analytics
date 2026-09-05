@@ -1,5 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
+import { NO_BASIS_ALL_TIME } from '@/lib/delta';
 import { CompactStatHeadline, StackedStat } from './CompareStat';
 
 /**
@@ -16,10 +17,20 @@ import { CompactStatHeadline, StackedStat } from './CompareStat';
 const text = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
 
 describe('CompactStatHeadline — слот дельты', () => {
-  it('нет прошлого окна → «— к пред.», а не пустота', () => {
-    const html = renderToStaticMarkup(<CompactStatHeadline text="12,4K" delta={null} live />);
-    // NBSP внутри — визуально одна лексема, поэтому сравниваем по нормализованному пробелу.
-    expect(text(html).replace(/ /g, ' ')).toContain('— к пред.');
+  /**
+   * ПЕРЕВЁРНУТ (R2). Раньше здесь пиналось «— к пред.» — и оно же было дефектом: слот ссылался на
+   * «пред.», которого читатель НИГДЕ не видел (ни дат, ни числа), а ведущее тире читалось как сбой
+   * загрузки. Контракт сменился: слот называет своё состояние словами и объясняет причину
+   * подсказкой. Само требование «слот не молчит никогда» (D9) осталось нетронутым.
+   */
+  it('нет прошлого окна → «нет базы» с причиной, а не отсылка к невидимому «пред.»', () => {
+    const html = renderToStaticMarkup(
+      <CompactStatHeadline text="12,4K" delta={null} noBasisReason={NO_BASIS_ALL_TIME} live />,
+    );
+    const flat = text(html).replace(/\u00a0/g, ' ');
+    expect(flat).toContain('нет базы');
+    expect(flat).not.toContain('к пред.');
+    expect(html).toContain(`title="${NO_BASIS_ALL_TIME}"`);
   });
 
   it('сравнили и без изменений → честный «0%», не молчание', () => {
@@ -80,5 +91,52 @@ describe('дельта ниже разрешения печати', () => {
   it('движение выше разрешения печатается как раньше', () => {
     const html = renderToStaticMarkup(<CompactStatHeadline text="12,4K" delta={{ pct: 0.06, dir: 'up' }} live />);
     expect(text(html)).toContain('↑0.1%');
+  });
+});
+
+
+/**
+ * R2 — ОСНОВАНИЕ ДЕЛЬТЫ ПО ХОВЕРУ. «↑12.3%» не проверить, не уходя со страницы: ни даты базы, ни
+ * её числа рядом не было. Основание встаёт подсказкой (`title`) и дублируется для читалки —
+ * `title` недоступен ни с клавиатуры, ни на тач.
+ */
+describe('CompactStatHeadline — основание дельты', () => {
+  const basis = { label: '29 июл. – 4 авг.', value: '9.9k' };
+
+  it('пилюля процента несёт «против …: …» и повторяет его для читалки', () => {
+    const html = renderToStaticMarkup(
+      <CompactStatHeadline text="12,4K" delta={{ pct: 12.3, dir: 'up' }} basis={basis} live />,
+    );
+    expect(html).toContain('title="против 29 июл. – 4 авг.: 9.9k"');
+    expect(html).toContain('sr-only');
+    expect(text(html)).toContain('↑12.3%');
+  });
+
+  it('готовая строка-дельта («п.п.», «+N») несёт то же основание — пилюли там нет', () => {
+    const html = renderToStaticMarkup(
+      <CompactStatHeadline text="28,9%" delta={{ pct: 8.3, dir: 'up' }} deltaText="+1,4 п.п." basis={basis} live />,
+    );
+    expect(html).toContain('title="против 29 июл. – 4 авг.: 9.9k"');
+    expect(text(html)).toContain('+1,4 п.п.');
+  });
+
+  it('без основания атрибута нет вовсе — пустой title читалка озвучивает как шум', () => {
+    const html = renderToStaticMarkup(
+      <CompactStatHeadline text="12,4K" delta={{ pct: 12.3, dir: 'up' }} live />,
+    );
+    expect(html).not.toContain('title=');
+    expect(html).not.toContain('sr-only');
+  });
+
+  it('рецепт слота ОДИН на все варианты — иначе подсказку пришлось бы вешать в каждый отдельно', () => {
+    const recipe = 'shrink-0 text-xs font-medium tabular-nums text-muted-foreground';
+    for (const html of [
+      renderToStaticMarkup(<CompactStatHeadline text="1" delta={{ pct: 5, dir: 'up' }} live />),
+      renderToStaticMarkup(<CompactStatHeadline text="1" delta={{ pct: 0, dir: 'flat' }} live />),
+      renderToStaticMarkup(<CompactStatHeadline text="1" delta={null} live />),
+      renderToStaticMarkup(<CompactStatHeadline text="1" delta={null} deltaText="+531" live />),
+    ]) {
+      expect(html).toContain(recipe);
+    }
   });
 });
