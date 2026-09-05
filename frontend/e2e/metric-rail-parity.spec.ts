@@ -69,3 +69,53 @@ test.describe('рейл «Сравнение»: одна анатомия у TG 
     expect(ig?.totalFontSize).toBe(tg?.totalFontSize);
   });
 });
+
+/**
+ * R3 — РЕЙЛ НАЗЫВАЕТ ДАТЫ ОБОИХ ОКОН И ТЕ ЖЕ МАРКЕРЫ, ЧТО ПОЛОТНО.
+ *
+ * Рейл печатал имя базы и её число («Пред. период — 9.9k»): даты окон не стояли нигде, кроме
+ * тултипа графика, — то есть узнать, какая неделя сравнивается с какой, можно было ТОЛЬКО наведя
+ * курсор на точку. Маркеры сверяются по классам, а не «на глаз»: рейл и легенда полотна обязаны
+ * рисовать один и тот же штрих, потому что это один компонент, — разойдясь, они соврут молча.
+ */
+// «5 июн. – 11 июн.» / «29 мая – 4 июн.»: сокращение месяца в ru-RU идёт с точкой, у мая её нет.
+const RANGE = /\d{1,2}\s[а-я]+\.?\s–\s\d{1,2}\s[а-я]+\.?/;
+
+test.describe('рейл «Сравнение»: обе серии с датами окон', () => {
+  test.beforeEach(async ({ browserName: _b }, testInfo) => {
+    test.skip(testInfo.project.name !== 'desktop-1440', 'Рейл разбора — desktop-раскладка');
+  });
+
+  for (const route of ['/metrics/views', '/metrics/ig-reach']) {
+    test(`${route}: две строки легенды с датами, маркеры совпадают с полотном`, async ({ page }) => {
+      await bootDemo(page, route);
+      const rail = page.locator('[data-rail-card="comparison"]');
+      await expect(rail).toBeVisible();
+
+      const rows = rail.locator('[data-series-role]');
+      await expect(rows).toHaveCount(2);
+      await expect(rail.locator('[data-series-role="primary"] [data-series-dates]')).toHaveText(RANGE);
+      await expect(rail.locator('[data-series-role="comparison"] [data-series-dates]')).toHaveText(RANGE);
+      // Окна разные — иначе подпись «сравнения» указывала бы на само себя.
+      const railDates = await rail.locator('[data-series-dates]').allInnerTexts();
+      expect(railDates[0]).not.toBe(railDates[1]);
+
+      // Маркер сравнения на странице — ОДИН рецепт: пунктир в легенде полотна и пунктир в рейле.
+      // Ровно два вхождения: если бы рейл рисовал свою копию классов, они бы разошлись молча.
+      const marks = page.locator('span[aria-hidden="true"][class*="border-dashed"]');
+      await expect(marks).toHaveCount(2);
+      const classes = await marks.evaluateAll((nodes) => nodes.map((n) => n.className));
+      expect(classes[0], `легенда полотна против рейла: ${JSON.stringify(classes)}`).toBe(classes[1]);
+      await expect(rail.locator('[data-series-role="comparison"] span[class*="border-dashed"]')).toHaveCount(1);
+    });
+  }
+
+  test('с выключенной базой легенды нет — на её месте подсказка', async ({ page }) => {
+    await bootDemo(page, '/metrics/views?cmp=off');
+    const rail = page.locator('[data-rail-card="comparison"]');
+    await expect(rail).toBeVisible();
+    await expect(rail.locator('[data-series-role]')).toHaveCount(0);
+    await expect(rail.getByText('Выберите базу')).toBeVisible();
+  });
+});
+

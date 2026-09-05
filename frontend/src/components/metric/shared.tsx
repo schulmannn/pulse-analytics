@@ -14,6 +14,7 @@ import { setMetricRailHidden, useMetricRailHidden } from '@/lib/metricRail';
 // Реэкспорт: правило дельты живёт в своём лёгком модуле (см. comparisonDelta), но все прежние
 // импорты `from '@/components/metric/shared'` продолжают работать.
 import { ComparisonDelta } from '@/components/metric/comparisonDelta';
+import { SeriesLegend } from '@/components/metric/seriesLegend';
 import { isPlainLeftClick, useViewTransitionNavigate } from '@/lib/viewTransitionNavigate';
 
 export { ComparisonDelta };
@@ -234,6 +235,52 @@ export function RailWindowTotal({ label, value }: { label: string; value: string
     <div>
       <div className="text-2xs tracking-wide text-muted-foreground">{label}</div>
       <KpiValue size="compact" text={value} className="mt-1 text-foreground" />
+    </div>
+  );
+}
+
+/**
+ * ЛЕГЕНДА СРАВНЕНИЯ В РЕЙЛЕ — «что с чем» одним взглядом (референс Square).
+ *
+ * Рейл печатал только имя базы и её число («прошлый период — 9.9k»): ДАТ обоих окон не было
+ * нигде, кроме тултипа графика, — то есть чтобы узнать, какая неделя сравнивается с какой,
+ * читатель обязан был навести курсор на точку. Границы при этом давно посчитаны (winFrom/winTo и
+ * comparisonWindow), они просто не доезжали до глаз.
+ *
+ * Маркеры берутся из ТОГО ЖЕ компонента, что рисует легенду над полотном: рейл и график не имеют
+ * права разойтись в том, каким штрихом нарисован «прошлый период». Подписи серий поэтому тоже
+ * чиповые («Пред. период»), а не прозаические («прошлый период»), — иначе один смысл звучит в
+ * двух регистрах на расстоянии 200px.
+ */
+export function RailComparison({
+  current,
+  comparison,
+  delta,
+  deltaFormat,
+  evaluative,
+  marker,
+}: {
+  /** Текущее окно: подпись серии как в легенде графика + диапазон дат + итог (уже через fmt.*). */
+  current: { label?: string; dates: string; value: string };
+  comparison: { label: string; dates: string; value: string };
+  delta?: number | null;
+  deltaFormat?: (abs: number) => string;
+  evaluative?: boolean;
+  /** Форма маркера = вид полотна страницы (столбцы рисуют свотчи, линия — штрих и пунктир).
+      `none` — где полотно призрак не рисует: маркер обещал бы серию, которой на графике нет. */
+  marker?: 'line' | 'bar' | 'none';
+}) {
+  return (
+    <div className="space-y-3">
+      <SeriesLegend
+        layout="rail"
+        marker={marker}
+        items={[
+          { role: 'primary', label: current.label ?? 'Текущий период', dates: current.dates, value: current.value },
+          { role: 'comparison', label: comparison.label, dates: comparison.dates, value: comparison.value },
+        ]}
+      />
+      {delta != null && <ComparisonDeltaRow delta={delta} format={deltaFormat} evaluative={evaluative} />}
     </div>
   );
 }

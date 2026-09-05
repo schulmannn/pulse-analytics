@@ -36,7 +36,7 @@ import { PostDetailModal } from '@/components/PostDetailModal';
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { CHART_MAX_POINTS, lttbDownsample } from '@/lib/downsample';
-import { DAY_MS, alignGhost, baselineCoveredByPosts, bucketKeyOf, bucketKeysInWindow, comparisonWindow } from '@/lib/metricSeries';
+import { DAY_MS, alignGhost, baselineCoveredByPosts, bucketKeyOf, bucketKeysInWindow, comparisonWindow, windowRangeLabel } from '@/lib/metricSeries';
 import type { Grain } from '@/lib/metricSeries';
 import { pickIndexes } from '@/lib/msSeries';
 import { useExplorerChartHeight } from '@/lib/useExplorerChartHeight';
@@ -45,7 +45,7 @@ import { MediaThumb } from '@/components/MediaThumb';
 
 import { MetricRailToggle } from '@/components/metric/shared';
 import { useMetricRailHidden } from '@/lib/metricRail';
-import { ComparisonDeltaRow, MetricBackLink, MetricDescriptor, RailSection, RailWindowTotal } from '@/components/metric/shared';
+import { MetricBackLink, MetricDescriptor, RailComparison, RailSection, RailWindowTotal } from '@/components/metric/shared';
 
 /** Короткий день недели для тултипов дневной гранулы («чт, 2 июл») — артефакт v2. */
 const WEEKDAY_FMT = new Intl.DateTimeFormat('ru-RU', { weekday: 'short' });
@@ -1259,16 +1259,19 @@ export function MetricPage() {
                 />
                 {cmp === 'off' ? (
                   <p className="text-xs text-muted-foreground">Выберите базу — серия сравнения, пары в рейтинге и Δ появятся автоматически.</p>
-                ) : compare ? (
-                  <div className="space-y-3">
-                    {/* Значение базы — вторичный вес; Δ — общая строка «Изменение» (одна на все
-                        вертикали): цветной ТЕКСТ без заливки, направление в глифе. */}
-                    <div className="flex items-baseline justify-between gap-3">
-                      <span className="text-xs text-muted-foreground">{cmpLabel}</span>
-                      <span className="text-base font-medium tabular-nums text-ink2">{compare.previous}</span>
-                    </div>
-                    {compareDelta != null && <ComparisonDeltaRow delta={compareDelta} />}
-                  </div>
+                ) : compare && baseWin ? (
+                  /* Обе серии названы ОДНОЙ легендой с графиком — с маркером и датами окна:
+                     без дат «Пред. период» не отвечал, какая неделя сравнивается с какой. */
+                  <RailComparison
+                    marker={chartType === 'bar' ? 'bar' : 'line'}
+                    current={{ dates: windowRangeLabel({ from: winFrom, to: winTo }), value: meta.total }}
+                    comparison={{
+                      label: CMP_CHIP[cmp],
+                      dates: windowRangeLabel(baseWin),
+                      value: compare.previous,
+                    }}
+                    delta={compareDelta}
+                  />
                 ) : (
                   <p className="text-xs text-muted-foreground">
                     В загруженных постах недостаточно данных за {cmpLabel} — сравнить не с чем.

@@ -121,6 +121,10 @@ export interface MentionsTimeline {
   titles: string[];
   /** ISO-дни точек текущего окна (нужны недельным корзинам capMentionsTimeline). */
   days: string[];
+  /** ISO-дни БАЗОВОГО окна — ровно те, из которых собран ghost. Легенда рейла подписывает
+      сравниваемый диапазон, и вычислять его повторно на странице значило бы завести второе
+      правило выравнивания базы: разъехавшись, они солгут, а не упадут. */
+  ghostDays?: string[];
   /** Потенциальные просмотры по дням — той же длины, что values (кормят недельные тултипы). */
   views: number[];
 }
@@ -180,6 +184,7 @@ export function buildMentionsTimeline(
         return `${fmt.day(d)}: ${fmt.num(c?.mentions ?? 0)} упом · ${fmt.short(c?.views ?? 0)} просм`;
       }),
       days: curDays,
+      ghostDays: prevDays,
       views: curDays.map((d) => curMap.get(d)?.views ?? 0),
     };
   }
@@ -215,6 +220,7 @@ export function buildMentionsTimeline(
       return `${fmt.day(d)}: ${fmt.num(c?.mentions ?? 0)} упом · ${fmt.short(c?.views ?? 0)} просм`;
     }),
     days: curDays,
+    ghostDays: prevDays,
     views: curDays.map((d) => curMap.get(d)?.views ?? 0),
   };
 }

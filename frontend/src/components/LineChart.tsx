@@ -10,6 +10,7 @@ import { detectAnomalies } from '@/lib/anomaly';
 import { nearestPointIndex } from '@/lib/chartHover';
 import { axisLabelIndexes } from '@/lib/chartLabels';
 import { ChartTooltip, type TooltipRow, type TooltipState } from '@/components/ChartTooltip';
+import { SeriesLegend } from '@/components/metric/seriesLegend';
 import { ChartExpandedContext, ChartRefLinesContext, ExpandedChartHeightContext, WidgetTargetContext } from '@/components/ExpandableChart';
 import { clampTargetToDomain, targetTooltipRow } from '@/lib/targetDomain';
 import { observeSize } from '@/lib/observeSize';
@@ -935,32 +936,15 @@ export function LineChart({
           Чипы одинаковы во ВСЕХ appearance и повторяют язык линий: сплошной штрих — текущий период,
           пунктир — сравнение (квадрат-заливка врал бы про несуществующую area прошлого периода). */}
       {ghost && ghost.length >= 2 && (
-        <div className="mb-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-2xs font-medium text-muted-foreground">
-          <span className="flex select-none items-center gap-1.5">
-            <span aria-hidden="true" className="h-0.5 w-4 rounded-full" style={{ backgroundColor: 'hsl(var(--chart-role-primary))' }} />
-            {primaryLabel ?? 'Текущий период'}
-          </span>
-          {legendToggle ? (
-            <button
-              type="button"
-              aria-pressed={!ghostHidden}
-              onClick={() => setGhostHidden((v) => !v)}
-              title={ghostHidden ? 'Показать сравнение' : 'Скрыть сравнение'}
-              className={`flex select-none items-center gap-1.5 rounded transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40 ${ghostHidden ? 'opacity-40 line-through' : ''}`}
-            >
-              <span aria-hidden="true" className="w-4 border-t-2 border-dashed" style={{ borderColor: 'hsl(var(--chart-role-comparison))' }} />
-              {ghostLabel}
-            </button>
-          ) : (
-            // Выключенное сравнение НЕ уносит чип из потока: место остаётся за ним, иначе строка
-            // легенды пропадает целиком и всё, что под графиком, дёргается вверх. Но и утверждать
-            // «пред. период» он не должен — поэтому становится невидим, а не приглушён.
-            <span className={`flex select-none items-center gap-1.5${ghostVisible ? '' : ' invisible'}`} aria-hidden={!ghostVisible}>
-              <span aria-hidden="true" className="w-4 border-t-2 border-dashed" style={{ borderColor: 'hsl(var(--chart-role-comparison))' }} />
-              {ghostLabel}
-            </span>
-          )}
-        </div>
+        <SeriesLegend
+          layout="chart"
+          items={[
+            { role: 'primary', label: primaryLabel ?? 'Текущий период' },
+            { role: 'comparison', label: ghostLabel, hidden: !ghostVisible },
+          ]}
+          onToggleComparison={legendToggle ? () => setGhostHidden((v) => !v) : undefined}
+          comparisonPressed={!ghostHidden}
+        />
       )}
       <div ref={containerRef} className="relative w-full">
       <svg

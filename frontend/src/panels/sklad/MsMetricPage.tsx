@@ -26,7 +26,8 @@ import {
   normalizeMsChannelFilter,
   sameMsChannelFilter,
 } from '@/lib/msChannelFilter';
-import { msPreviousPeriod, useMsResolvedPeriod, type MsPeriod } from '@/lib/msPeriod';
+import { msPeriodBounds, msPreviousPeriod, useMsResolvedPeriod, type MsPeriod } from '@/lib/msPeriod';
+import { windowRangeLabel } from '@/lib/metricSeries';
 import { metricTotal, type Grain, type Metric } from '@/lib/msSeries';
 import { customerMetricTotal, type MsCustomerMetric } from '@/lib/msCustomerSeries';
 import type { MsChannelContributionMetric } from '@/lib/msChannelContribution';
@@ -75,7 +76,7 @@ import {
 } from '@/panels/sklad/MsTopProducts';
 import { MsStockTable, STOCK_SORT_OPTIONS, type MsStockSort } from '@/panels/sklad/MsStock';
 import { isMsMetricKey } from '@/panels/sklad/msMetricKeys';
-import { ComparisonDeltaRow, MetricColumns, MetricDescriptor, WindowBarShell, RailSection, MetricPageHeader} from '@/components/metric/shared';
+import { MetricColumns, MetricDescriptor, WindowBarShell, RailComparison, RailSection, MetricPageHeader} from '@/components/metric/shared';
 
 /**
  * Полностраничные метрики МойСклада — `/metrics/ms-*`. Каждая раскрываемая карточка Обзора/Клиентов/
@@ -284,7 +285,7 @@ function MsMetricShell({
         rail={
           <>
             {tools && <div className="hidden lg:block">{tools}</div>}
-            <RailSection title="Сравнение">
+            <RailSection title="Сравнение" mark="comparison">
               {comparison ?? (
                 <p className="text-xs leading-relaxed text-muted-foreground">
                   Для этого отчёта нет одной канонической метрики периода — сравнение не рассчитывается.
@@ -365,26 +366,35 @@ function ComparisonReadout({
   current,
   previous,
   format,
+  period,
   previousPeriod,
   pending = false,
   error = false,
   label = 'Текущее окно',
   mode,
   onMode,
+  marker = 'none',
 }: {
   current: number | null;
   previous: number | null;
   format: (value: number) => string;
+  /** Текущее окно — ради ДАТ в легенде; границы берутся из того же резолвера, что и запрос. */
+  period: MsPeriod;
   previousPeriod: MsPeriod | null;
   pending?: boolean;
   error?: boolean;
   label?: string;
   mode: 'off' | 'prev';
   onMode: (mode: 'off' | 'prev') => void;
+  /** Маркер серии — ТОЛЬКО там, где полотно реально рисует призрак прошлого окна. У разрезов,
+      воронки и таблиц второй серии нет, и штрих обещал бы линию, которой на графике не существует. */
+  marker?: 'line' | 'bar' | 'none';
 }) {
   const delta = current != null && previous != null && previous !== 0
     ? ((current - previous) / Math.abs(previous)) * 100
     : null;
+  const curBounds = msPeriodBounds(period);
+  const prevBounds = previousPeriod ? msPeriodBounds(previousPeriod) : null;
   return (
     <div className="space-y-3">
       <div className="flex items-baseline justify-between gap-3">
@@ -412,13 +422,18 @@ function ComparisonReadout({
       ) : error ? (
         <p className="text-xs text-muted-foreground">Не удалось получить предыдущий период.</p>
       ) : (
-        <div className="space-y-2 text-sm">
-          <div className="flex items-baseline justify-between gap-3">
-            <span className="text-xs text-muted-foreground">Пред. период</span>
-            <span className="tabular-nums">{previous == null ? '—' : format(previous)}</span>
-          </div>
-          {delta != null && <ComparisonDeltaRow delta={delta} />}
-        </div>
+        /* Обе строки — одной анатомией со всеми вертикалями: подпись, ДАТЫ окна и итог справа.
+           Без дат «Пред. период» не отвечал, какое окно сравнивается с каким. */
+        <RailComparison
+          marker={marker}
+          current={{ label, dates: curBounds ? windowRangeLabel(curBounds) : '', value: current == null ? '—' : format(current) }}
+          comparison={{
+            label: 'Пред. период',
+            dates: prevBounds ? windowRangeLabel(prevBounds) : '',
+            value: previous == null ? '—' : format(previous),
+          }}
+          delta={delta}
+        />
       )}
     </div>
   );
@@ -508,6 +523,10 @@ function MsSummaryPage({
       descriptor={descriptor}
       comparison={
         <ComparisonReadout
+          period={window.period}
+          // Единственная страница МойСклада, где полотно РИСУЕТ призрак прошлого окна
+          // (MsSummaryExplorer): только здесь маркер легенды не обещает лишнего.
+          marker={kind}
           current={valueOf(current.data)}
           previous={comparisonPeriod ? valueOf(previous.data) : null}
           format={format}
@@ -577,6 +596,7 @@ function MsCustomerPage({
       descriptor={descriptor}
       comparison={
         <ComparisonReadout
+          period={window.period}
           current={valueOf(current.data)}
           previous={comparisonPeriod ? valueOf(previous.data) : null}
           format={format}
@@ -705,6 +725,7 @@ function MsChannelsPage() {
       tools={filterEditor}
       comparison={
         <ComparisonReadout
+          period={window.period}
           current={valueOf(currentSeries.data)}
           previous={comparisonPeriod ? valueOf(previousSeries.data) : null}
           format={format}
@@ -932,6 +953,7 @@ function MsFunnelPage() {
       descriptor="Заказы, созданные в выбранном окне, по последнему сохранённому статусу"
       comparison={
         <ComparisonReadout
+          period={window.period}
           current={valueOf(funnel.data)}
           previous={comparisonPeriod ? valueOf(previous.data) : null}
           format={format}
@@ -1089,6 +1111,7 @@ function MsReturnsPage() {
       descriptor="Возвраты МойСклада за выбранное окно"
       comparison={
         <ComparisonReadout
+          period={window.period}
           current={valueOf(current.data)}
           previous={comparisonPeriod ? valueOf(previous.data) : null}
           format={format}
@@ -1156,6 +1179,7 @@ function MsSalesChannelsPage() {
       descriptor="Доля каждого канала и его абсолютный вклад в изменение выручки или заказов"
       comparison={
         <ComparisonReadout
+          period={window.period}
           current={totalOf(channels.data)}
           previous={comparisonPeriod ? totalOf(previous.data) : null}
           format={format}
@@ -1240,6 +1264,7 @@ function MsGeographyPage() {
       descriptor="Города доставки за выбранное окно"
       comparison={
         <ComparisonReadout
+          period={window.period}
           current={geo.data?.total_orders ?? null}
           previous={comparisonPeriod ? (previous.data?.total_orders ?? null) : null}
           format={fmt.num}
@@ -1291,6 +1316,7 @@ function MsTopCustomersPage() {
       descriptor="Контрагенты окна по сумме заказов"
       comparison={
         <ComparisonReadout
+          period={window.period}
           current={sumOf(topCustomers.data)}
           previous={comparisonPeriod ? sumOf(previous.data) : null}
           format={(value) => `${formatMoney(value, 'axis')}`}
@@ -1328,6 +1354,7 @@ function MsRfmPage() {
       descriptor="Относительная ценность и активность покупателей выбранного окна"
       comparison={
         <ComparisonReadout
+          period={window.period}
           current={rfm.data?.customers ?? null}
           previous={comparisonPeriod ? (previous.data?.customers ?? null) : null}
           format={(value) => `${fmt.num(value)} ${value === 1 ? 'покупатель' : 'покупателей'}`}

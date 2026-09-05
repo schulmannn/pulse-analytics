@@ -26,7 +26,8 @@ import { useMsResolvedPeriod, type MsPeriod } from '@/lib/msPeriod';
 import { useYmGoals, useYmHourly, useYmSummary } from '@/api/ym';
 import { YM_BREAKDOWN_BY_KEY, type YmBreakdownDef } from '@/panels/metrika/ymBreakdowns';
 import { isYmMetricKey } from '@/panels/metrika/ymMetricKeys';
-import { ComparisonDeltaRow, MetricColumns, MetricDescriptor, WindowBarShell, RailSection, MetricPageHeader} from '@/components/metric/shared';
+import { MetricColumns, MetricDescriptor, WindowBarShell, RailComparison, RailSection, MetricPageHeader} from '@/components/metric/shared';
+import { dayRangeOf, windowRangeLabel } from '@/lib/metricSeries';
 
 /**
  * Полностраничные метрики «Яндекс.Метрики» — `/metrics/ym-*`. Каждая карточка Обзора /metrika ведёт
@@ -278,14 +279,23 @@ function YmSeriesPage({ def }: { def: YmSeriesDef }) {
   // деградируем без выдуманного baseline). «Пред. период» — равный срез прямо перед окном;
   // «Год назад» — те же календарные даты годом раньше (по дате, не индексу — в архиве возможны дыры).
   let ghostVals: number[] = [];
+  // Границы базы — РЕАЛЬНЫЕ дни архива, а не арифметика от окна: в ym_daily возможны дыры, и
+  // подписать легенду вычисленным диапазоном значило бы соврать точнее прежнего молчания.
+  let ghostDays: { from: string; to: string } | null = null;
   if (cmp === 'prev' && days > 0 && seriesFull.length >= 2 * n) {
-    ghostVals = seriesFull.slice(-(2 * n), -n).map((p) => p.value);
+    const base = seriesFull.slice(-(2 * n), -n);
+    ghostVals = base.map((p) => p.value);
+    ghostDays = dayRangeOf(base.map((p) => p.day));
   } else if (cmp === 'year' && days > 0) {
     const byDay = new Map(seriesFull.map((p) => [p.day, p.value]));
     const shifted = winPoints.map((p) => byDay.get(shiftYearBack(p.day)));
-    if (shifted.every((v): v is number => v != null)) ghostVals = shifted;
+    if (shifted.every((v): v is number => v != null)) {
+      ghostVals = shifted;
+      ghostDays = dayRangeOf(winPoints.map((p) => shiftYearBack(p.day)));
+    }
   }
   const ghostOk = cmp !== 'off' && days > 0 && n > 1 && ghostVals.length === n;
+  const winDays = dayRangeOf(winPoints.map((p) => p.day));
   const cmpLabel = cmp === 'year' ? 'Год назад' : 'Пред. период';
 
   // Длинный архив («Всё») даунсэмплим до ~140 точек перед рендером (канон графиков); окна 7/30/90
@@ -339,14 +349,19 @@ function YmSeriesPage({ def }: { def: YmSeriesDef }) {
             <p className="text-xs text-muted-foreground">Выберите базу — пунктир прошлого окна ляжет на график.</p>
           ) : days === 0 ? (
             <p className="text-xs text-muted-foreground">Для окна «Всё» прошлого периода не существует.</p>
-          ) : ghostOk ? (
-            <div className="space-y-2 text-sm">
-              <div className="flex items-baseline justify-between gap-3">
-                <span className="text-xs text-muted-foreground">{cmpLabel}</span>
-                <span className="tabular-nums">{sumPrev != null ? fmt.kpi(sumPrev) : '—'}</span>
-              </div>
-              {compareDelta != null && <ComparisonDeltaRow delta={compareDelta} />}
-            </div>
+          ) : ghostOk && winDays && ghostDays ? (
+            /* Та же легенда, что над полотном: маркер + даты окна + итог. Без дат «Пред. период»
+               не отвечал, какие именно дни архива легли в базу. */
+            <RailComparison
+              marker={kind === 'bar' ? 'bar' : 'line'}
+              current={{ dates: windowRangeLabel(winDays), value: fmt.kpi(sumCur) }}
+              comparison={{
+                label: cmpLabel,
+                dates: windowRangeLabel(ghostDays),
+                value: sumPrev != null ? fmt.kpi(sumPrev) : '—',
+              }}
+              delta={compareDelta}
+            />
           ) : cmp === 'year' ? (
             <p className="text-xs text-muted-foreground">
               Архив ym_daily пока не достаёт до прошлого года — история копится, сравнение включится само.
