@@ -553,7 +553,7 @@ function CdekSeriesPage({ def, metricKey }: { def: SeriesDef; metricKey: SeriesK
            X» не называла ни дат базы, ни того, каким штрихом она нарисована на графике. */
         <RailComparison
           marker={kind === 'bar' ? 'bar' : 'line'}
-          current={{ label: 'Текущее окно', dates: windowRangeLabel(windowPair.current), value: cur != null ? def.format(cur) : '—' }}
+          current={{ dates: windowRangeLabel(windowPair.current), value: cur != null ? def.format(cur) : '—' }}
           comparison={{ label: 'Пред. период', dates: windowRangeLabel(windowPair.previous), value: def.format(prev) }}
           delta={cur != null && prev !== 0 ? ((cur - prev) / prev) * 100 : null}
           evaluative

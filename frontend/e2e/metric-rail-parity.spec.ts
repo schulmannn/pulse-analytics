@@ -100,6 +100,13 @@ test.describe('рейл «Сравнение»: обе серии с датам�
       const railDates = await rail.locator('[data-series-dates]').allInnerTexts();
       expect(railDates[0]).not.toBe(railDates[1]);
 
+      // ИМЯ СЕРИИ ЗВУЧИТ В РЕЙЛЕ РОВНО ОДИН РАЗ. Пока подпись текущей серии приходила от
+      // страницы, она совпадала с заголовком итога окна над ней, и в колонке 300px два разных
+      // смысла звучали одними словами: `getByText('Текущий период')` находил два узла и валил
+      // strict mode (interactions.spec на TG, ms-returns на «Числе возвратов»). Окно называет
+      // заголовок, серию — легенда, и путать их нельзя.
+      await expect(rail.getByText('Текущий период', { exact: true })).toHaveCount(1);
+
       // Маркер сравнения на странице — ОДИН рецепт: пунктир в легенде полотна и пунктир в рейле.
       // Ровно два вхождения: если бы рейл рисовал свою копию классов, они бы разошлись молча.
       const marks = page.locator('span[aria-hidden="true"][class*="border-dashed"]');

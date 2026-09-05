@@ -228,7 +228,6 @@ function MentionsTimelinePage() {
                 <RailComparison
                   marker={kind === 'bar' ? 'bar' : 'line'}
                   current={{
-                    label: 'Текущий период',
                     dates: currentRange ? windowRangeLabel(currentRange) : '',
                     value: fmt.num(currentTotal),
                   }}

@@ -426,7 +426,7 @@ function ComparisonReadout({
            Без дат «Пред. период» не отвечал, какое окно сравнивается с каким. */
         <RailComparison
           marker={marker}
-          current={{ label, dates: curBounds ? windowRangeLabel(curBounds) : '', value: current == null ? '—' : format(current) }}
+          current={{ dates: curBounds ? windowRangeLabel(curBounds) : '', value: current == null ? '—' : format(current) }}
           comparison={{
             label: 'Пред. период',
             dates: prevBounds ? windowRangeLabel(prevBounds) : '',

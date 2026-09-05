@@ -260,8 +260,12 @@ export function RailComparison({
   evaluative,
   marker,
 }: {
-  /** Текущее окно: подпись серии как в легенде графика + диапазон дат + итог (уже через fmt.*). */
-  current: { label?: string; dates: string; value: string };
+  /** Текущее окно: диапазон дат + итог (уже через fmt.*). ПОДПИСИ ЗДЕСЬ НЕТ НАМЕРЕННО — легенда
+      называет СЕРИЮ («Текущий период», дословно как над полотном), а окно называет заголовок
+      рейла выше. Пока подпись приходила от страницы, обе строки говорили одними словами, и в
+      колонке 300px их нечем было различить — strict-mode e2e поймал это дважды (TG и возвраты
+      МойСклада: `getByText(...)` находил два узла). */
+  current: { dates: string; value: string };
   comparison: { label: string; dates: string; value: string };
   delta?: number | null;
   deltaFormat?: (abs: number) => string;
@@ -276,7 +280,7 @@ export function RailComparison({
         layout="rail"
         marker={marker}
         items={[
-          { role: 'primary', label: current.label ?? 'Текущий период', dates: current.dates, value: current.value },
+          { role: 'primary', label: 'Текущий период', dates: current.dates, value: current.value },
           { role: 'comparison', label: comparison.label, dates: comparison.dates, value: comparison.value },
         ]}
       />
