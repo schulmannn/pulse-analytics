@@ -159,17 +159,26 @@ function nextStep(step: number): number {
 /**
  * Nice y-scale: snap the domain outward to 1/2/5×10ⁿ tick steps so gridlines land on round
  * values and never format into duplicate labels («4.9k / 4.9k / 4.8k»), capped at 5 ticks.
+ *
+ * ПОТОЛОК ДОМЕНА И ВЕРХНЯЯ ЛИНЕЙКА СЕТКИ — РАЗНЫЕ ВЕЛИЧИНЫ. Линейки стоят на круглых значениях;
+ * потолок стоит НАД пиком, и совпадать с линейкой он не обязан.
+ *
+ * Первая попытка (#585) раздувала ВХОД на 8 % до выбора шага — и это ломало круглые максимумы.
+ * Замер: `niceScale(0, 100)` отдавала hi 150 при шаге 50, то есть ряд с максимумом 100 занимал
+ * две трети высоты, а «Доля топ-N» товаров рисовалась на оси 0…150 % с тиком «150.0 %»
+ * (аудит #554, проход №2, N9). Причина механическая: запас переводил домен в следующую скобку
+ * лестницы шагов, и округление вверх добавляло уже не 8 %, а половину шага.
+ *
+ * @param declaredCeiling — потолок ЗАЯВЛЕН вызывающим (`yMax`), а не выведен из данных. Тогда
+ *   запас не нужен вовсе: заявленный максимум — это уже рамка, а не точка ряда, которой нужен
+ *   воздух над головой. Проценты (`yMax={100}`) обязаны рисоваться ровно до 100.
  */
-export function niceScale(minV: number, maxV: number): { lo: number; hi: number; step: number; ticks: number[] } {
-  // ПИК НЕ КАСАЕТСЯ ПОТОЛКА (аудит #554). Когда максимум кратен шагу, `ceil` ниже отдавал
-  // hi === maxV: вершина линии ложилась РОВНО на верхнюю линейку сетки и сливалась с ней (видно на
-  // /metrics/ig-follows): глазу нечем отличить «дошло до максимума окна» от «упёрлось в край графика».
-  //
-  // Запас добавляется К ВХОДУ, а не к готовому потолку: иначе лишний шаг ломает потолок числа
-  // делений (цикл «> 4.5 шагов» ниже), и вместо четырёх линеек сетки получается шесть. Округление
-  // вверх само подберёт честный потолок выше пика.
-  const pad = Math.abs(maxV - minV) || Math.abs(maxV) || 1;
-  maxV += pad * SCALE_HEADROOM;
+export function niceScale(
+  minV: number,
+  maxV: number,
+  declaredCeiling = false,
+): { lo: number; hi: number; step: number; ticks: number[] } {
+  const peak = maxV;
   let span = maxV - minV;
   if (!Number.isFinite(span) || span <= 0) span = Math.abs(maxV) || 1;
   const mag0 = 10 ** Math.floor(Math.log10(Math.max(span / 2.5, 1e-9)));
@@ -185,6 +194,12 @@ export function niceScale(minV: number, maxV: number): { lo: number; hi: number;
   if (hi === lo) hi = lo + step;
   const ticks: number[] = [];
   for (let t = hi; t >= lo - step / 2; t -= step) ticks.push(t);
+  // Линейки сетки уже посчитаны — запас поднимает ТОЛЬКО потолок домена. Пик остаётся на своей
+  // круглой линейке (она же и подписывает его значение), но между ним и рамкой появляется воздух:
+  // именно его отсутствие и мешало отличить «дошло до максимума окна» от «упёрлось в край».
+  // Число линеек при этом не меняется — их посчитали до подъёма.
+  const clearance = (hi - lo) * SCALE_HEADROOM;
+  if (!declaredCeiling && hi - peak < clearance) hi = peak + clearance;
   return { lo, hi, step, ticks };
 }
 
@@ -383,7 +398,7 @@ export function LineChart({
     const computedMax = Math.max(...scaleVals);
     // The caller's yMin/yMax (e.g. a zero base for volume metrics) defines the domain; the nice
     // scale then only expands it outward to round tick values, never clips.
-    const scale = niceScale(yMin ?? computedMin, yMax ?? computedMax);
+    const scale = niceScale(yMin ?? computedMin, yMax ?? computedMax, yMax != null);
     const min = scale.lo;
     const max = scale.hi;
     const range = max - min || 1;
@@ -516,7 +531,11 @@ export function LineChart({
       if (!markExtremes) return [];
       // Max и «последнее» — только по реальным точкам: подписывать дыру нечем.
       let maxE = real[0];
-      for (const r of real) if (r.v > maxE.v) maxE = r;
+      // `>=`, а не `>`: при равных максимумах берём ПОСЛЕДНИЙ. Иначе, когда хвост ряда повторяет
+      // ранний пик, рядом печатались две подписи с одним и тем же числом («6.9k 6.9k» на
+      // /metrics/ig-reach) — разведённые по x, а потому не пойманные дедупом ниже. Последняя точка,
+      // делящая максимум, и есть максимум: две подписи об одном значении не несут информации.
+      for (const r of real) if (r.v >= maxE.v) maxE = r;
       const idxs = maxE.i === lastReal.i ? [lastReal] : [maxE, lastReal];
       const laidOut = idxs.map((e) => {
         const px = points[e.i].x;
