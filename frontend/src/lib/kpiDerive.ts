@@ -144,7 +144,7 @@ export function deriveKpis(
   // views_graph): честные «просмотры канала за период». Пост-сумма (`totalViews`) меряет УЖЕ —
   // только просмотры постов, ОПУБЛИКОВАННЫХ в окне — и расходится в разы (на проде 10.8k vs 1.8k);
   // она остаётся базой для avg-reach-на-пост ниже и фолбэком, когда архива нет (без БД / малый
-  // канал без stats / day 1). Тренд уже канальный (dailyWindowDelta по historyRows.views).
+  // канал без stats / day 1). Тренд уже канальный (viewsPair по historyRows.views).
   const viewsArchiveRows = historyRows
     .filter((r) => r.views != null && inRange(r.day))
     .sort((a, b) => a.day.localeCompare(b.day));
