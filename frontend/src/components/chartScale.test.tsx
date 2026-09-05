@@ -25,20 +25,44 @@ describe('niceScale: запас над пиком', () => {
     expect(hi).toBeGreaterThan(10);
   });
 
-  it('потолок остаётся круглым числом, кратным шагу', () => {
+  it('круглые — ЛИНЕЙКИ сетки; потолок домена стоит над ними', () => {
+    // Раньше здесь проверялось, что кратен шагу сам hi. Это и был источник N9: требование
+    // «потолок = линейка» при потолке в 4.5 шага не оставляет места для маленького запаса —
+    // ближайшая линейка выше круглого максимума отстоит на ПОЛШАГА. Круглыми обязаны быть
+    // линейки (иначе подписи оси дают «4.9k / 4.9k»), а потолок — только выше пика.
     for (const max of [10, 145, 1000, 4950, 120_000]) {
-      const { hi, lo, step } = niceScale(0, max);
+      const { hi, lo, step, ticks } = niceScale(0, max);
       expect(hi).toBeGreaterThan(max);
-      expect(Math.abs(hi / step - Math.round(hi / step))).toBeLessThan(1e-9);
+      for (const t of ticks) expect(Math.abs(t / step - Math.round(t / step))).toBeLessThan(1e-9);
       expect(lo).toBe(0);
     }
   });
 
   it('делений по-прежнему не больше пяти: запас не плодит линейки сетки', () => {
     for (const max of [10, 145, 1000, 4950, 120_000]) {
-      const { hi, lo, step } = niceScale(0, max);
-      expect((hi - lo) / step).toBeLessThanOrEqual(4.5);
+      // Считаем ЛИНЕЙКИ, а не (hi−lo)/step: потолок домена теперь стоит НАД последней линейкой,
+      // и отношение перестало быть их числом. Смысл проверки прежний — сетка не густеет.
+      const { ticks } = niceScale(0, max);
+      expect(ticks.length).toBeLessThanOrEqual(5);
     }
+  });
+
+  it('запас не выкидывает пик на две трети высоты (N9)', () => {
+    // Круглый максимум — самый частый случай у процентов и счётчиков. Раньше запас добавлялся ДО
+    // выбора шага, переводил домен в следующую скобку лестницы, и hi прыгал с 100 на 150.
+    for (const max of [10, 100, 1000, 10_000]) {
+      const { hi } = niceScale(0, max);
+      expect(hi).toBeGreaterThan(max);
+      expect(hi).toBeLessThanOrEqual(max * 1.12);
+    }
+  });
+
+  it('заявленный потолок (yMax) — это рамка, а не точка ряда', () => {
+    // «Доля топ-N» товаров приходит с yMax=100 и обязана рисоваться ровно до 100 %.
+    const { hi, lo, ticks } = niceScale(0, 100, true);
+    expect(hi).toBe(100);
+    expect(lo).toBe(0);
+    expect(ticks[0]).toBe(100);
   });
 });
 
