@@ -6,7 +6,7 @@ import { BarChart } from '@/components/BarChart';
 import { ChartBand } from '@/components/ChartBand';
 import { Sparkline } from '@/components/Sparkline';
 import { EmptyState } from '@/components/EmptyState';
-import { ErrorState } from '@/components/ErrorState';
+import { RusenderErrorState } from '@/panels/rusender/RusenderErrorState';
 import { ChartSkeleton } from '@/components/ui/dataSkeleton';
 import { useRusenderStatus, useRusenderSummary, type RusenderPoint } from '@/api/rusender';
 import { useSelectedChannel } from '@/lib/channel-context';
@@ -178,7 +178,7 @@ export function RusenderOverview() {
     );
   }
 
-  if (summary.isError) return <ErrorState onRetry={() => void summary.refetch()} />;
+  if (summary.isError) return <RusenderErrorState query={summary} />;
 
   const data = summary.data;
   const ev = data?.events;

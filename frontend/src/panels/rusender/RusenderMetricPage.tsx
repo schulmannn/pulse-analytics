@@ -7,7 +7,7 @@ import { BarChart } from '@/components/BarChart';
 import { PeriodChips } from '@/components/PeriodChips';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { SourceIdentity } from '@/components/SourceIdentity';
-import { ErrorState } from '@/components/ErrorState';
+import { RusenderErrorState } from '@/panels/rusender/RusenderErrorState';
 import { ChartSkeleton } from '@/components/ui/dataSkeleton';
 import {
   MetricColumns,
@@ -151,7 +151,7 @@ export function RusenderMetricPage({ metricKey }: { metricKey: RusenderMetricKey
   // бы ТЕКУЩИЙ кэш — дельта вышла бы нулевой. Читаем только когда предыдущее окно существует.
   const prevData = prevWindow != null ? previous.data : undefined;
 
-  if (summary.isError) return <ErrorState onRetry={() => void summary.refetch()} />;
+  if (summary.isError) return <RusenderErrorState query={summary} />;
 
   const series: RusenderPoint[] = summary.data?.series ?? [];
   const points = series.map((p) => def.pick(p));
