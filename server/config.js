@@ -62,6 +62,13 @@ function loadConfig(env = process.env) {
       // Валидируется как целое в 1..1000 (validateConfig): оператор может уменьшить дефолт, но не
       // отключить ограничение памяти гигантской страницей.
       gdprExportPageSize: Number(env.GDPR_EXPORT_PAGE_SIZE || 1000),
+      // Экспорт держит коннект ОСНОВНОГО пула на всё время стрима (server.timeout = 0), поэтому
+      // два потолка: сколько ждём, пока клиент заберёт очередной кусок ответа ('drain'), прежде
+      // чем разорвать выгрузку и вернуть коннект (щедро: медленный, но живой клиент успевает), и
+      // сколько выгрузок идёт одновременно — сверх лимита роут отвечает 503 + Retry-After. Иначе
+      // несколько непрочитываемых выгрузок съедали весь пул и вставал весь API.
+      gdprExportDrainTimeoutMs: Number(env.GDPR_EXPORT_DRAIN_TIMEOUT_MS || 60000),
+      gdprExportMaxConcurrent: Number(env.GDPR_EXPORT_MAX_CONCURRENT || 2),
       // Fail-fast timeouts (мс). Без них пул мог висеть на выдаче коннекта, а зависший
       // запрос — держать соединение бесконечно; db-unavailable→503 маппинг уже есть в db/errors.
       connectionTimeoutMs: Number(env.PG_CONNECTION_TIMEOUT_MS || 3000),
@@ -493,6 +500,26 @@ function validateConfig(config) {
     config.database.gdprExportPageSize > 1000
   ) {
     add('database.gdprExportPageSize', 'GDPR_EXPORT_PAGE_SIZE должен быть целым числом в диапазоне 1..1000.');
+  }
+  // Сторож медленного читателя экспорта: меньше 5с рвал бы живых клиентов на мобильной сети,
+  // больше 10 мин снова позволял бы надолго занять коннект основного пула.
+  if (
+    !Number.isInteger(config.database.gdprExportDrainTimeoutMs) ||
+    config.database.gdprExportDrainTimeoutMs < 5000 ||
+    config.database.gdprExportDrainTimeoutMs > 600000
+  ) {
+    add('database.gdprExportDrainTimeoutMs', 'GDPR_EXPORT_DRAIN_TIMEOUT_MS должен быть целым числом (мс) в диапазоне 5000..600000.');
+  }
+  // Одновременные выгрузки: 0 — экспорт всегда 503; не меньше основного пула — лимит не защищает
+  // API от исчерпания коннектов.
+  if (
+    !Number.isInteger(config.database.gdprExportMaxConcurrent) ||
+    config.database.gdprExportMaxConcurrent < 1 ||
+    config.database.gdprExportMaxConcurrent > 8 ||
+    (Number.isInteger(config.database.poolMax) &&
+      config.database.gdprExportMaxConcurrent >= config.database.poolMax)
+  ) {
+    add('database.gdprExportMaxConcurrent', 'GDPR_EXPORT_MAX_CONCURRENT должен быть целым числом в диапазоне 1..8 и меньше PGPOOL_MAX.');
   }
   // Instagram OAuth admission-контроль. cap вне [1..64] бессмыслен (0 = connect всегда 503, гигантский
   // = нет защиты от пикового fan-out); acquire-таймаут держим в [100мс..10с]: слишком мало = ложные

@@ -150,6 +150,40 @@ test('loadConfig/validateConfig: GDPR_EXPORT_PAGE_SIZE — дефолт 1000, en
   }
 });
 
+test('loadConfig/validateConfig: GDPR_EXPORT_DRAIN_TIMEOUT_MS и GDPR_EXPORT_MAX_CONCURRENT — дефолты и границы', () => {
+  const d = loadConfig({});
+  assert.equal(d.database.gdprExportDrainTimeoutMs, 60000, 'дефолт 60с — щедро для медленного, но живого клиента');
+  assert.equal(d.database.gdprExportMaxConcurrent, 2, 'дефолт 2 одновременные выгрузки');
+  const c = loadConfig({ GDPR_EXPORT_DRAIN_TIMEOUT_MS: '120000', GDPR_EXPORT_MAX_CONCURRENT: '3' });
+  assert.equal(c.database.gdprExportDrainTimeoutMs, 120000);
+  assert.equal(c.database.gdprExportMaxConcurrent, 3);
+  const fields = ['database.gdprExportDrainTimeoutMs', 'database.gdprExportMaxConcurrent'];
+  assert.deepEqual(validateConfig(d).filter((e) => fields.includes(e.field)), []);
+  assert.deepEqual(validateConfig(c).filter((e) => fields.includes(e.field)), []);
+  for (const env of [
+    { GDPR_EXPORT_DRAIN_TIMEOUT_MS: 'abc' },
+    { GDPR_EXPORT_DRAIN_TIMEOUT_MS: '4999' },
+    { GDPR_EXPORT_DRAIN_TIMEOUT_MS: '600001' },
+  ]) {
+    assert.ok(
+      validateConfig(loadConfig(env)).some((e) => e.field === 'database.gdprExportDrainTimeoutMs'),
+      `${JSON.stringify(env)} отклонён`,
+    );
+  }
+  for (const env of [
+    { GDPR_EXPORT_MAX_CONCURRENT: '0' },
+    { GDPR_EXPORT_MAX_CONCURRENT: '1.5' },
+    { GDPR_EXPORT_MAX_CONCURRENT: '9' },
+    // Лимит не меньше пула не защищает API от исчерпания коннектов.
+    { GDPR_EXPORT_MAX_CONCURRENT: '4', PGPOOL_MAX: '4' },
+  ]) {
+    assert.ok(
+      validateConfig(loadConfig(env)).some((e) => e.field === 'database.gdprExportMaxConcurrent'),
+      `${JSON.stringify(env)} отклонён`,
+    );
+  }
+});
+
 test('loadConfig: HTTP-таймауты сервера — дефолты и env-переопределения', () => {
   const d = loadConfig({});
   assert.equal(d.http.keepAliveTimeoutMs, 65000, 'keepAlive дефолт 65с (> 60с Railway-прокси)');

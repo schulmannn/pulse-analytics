@@ -236,6 +236,8 @@ function createDatabase(config, overrides = {}) {
   const gdprService = overrides.createGdprService
     ? overrides.createGdprService({
         pool, enabled, transaction, exportPageSize: config.database.gdprExportPageSize,
+        exportDrainTimeoutMs: config.database.gdprExportDrainTimeoutMs,
+        exportMaxConcurrent: config.database.gdprExportMaxConcurrent,
       })
     : null;
   // Campaign membership performs an atomic lock/count/insert through the shared transaction helper.
