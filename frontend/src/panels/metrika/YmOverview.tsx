@@ -167,8 +167,10 @@ export function YmOverview() {
   }
 
   if (summary.isError) {
-    const status = (summary.error as { status?: number } | null)?.status;
-    if (status === 401) {
+    const { status, code } = (summary.error as { status?: number; code?: string } | null) ?? {};
+    // Различаем по машинному коду, а не по статусу: 401 без кода — это наша истёкшая сессия (её
+    // уводит на /login lib/authRedirect), а не отзыв токена Яндекса.
+    if (code === 'ym_token_revoked') {
       // Токен отозван на стороне Яндекса — честный reconnect-CTA вместо «недоступна».
       return (
         <EmptyState
