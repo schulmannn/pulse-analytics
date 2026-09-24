@@ -14,6 +14,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('crypto');
+const { performance } = require('node:perf_hooks');
 const { registerTeamRoutes } = require('../server/routes/team');
 
 const sha256 = (v) => crypto.createHash('sha256').update(String(v)).digest('hex');
@@ -36,6 +37,7 @@ function harness(over = {}) {
     passwordWrites: [],
     statusWrites: [],
     accepted: [],
+    workspaceLookups: 0,
     invite: {
       status: 'live',
       email: 'victim@example.com',
@@ -51,6 +53,9 @@ function harness(over = {}) {
 
   const db = {
     enabled: true,
+    INVITE_ROLES: ['admin', 'member', 'viewer'],
+    // Выпуску приглашения воркспейс здесь не нужен: 503 после проверки формы доказывает, что адрес её прошёл.
+    ensureTeamWorkspace: async () => { state.workspaceLookups += 1; return null; },
     getWorkspaceInviteByToken: async (hash) => (hash === sha256(RAW_TOKEN) ? state.invite : null),
     getUserByEmail: async (email) => state.users.get(String(email).toLowerCase()) || null,
     getUserById: async (id) => [...state.users.values()].find((u) => u.id === id) || null,
@@ -238,4 +243,40 @@ test('превью сообщает verify_required, чтобы страница
   await handler({ params: { token: RAW_TOKEN }, headers: {}, query: {} }, res, (e) => { if (e) throw e; });
   assert.equal(res.body.verify_required, true);
   assert.equal(res.body.needs_account, true);
+});
+
+// ── Выпуск приглашения: проверка адреса (аудит, AUTH-1) ──────────────────────────────────────────
+async function invite(handlers, email) {
+  const handler = handlers.get('POST /api/team/invites');
+  assert.ok(handler, 'роут выпуска приглашения зарегистрирован');
+  const res = { statusCode: 200, status(c) { this.statusCode = c; return this; }, json(b) { this.body = b; return this; } };
+  const req = { body: { email, role: 'member' }, user: { uid: 1, email: 'owner@example.com' }, headers: {}, query: {} };
+  const t0 = performance.now();
+  const pending = handler(req, res, (e) => { if (e) throw e; });
+  const syncMs = performance.now() - t0;
+  await pending;
+  return { res, syncMs };
+}
+
+test('приглашение: 100 КБ-адрес отвергается 400 до БД и не держит event loop (ReDoS)', async () => {
+  // Прежний EMAIL_RE разбирал «a@» + точки + «@» за O(n²): ~20 с на один запрос.
+  const { handlers, state } = harness();
+  const { res, syncMs } = await invite(handlers, `a@${'.'.repeat(102_300)}@`);
+  assert.equal(res.statusCode, 400);
+  assert.deepEqual(res.body, { error: 'Некорректный email' });
+  assert.ok(syncMs < 200, `обработчик держал event loop ${syncMs.toFixed(1)} мс`);
+  assert.equal(state.workspaceLookups, 0);
+});
+
+test('приглашение: обычный адрес проходит проверку формы, мусор — прежний 400', async () => {
+  const { handlers, state } = harness();
+  const ok = await invite(handlers, ' Colleague@Example.com ');
+  assert.equal(ok.res.statusCode, 503, 'дошли до воркспейса — значит, адрес принят');
+  assert.equal(state.workspaceLookups, 1);
+  for (const bad of ['colleague', 'colleague@example', 'colleague@example..com']) {
+    const r = await invite(handlers, bad);
+    assert.equal(r.res.statusCode, 400, bad);
+    assert.deepEqual(r.res.body, { error: 'Некорректный email' });
+  }
+  assert.equal(state.workspaceLookups, 1);
 });
