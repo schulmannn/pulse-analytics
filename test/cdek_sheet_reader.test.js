@@ -343,3 +343,150 @@ test('readSheetRows не выпускает наружу чужое исключ
     Buffer.prototype.readUInt32LE = original;
   }
 });
+
+// ── Служебные части книги и ширина листа (CDEKRS-1, CDEKRS-2) ────────────────────────────────────
+// Линейный разбор H-2 закрыл только тело листа. До него книга читала workbook.xml, rels и styles.xml
+// регулярками с `[^>]*`: rels из 2000 оборванных `<Relationship` (zip 684 Б) занимал единственную
+// web-реплику на 26–80 с. Отдельно индекс колонки из `r="…"` не имел потолка: `r="AAAAAA1"` добивал
+// строку null-ами до 12 млн элементов, и двадцать таких строк роняли процесс фатальным OOM.
+
+const PLAIN_WORKBOOK = '<workbook xmlns:r="r"><sheets><sheet name="s" sheetId="1" r:id="rId1"/></sheets></workbook>';
+const PLAIN_RELS = '<Relationships><Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>';
+const ONE_CELL_SHEET = '<worksheet><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>x</t></is></c></row></sheetData></worksheet>';
+
+/** Книга из произвольных частей: по умолчанию корректная, с одной ячейкой «x» в A1. */
+function bookWithParts({ workbook = PLAIN_WORKBOOK, rels = PLAIN_RELS, styles, shared, sheet = ONE_CELL_SHEET, extra = [] }) {
+  const files = [
+    { name: 'xl/workbook.xml', data: Buffer.from(workbook, 'utf8') },
+    { name: 'xl/_rels/workbook.xml.rels', data: Buffer.from(rels, 'utf8') },
+  ];
+  if (styles !== undefined) files.push({ name: 'xl/styles.xml', data: Buffer.from(styles, 'utf8') });
+  if (shared !== undefined) files.push({ name: 'xl/sharedStrings.xml', data: Buffer.from(shared, 'utf8') });
+  files.push({ name: 'xl/worksheets/sheet1.xml', data: Buffer.from(sheet, 'utf8') });
+  for (const { name, xml } of extra) files.push({ name, data: Buffer.from(xml, 'utf8') });
+  return buildZip(files);
+}
+
+// Размеры подобраны так, что старый ридер тратил на каждый файл секунды (замер до правки — в
+// скобках), а файл остаётся в пару килобайт. Новый — единицы миллисекунд; потолок в 1 с — запас
+// против шумного раннера, недостижимый для квадратичного и кубического разбора.
+const PATHOLOGICAL_BOOKS = [
+  ['rels: 1500 оборванных <Relationship> (кубически, ~10 с)',
+    { rels: `<Relationships>${'<Relationship Id="rId1" '.repeat(1500)}` }],
+  ['workbook: 40 000 оборванных <sheet> (~4 с)',
+    { workbook: `<workbook>${'<sheet '.repeat(40000)}` }],
+  ['styles: <numFmt> из 32 000 numFmtId без formatCode (~5 с)',
+    { styles: `<styleSheet><numFmts><numFmt ${'numFmtId="1" '.repeat(32000)}` }],
+  ['styles: 80 000 незакрытых <cellXfs> (~4 с)',
+    { styles: `<styleSheet>${'<cellXfs '.repeat(80000)}` }],
+  ['styles: formatCode из 150 000 «[» без «]» (~8 с)',
+    { styles: `<styleSheet><numFmts><numFmt numFmtId="164" formatCode="${'['.repeat(150000)}"/></numFmts></styleSheet>` }],
+];
+
+for (const [label, parts] of PATHOLOGICAL_BOOKS) {
+  test(`xlsx: ${label} — разбор за миллисекунды, книга читается`, () => {
+    const buf = bookWithParts(parts);
+    assert.ok(buf.length < 8 * 1024, `фикстура — килобайты, а не мегабайты (${buf.length} Б)`);
+    const t0 = performance.now();
+    const { rows } = readSheetRows(buf, 'export.xlsx');
+    const ms = performance.now() - t0;
+    // Оборванный служебный тег не делает книгу нечитаемой: как и раньше, лист находится фолбэком.
+    assert.deepEqual(rows[0], ['x']);
+    assert.ok(ms < 1000, `разбор занял ${ms.toFixed(0)} мс — потолок 1000 мс`);
+  });
+}
+
+test('xlsx: rels с несколькими связями и `>` в значении атрибута читаются как раньше', () => {
+  // Сохранение поведения, а не регрессия: лист берётся по r:id из rels, даже когда его связь не
+  // первая и рядом лежит sheet1.xml (фолбэк выбрал бы его). `>` в formatCode законен в XML —
+  // граница тега ищется по '<', и датовый формат с условием не теряется.
+  const buf = bookWithParts({
+    workbook: '<workbook xmlns:r="r"><workbookPr/><bookViews><workbookView/></bookViews>'
+      + '<sheets><sheet name="Заказы" sheetId="2" r:id="rId3"/></sheets></workbook>',
+    rels: '<Relationships>'
+      + '<Relationship Id="rId1" Type="theme" Target="theme/theme1.xml"/>'
+      + '<Relationship Id="rId2" Type="styles" Target="styles.xml"/>'
+      + '<Relationship Id="rId3" Type="worksheet" Target="worksheets/sheet2.xml"/>'
+      + '</Relationships>',
+    styles: '<styleSheet><numFmts count="1"><numFmt numFmtId="165" formatCode="[>=0]yyyy-mm-dd hh:mm:ss"/></numFmts>'
+      + '<cellXfs count="2"><xf numFmtId="0"/><xf numFmtId="165" applyNumberFormat="1"><alignment/></xf></cellXfs></styleSheet>',
+    extra: [{
+      name: 'xl/worksheets/sheet2.xml',
+      xml: '<worksheet><sheetData><row r="1"><c r="A1" s="1"><v>45869.65263888889</v></c></row></sheetData></worksheet>',
+    }],
+  });
+  const { rows, sheetName } = readSheetRows(buf, 'export.xlsx');
+  assert.equal(sheetName, 'Заказы');
+  assert.deepEqual(rows[0], ['2025-07-31 15:39:48']);
+});
+
+test('xlsx: дедлайн покрывает всю книгу — rels, строковую таблицу и стили, а не только строки листа', () => {
+  // Лист — одна строка: до правки часы заводились только в цикле строк листа, и на книге, где вся
+  // работа приходится на служебные части, рубеж не срабатывал ни разу.
+  const n = 600;   // больше шага проверки часов (500) — проверка обязана случиться
+  const cases = [
+    ['rels', { rels: `<Relationships>${'<Relationship Id="rIdX" Target="x.xml"/>'.repeat(n)}<Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>` }],
+    ['строковая таблица', { shared: `<sst>${'<si><t>y</t></si>'.repeat(n)}</sst>` }],
+    ['форматы чисел', { styles: `<styleSheet><numFmts>${'<numFmt numFmtId="164" formatCode="0"/>'.repeat(n)}</numFmts></styleSheet>` }],
+    ['стили ячеек', { styles: `<styleSheet><cellXfs>${'<xf numFmtId="0"/>'.repeat(n)}</cellXfs></styleSheet>` }],
+  ];
+  for (const [label, parts] of cases) {
+    const buf = bookWithParts(parts);
+    // Часы двигаются сами на каждый вызов: первая же проверка видит просрочку.
+    let ticks = 0;
+    const now = () => { ticks += 10_000; return ticks; };
+    assert.throws(() => readXlsxRows(buf, { deadlineMs: 1, now }), /слишком сложный/i, label);
+    assert.deepEqual(readXlsxRows(buf).rows[0], ['x'], `${label}: с нормальными часами книга читается`);
+  }
+});
+
+/** Лист из одной строки с inline-ячейкой по заданной ссылке. */
+const sheetWithCellAt = (ref) =>
+  `<worksheet><sheetData><row r="1"><c r="${ref}" t="inlineStr"><is><t>x</t></is></c></row></sheetData></worksheet>`;
+
+test('xlsx: ссылка ячейки далеко за краем листа — внятный отказ, а не строка в миллионы null', () => {
+  // AAAAAA — 12 млн колонок (до правки: 300 МБ кучи и полсекунды на ОДНУ строку), XFE — за пределом
+  // даже нынешнего Excel, IW — первая колонка за потолком ридера.
+  for (const ref of ['AAAAAA1', 'AAAAAAA1', 'XFE1', 'IW1']) {
+    const buf = bookWithParts({ sheet: sheetWithCellAt(ref) });
+    const t0 = performance.now();
+    assert.throws(() => readSheetRows(buf, 'export.xlsx'), (e) => {
+      assert.ok(e instanceof SheetReadError, ref);
+      assert.match(e.userMessage, /больше 256 колонок/, ref);
+      return true;
+    });
+    assert.ok(performance.now() - t0 < 500, `${ref}: отказ обязан быть мгновенным`);
+  }
+});
+
+test('xlsx: последняя допустимая колонка (IV, 256-я) читается', () => {
+  const { rows } = readSheetRows(bookWithParts({ sheet: sheetWithCellAt('IV1') }), 'export.xlsx');
+  assert.equal(rows[0].length, 256);
+  assert.equal(rows[0][255], 'x');
+  assert.equal(rows[0][0], null);
+});
+
+test('xlsx: пустая клетка оформления за краем листа не валит файл и не раздувает строку', () => {
+  // Excel пишет `<c r="…" s="…"/>` у раскрашенных, но пустых клеток — данных в них нет.
+  const buf = bookWithParts({
+    sheet: '<worksheet><sheetData><row r="1"><c r="A1"><v>7</v></c><c r="XFD1" s="1"/><c r="AAAAAA1"/></row></sheetData></worksheet>',
+  });
+  const [row] = readSheetRows(buf, 'export.xlsx').rows;
+  // Длина — отдельно и первой: до правки строка была в 12 млн элементов, и diff deepEqual на ней
+  // сам съедал память раннера.
+  assert.equal(row.length, 1);
+  assert.deepEqual(row, [7]);
+});
+
+test('xlsx: добитые null считаются в бюджет ячеек, а не только теги <c>', () => {
+  // 50 строк по одной ячейке в 256-й колонке: тегов 50, а слотов в памяти — 12 800. Прежний счётчик
+  // видел только теги, и сотня тысяч таких строк (zip ~0.5 МБ) держала 276 МБ кучи.
+  const parts = [];
+  for (let r = 1; r <= 50; r++) parts.push(`<row r="${r}"><c r="IV${r}"><v>${r}</v></c></row>`);
+  const buf = bookWithParts({ sheet: `<worksheet><sheetData>${parts.join('')}</sheetData></worksheet>` });
+  assert.throws(() => readXlsxRows(buf, { maxCells: 10000 }), /слишком много ячеек/);
+  // Тот же файл в штатном бюджете читается целиком.
+  const { rows } = readXlsxRows(buf);
+  assert.equal(rows.length, 50);
+  assert.equal(rows[49][255], 50);
+});
