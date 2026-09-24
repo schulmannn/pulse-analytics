@@ -10,9 +10,13 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const zlib = require('zlib');
 
+const { spawnSync } = require('node:child_process');
+const path = require('node:path');
+
 const { readSheetRows, readXlsxRows, readCsvRows, SheetReadError, serialToNaive } =
   require('../server/lib/sheetReader');
-const { buildXlsx, buildZip } = require('./cdekFixtures');
+const { parseCdekSheet } = require('../server/domain/cdekImport');
+const { buildXlsx, buildZip, CDEK_HEADER, cdekRow } = require('./cdekFixtures');
 
 test('xlsx: заголовки, shared strings, числа и имя листа', () => {
   const buf = buildXlsx([
@@ -508,9 +512,6 @@ test('xlsx: добитые null считаются в бюджет ячеек, �
 // кучи — фатальный OOM того же класса, что CDEKRS-2. А бюджет слотов из CDEKRS-2 задел законные
 // файлы: пустая клетка оформления в колонке IV добивала каждую строку null-ами до 256 слотов.
 
-const { parseCdekSheet } = require('../server/domain/cdekImport');
-const { CDEK_HEADER, cdekRow } = require('./cdekFixtures');
-
 /** Прежний декодер — эталон смысла: линейный проход обязан давать ровно то же самое. */
 const LEGACY_ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
 const legacyDecode = (s) => s.replace(/&(#x[0-9a-fA-F]+|#\d+|[a-z]+);/g, (m, e) => {
@@ -543,13 +544,12 @@ test('xlsx: линейный декодер ссылок даёт ровно т�
   }
 });
 
-// 2.3 млн `&#65;` — 11.5 МБ XML (под потолком листа в 12 МБ), zip ~18 КБ.
-const ENTITY_FLOOD = '&#65;'.repeat(2_300_000);
-
 test('xlsx: миллионы XML-ссылок в одном значении — мгновенный SheetReadError, а не фатальный OOM', () => {
   // До правки каждая из этих книг разворачивалась в значение на миллионы символов, а под
   // --max-old-space-size=256 процесс падал фатальным OOM (замер: 1.7–2.3 с, exit 134). try/catch
   // его не ловит — реплика перезапускается вместе со всеми запросами в полёте.
+  // 2.3 млн `&#65;` — 11.5 МБ XML (под потолком листа в 12 МБ), zip ~18 КБ.
+  const ENTITY_FLOOD = '&#65;'.repeat(2_300_000);
   const books = [
     ['ячейка inlineStr', { sheet: `<worksheet><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>${ENTITY_FLOOD}</t></is></c></row></sheetData></worksheet>` }],
     ['ячейка t="str"', { sheet: `<worksheet><sheetData><row r="1"><c r="A1" t="str"><v>${ENTITY_FLOOD}</v></c></row></sheetData></worksheet>` }],
@@ -614,4 +614,68 @@ test('xlsx: 20 000 строк с пустой клеткой оформлени�
   assert.equal(parsed.stats.rows_total, 20000);
   assert.equal(parsed.stats.rows_rejected, 0);
   assert.equal(parsed.stats.orders_total, 20000);
+});
+
+test('xlsx: поток XML-ссылок отвергается и под кучей в 64 МБ — свойство проверено памятью, а не часами', () => {
+  // Предыдущий тест меряет время, а прежний replace на этом входе укладывался в ~0.7 с, забирая
+  // ~365 МБ кучи: откат декодера на глобальную регулярку с проверкой длины ПОСЛЕ неё прошёл бы его
+  // зелёным. Здесь тот же файл читается в дочернем процессе с жёстким лимитом кучи: прежний код
+  // падает фатальным OOM (exit 134), линейный отказывает за десятки миллисекунд.
+  const script = `
+    const { buildZip } = require(${JSON.stringify(path.join(__dirname, 'cdekFixtures'))});
+    const { readSheetRows } = require(${JSON.stringify(path.join(__dirname, '..', 'server', 'lib', 'sheetReader'))});
+    const flood = '&#65;'.repeat(2300000);
+    const buf = buildZip([
+      { name: 'xl/workbook.xml', data: Buffer.from('<workbook xmlns:r="r"><sheets><sheet name="s" sheetId="1" r:id="rId1"/></sheets></workbook>') },
+      { name: 'xl/_rels/workbook.xml.rels', data: Buffer.from('<Relationships><Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>') },
+      { name: 'xl/worksheets/sheet1.xml', data: Buffer.from('<worksheet><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>' + flood + '</t></is></c></row></sheetData></worksheet>') },
+    ]);
+    try { readSheetRows(buf, 'export.xlsx'); console.log('ACCEPTED'); }
+    catch (e) { console.log(e.userMessage || e.message); }
+  `;
+  const res = spawnSync(process.execPath, ['--max-old-space-size=64', '-e', script], { encoding: 'utf8' });
+  assert.equal(res.status, 0, `дочерний процесс упал (status ${res.status}, signal ${res.signal}): ${res.stderr.slice(-300)}`);
+  assert.match(res.stdout, /длиннее 32767 символов/);
+});
+
+test('xlsx: ячейки без атрибута r — пустая заглушка держит свою колонку', () => {
+  // `r` в OOXML необязателен: такой писатель ставит заглушку на каждый пропуск, и позиция
+  // следующей ячейки считается от неё. Пустая заглушка не добивает строку справа, но место своё
+  // занимает — иначе значения съезжают в чужие колонки (ревью CDEKRS-2: цена попадала в «Кол-во»).
+  const shared = '<sst><si><t>ID</t></si><si><t></t></si></sst>';
+  const row = (middle) => '<worksheet><sheetData><row>'
+    + `<c><v>42</v></c>${middle}<c t="inlineStr"><is><t>complete</t></is></c>`
+    + '</row></sheetData></worksheet>';
+  const placeholders = {
+    'оформление <c s="1"/>': '<c s="1"/>',
+    'голый <c/>': '<c/>',
+    'пустой inlineStr': '<c t="inlineStr"><is><t></t></is></c>',
+    'пустая строка таблицы': '<c t="s"><v>1</v></c>',
+  };
+  for (const [label, middle] of Object.entries(placeholders)) {
+    const { rows } = readSheetRows(bookWithParts({ shared, sheet: row(middle) }), 'export.xlsx');
+    assert.deepEqual(rows[0], [42, null, 'complete'], label);
+  }
+  // Смесь: первые ячейки с r, дальше без него — позиция продолжается от самой правой.
+  const mixed = '<worksheet><sheetData><row><c r="A1"><v>42</v></c><c r="B1" s="1"/>'
+    + '<c t="inlineStr"><is><t>complete</t></is></c></row></sheetData></worksheet>';
+  assert.deepEqual(readSheetRows(bookWithParts({ sheet: mixed }), 'export.xlsx').rows[0], [42, null, 'complete']);
+});
+
+test('xlsx: выгрузка СДЭКа без атрибутов r с пустым «Комментарием» импортируется без сдвига колонок', () => {
+  const cell = (v) => {
+    if (v === null) return '<c s="1"/>';
+    if (typeof v === 'number') return `<c><v>${v}</v></c>`;
+    return `<c t="inlineStr"><is><t>${v}</t></is></c>`;
+  };
+  const data = [CDEK_HEADER, cdekRow({ id: 101, created: '2026-01-10 10:00:00', productId: 'p1', price: 1500, qty: 2, reserved: 7 })];
+  const sheet = `<worksheet><sheetData>${data.map((r) => `<row>${r.map(cell).join('')}</row>`).join('')}</sheetData></worksheet>`;
+  const { rows } = readSheetRows(bookWithParts({ sheet }), 'export.xlsx');
+  const parsed = parseCdekSheet(rows);
+  assert.equal(parsed.stats.rows_rejected, 0);
+  const [order] = parsed.orders;
+  assert.equal(order.warehouse_code, '19821');
+  assert.equal(order.carrier, 'Cdek');
+  assert.equal(order.comment, null);
+  assert.deepEqual(order.items.map((i) => [i.product_id, i.unit_price_kopecks, i.qty, i.qty_reserved]), [['p1', 150000, 2, 7]]);
 });

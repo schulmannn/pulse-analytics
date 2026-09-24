@@ -462,6 +462,11 @@ function parseSheet(xml, { shared, dateStyles, maxRows, maxCells, deadline }) {
     if (target >= maxRows) throw new SheetReadError(`В файле больше ${maxRows} строк`);
     while (rows.length < target) rows.push([]);
     const row = [];
+    // Неявная позиция ячейки без `r` (атрибут в OOXML необязателен) — следующая за самой правой
+    // уже встреченной клеткой, включая пустые. Держим её отдельно от длины массива: пустые
+    // клетки справа строку не добивают, но место своё занимают, иначе писатель без `r`, который
+    // обязан ставить заглушку на каждый пропуск, сдвигал бы следующие значения в чужие колонки.
+    let width = 0;
     let cellPos = 0;
     for (;;) {
       const c = readElement(el.inner, 'c', cellPos);
@@ -470,10 +475,11 @@ function parseSheet(xml, { shared, dateStyles, maxRows, maxCells, deadline }) {
       const attrs = c.attrs;
       const inner = c.inner;
       const ref = attrs.match(/r="([A-Za-z]+)\d+"/);
-      const idx = ref ? colIndex(ref[1]) : row.length;
+      const idx = ref ? colIndex(ref[1]) : width;
       // За краем листа — пропуск ещё до разбора значения: такая ячейка не стоит ни слотов строки,
       // ни декодирования (раньше ячейка с данными там отвергала весь файл).
       if (idx < 0 || idx >= MAX_COLUMNS) continue;
+      if (idx >= width) width = idx + 1;
       const type = (attrs.match(/\bt="([^"]+)"/) || [])[1] || 'n';
       const style = (attrs.match(/\bs="(\d+)"/) || [])[1];
       let value = null;
