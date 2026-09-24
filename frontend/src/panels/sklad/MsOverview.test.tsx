@@ -35,7 +35,11 @@ describe('MsOverview error states', () => {
     const html = renderWithError(401, 'Токен отозван МойСкладом — переподключите источник', 'ms_token_revoked');
     expect(html).toContain('Токен МойСклада отозван');
     expect(html).toContain('Переподключить МойСклад');
-    expect(html).toContain('href="/connect"');
+    // Сразу на карточку МойСклада, а не на Telegram по умолчанию; путь назван целиком, потому что
+    // замены токена у подключённого источника нет — только «Отключить» и новое подключение.
+    expect(html).toContain('href="/connect?source=moysklad"');
+    expect(html).toContain('отключите старый и вставьте новый');
+    expect(html).toContain('История продаж сохранится');
   });
 
   it('names missing employee rights on 403 ms_forbidden instead of asking to reconnect', () => {
@@ -63,7 +67,7 @@ describe('MsOverview error states', () => {
     // У подключённого МойСклада на /connect нет замены токена (только «Отключить») — ссылка туда
     // была тупиком. Никакой кнопки: чинится правами в МойСкладе, а не у нас.
     expect(html).not.toContain('Подключить другой токен');
-    expect(html).not.toContain('href="/connect"');
+    expect(html).not.toContain('href="/connect');
     expect(html).not.toContain('<a ');
   });
 
@@ -77,5 +81,6 @@ describe('MsOverview error states', () => {
   it('keeps the onboarding state for a channel without a MoySklad token (404)', () => {
     const html = renderWithError(404, 'МойСклад не подключён');
     expect(html).toContain('Подключить МойСклад');
+    expect(html).toContain('href="/connect?source=moysklad"');
   });
 });
