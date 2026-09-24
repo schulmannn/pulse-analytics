@@ -660,6 +660,12 @@ test('xlsx: ячейки без атрибута r — пустая заглуш
   const mixed = '<worksheet><sheetData><row><c r="A1"><v>42</v></c><c r="B1" s="1"/>'
     + '<c t="inlineStr"><is><t>complete</t></is></c></row></sheetData></worksheet>';
   assert.deepEqual(readSheetRows(bookWithParts({ sheet: mixed }), 'export.xlsx').rows[0], [42, null, 'complete']);
+  // Ячейка за краем листа пропускается, но позицию двигает: следующая без r тоже за краем,
+  // а не на месте колонки C.
+  const beyond = '<worksheet><sheetData><row><c r="A1"><v>42</v></c><c r="B1" s="1"/>'
+    + '<c r="ZZ1" t="inlineStr"><is><t>note</t></is></c><c t="inlineStr"><is><t>stray</t></is></c>'
+    + '</row></sheetData></worksheet>';
+  assert.deepEqual(readSheetRows(bookWithParts({ sheet: beyond }), 'export.xlsx').rows[0], [42]);
 });
 
 test('xlsx: выгрузка СДЭКа без атрибутов r с пустым «Комментарием» импортируется без сдвига колонок', () => {

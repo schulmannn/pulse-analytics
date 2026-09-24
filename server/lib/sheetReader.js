@@ -476,10 +476,12 @@ function parseSheet(xml, { shared, dateStyles, maxRows, maxCells, deadline }) {
       const inner = c.inner;
       const ref = attrs.match(/r="([A-Za-z]+)\d+"/);
       const idx = ref ? colIndex(ref[1]) : width;
+      // Позицию двигает и пропущенная ячейка за краем: иначе следующая ячейка без `r` вернулась бы
+      // из колонки ZZ обратно в лист и легла бы на чужое место.
+      if (idx >= width) width = idx + 1;
       // За краем листа — пропуск ещё до разбора значения: такая ячейка не стоит ни слотов строки,
       // ни декодирования (раньше ячейка с данными там отвергала весь файл).
       if (idx < 0 || idx >= MAX_COLUMNS) continue;
-      if (idx >= width) width = idx + 1;
       const type = (attrs.match(/\bt="([^"]+)"/) || [])[1] || 'n';
       const style = (attrs.match(/\bs="(\d+)"/) || [])[1];
       let value = null;
