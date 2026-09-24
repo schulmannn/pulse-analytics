@@ -236,7 +236,9 @@ function projectRow(spec, row) {
 // читателя: 'drain' (или 'finish' финала) не пришёл за это время → ответ рвётся, ожидание
 // отклоняется ExportAborted (штатный путь обрыва: 'aborted', коннект освобождается в finally).
 function createWriter(res, { drainTimeoutMs = 0 } = {}) {
-  let closed = false;
+  // Ответ мог умереть ещё ДО writer'а (клиент ушёл, пока выгрузка ждала коннект пула): 'close' уже
+  // отгремел и повторно не придёт — без этой проверки экспорт писал бы в мёртвый сокет до сторожа.
+  let closed = Boolean(res.destroyed || (res.socket && res.socket.destroyed));
   let drainWaiters = [];
   const flush = (rejectAll) => {
     const waiters = drainWaiters;
@@ -701,6 +703,7 @@ function createGdprService({
     const w = createWriter(res, { drainTimeoutMs });
     let started = false;
     try {
+      if (w.closed) return 'aborted'; // клиент ушёл, пока ждали коннект — в БД не ходим
       const q = (sql, params) => client.query(sql, params);
 
       // ── Заголовок документа: буферизуем только singleton-строки account/prefs/tg-session.

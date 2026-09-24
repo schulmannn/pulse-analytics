@@ -132,6 +132,20 @@ test('writer: обрыв соединения → ожидающий write па�
   w.cleanup();
 });
 
+test('writer: ответ умер до создания writer\'а → closed сразу, write падает ExportAborted', async () => {
+  const gone = fakeSocket();
+  gone.destroyed = true; // 'close' уже отгремел — повторно не придёт
+  const w = createWriter(gone);
+  assert.strictEqual(w.closed, true);
+  await assert.rejects(w.write('x'), (e) => e instanceof ExportAborted);
+  w.cleanup();
+
+  const deadSocket = fakeSocket();
+  deadSocket.socket = { destroyed: true };
+  assert.strictEqual(createWriter(deadSocket).closed, true);
+  assert.strictEqual(createWriter(fakeSocket()).closed, false);
+});
+
 test('writer: end() → close до finish → отклоняется ExportAborted, не виснет', async () => {
   const sock = fakeSocket();
   // res.end вызван, но сокет рвётся 'close' ДО 'finish' — end() обязан отклониться, а не
@@ -766,6 +780,21 @@ test('стрим: сбой ДО первого байта → throw (роут у
   let ready = false;
   await assert.rejects(svc.streamUserExport(5, res, { onReady() { ready = true; } }), /early/);
   assert.strictEqual(ready, false, 'заголовки не ставились — 404/500 ещё возможны');
+  assert.strictEqual(res.chunks.length, 0);
+  assert.strictEqual(pool.released, 1);
+});
+
+test('стрим: клиент ушёл, пока экспорт ждал коннект → aborted без запросов и без заголовков', async () => {
+  const pool = fakePool({ account: { id: 5, email: 'e', role: 'user', status: 'active', avatar_url: null, created_at: 'T' } });
+  const res = collectorRes();
+  const connect = pool.connect;
+  pool.connect = async () => { res.destroy(); return connect(); }; // 'close' раньше writer'а
+  const svc = createGdprService({ pool, enabled: true, transaction: null });
+  let ready = false;
+  const outcome = await svc.streamUserExport(5, res, { onReady() { ready = true; } });
+  assert.strictEqual(outcome, 'aborted');
+  assert.strictEqual(pool.capture.length, 0, 'в БД не ходили');
+  assert.strictEqual(ready, false);
   assert.strictEqual(res.chunks.length, 0);
   assert.strictEqual(pool.released, 1);
 });
