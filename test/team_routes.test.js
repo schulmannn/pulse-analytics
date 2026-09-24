@@ -264,7 +264,8 @@ test('приглашение: 100 КБ-адрес отвергается 400 д�
   const { res, syncMs } = await invite(handlers, `a@${'.'.repeat(102_300)}@`);
   assert.equal(res.statusCode, 400);
   assert.deepEqual(res.body, { error: 'Некорректный email' });
-  assert.ok(syncMs < 200, `обработчик держал event loop ${syncMs.toFixed(1)} мс`);
+  // 1 с против ~6–20 с у прежнего EMAIL_RE — запас от ложного красного на загруженном раннере.
+  assert.ok(syncMs < 1000, `обработчик держал event loop ${syncMs.toFixed(1)} мс`);
   assert.equal(state.workspaceLookups, 0);
 });
 

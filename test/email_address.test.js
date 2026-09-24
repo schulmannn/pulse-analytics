@@ -7,8 +7,8 @@
 // Здесь пришпилены две вещи: контракт общей проверки (lib/emailAddress — обычные адреса как
 // раньше, длина режется до регулярки, разбор линеен) и то, что публичные роуты auth ходят именно
 // через неё — с прежними ответами и прежним порядком «сначала ответ, потом БД» у forgot/resend.
-// Бюджет времени щедрый (200 мс против ~20 с у прежнего паттерна), чтобы параллельный прогон
-// юнитов не делал тест хрупким.
+// Бюджет времени щедрый (1 с против ~6–20 с у прежнего паттерна): под перегруженным CI-раннером
+// 200 мс уже давали ложный красный, а регрессию к квадратичному разбору 1 с ловит с запасом.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -18,7 +18,7 @@ const { performance } = require('node:perf_hooks');
 const { isPlausibleEmail, MAX_EMAIL_LENGTH } = require('../server/lib/emailAddress');
 const { registerAuthRoutes } = require('../server/routes/auth');
 
-const BUDGET_MS = 200;
+const BUDGET_MS = 1000;
 
 // Тело атаки из аудита: `{"email":"a@" + "."×102300 + "@"}` — 102 КБ, express.json его пропускает.
 const ATTACK = `a@${'.'.repeat(102_300)}@`;
