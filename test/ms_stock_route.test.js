@@ -153,7 +153,7 @@ test('stock: без продаж за окно — у всех days_left null, �
   ]);
 });
 
-test('stock: 401/403 от МС → 401 + ms_token_revoked (reconnect-CTA, не «сервис упал»)', async () => {
+test('stock: 401 от МС (токен отозван) → 401 + ms_token_revoked (reconnect-CTA, не «сервис упал»)', async () => {
   const { routes } = buildMs({
     msFetch: async () => {
       const e = new Error('МойСклад: HTTP 401');

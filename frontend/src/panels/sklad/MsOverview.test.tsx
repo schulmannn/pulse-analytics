@@ -49,6 +49,24 @@ describe('MsOverview error states', () => {
     expect(html).not.toContain('Переподключить');
   });
 
+  it('on ms_forbidden names the MoySklad rights the dashboard reads and offers no dead-end /connect CTA', () => {
+    const html = renderWithError(
+      403,
+      'МойСклад отказал в доступе: у сотрудника, чей токен подключён, нет прав на эти данные',
+      'ms_forbidden',
+    );
+    // Что именно выдать сотруднику: то, что читает дашборд склада.
+    for (const right of ['Показателей', 'Заказов покупателей', 'Возвратов покупателей', 'Контрагентов', 'Прибыльность', 'Остатки', 'себестоимость']) {
+      expect(html).toContain(right);
+    }
+    expect(html).toContain('обновите страницу');
+    // У подключённого МойСклада на /connect нет замены токена (только «Отключить») — ссылка туда
+    // была тупиком. Никакой кнопки: чинится правами в МойСкладе, а не у нас.
+    expect(html).not.toContain('Подключить другой токен');
+    expect(html).not.toContain('href="/connect"');
+    expect(html).not.toContain('<a ');
+  });
+
   it('does not dress up a code-less 401 (our session expired) as a revoked token', () => {
     const html = renderWithError(401, 'Сессия истекла, войди снова');
     expect(html).not.toContain('Токен МойСклада отозван');
