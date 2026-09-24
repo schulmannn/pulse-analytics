@@ -4,7 +4,9 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { loadConfig, validateConfig, ConfigError, isProductionEnv } = require('../server/config');
+const {
+  loadConfig, validateConfig, collectConfigWarnings, gdprExportConcurrencyLimit, ConfigError, isProductionEnv,
+} = require('../server/config');
 
 test('loadConfig: дефолты из пустого env', () => {
   const c = loadConfig({});
@@ -174,14 +176,52 @@ test('loadConfig/validateConfig: GDPR_EXPORT_DRAIN_TIMEOUT_MS и GDPR_EXPORT_MAX
     { GDPR_EXPORT_MAX_CONCURRENT: '0' },
     { GDPR_EXPORT_MAX_CONCURRENT: '1.5' },
     { GDPR_EXPORT_MAX_CONCURRENT: '9' },
-    // Лимит не меньше пула не защищает API от исчерпания коннектов.
-    { GDPR_EXPORT_MAX_CONCURRENT: '4', PGPOOL_MAX: '4' },
   ]) {
     assert.ok(
       validateConfig(loadConfig(env)).some((e) => e.field === 'database.gdprExportMaxConcurrent'),
       `${JSON.stringify(env)} отклонён`,
     );
   }
+});
+
+test('GDPR_EXPORT_MAX_CONCURRENT не меньше PGPOOL_MAX — не ошибка старта, а зажим до PGPOOL_MAX − 1 и предупреждение', () => {
+  const PROD = { NODE_ENV: 'production', SESSION_SECRET: 's', DATABASE_URL: 'postgres://x', APP_URL: 'https://atlavue.app' };
+  for (const [env, effective] of [
+    [{ PGPOOL_MAX: '2' }, 1], // дефолт 2 выгрузки на маленьком пуле
+    [{ PGPOOL_MAX: '1' }, 1], // меньше 1 нельзя: 0 = экспорт всегда 503
+    [{ GDPR_EXPORT_MAX_CONCURRENT: '4', PGPOOL_MAX: '4' }, 3],
+    [{ GDPR_EXPORT_MAX_CONCURRENT: '8', PGPOOL_MAX: '3' }, 2],
+  ]) {
+    const config = loadConfig({ ...PROD, ...env });
+    // Прод-конфиг с маленьким пулом валиден: validateConfig пуст → web/worker/migrate стартуют.
+    assert.deepEqual(validateConfig(config), [], `${JSON.stringify(env)}: без фатальной ошибки`);
+    assert.equal(config.database.gdprExportMaxConcurrent, Number(env.GDPR_EXPORT_MAX_CONCURRENT || 2), 'в config — заданное значение');
+    assert.equal(gdprExportConcurrencyLimit(config.database), effective, `${JSON.stringify(env)}: эффективный лимит`);
+    const warnings = collectConfigWarnings(config);
+    assert.equal(warnings.length, 1, `${JSON.stringify(env)}: одно предупреждение`);
+    assert.equal(warnings[0].field, 'database.gdprExportMaxConcurrent');
+    assert.match(warnings[0].message, /PGPOOL_MAX/);
+  }
+  assert.match(
+    collectConfigWarnings(loadConfig({ PGPOOL_MAX: '4', GDPR_EXPORT_MAX_CONCURRENT: '4' }))[0].message,
+    /не больше 3/,
+    'предупреждение называет эффективный лимит',
+  );
+  assert.match(
+    collectConfigWarnings(loadConfig({ PGPOOL_MAX: '1' }))[0].message,
+    /единственный коннект/,
+    'PGPOOL_MAX=1: зажимать некуда — предупреждение говорит об этом прямо',
+  );
+  // Лимит меньше пула — как задан, без предупреждений (в т.ч. дефолты).
+  for (const env of [{}, { PGPOOL_MAX: '3' }, { GDPR_EXPORT_MAX_CONCURRENT: '3', PGPOOL_MAX: '4' }]) {
+    const config = loadConfig(env);
+    assert.equal(gdprExportConcurrencyLimit(config.database), config.database.gdprExportMaxConcurrent);
+    assert.deepEqual(collectConfigWarnings(config), [], `${JSON.stringify(env)}: без предупреждений`);
+  }
+  // Вне 1..8 — по-прежнему ошибка validateConfig, зажим такие значения не «чинит».
+  assert.equal(gdprExportConcurrencyLimit({ gdprExportMaxConcurrent: 0, poolMax: 10 }), 0);
+  assert.ok(Number.isNaN(gdprExportConcurrencyLimit({ gdprExportMaxConcurrent: Number.NaN, poolMax: 10 })));
+  assert.deepEqual(collectConfigWarnings(loadConfig({ GDPR_EXPORT_MAX_CONCURRENT: 'abc', PGPOOL_MAX: '2' })), []);
 });
 
 test('loadConfig: HTTP-таймауты сервера — дефолты и env-переопределения', () => {

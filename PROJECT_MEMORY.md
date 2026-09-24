@@ -76,9 +76,11 @@ managed-first. Живой поиск упоминаний также работ�
   браузерный) экспорт обрывался на финале. Коннект основного пула ограничен двумя потолками:
   сторож `drain` (`GDPR_EXPORT_DRAIN_TIMEOUT_MS`, 60 с на каждый ~64-КБ ломоть ответа) рвёт
   выгрузку непрочитывающего клиента, а лимит одновременных выгрузок (`GDPR_EXPORT_MAX_CONCURRENT`,
-  2, и одна на пользователя) до первого байта отвечает `503` + `Retry-After`; на время выгрузки на
-  клиенте висит свой слушатель `'error'`. Буферизуются лишь singleton-строки
-  account/prefs/integration identity/tg-session и bounded current snapshot. Пиковая память ответа =
+  2, и одна на пользователя) до первого байта отвечает `503` + `Retry-After`. Лимит не меньше
+  `PGPOOL_MAX` — не ошибка конфига (старт не падает): он зажимается до `PGPOOL_MAX − 1` (минимум 1)
+  с `[boot] WARNING` в логе web. На время выгрузки на клиенте висит свой слушатель `'error'`.
+  Буферизуются лишь singleton-строки account/prefs/integration identity/tg-session и bounded
+  current snapshot. Пиковая память ответа =
   одна страница, а не весь архив. Архив канала покрывает **все шесть источников**: TG (`channel_daily`,
   `channel_monthly`, `posts`, `velocity_daily`, `mentions`), IG (`ig_daily`, `ig_media_daily`),
   МойСклад (`ms_daily`, `ms_orders`, `ms_returns`), Метрику (`ym_daily`), СДЭК (`cdek_imports` без
