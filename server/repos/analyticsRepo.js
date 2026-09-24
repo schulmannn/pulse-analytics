@@ -452,12 +452,14 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
   }
 
   // ── Connection-status коллектора (read; writes живут в ingest/collectorRepo) ───────
+  // Моменты — с оффсетом TZH:TZM ('+00:00'): роут считает stale через new Date(), а голый 'OF'
+  // ('+00') V8 не парсит → NaN → stale=true у каждого канала.
   async function getCollectorStatus(channelId, user) {
     if (!enabled || !channelId || !user || user.uid == null) return null;
     const { rows } = await pool.query(
       `SELECT s.collector_version, s.last_ingest_id,
-              to_char(s.last_attempt_at,'YYYY-MM-DD"T"HH24:MI:SSOF') AS last_attempt_at,
-              to_char(s.last_success_at,'YYYY-MM-DD"T"HH24:MI:SSOF') AS last_success_at,
+              to_char(s.last_attempt_at,'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS last_attempt_at,
+              to_char(s.last_success_at,'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS last_success_at,
               s.last_error
          FROM collector_status s
          JOIN channels c ON c.id=s.channel_id

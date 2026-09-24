@@ -18,7 +18,8 @@ const AI_CHAT_MESSAGES_LIMIT = 200;
 const UTC_TODAY = `(now() AT TIME ZONE 'utc')::date`;
 
 function createAiChatsRepo({ pool, enabled }) {
-  const ISO = `'YYYY-MM-DD"T"HH24:MI:SSOF'`;
+  // Смещение — TZH:TZM ('+00:00'), не OF: OF при целочасовом поясе даёт '+00', а JS Date такое не парсит.
+  const ISO = `'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM'`;
   const CHAT_COLS = `c.id, c.title,
     to_char(c.created_at,${ISO}) AS created_at,
     to_char(c.updated_at,${ISO}) AS updated_at`;
