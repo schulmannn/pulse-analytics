@@ -379,8 +379,10 @@ const PATHOLOGICAL_BOOKS = [
     { styles: `<styleSheet><numFmts><numFmt ${'numFmtId="1" '.repeat(32000)}` }],
   ['styles: 80 000 незакрытых <cellXfs> (~4 с)',
     { styles: `<styleSheet>${'<cellXfs '.repeat(80000)}` }],
-  ['styles: formatCode из 150 000 «[» без «]» (~8 с)',
-    { styles: `<styleSheet><numFmts><numFmt numFmtId="164" formatCode="${'['.repeat(150000)}"/></numFmts></styleSheet>` }],
+  // По 32 000 «[» — под потолком длины значения (32 767 символов): formatCode длиннее теперь
+  // отвергается сразу (тест ниже), а квадратичный вырез скобок стоил ~0.37 с на КАЖДЫЙ такой формат.
+  ['styles: 25 formatCode по 32 000 «[» без «]» (~9 с)',
+    { styles: `<styleSheet><numFmts>${`<numFmt numFmtId="164" formatCode="${'['.repeat(32000)}"/>`.repeat(25)}</numFmts></styleSheet>` }],
 ];
 
 for (const [label, parts] of PATHOLOGICAL_BOOKS) {
@@ -444,19 +446,28 @@ test('xlsx: дедлайн покрывает всю книгу — rels, стр
 const sheetWithCellAt = (ref) =>
   `<worksheet><sheetData><row r="1"><c r="${ref}" t="inlineStr"><is><t>x</t></is></c></row></sheetData></worksheet>`;
 
-test('xlsx: ссылка ячейки далеко за краем листа — внятный отказ, а не строка в миллионы null', () => {
-  // AAAAAA — 12 млн колонок (до правки: 300 МБ кучи и полсекунды на ОДНУ строку), XFE — за пределом
-  // даже нынешнего Excel, IW — первая колонка за потолком ридера.
+test('xlsx: данные далеко за краем листа пропускаются — файл читается, строка не раздувается', () => {
+  // AAAAAA — 12 млн колонок (до CDEKRS-2: 300 МБ кучи и полсекунды на ОДНУ строку), XFE — за
+  // пределом даже нынешнего Excel, IW — первая колонка за потолком ридера. Сначала такая ячейка
+  // отвергала весь файл; но домен читает свои 18 колонок по заголовку, и заметка пользователя
+  // где-то справа — не повод не принять выгрузку. Пропуск держит ту же память, что и отказ.
   for (const ref of ['AAAAAA1', 'AAAAAAA1', 'XFE1', 'IW1']) {
-    const buf = bookWithParts({ sheet: sheetWithCellAt(ref) });
+    const sheet = `<worksheet><sheetData><row r="1"><c r="A1"><v>7</v></c>`
+      + `<c r="${ref}" t="inlineStr"><is><t>заметка</t></is></c></row></sheetData></worksheet>`;
     const t0 = performance.now();
-    assert.throws(() => readSheetRows(buf, 'export.xlsx'), (e) => {
-      assert.ok(e instanceof SheetReadError, ref);
-      assert.match(e.userMessage, /больше 256 колонок/, ref);
-      return true;
-    });
-    assert.ok(performance.now() - t0 < 500, `${ref}: отказ обязан быть мгновенным`);
+    const [row] = readSheetRows(bookWithParts({ sheet }), 'export.xlsx').rows;
+    assert.ok(performance.now() - t0 < 500, `${ref}: пропуск обязан быть мгновенным`);
+    assert.equal(row.length, 1, ref);
+    assert.deepEqual(row, [7], ref);
   }
+  // Объём: 20 000 строк с данными в AAAAAA — каждая строка остаётся в одну ячейку.
+  const parts = [];
+  for (let r = 1; r <= 20000; r++) {
+    parts.push(`<row r="${r}"><c r="A${r}"><v>${r}</v></c><c r="AAAAAA${r}" t="inlineStr"><is><t>far</t></is></c></row>`);
+  }
+  const { rows } = readSheetRows(bookWithParts({ sheet: `<worksheet><sheetData>${parts.join('')}</sheetData></worksheet>` }), 'export.xlsx');
+  assert.equal(rows.length, 20000);
+  assert.ok(rows.every((row, i) => row.length === 1 && row[0] === i + 1), 'данные за краем не попали в строки');
 });
 
 test('xlsx: последняя допустимая колонка (IV, 256-я) читается', () => {
@@ -489,4 +500,118 @@ test('xlsx: добитые null считаются в бюджет ячеек, �
   const { rows } = readXlsxRows(buf);
   assert.equal(rows.length, 50);
   assert.equal(rows[49][255], 50);
+});
+
+// ── Потолок длины значения и пустое оформление справа (повторное ревью CDEKRS-2) ──────────────────
+// decodeXml был s.replace(/&(…);/g, fn): глобальная регулярка с функцией в V8 сначала собирает ВСЕ
+// совпадения, и одна ячейка из 11.5 МБ `&#65;` (zip ~18 КБ) за пару секунд съедала больше 256 МБ
+// кучи — фатальный OOM того же класса, что CDEKRS-2. А бюджет слотов из CDEKRS-2 задел законные
+// файлы: пустая клетка оформления в колонке IV добивала каждую строку null-ами до 256 слотов.
+
+const { parseCdekSheet } = require('../server/domain/cdekImport');
+const { CDEK_HEADER, cdekRow } = require('./cdekFixtures');
+
+/** Прежний декодер — эталон смысла: линейный проход обязан давать ровно то же самое. */
+const LEGACY_ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
+const legacyDecode = (s) => s.replace(/&(#x[0-9a-fA-F]+|#\d+|[a-z]+);/g, (m, e) => {
+  if (e[0] === '#') {
+    const code = e[1] === 'x' ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10);
+    return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : m;
+  }
+  return LEGACY_ENTITIES[e] !== undefined ? LEGACY_ENTITIES[e] : m;
+});
+
+const tooLong = (fn, label) => assert.throws(fn, (e) => {
+  assert.ok(e instanceof SheetReadError, label);
+  assert.match(e.userMessage, /длиннее 32767 символов/, label);
+  return true;
+});
+
+test('xlsx: линейный декодер ссылок даёт ровно то же, что прежний replace', () => {
+  const samples = [
+    'a&b', '&&amp;', '&amp;amp;', '&#65;&#x41;&#X41;', '&#0;&#x0;', '&#;&#x;&;', '&AMP;&Amp;',
+    '&nbsp;&copy;', '&#128512;&#x1F600;', 'хвост&', '&#00065;', '&#9999999;x', '&#x110000;',
+    '&lt;&gt;&quot;&apos;', 'a & b; c', '&amp', '&a1;', '&#1055;&#x440;&amp;&#65;', 'без ссылок',
+    '&amp;&amp;&amp;', '&#65&#66;', '&&&#67;;',
+  ];
+  for (const s of samples) {
+    const expected = legacyDecode(s);
+    // inlineStr идёт через joinTexts, t="str" — прямо в decodeXml.
+    assert.deepEqual(readSheetRows(xlsxWithRawCell(s), 'export.xlsx').rows[0], [expected], `inline: ${s}`);
+    const sheet = `<worksheet><sheetData><row r="1"><c r="A1" t="str"><v>${s}</v></c></row></sheetData></worksheet>`;
+    assert.deepEqual(readSheetRows(bookWithParts({ sheet }), 'export.xlsx').rows[0], [expected], `str: ${s}`);
+  }
+});
+
+// 2.3 млн `&#65;` — 11.5 МБ XML (под потолком листа в 12 МБ), zip ~18 КБ.
+const ENTITY_FLOOD = '&#65;'.repeat(2_300_000);
+
+test('xlsx: миллионы XML-ссылок в одном значении — мгновенный SheetReadError, а не фатальный OOM', () => {
+  // До правки каждая из этих книг разворачивалась в значение на миллионы символов, а под
+  // --max-old-space-size=256 процесс падал фатальным OOM (замер: 1.7–2.3 с, exit 134). try/catch
+  // его не ловит — реплика перезапускается вместе со всеми запросами в полёте.
+  const books = [
+    ['ячейка inlineStr', { sheet: `<worksheet><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>${ENTITY_FLOOD}</t></is></c></row></sheetData></worksheet>` }],
+    ['ячейка t="str"', { sheet: `<worksheet><sheetData><row r="1"><c r="A1" t="str"><v>${ENTITY_FLOOD}</v></c></row></sheetData></worksheet>` }],
+    ['formatCode', { styles: `<styleSheet><numFmts><numFmt numFmtId="164" formatCode="${ENTITY_FLOOD}"/></numFmts></styleSheet>` }],
+    // Строковой таблице распаковка отмеряет 4 МБ — в неё помещается 800 тысяч ссылок.
+    ['строка sharedStrings', { shared: `<sst><si><t>${'&#65;'.repeat(800_000)}</t></si></sst>` }],
+  ];
+  for (const [label, parts] of books) {
+    const buf = bookWithParts(parts);
+    assert.ok(buf.length < 64 * 1024, `${label}: фикстура — десятки килобайт (${buf.length} Б)`);
+    const t0 = performance.now();
+    tooLong(() => readSheetRows(buf, 'export.xlsx'), label);
+    const ms = performance.now() - t0;
+    assert.ok(ms < 1000, `${label}: отказ занял ${ms.toFixed(0)} мс — потолок 1000 мс`);
+  }
+});
+
+test('xlsx: потолок длины — 32 767 символов значения читаются, 32 768 уже нет; меряется декодированный текст', () => {
+  const inline = (inner) => readSheetRows(xlsxWithRawCell(inner), 'export.xlsx').rows[0][0];
+  // Предел ячейки самого Excel проходит целиком.
+  assert.equal(inline('я'.repeat(32767)).length, 32767);
+  tooLong(() => inline('я'.repeat(32768)), 'текст без ссылок');
+  // Меряется РЕЗУЛЬТАТ: 32 767 `&amp;` — это 164 тысячи символов XML, но ровно 32 767 символов значения.
+  assert.equal(inline('&amp;'.repeat(32767)), '&'.repeat(32767));
+  tooLong(() => inline('&amp;'.repeat(32768)), 'ссылки');
+  // rich-text: каждый кусок короткий, а значение целиком — нет.
+  const rich = (n) => '<worksheet><sheetData><row r="1"><c r="A1" t="inlineStr"><is>'
+    + `<r><t>${'a'.repeat(n)}</t></r><r><t>${'b'.repeat(n)}</t></r></is></c></row></sheetData></worksheet>`;
+  assert.equal(readSheetRows(bookWithParts({ sheet: rich(16000) }), 'export.xlsx').rows[0][0].length, 32000);
+  tooLong(() => readSheetRows(bookWithParts({ sheet: rich(20000) }), 'export.xlsx'), 'rich-text из двух кусков');
+  // Та же граница у строки из таблицы и у formatCode (сам Excel не пускает формат длиннее 255).
+  tooLong(() => readSheetRows(bookWithParts({ shared: `<sst><si><t>${'x'.repeat(32768)}</t></si></sst>` }), 'export.xlsx'), 'sharedStrings');
+  tooLong(() => readSheetRows(bookWithParts({
+    styles: `<styleSheet><numFmts><numFmt numFmtId="164" formatCode="${'['.repeat(150000)}"/></numFmts></styleSheet>`,
+  }), 'export.xlsx'), 'formatCode из 150 000 «[»');
+});
+
+test('xlsx: пустая клетка посреди строки держит позицию, пустая справа строку не добивает', () => {
+  const sheet = '<worksheet><sheetData>'
+    + '<row r="1"><c r="A1"><v>1</v></c><c r="B1" s="1"/><c r="C1"><v>3</v></c>'
+    + '<c r="D1" t="inlineStr"><is><t></t></is></c><c r="E1" s="1"/></row>'
+    + '<row r="2"><c r="A2" s="1"/><c r="IV2" s="1"/></row>'
+    + '</sheetData></worksheet>';
+  const { rows } = readSheetRows(bookWithParts({ sheet }), 'export.xlsx');
+  assert.deepEqual(rows[0], [1, null, 3]);
+  assert.equal(rows[1].length, 0, 'строка из одного оформления — пустая, а не 256 null');
+});
+
+test('xlsx: 20 000 строк с пустой клеткой оформления в IV — законная выгрузка читается и импортируется', () => {
+  // Заливка или рамка, протянутая до колонки IV, — обычное дело. Excel пишет такие пустые клетки
+  // тегом `<c r="IV5" s="1"/>`, а бюджет слотов из CDEKRS-2 добивал до неё каждую строку null-ами:
+  // 20 001 × 256 = 5.1 млн слотов > 4 млн — выгрузка отвергалась «слишком много ячеек».
+  const data = [CDEK_HEADER];
+  for (let i = 1; i <= 20000; i++) {
+    data.push(cdekRow({ id: i, created: '2026-01-10 10:00:00', productId: `p${i % 50}` }));
+  }
+  const { rows } = readSheetRows(buildXlsx(data, { styledTo: 'IV' }), 'export.xlsx');
+  assert.equal(rows.length, 20001);
+  // Длина строки — до последней НЕПУСТОЙ клетки (R, «Служба доставки»), а не до оформления.
+  assert.ok(rows.every((row) => row.length === CDEK_HEADER.length), 'пустое оформление справа не раздувает строки');
+  const parsed = parseCdekSheet(rows);
+  assert.equal(parsed.stats.rows_total, 20000);
+  assert.equal(parsed.stats.rows_rejected, 0);
+  assert.equal(parsed.stats.orders_total, 20000);
 });

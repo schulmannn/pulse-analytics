@@ -121,18 +121,61 @@ function inflateEntry(buf, entry, budget, entryLimit = Infinity) {
 
 const ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
 
+/**
+ * Потолок длины ОДНОГО значения после декодирования: текст ячейки (вместе со всеми кусками
+ * rich-text), строка из sharedStrings, formatCode, имя листа. 32 767 символов — предел ячейки
+ * самого Excel: длиннее он не даёт ни ввести, ни сохранить, а поля выгрузки СДЭКа (номера, названия,
+ * адреса, комментарии) — десятки и сотни символов, то есть запас на два порядка. Потолок держит
+ * память, а не красоту: одна ячейка из 11.5 МБ `&#65;` (zip 18 КБ) разворачивалась в строку на
+ * 2.3 млн символов, и куча за 256 МБ роняла процесс фатальным OOM за пару секунд (повторное ревью
+ * CDEKRS-2). С потолком на одно значение приходится не больше 32 тысяч ссылок, и отказ мгновенный.
+ */
+const MAX_VALUE_CHARS = 32767;
+const TOO_LONG = `В файле есть значение длиннее ${MAX_VALUE_CHARS} символов — столько не вмещает даже ячейка Excel`;
+
+// Одна ссылка ровно в позиции lastIndex (флаг y) — та же регулярка, что раньше стояла в replace.
+const ENTITY_AT = /&(#x[0-9a-fA-F]+|#\d+|[a-z]+);/y;
+
+/**
+ * XML-ссылки → символы за один проход: indexOf('&'), разбор одной ссылки, кусок в массив.
+ * Раньше здесь был s.replace(/&(…);/g, fn), а глобальная регулярка с функцией в V8 собирает
+ * совпадения вместе с группами пачкой, а не по одному: 2.3 млн `&#65;` держали в куче миллионы
+ * подстрок разом (замер: за 256 МБ и фатальный OOM). Теперь в памяти только уже декодированное,
+ * а длина выхода проверяется по ходу. `length + amp - last` — нижняя граница итоговой длины
+ * (кусок до '&' уйдёт в выход как есть) и растёт хотя бы на единицу за шаг, так что шагов на одно
+ * значение — порядка MAX_VALUE_CHARS, сколько бы ссылок ни лежало дальше.
+ * Смысл прежний: неизвестная сущность и ссылка за пределами Unicode остаются собой.
+ */
 function decodeXml(s) {
-  if (!s || !s.includes('&')) return s || '';
-  return s.replace(/&(#x[0-9a-fA-F]+|#\d+|[a-z]+);/g, (m, e) => {
+  if (!s) return '';
+  const parts = [];
+  let length = 0;
+  let last = 0;   // начало ещё не скопированного куска
+  for (let amp = s.indexOf('&'); amp >= 0; amp = s.indexOf('&', amp + 1)) {
+    if (length + amp - last > MAX_VALUE_CHARS) throw new SheetReadError(TOO_LONG);
+    ENTITY_AT.lastIndex = amp;
+    const m = ENTITY_AT.exec(s);
+    if (!m) continue;
+    const e = m[1];
+    let ch;
     if (e[0] === '#') {
       const code = e[1] === 'x' ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10);
       // Верхняя граница обязательна: `&#9999999;` — валидный синтаксис, но за пределами Unicode,
       // и String.fromCodePoint на нём бросает RangeError. Неразбираемая ссылка остаётся собой —
       // ровно как неизвестная именованная сущность ниже.
-      return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : m;
+      if (code > 0 && code <= 0x10ffff) ch = String.fromCodePoint(code);
+    } else {
+      ch = ENTITIES[e];
     }
-    return ENTITIES[e] !== undefined ? ENTITIES[e] : m;
-  });
+    if (ch === undefined) continue;
+    parts.push(s.slice(last, amp), ch);
+    length += amp - last + ch.length;
+    last = amp + m[0].length;
+  }
+  if (length + s.length - last > MAX_VALUE_CHARS) throw new SheetReadError(TOO_LONG);
+  if (last === 0) return s;
+  parts.push(s.slice(last));
+  return parts.join('');
 }
 
 // ── Линейный токенизатор вместо ленивых регулярок ──────────────────────────────────────────────
@@ -246,12 +289,21 @@ function joinTexts(xml) {
     }
     body = stripped + body.slice(pos);
   }
-  let text = '';
+  // Потолок — на ВСЁ значение, а не на кусок: 600 тысяч run-ов `<r><t>A</t></r>` по одному
+  // символу иначе проходили бы мимо него поштучно. Куски собираются в массив и склеиваются один
+  // раз, а не цепочкой `+=`, которая держала бы в куче узел на каждый run.
+  const parts = [];
+  let length = 0;
   let pos = 0;
   for (;;) {
     const el = readElement(body, 't', pos);
-    if (!el) return text;
-    text += decodeXml(el.inner);
+    if (!el) return parts.join('');
+    const piece = decodeXml(el.inner);
+    if (piece) {
+      length += piece.length;
+      if (length > MAX_VALUE_CHARS) throw new SheetReadError(TOO_LONG);
+      parts.push(piece);
+    }
     pos = el.next;
   }
 }
@@ -340,6 +392,8 @@ function colIndex(ref) {
  * ловит никакой try/catch (аудит, CDEKRS-2). Выгрузка СДЭКа — 18 колонок (A…R, COLUMN_TITLES в
  * domain/cdekImport.js); 256 — предел самого Excel до 2007 года (колонка IV), то есть
  * четырнадцатикратный запас на колонки, которые пользователь допишет к выгрузке сам.
+ * Ячейка дальше потолка ПРОПУСКАЕТСЯ, а не валит файл: домен читает свои 18 колонок по заголовку,
+ * и заметки пользователя где-нибудь в колонке ZZ к импорту отношения не имеют.
  */
 const MAX_COLUMNS = 256;
 
@@ -417,7 +471,9 @@ function parseSheet(xml, { shared, dateStyles, maxRows, maxCells, deadline }) {
       const inner = c.inner;
       const ref = attrs.match(/r="([A-Za-z]+)\d+"/);
       const idx = ref ? colIndex(ref[1]) : row.length;
-      if (idx < 0) continue;
+      // За краем листа — пропуск ещё до разбора значения: такая ячейка не стоит ни слотов строки,
+      // ни декодирования (раньше ячейка с данными там отвергала весь файл).
+      if (idx < 0 || idx >= MAX_COLUMNS) continue;
       const type = (attrs.match(/\bt="([^"]+)"/) || [])[1] || 'n';
       const style = (attrs.match(/\bs="(\d+)"/) || [])[1];
       let value = null;
@@ -442,18 +498,19 @@ function parseSheet(xml, { shared, dateStyles, maxRows, maxCells, deadline }) {
           }
         }
       }
-      if (idx >= MAX_COLUMNS) {
-        // Пустая клетка за краем — след оформления (Excel пишет `<c r="…" s="3"/>` у раскрашенных,
-        // но пустых клеток): данных в ней нет, и отвергать из-за неё весь файл незачем.
-        if (value === null || value === '') continue;
-        throw new SheetReadError(`В файле больше ${MAX_COLUMNS} колонок`);
-      }
+      const empty = value === null || value === '';
       if (idx >= row.length) {
+        // Пустая клетка правее последней заполненной — след оформления (Excel пишет
+        // `<c r="IV5" s="1"/>` у раскрашенных, но пустых клеток). Добивать до неё строку null-ами
+        // и списывать эти слоты с бюджета незачем: 20 тысяч строк с заливкой до колонки IV —
+        // законный файл, а по слотам он весил 5 млн ячеек и отвергался «слишком много ячеек».
+        // Домен читает `row[i] ?? null`, так что короткая строка для него та же, что добитая.
+        if (empty) continue;
         cells += idx + 1 - row.length;
         if (cells > maxCells) throw new SheetReadError('В файле слишком много ячеек');
       }
       while (row.length < idx) row.push(null);
-      row[idx] = value === '' ? null : value;
+      row[idx] = empty ? null : value;
     }
     rows.push(row);
   }
