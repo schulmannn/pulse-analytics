@@ -80,12 +80,25 @@ const PANELS = [
   'RusenderAudience.tsx',
 ] as const;
 
+const readPanel = (file: string) =>
+  readFileSync(fileURLToPath(new URL(`./${file}`, import.meta.url)), 'utf8');
+
 describe('Витрины Rusender показывают причину ошибки', () => {
   for (const file of PANELS) {
     it(`${file}: isError → RusenderErrorState`, () => {
-      const source = readFileSync(fileURLToPath(new URL(`./${file}`, import.meta.url)), 'utf8');
+      const source = readPanel(file);
       expect(source, 'голый ErrorState теряет текст сервера').not.toMatch(/<ErrorState\b/);
-      expect(source).toMatch(/\.isError\) return <RusenderErrorState query=\{\w+\} \/>;/);
+      expect(source).toMatch(/<RusenderErrorState query=\{\w+\} \/>/);
     });
   }
+
+  it('RusenderMetricPage: при ошибке шапка и пикер «Окно» остаются — иначе окно шире потолка не сменить', () => {
+    const source = readPanel('RusenderMetricPage.tsx');
+    const branch = source.slice(source.indexOf('if (summary.isError)'));
+    const body = branch.slice(0, branch.indexOf('\n  }\n') + 4);
+    expect(body).toContain('<RusenderMetricShell');
+    expect(body).toContain('<RusenderErrorState query={summary} />');
+    expect(body).toContain('{windowBar}');
+    expect(source).toMatch(/const windowBar = \(\s*<WindowBarShell>\s*<PeriodChips/);
+  });
 });
