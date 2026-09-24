@@ -45,6 +45,13 @@ function fmtDay(d) {
 
 const isDayKey = (v) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v);
 
+// Правдоподобное время Rusender: раньше 2000 года рассылок не было, а дальше года вперёд их не
+// планируют. Мусорный год (0001 или 9999) иначе становился границей архива, и окно «Всё»
+// раздувалось до миллионов дней generate_series на каждое открытие витрины.
+const PLAUSIBLE_FROM_MS = Date.UTC(2000, 0, 1);
+const PLAUSIBLE_AHEAD_MS = 366 * 86400000;
+const isPlausibleMs = (at) => at >= PLAUSIBLE_FROM_MS && at <= Date.now() + PLAUSIBLE_AHEAD_MS;
+
 /**
  * День точки активности → 'YYYY-MM-DD'.
  *
@@ -57,16 +64,12 @@ const isDayKey = (v) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v);
 function dayOfActivity(raw) {
   if (typeof raw !== 'string' || !raw) return null;
   const dotted = /^(\d{2})\.(\d{2})\.(\d{4})$/.exec(raw.trim());
-  if (dotted) {
-    const [, dd, mm, yyyy] = dotted;
-    const day = `${yyyy}-${mm}-${dd}`;
-    // Формат совпал, но 32.13.2026 днём не является — проверяем календарно.
-    const at = Date.parse(`${day}T12:00:00Z`);
-    if (!Number.isFinite(at)) return null;
-    return new Date(at).toISOString().slice(0, 10) === day ? day : null;
-  }
-  const iso = raw.slice(0, 10);
-  return isDayKey(iso) ? iso : null;
+  const day = dotted ? `${dotted[3]}-${dotted[2]}-${dotted[1]}` : raw.slice(0, 10);
+  if (!isDayKey(day)) return null;
+  // Формат совпал, но 32.13.2026 (или 2026-02-30) днём не является — проверяем календарно.
+  const at = Date.parse(`${day}T12:00:00Z`);
+  if (!Number.isFinite(at) || !isPlausibleMs(at)) return null;
+  return new Date(at).toISOString().slice(0, 10) === day ? day : null;
 }
 
 /** Целое или null: «поля нет» ≠ «ноль». Витрины отличают отсутствие статистики от нулевой. */
@@ -83,11 +86,14 @@ function strOrNull(v, max = 500) {
   return t ? t.slice(0, max) : null;
 }
 
-/** ISO-время или null. Кривую строку отбрасываем здесь, чтобы не уронить jsonb-каст батча. */
+/**
+ * ISO-время или null. Кривую строку отбрасываем здесь, чтобы не уронить jsonb-каст батча;
+ * неправдоподобный год — тоже (см. isPlausibleMs).
+ */
 function tsOrNull(v) {
   if (typeof v !== 'string' || !v) return null;
   const at = Date.parse(v);
-  return Number.isFinite(at) ? new Date(at).toISOString() : null;
+  return Number.isFinite(at) && isPlausibleMs(at) ? new Date(at).toISOString() : null;
 }
 
 /**
