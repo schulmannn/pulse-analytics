@@ -101,6 +101,13 @@ function makeRes() {
     redirects: [],
     headers: new Map(),
     setHeader(name, value) { this.headers.set(String(name).toLowerCase(), value); },
+    append(name, value) {
+      const key = String(name).toLowerCase();
+      const current = this.headers.get(key);
+      if (current == null) this.headers.set(key, value);
+      else if (Array.isArray(current)) current.push(value);
+      else this.headers.set(key, [current, value]);
+    },
     getHeader(name) { return this.headers.get(String(name).toLowerCase()); },
     status(code) { this.statusCode = code; return this; },
     json(body) { this.body = body; return this; },
@@ -230,6 +237,22 @@ test('OAuth start binds a one-time state to a secure host-only browser cookie', 
   assert.match(callbackRes.last.url, /ig=connected&ch=42$/);
   assert.equal(h.oauthStateStore.has(payload.nonce), false, 'callback consumes the nonce');
   assert.match(callbackRes.getHeader('set-cookie'), /Max-Age=0/, 'browser binding is cleared');
+});
+
+test('OAuth state cookie appends without overwriting a sliding session cookie', async () => {
+  const h = makeHarness({ seedDefaultState: false });
+  const res = makeRes();
+  res.setHeader('Set-Cookie', 'pulse_session=fresh; Path=/; HttpOnly');
+  await h.start({
+    query: { channel: '42' },
+    headers: {},
+    user: { uid: 1, role: 'user', email: 'u@test' },
+  }, res);
+
+  const cookies = res.getHeader('set-cookie');
+  assert.ok(Array.isArray(cookies));
+  assert.equal(cookies[0], 'pulse_session=fresh; Path=/; HttpOnly');
+  assert.match(cookies[1], new RegExp(`^${STATE_COOKIE}=`));
 });
 
 test('a leaked signed state without the initiating browser cookie cannot bind an account', async () => {

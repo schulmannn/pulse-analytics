@@ -74,15 +74,17 @@ test('channel links canonicalize invalid selections and incompatible chart state
     .toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByRole('toolbar', { name: 'Тип графика' })).toHaveCount(0);
 
-  const picker = page.getByRole('button', { name: 'Каналы: 3' });
-  await picker.click();
-  const channelGroup = page.getByRole('group', { name: 'Каналы продаж' });
+  const filter = page.locator('details[data-testid="ms-channel-filter"]:visible');
+  await expect(filter.locator('summary')).toContainText('3');
+  await expect(filter).not.toHaveAttribute('open', '');
+  await filter.locator('summary').click();
+  const channelGroup = filter.getByRole('group', { name: 'Каналы продаж' });
   await expect(channelGroup.getByRole('checkbox', { name: 'Интернет-магазин' })).toBeChecked();
   await expect(channelGroup.getByRole('checkbox', { name: 'Партнёры' })).toBeChecked();
   await expect(channelGroup.getByRole('checkbox', { name: 'Недоступный канал · 46f07379' })).toBeChecked();
 
   await page.reload();
-  await expect(page.getByRole('button', { name: 'Каналы: 3' })).toBeVisible();
+  await expect(page.locator('details[data-testid="ms-channel-filter"]:visible').locator('summary')).toContainText('3');
   expect(new URL(page.url()).searchParams.get('channels')).toBe(expectedChannels);
   await expect(page.getByRole('dialog')).toHaveCount(0);
   expect(await overflowingCards(page)).toEqual([]);

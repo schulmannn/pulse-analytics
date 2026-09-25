@@ -212,6 +212,42 @@ test('summary: кривой диапазон (from>to / мусор) → 400, к 
   assert.equal(fetches, 0);
 });
 
+test('summary: диапазон шире потолка → 400 (строка на каждый день окна = OOM-вектор), к Метрике не ходим', async () => {
+  let fetches = 0;
+  const { routes } = buildYm({ ymFetch: async () => { fetches += 1; return {}; } });
+  // Десятилетие: 3654 плотных дневных строк × (базовые серии + 7 серий качества) в кэш, который
+  // ограничен ЧИСЛОМ записей, а не байтами.
+  const wide = await invoke(routes, 'GET /api/ym/summary', { query: { from: '2016-01-01', to: '2026-01-01' } });
+  assert.equal(wide.statusCode, 400);
+  assert.match(wide.body.error, /Слишком широкий диапазон/);
+  assert.match(wide.body.error, /400 дней/);
+  // Потолок распространяется на все data-роуты (разбор периода общий).
+  const wideSources = await invoke(routes, 'GET /api/ym/sources', { query: { from: '2016-01-01', to: '2026-01-01' } });
+  assert.equal(wideSources.statusCode, 400);
+  assert.equal(fetches, 0, 'широкое окно отсекается ДО запроса в Метрику');
+});
+
+test('summary: граничные 400 дней проходят, 401-й — уже 400; «Всё» потолком не ограничено', async () => {
+  const edge = buildYm({
+    ymFetch: async () => ({ data: [], totals: [] }),
+  });
+  const ok = await invoke(edge.routes, 'GET /api/ym/summary', { query: { from: '2025-01-01', to: '2026-02-04' } });
+  assert.equal(ok.statusCode, 200, 'ровно 400 дней — легитимное окно (год + запас на YoY-сдвиг)');
+  assert.equal(ok.body.visits.series.length, 400, 'плотная серия ровно на ширину окна');
+
+  const over = await invoke(edge.routes, 'GET /api/ym/summary', { query: { from: '2025-01-01', to: '2026-02-05' } });
+  assert.equal(over.statusCode, 400, '401 день — за потолком');
+
+  // «Всё» (days=0 без from/to) идёт архивной веткой и потолка ширины не знает.
+  const all = buildYm({
+    ymFetch: async () => ({ data: [], totals: [] }),
+    db: { getYmDailyAllForActor: async () => [{ day: '2015-01-01', visits: 1, users: 1, pageviews: 1 }] },
+  });
+  const allTime = await invoke(all.routes, 'GET /api/ym/summary', { query: { days: '0' } });
+  assert.equal(allTime.statusCode, 200);
+  assert.equal(allTime.body.meta.all_time, true);
+});
+
 test('sources: маппинг строк + totals полного отчёта авторитетнее суммы среза', async () => {
   const { routes } = buildYm({
     ymFetch: async (_t, path) => {
@@ -619,6 +655,49 @@ test('summary «Всё» без читаемого токена: архив че
   assert.equal(res.body.quality.bounce_rate, null);
   assert.deepEqual(res.body.quality_series.bounce_rate, [{ day: '2026-06-01', value: 40 }]);
   assert.deepEqual(res.body.quality_series.robot_visits, [{ day: '2026-06-01', value: 1 }]);
+});
+
+test('summary «Всё» без архива и без живого отчёта: итоги — ПРОПУСК (null), а не «0 за всё время»', async () => {
+  const { routes } = buildYm({
+    ymFetch: async () => { throw new Error('upstream down'); },
+    db: { getYmDailyAllForActor: async () => [] },
+  });
+  const res = await invoke(routes, 'GET /api/ym/summary', { query: { days: '0' } });
+  assert.equal(res.statusCode, 200);
+  // Ключевой инвариант: сбора не было — значит мы НЕ ЗНАЕМ числа. «0 визитов за всё время»
+  // утверждало бы про счётчик то, чего мы не проверяли.
+  assert.equal(res.body.visits.total, null);
+  assert.equal(res.body.users.total, null);
+  assert.equal(res.body.pageviews.total, null);
+  assert.deepEqual(res.body.visits.series, [], 'серия честно пуста');
+  assert.equal(res.body.meta.exact_period_totals, false);
+  assert.equal(res.body.meta.all_time, true);
+  assert.equal(res.body.meta.archive_last_day, null);
+  // Качество давно следует тому же канону — пропуск, а не выдуманный ноль.
+  assert.equal(res.body.quality.bounce_rate, null);
+});
+
+test('summary «Всё»: РЕАЛЬНО пустой счётчик отдаёт честный 0 — живые totals отличают его от пропуска', async () => {
+  const { routes } = buildYm({
+    // Счётчик подключён и отвечает: за всю историю ровно ноль визитов. Это ЗНАНИЕ, а не пробел.
+    ymFetch: async () => ({ data: [], totals: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }),
+    db: { getYmDailyAllForActor: async () => [] },
+  });
+  const res = await invoke(routes, 'GET /api/ym/summary', { query: { days: '0' } });
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.visits.total, 0, 'живой отчёт ответил — 0 честный');
+  assert.equal(res.body.users.total, 0);
+  assert.equal(res.body.meta.exact_period_totals, true);
+});
+
+test('summary окно: пустое окно остаётся нулём — плотные дневные строки это ЗНАНИЕ, а не пропуск', async () => {
+  const { routes } = buildYm({ ymFetch: async () => ({ data: [], totals: [] }) });
+  const res = await invoke(routes, 'GET /api/ym/summary', { query: { days: '7' } });
+  assert.equal(res.statusCode, 200);
+  // Окно ходило в Метрику и получило ответ: семь дней по нулю. Это не пропуск сбора.
+  assert.equal(res.body.visits.total, 0);
+  assert.equal(res.body.visits.series.length, 7);
+  assert.equal(res.body.meta.all_time, false);
 });
 
 test('summary «Всё»: live-сбой не валит архив и negative-cache не долбит upstream повторно', async () => {
@@ -1313,4 +1392,73 @@ test('hourly/exits: 401 после connect → ym_token_revoked (reconnect-CTA)'
     assert.equal(res.statusCode, 401, `${route}: 401`);
     assert.equal(res.body.code, 'ym_token_revoked', `${route}: reconnect-код`);
   }
+});
+
+test('connect: счётчик возвращается В УКАЗАННЫЙ пустой ym-канал, а не в новый', async () => {
+  // «Отключить» удаляет учётку, но НЕ канал: дневной архив остаётся, так и обещает подтверждение.
+  // Без этой ветки повторное подключение того же счётчика заводило второй канал, а первый навсегда
+  // висел в переключателе пустым источником.
+  const saved = [];
+  let created = 0;
+  const { routes } = buildYm({
+    ymFetch: async () => ({ counters: [COUNTER] }),
+    db: {
+      findYmChannelByCounter: async () => null,
+      getChannelOrDefault: async (id) => (id === 5 ? { id: 5, owner_uid: 7, source: 'ym' } : null),
+      getYmAccount: async () => null,
+      createYmChannel: async () => { created += 1; return { id: 99 }; },
+      saveYmAccount: async (channelId, fields) => { saved.push({ channelId, fields }); return true; },
+    },
+  });
+  const res = await invoke(routes, 'POST /api/ym/connect', {
+    body: { token: 'oauth-secret' },
+    headers: { 'x-channel-id': '5' },
+  });
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.channel_id, 5, 'счётчик встал в существующий канал');
+  assert.equal(created, 0, 'новый канал не заводится');
+  assert.equal(saved[0].channelId, 5);
+});
+
+test('connect: чужой/не-ym канал в заголовке игнорируется — счётчику заводится свой', async () => {
+  // Заголовок — это ПОДСКАЗКА, а не команда: подставив id телеграм-канала (или чужого), никто не
+  // должен превратить его в источник Метрики.
+  let created = 0;
+  const { routes } = buildYm({
+    ymFetch: async () => ({ counters: [COUNTER] }),
+    db: {
+      findYmChannelByCounter: async () => null,
+      getChannelOrDefault: async (id) => (id === 5 ? { id: 5, owner_uid: 7, source: 'collector' } : null),
+      getYmAccount: async () => null,
+      createYmChannel: async () => { created += 1; return { id: 77 }; },
+      saveYmAccount: async () => true,
+    },
+  });
+  const res = await invoke(routes, 'POST /api/ym/connect', {
+    body: { token: 'oauth-secret' },
+    headers: { 'x-channel-id': '5' },
+  });
+  assert.equal(res.body.channel_id, 77);
+  assert.equal(created, 1);
+});
+
+test('connect: занятый ym-канал не перехватывается — у счётчика свой', async () => {
+  // На канале уже живёт ДРУГОЙ счётчик: подключение поверх стёрло бы его историю подменой учётки.
+  let created = 0;
+  const { routes } = buildYm({
+    ymFetch: async () => ({ counters: [COUNTER] }),
+    db: {
+      findYmChannelByCounter: async () => null,
+      getChannelOrDefault: async (id) => (id === 5 ? { id: 5, owner_uid: 7, source: 'ym' } : null),
+      getYmAccount: async () => ({ channel_id: 5, counter_id: 'other', access_token_enc: 'enc' }),
+      createYmChannel: async () => { created += 1; return { id: 88 }; },
+      saveYmAccount: async () => true,
+    },
+  });
+  const res = await invoke(routes, 'POST /api/ym/connect', {
+    body: { token: 'oauth-secret' },
+    headers: { 'x-channel-id': '5' },
+  });
+  assert.equal(res.body.channel_id, 88);
+  assert.equal(created, 1);
 });

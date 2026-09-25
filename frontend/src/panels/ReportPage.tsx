@@ -15,6 +15,7 @@ import type { DailySeries, DrillKey, PostMetricField } from '@/lib/kpiDerive';
 import { DAY_MS, buildWeeklyTable, cellTint } from '@/lib/reportTables';
 import { defaultBlock, isReportBlockKey, normalizeBlocks } from '@/lib/reportBlocks';
 import type { ReportBlock, ReportBlockKey, ReportBlockType } from '@/lib/reportBlocks';
+import { KpiValue } from '@/components/chartWidget/KpiValue';
 import { fmt } from '@/lib/format';
 import { useMediaQuery } from '@/lib/useMediaQuery';
 import { ReportDocumentDesktop } from '@/panels/report/ReportDocumentDesktop';
@@ -153,11 +154,13 @@ function ReportDocumentBody({
 
   const [renaming, setRenaming] = useState(false);
   const cancelRename = useRef(false);
+  const renameInputRef = useRef<HTMLInputElement>(null);
   // After a rename commits/cancels the input unmounts — return focus to the reappearing
   // pencil button (guarded so the initial mount, where renaming starts false, is unaffected).
   const pencilRef = useRef<HTMLButtonElement>(null);
   const wasRenaming = useRef(false);
   useEffect(() => {
+    if (renaming) renameInputRef.current?.focus();
     if (wasRenaming.current && !renaming) pencilRef.current?.focus();
     wasRenaming.current = renaming;
   }, [renaming]);
@@ -259,7 +262,7 @@ function ReportDocumentBody({
   const generated = fmt.day(new Date());
 
   const chipBase = 'rounded-full border px-3 py-1 text-xs font-medium transition-colors';
-  const chipActive = 'border-primary/40 bg-primary/10 text-primary';
+  const chipActive = 'border-primary/40 bg-primary/10 text-accent-foreground';
   const chipIdle = 'border-border text-muted-foreground hover:text-foreground';
 
   // ── Block edit handlers ──
@@ -307,8 +310,8 @@ function ReportDocumentBody({
         <Link key={k} to={`/metrics/${k}`} className="bg-background p-3 transition-colors hover:bg-muted/60">
           <div className="text-2xs tracking-wide text-muted-foreground">{label}</div>
           <div className="mt-1 flex items-baseline gap-1.5">
-            <span className="text-2xl font-medium tabular-nums tracking-tight">{drillMeta[k].total}</span>
-            <DeltaPill delta={drillMeta[k].trend} subtle />
+            <KpiValue size="small" text={drillMeta[k].total} />
+            <DeltaPill delta={drillMeta[k].trend} />
           </div>
         </Link>
       ))}
@@ -381,7 +384,7 @@ function ReportDocumentBody({
         );
       case 'metric-subscribers':
         return (
-          <ReportMetricCard title="Подписчики по дням" total={drillMeta.subscribers.total} trend={drillMeta.subscribers.trend}
+          <ReportMetricCard title="Динамика подписчиков" total={drillMeta.subscribers.total} trend={drillMeta.subscribers.trend}
             series={subsSpark} valueFmt={fmt.num} to="/metrics/subscribers" />
         );
       case 'metric-reactions':
@@ -412,7 +415,7 @@ function ReportDocumentBody({
   const chartSpec = (metric: string): { series: DailySeries; valueFmt: (n: number) => string; zeroBase: boolean; label: string; drill: DrillKey } => {
     switch (metric) {
       case 'subscribers':
-        return { series: subsSpark, valueFmt: fmt.num, zeroBase: false, label: 'Подписчики по дням', drill: 'subscribers' };
+        return { series: subsSpark, valueFmt: fmt.num, zeroBase: false, label: 'Динамика подписчиков', drill: 'subscribers' };
       case 'reactions':
         return { series: dailyFor('likes'), valueFmt: fmt.short, zeroBase: true, label: 'Реакции по дням', drill: 'reactions' };
       case 'forwards':
@@ -450,7 +453,7 @@ function ReportDocumentBody({
             </BlockControls>
             <div className="text-xs font-medium tracking-wider text-muted-foreground">{label}</div>
             <div className="mt-2 flex items-baseline gap-2">
-              <span className="text-3xl font-medium tabular-nums tracking-tight">{drillMeta[metric].total}</span>
+              <KpiValue size="compact" text={drillMeta[metric].total} />
               <DeltaPill delta={drillMeta[metric].trend} />
             </div>
           </div>
@@ -473,8 +476,8 @@ function ReportDocumentBody({
               </BlockControls>
             </div>
             <div className="flex items-baseline gap-2">
-              <span className="text-2xl font-medium tabular-nums tracking-tight">{drillMeta[spec.drill].total}</span>
-              <DeltaPill delta={drillMeta[spec.drill].trend} subtle />
+              <KpiValue size="small" text={drillMeta[spec.drill].total} />
+              <DeltaPill delta={drillMeta[spec.drill].trend} />
             </div>
             <ReportChart series={spec.series} viz={viz} valueFmt={spec.valueFmt} zeroBase={spec.zeroBase} />
           </section>
@@ -511,7 +514,7 @@ function ReportDocumentBody({
         <div className="text-xs text-muted-foreground">Отчёт · Telegram · сгенерирован {generated}</div>
         {renaming ? (
           <input
-            autoFocus
+            ref={renameInputRef}
             defaultValue={report.name}
             maxLength={120}
             aria-label="Название отчёта"

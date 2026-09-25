@@ -1,4 +1,5 @@
 import { EmptyState } from '@/components/EmptyState';
+import { ShareTrack } from '@/components/ShareRows';
 import { NetworkBadge } from '@/components/campaigns/shared';
 import { fmt } from '@/lib/format';
 import type { SourceLeaderRow } from '@/lib/campaignPageModel';
@@ -22,12 +23,7 @@ export function CampaignSourceLeaderboard({ leaders }: { leaders: SourceLeaderRo
           </div>
           {source.share != null && (
             <div className="mt-1 flex items-center gap-2">
-              <div className="h-1 flex-1 overflow-hidden rounded-full bg-muted">
-                <div
-                  className="h-full rounded-full bg-primary/60"
-                  style={{ width: `${Math.max(2, Math.round(source.share * 100))}%` }}
-                />
-              </div>
+              <ShareTrack pct={source.share * 100} height="h-1" />
               <span className="w-9 text-right text-2xs tabular-nums text-muted-foreground">
                 {Math.round(source.share * 100)}%
               </span>

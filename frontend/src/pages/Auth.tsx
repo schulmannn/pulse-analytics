@@ -1,10 +1,12 @@
 import { useState } from 'react';
 import type { FormEvent, InputHTMLAttributes, ReactNode } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { useForgot, useLogin, useRegister, useReset, useVerify } from '@/api/queries';
+import { useForgot, useLogin, useMe, useRegister, useReset, useVerify } from '@/api/queries';
+import { useAcceptInvite, useClaimInvite, useInvitePreview } from '@/api/team';
 import { AtlavueMark } from '@/components/AtlavueMark';
 import { GoogleSignInButton } from '@/components/GoogleSignInButton';
 import { Button } from '@/components/ui/button';
+import { ROLE_LABEL, type MemberRole } from '@/lib/team';
 import { cn } from '@/lib/utils';
 
 // "Atlavue Refined Technical" auth — a calm dark card on the near-black canvas: one card-scale
@@ -158,7 +160,7 @@ export function LoginPage() {
             required
             disabled={forgotMutation.isPending}
           />
-          <Button type="submit" disabled={forgotMutation.isPending} size="lg" className="mt-5 w-full px-4">
+          <Button type="submit" pending={forgotMutation.isPending} disabled={forgotMutation.isPending} size="lg" className="mt-5 w-full px-4">
             {forgotMutation.isPending ? 'Отправка…' : 'Отправить ссылку'}
           </Button>
           {forgotMutation.isError && (
@@ -216,7 +218,7 @@ export function LoginPage() {
             disabled={loginMutation.isPending}
           />
         </div>
-        <Button type="submit" disabled={loginMutation.isPending} size="lg" className="mt-5 w-full px-4">
+        <Button type="submit" pending={loginMutation.isPending} disabled={loginMutation.isPending} size="lg" className="mt-5 w-full px-4">
           {loginMutation.isPending ? 'Вход…' : 'Войти'}
         </Button>
         {loginMutation.isError && (
@@ -289,7 +291,7 @@ export function RegisterPage() {
             disabled={registerMutation.isPending}
           />
         </div>
-        <Button type="submit" disabled={registerMutation.isPending} size="lg" className="mt-5 w-full px-4">
+        <Button type="submit" pending={registerMutation.isPending} disabled={registerMutation.isPending} size="lg" className="mt-5 w-full px-4">
           {registerMutation.isPending ? 'Регистрация…' : 'Создать аккаунт'}
         </Button>
         {registerMutation.isError && (
@@ -332,7 +334,7 @@ export function VerifyPage() {
           {token ? 'Подтвердите аккаунт — нажмите кнопку ниже.' : 'Ссылка неполная — откройте её из письма целиком или запросите новое письмо при входе.'}
         </p>
         {token && !verifyMutation.isSuccess && (
-          <Button type="submit" disabled={verifyMutation.isPending} size="lg" className="mt-5 w-full px-4">
+          <Button type="submit" pending={verifyMutation.isPending} disabled={verifyMutation.isPending} size="lg" className="mt-5 w-full px-4">
             {verifyMutation.isPending ? 'Подтверждение…' : 'Подтвердить email'}
           </Button>
         )}
@@ -384,7 +386,7 @@ export function ResetPage() {
           required
           disabled={!token || resetMutation.isPending}
         />
-        <Button type="submit" disabled={!token || resetMutation.isPending} size="lg" className="mt-5 w-full px-4">
+        <Button type="submit" pending={resetMutation.isPending} disabled={!token || resetMutation.isPending} size="lg" className="mt-5 w-full px-4">
           {resetMutation.isPending ? 'Сохранение…' : 'Сохранить пароль'}
         </Button>
         {resetMutation.isError && (
@@ -397,5 +399,225 @@ export function ResetPage() {
         </div>
       </form>
     </AuthShell>
+  );
+}
+
+/**
+ * Приём приглашения в команду (`/invite?token=…`). Публичная страница: ссылка приходит письмом,
+ * сессии у получателя может ещё не быть. Развилки, и все честные:
+ *  • сессия есть и email совпал — одна кнопка «Принять»;
+ *  • сессии нет и аккаунта тоже — пароль прямо здесь: доставка письма УЖЕ доказала владение
+ *    ящиком (то же основание, что у verified-email от Google), сервер заводит активный аккаунт;
+ *  • то же, но ссылку показывали приглашающему (`verify_required`) — доставка больше ничего не
+ *    доказывает: пароль не спрашиваем (сервер его не сохранит), аккаунт заводится неактивным, и
+ *    дальше человек идёт по письму на СВОЙ ящик. H-1 из аудита #554;
+ *  • аккаунт есть, но вошли не тем (или не вошли) — отправляем логиниться, ссылка подождёт.
+ */
+export function InvitePage() {
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const token = searchParams.get('token') ?? '';
+  const preview = useInvitePreview(token);
+  const me = useMe();
+  const acceptMutation = useAcceptInvite();
+  const claimMutation = useClaimInvite();
+  const [password, setPassword] = useState('');
+
+  const goToApp = () => navigate('/', { replace: true });
+
+  if (!token) {
+    return (
+      <AuthShell title="Приглашение">
+        <p className="text-sm text-ink2">Ссылка неполная — откройте её из письма целиком.</p>
+        <InviteFooter />
+      </AuthShell>
+    );
+  }
+
+  if (preview.isLoading) {
+    return (
+      <AuthShell title="Приглашение">
+        <p className="text-sm text-ink2">Проверяем ссылку…</p>
+      </AuthShell>
+    );
+  }
+
+  if (preview.isError || !preview.data) {
+    return (
+      <AuthShell title="Приглашение">
+        <p role="alert" className="text-sm text-destructive">{errorMessage(preview.error)}</p>
+        <InviteFooter />
+      </AuthShell>
+    );
+  }
+
+  const invite = preview.data;
+  const roleLabel = ROLE_LABEL[invite.role as MemberRole] ?? invite.role;
+
+  if (invite.status !== 'live') {
+    const reason = {
+      expired: 'Срок действия ссылки истёк — попросите выслать приглашение заново.',
+      revoked: 'Приглашение отозвано.',
+      accepted: 'Приглашение уже принято — просто войдите в аккаунт.',
+    }[invite.status];
+    return (
+      <AuthShell title="Приглашение недействительно">
+        <p className="text-sm text-ink2">{reason}</p>
+        <InviteFooter />
+      </AuthShell>
+    );
+  }
+
+  const subtitle = (
+    <>
+      {invite.invited_by ? <b className="font-medium text-foreground">{invite.invited_by}</b> : 'Вас'}
+      {invite.invited_by ? ' приглашает вас' : ' пригласили'} в пространство{' '}
+      <b className="font-medium text-foreground">{invite.workspace}</b> — роль «{roleLabel}».
+    </>
+  );
+
+  const signedInAs = me.data?.email ?? null;
+
+  // Вошли под тем же адресом — принять можно в один клик.
+  if (signedInAs && signedInAs.toLowerCase() === invite.email.toLowerCase()) {
+    return (
+      <AuthShell title="Приглашение в команду" subtitle={subtitle}>
+        <Button
+          type="button"
+          size="lg"
+          className="w-full px-4"
+          pending={acceptMutation.isPending}
+          disabled={acceptMutation.isPending}
+          onClick={() => acceptMutation.mutate(token, { onSuccess: goToApp })}
+        >
+          {acceptMutation.isPending ? 'Принимаем…' : 'Принять приглашение'}
+        </Button>
+        {acceptMutation.isError && (
+          <p role="alert" className="mt-3 text-sm text-destructive">{errorMessage(acceptMutation.error)}</p>
+        )}
+        <InviteFooter />
+      </AuthShell>
+    );
+  }
+
+  // Вошли под другим адресом — приглашение именное, чужая сессия его не примет.
+  if (signedInAs) {
+    return (
+      <AuthShell title="Приглашение на другой адрес" subtitle={subtitle}>
+        <p className="text-sm text-ink2">
+          Вы вошли как <b className="font-medium text-foreground">{signedInAs}</b>, а приглашение выписано на{' '}
+          <b className="font-medium text-foreground">{invite.email}</b>. Выйдите и откройте ссылку из письма снова.
+        </p>
+        <InviteFooter />
+      </AuthShell>
+    );
+  }
+
+  // Аккаунт уже существует, но сессии нет — сначала вход, ссылка останется рабочей.
+  if (!invite.needs_account) {
+    return (
+      <AuthShell title="Приглашение в команду" subtitle={subtitle}>
+        <p className="text-sm text-ink2">
+          У <b className="font-medium text-foreground">{invite.email}</b> уже есть аккаунт Atlavue — войдите и
+          откройте ссылку из письма снова.
+        </p>
+        <Link to="/login" className="mt-5 block">
+          <Button type="button" size="lg" className="w-full px-4">Войти</Button>
+        </Link>
+        <InviteFooter />
+      </AuthShell>
+    );
+  }
+
+  // Ссылку видел не только получатель письма — аккаунт активируется письмом на его ящик.
+  const verifyRequired = invite.verify_required === true;
+
+  // Аккаунт заведён, сессии нет: единственный оставшийся шаг живёт в почте.
+  if (claimMutation.isSuccess && claimMutation.data?.verify_required) {
+    return (
+      <AuthShell title="Проверьте почту" subtitle={subtitle}>
+        <p className="text-sm text-ink2">
+          Мы отправили письмо на <b className="font-medium text-foreground">{invite.email}</b>. Откройте его и
+          подтвердите адрес — после этого задайте пароль через «Забыли пароль» на странице входа.
+        </p>
+        <p className="mt-3 text-sm text-ink2">
+          Доступ к пространству <b className="font-medium text-foreground">{invite.workspace}</b> уже закреплён
+          за этим адресом и появится сразу после подтверждения.
+        </p>
+        <InviteFooter />
+      </AuthShell>
+    );
+  }
+
+  // Аккаунта нет — заводим его прямо здесь.
+  const handleClaim = (event: FormEvent) => {
+    event.preventDefault();
+    claimMutation.mutate(
+      verifyRequired ? { token } : { token, password },
+      { onSuccess: (data) => { if (!data.verify_required) goToApp(); } },
+    );
+  };
+
+  return (
+    <AuthShell title="Принять приглашение" subtitle={subtitle}>
+      <form onSubmit={handleClaim}>
+        <AuthField
+          id="invite-email"
+          label="Email"
+          icon="mail"
+          type="email"
+          value={invite.email}
+          readOnly
+          disabled
+        />
+        {verifyRequired ? (
+          <p className="mt-4 text-sm text-ink2">
+            Эту ссылку мог видеть не только владелец адреса, поэтому аккаунт активируется
+            подтверждением почты: мы отправим письмо на <b className="font-medium text-foreground">{invite.email}</b>.
+          </p>
+        ) : (
+          <div className="mt-4">
+            <AuthField
+              id="invite-password"
+              label="Придумайте пароль"
+              icon="lock"
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              placeholder="минимум 8 символов"
+              autoComplete="new-password"
+              minLength={8}
+              required
+              disabled={claimMutation.isPending}
+            />
+          </div>
+        )}
+        <Button
+          type="submit"
+          size="lg"
+          className="mt-5 w-full px-4"
+          pending={claimMutation.isPending}
+          disabled={claimMutation.isPending}
+        >
+          {claimMutation.isPending
+            ? (verifyRequired ? 'Отправляем письмо…' : 'Создаём аккаунт…')
+            : (verifyRequired ? 'Отправить подтверждение' : 'Принять и войти')}
+        </Button>
+        {claimMutation.isError && (
+          <p role="alert" className="mt-3 text-sm text-destructive">{errorMessage(claimMutation.error)}</p>
+        )}
+      </form>
+      <InviteFooter />
+    </AuthShell>
+  );
+}
+
+function InviteFooter() {
+  return (
+    <div className="mt-5 border-t border-border pt-5 text-sm">
+      <Link to="/login" className={LINK_CLASS}>
+        Перейти ко входу
+      </Link>
+    </div>
   );
 }

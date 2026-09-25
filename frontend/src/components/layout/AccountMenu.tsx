@@ -1,4 +1,4 @@
-import { NavLink, useNavigate } from 'react-router-dom';
+import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useLogout } from '@/api/queries';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -13,7 +13,10 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { setThemeStudioOpen } from '@/lib/appearanceStorage';
 import { useTheme } from '@/lib/theme';
+import { accountExitLabel, runAccountExit } from '@/lib/accountExit';
+import { useDemo } from '@/lib/demo-context';
 import { Icon } from '@/components/nav-icons';
 import { SUPER_NAV } from './nav';
 
@@ -52,9 +55,14 @@ function ThemeRow() {
             value={item.mode}
             aria-label={item.label}
             title={item.label}
-            className="flex h-6 w-6 justify-center rounded-full p-0 text-muted-foreground focus:bg-muted focus:text-foreground data-[state=checked]:bg-muted data-[state=checked]:text-foreground [&>span]:hidden"
+            className="group flex h-11 w-11 justify-center rounded-full p-0 text-muted-foreground focus:text-foreground sm:h-6 sm:w-6 [&>span:first-child]:hidden"
           >
-            <Icon name={item.icon} className="h-3.5 w-3.5" />
+            <span
+              aria-hidden="true"
+              className="flex h-6 w-6 items-center justify-center rounded-full group-focus:bg-muted group-data-[state=checked]:bg-muted group-data-[state=checked]:text-foreground"
+            >
+              <Icon name={item.icon} className="h-3.5 w-3.5" />
+            </span>
           </DropdownMenuRadioItem>
         ))}
       </DropdownMenuRadioGroup>
@@ -75,10 +83,17 @@ export function AccountMenuContent({
   onClose: () => void;
 }) {
   const navigate = useNavigate();
+  const location = useLocation();
   const logoutMutation = useLogout();
+  const { demo, exitDemo } = useDemo();
   const handleLogout = () =>
-    logoutMutation.mutate(undefined, {
-      onSettled: () => navigate('/login', { replace: true }),
+    runAccountExit({
+      demo,
+      exitDemo,
+      logout: () =>
+        logoutMutation.mutate(undefined, {
+          onSuccess: () => navigate('/login', { replace: true }),
+        }),
     });
 
   return (
@@ -113,17 +128,34 @@ export function AccountMenuContent({
         </>
       )}
 
+      {/* settingsBackground: настройки — модальный оверлей, за ним остаётся текущая страница. */}
       <DropdownMenuItem asChild>
-        <NavLink to="/settings" onClick={onClose}>
+        <NavLink to="/settings" state={{ settingsBackground: location }} onClick={onClose}>
           <Icon name="gear" className="text-muted-foreground" />
           Настройки
         </NavLink>
       </DropdownMenuItem>
       <DropdownMenuItem asChild>
-        <NavLink to="/settings?section=billing" onClick={onClose}>
+        <NavLink
+          to="/settings?section=billing"
+          state={{ settingsBackground: location }}
+          onClick={onClose}
+        >
           <Icon name="card" className="text-muted-foreground" />
           Подписка
         </NavLink>
+      </DropdownMenuItem>
+      {/* Студия — desktop-поверхность: панель открывается слева ПОВЕРХ страницы, чтобы правки темы
+          было видно на самих графиках. На телефоне остаётся раздел настроек. */}
+      <DropdownMenuItem
+        className="hidden md:flex"
+        onSelect={() => {
+          setThemeStudioOpen(true);
+          onClose?.();
+        }}
+      >
+        <Icon name="palette" className="text-muted-foreground" />
+        Оформление
       </DropdownMenuItem>
       <ThemeRow />
 
@@ -143,7 +175,7 @@ export function AccountMenuContent({
 
       <DropdownMenuSeparator />
       <DropdownMenuItem
-        disabled={logoutMutation.isPending}
+        disabled={!demo && logoutMutation.isPending}
         onSelect={(event) => {
           event.preventDefault();
           handleLogout();
@@ -154,7 +186,7 @@ export function AccountMenuContent({
           name="logout"
           className="text-muted-foreground transition-colors group-focus:text-destructive"
         />
-        {logoutMutation.isPending ? 'Выход…' : 'Выйти'}
+        {accountExitLabel(demo, logoutMutation.isPending)}
       </DropdownMenuItem>
     </>
   );

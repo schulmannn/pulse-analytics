@@ -60,7 +60,12 @@ export function editorSpec(config: WidgetConfig): EditorSpec {
     // Grain / comparison / target only render on a series chart; filter needs dimensions.
     grain: isSeries,
     comparison: isSeries,
-    target: isSeries,
+    // Цель осмысленна и у метрики-ЧИСЛА: «хочу ER 45%» — такой же понятный ориентир, как цель по
+    // просмотрам, и именно он даёт метрике честное кольцо прогресса (RadialGauge: дуга = доля от
+    // ИЗВЕСТНОГО целого, а цель пользователя как раз известное целое). Раньше цель разрешалась
+    // только рядам, и у ER стояло «Недоступно · только для метрик-рядов» — при том что кольцо
+    // рисуется как раз для kpi-виджета с целью.
+    target: isSeries || metric.kind === 'value',
     filter: filterDims.length > 0,
   };
   // Reasons for the controls this metric can't use — the editor shows them disabled, not hidden.

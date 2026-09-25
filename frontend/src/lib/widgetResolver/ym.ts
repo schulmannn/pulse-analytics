@@ -23,6 +23,9 @@ export const resolveYmMetric: WidgetMetricResolver = (metric, _config, ctx, out)
 
   const points: WidgetSeriesPoint[] = block.series.map((p) => ({ date: p.day, value: p.value }));
   if (!points.length) return { ...out, empty: true };
+  // total = null значит «сбора не было» и приходит ровно с пустой серией, которую мы уже отсекли
+  // выше. Проверяем всё равно явно: молчаливый `!` превратил бы будущий пропуск в «0».
+  if (block.total == null) return { ...out, empty: true };
   out.series = points;
   out.valueRaw = block.total;
   out.value = fmt.num(block.total);

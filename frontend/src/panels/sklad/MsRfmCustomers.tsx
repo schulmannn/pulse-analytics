@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { fetchMsRfmCustomersPage, useMsRfmSegmentCustomers, type MsRfmCustomers } from '@/api/queries';
+import { Check, Download } from 'lucide-react';
+import { fetchMsRfmCustomersPage, useMsRfmSegmentCustomers, type MsRfmCustomers } from '@/api/ms';
+import { IconMorph, useMorphFlash } from '@/components/ui/icon-morph';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { Button } from '@/components/ui/button';
@@ -8,12 +10,14 @@ import { toYmd } from '@/lib/analyticsExport';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { downloadCsv, type CsvRow } from '@/lib/csv';
 import { fmt, pluralRu } from '@/lib/format';
+import { formatMoney } from '@/lib/metricNumber';
 import { msPeriodKey, type MsPeriod } from '@/lib/msPeriod';
+import { useVirtualRows } from '@/lib/useVirtualRows';
 
 type Row = MsRfmCustomers['rows'][number];
 
-/** Размер страницы CSV-выгрузки — крупнее интерактивных 50: большой сегмент собирается за
-    считанные запросы, а не десятки «Показать ещё»-страниц. */
+/** Размер страницы CSV-выгрузки — серверный кэп 200: большой сегмент собирается за считанные
+    запросы (интерактивный листинг стартует с 50 и добирает по 200 — msRfmCustomersLimit). */
 export const MS_RFM_EXPORT_PAGE = 200;
 
 /** Имя файла выгрузки: rfm-<segment>-<YYYY-MM-DD>.csv (локальный день скачивания). */
@@ -81,10 +85,38 @@ interface Acc {
 
 const EMPTY = (key: string): Acc => ({ key, rows: [], total: null });
 
+/** Контент строки покупателя — общий для классической и виртуальной веток списка. */
+function CustomerRow({ row, index }: { row: Row; index: number }) {
+  return (
+    <>
+      <div className="flex items-center gap-3">
+        <span className="w-5 shrink-0 text-center text-xs font-medium tabular-nums text-muted-foreground">{index + 1}</span>
+        <span className={`min-w-0 flex-1 truncate text-sm ${row.name ? 'text-foreground' : 'text-muted-foreground'}`}>
+          {row.name ?? 'Без имени'}
+        </span>
+        <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+          {fmt.num(row.orders)} {pluralRu(row.orders, ['заказ', 'заказа', 'заказов'])}
+        </span>
+        <span className="w-28 shrink-0 text-right text-sm font-medium tabular-nums">{formatMoney(row.sum, 'axis')}</span>
+      </div>
+      <p className="mt-0.5 flex min-w-0 items-baseline gap-1.5 pl-8 text-2xs text-muted-foreground">
+        {row.city && <span className="shrink-0">{row.city}</span>}
+        {row.city && row.address && <span aria-hidden="true">·</span>}
+        {row.address && (
+          <span className="min-w-0 truncate" title={row.address}>{row.address}</span>
+        )}
+        {(row.city || row.address) && <span aria-hidden="true">·</span>}
+        <span className="shrink-0 whitespace-nowrap">последний заказ {fmt.day(row.last_day)}</span>
+      </p>
+    </>
+  );
+}
+
 /**
  * Покупатели выбранного RFM-сегмента — сознательный tenant-scoped листинг (в отличие от
- * агрегатного распределения MsRfmBody). Страницы по 50 строк копятся в состоянии («Показать ещё»),
- * смена сегмента или окна сбрасывает на первую страницу. R/F/M-оценки строк в UI не показываем —
+ * агрегатного распределения MsRfmBody). Страницы по MS_RFM_CUSTOMERS_PAGE строк копятся в состоянии
+ * («Показать ещё»), длинный список рендерится виртуально (useVirtualRows); смена сегмента или
+ * окна сбрасывает на первую страницу. R/F/M-оценки строк в UI не показываем —
  * перегруз; сегмент уже назван в заголовке карточки.
  */
 export function MsRfmSegmentCustomers({ period, segment }: { period: MsPeriod; segment: string }) {
@@ -93,6 +125,8 @@ export function MsRfmSegmentCustomers({ period, segment }: { period: MsPeriod; s
   const [acc, setAcc] = useState<Acc>(() => EMPTY(windowKey));
   const [offset, setOffset] = useState(0);
   const [exporting, setExporting] = useState(false);
+  // Морф Download→Check после успешной выгрузки (кнопочная моторика 2026-08-18).
+  const [exported, flashExported] = useMorphFlash();
   const [exportError, setExportError] = useState<string | null>(null);
   // «Телефоны»/«Почты»: какое поле сейчас собирается (disabled на время сборки) и 2-секундный
   // фидбек на самой кнопке («Скопировано N» / «Нет данных»).
@@ -130,6 +164,9 @@ export function MsRfmSegmentCustomers({ period, segment }: { period: MsPeriod; s
   const rows = stale ? [] : acc.rows;
   const total = stale ? null : acc.total;
 
+  // До early-return-ов (rules of hooks). Оценка ~57px: две текстовые строки + py-2.5 + border.
+  const virtual = useVirtualRows<HTMLUListElement>({ count: rows.length, estimateSize: 57 });
+
   if (rows.length === 0 && page.isPending) {
     return <TableSkeleton rows={5} columns={3} header={false} className="py-2" />;
   }
@@ -163,6 +200,7 @@ export function MsRfmSegmentCustomers({ period, segment }: { period: MsPeriod; s
         fetchMsRfmCustomersPage(channelId, period, segment, MS_RFM_EXPORT_PAGE, exportOffset),
       );
       downloadCsv(rfmExportFilename(segment), rfmCustomersCsvRows(all));
+      flashExported(); // морф Download→Check — только на УСПЕХЕ (ошибка уходит в ErrorState ниже)
     } catch (error) {
       setExportError(error instanceof Error ? error.message : 'ошибка');
     } finally {
@@ -221,15 +259,24 @@ export function MsRfmSegmentCustomers({ period, segment }: { period: MsPeriod; s
           <div className="flex shrink-0 items-center gap-3">
             {contactAction('phone', 'Телефоны')}
             {contactAction('email', 'Почты')}
+            {/* pending-канон кнопки + морф Download→Check на успехе (кнопочная моторика 2026-08-18). */}
             <Button
               type="button"
               variant="outline"
               size="sm"
               onClick={handleExport}
-              disabled={exporting}
-              className="shrink-0"
+              pending={exporting}
+              className="shrink-0 gap-1.5"
             >
-              {exporting ? 'Готовим…' : 'Выгрузить CSV'}
+              {!exporting && (
+                <IconMorph
+                  active={exported}
+                  a={<Download className="size-3.5" />}
+                  b={<Check className="size-3.5" />}
+                  className="size-3.5"
+                />
+              )}
+              Выгрузить CSV
             </Button>
           </div>
         </div>
@@ -245,31 +292,41 @@ export function MsRfmSegmentCustomers({ period, segment }: { period: MsPeriod; s
           retrying={exporting}
         />
       )}
-      <ul className="mt-1">
-        {rows.map((row, i) => (
-          <li key={row.agent_id} className="border-t border-border py-2.5 first:border-t-0">
-            <div className="flex items-center gap-3">
-              <span className="w-5 shrink-0 text-center text-xs font-medium tabular-nums text-muted-foreground">{i + 1}</span>
-              <span className={`min-w-0 flex-1 truncate text-sm ${row.name ? 'text-foreground' : 'text-muted-foreground'}`}>
-                {row.name ?? 'Без имени'}
-              </span>
-              <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-                {fmt.num(row.orders)} {pluralRu(row.orders, ['заказ', 'заказа', 'заказов'])}
-              </span>
-              <span className="w-28 shrink-0 text-right text-sm font-medium tabular-nums">{fmt.short(row.sum)} ₽</span>
-            </div>
-            <p className="mt-0.5 flex min-w-0 items-baseline gap-1.5 pl-8 text-2xs text-muted-foreground">
-              {row.city && <span className="shrink-0">{row.city}</span>}
-              {row.city && row.address && <span aria-hidden="true">·</span>}
-              {row.address && (
-                <span className="min-w-0 truncate" title={row.address}>{row.address}</span>
-              )}
-              {(row.city || row.address) && <span aria-hidden="true">·</span>}
-              <span className="shrink-0 whitespace-nowrap">последний заказ {fmt.day(row.last_day)}</span>
-            </p>
-          </li>
-        ))}
-      </ul>
+      {virtual.active ? (
+        // Виртуальное окно: абсолютные li поверх спейсер-высоты; border-t по индексу — first:
+        // в отрыве от порядка DOM не работает. Нумерация — по vi.index, как в классической ветке.
+        <ul
+          ref={virtual.containerRef}
+          data-virtualized="true"
+          className="relative mt-1"
+          style={{ height: virtual.totalSize }}
+        >
+          {virtual.items.map((vi) => {
+            const row = rows[vi.index];
+            if (!row) return null;
+            return (
+              <li
+                key={row.agent_id}
+                data-index={vi.index}
+                ref={virtual.measureElement}
+                className={`absolute inset-x-0 top-0 py-2.5 ${vi.index === 0 ? '' : 'border-t border-border'}`}
+                style={{ transform: `translateY(${vi.start - virtual.scrollMargin}px)` }}
+              >
+                <CustomerRow row={row} index={vi.index} />
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        // Реф и здесь: от контейнера ищется scroll-родитель ДО активации виртуализации.
+        <ul ref={virtual.containerRef} className="mt-1">
+          {rows.map((row, i) => (
+            <li key={row.agent_id} className="border-t border-border py-2.5 first:border-t-0">
+              <CustomerRow row={row} index={i} />
+            </li>
+          ))}
+        </ul>
+      )}
       {page.isError && (
         <ErrorState
           compact

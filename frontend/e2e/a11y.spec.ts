@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import type { Page, TestInfo } from '@playwright/test';
 import { AxeBuilder } from '@axe-core/playwright';
-import { bootDemo, detailOverlayOpener } from './helpers';
+import { bootDemo, detailOverlayOpener, openDetailOverlay } from './helpers';
 
 /**
  * Accessibility gate. Two layers:
@@ -38,6 +38,9 @@ const ROUTES = [
   { path: '/analytics', name: 'analytics' },
   { path: '/posts', name: 'posts' },
   { path: '/home', name: 'home' },
+  { path: '/settings', name: 'settings' },
+  { path: '/connect?source=moysklad', name: 'connect-moysklad' },
+  { path: '/connect?source=metrika', name: 'connect-metrika' },
 ];
 
 for (const route of ROUTES) {
@@ -49,7 +52,7 @@ for (const route of ROUTES) {
 
 test('axe: no serious violations — detail overlay open', async ({ page }, testInfo) => {
   await bootDemo(page, '/');
-  await detailOverlayOpener(page).click();
+  await openDetailOverlay(page);
   await expect(page.getByRole('dialog')).toBeVisible();
   await expectNoSeriousViolations(page, testInfo, 'detail-overlay');
 });
@@ -141,6 +144,17 @@ test('axe: no serious violations — command palette open', async ({ page }, tes
   await expectNoSeriousViolations(page, testInfo, 'palette');
 });
 
+test('axe: no serious violations — mobile settings sections', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'mobile-430', 'mobile settings sections');
+  await bootDemo(page, '/settings?section=billing');
+  await expect(page.getByRole('heading', { name: 'Подписка', level: 2 })).toBeVisible();
+  await expectNoSeriousViolations(page, testInfo, 'settings-billing');
+
+  await page.getByRole('tab', { name: 'Каналы', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Каналы', level: 2 })).toBeVisible();
+  await expectNoSeriousViolations(page, testInfo, 'settings-channels');
+});
+
 test('keyboard: widget edit dialog traps Tab and restores focus to the ⋯ trigger', async ({ page }) => {
   await bootDemo(page, '/');
   const menuButton = page.locator('button[aria-label^="Меню виджета"]').first();
@@ -159,4 +173,44 @@ test('keyboard: widget edit dialog traps Tab and restores focus to the ⋯ trigg
   // The «Изменить» item refocused the ⋯ trigger before opening, so the dialog's trap captured it
   // as opener and must restore it on close.
   await expect(menuButton).toBeFocused();
+});
+
+/**
+ * ЧЕТЫРЕ ТАБЛИЦЫ — ОДНО КОЛЬЦО ФОКУСА (аудит #554, «доступность»).
+ *
+ * Аудит записал строки таблиц с `onClick` как «без клавиатурного пути». Это НЕ ТАК: в ячейке
+ * публикации у всех четырёх стоит настоящая кнопка, и комментарий в Posts.tsx прямо объясняет
+ * зачем. Настоящее расхождение мельче и конкретнее: три таблицы (IgContentDesktop,
+ * CampaignPostsTable, MetricPage) несут один рецепт кольца, а таблица постов не несла ничего и
+ * доставалась браузерной обводке по умолчанию — фокус виден, но чужой.
+ *
+ * Гейт сравнивает ОТРЕНДЕРЕННОЕ кольцо двух таблиц между собой, а не с константой: «не none»
+ * прошло бы и без класса (Tailwind v4 держит на элементе цепочку прозрачных сегментов даже там,
+ * где тени нет — проверено снятием класса), а равенство с соседом — ровно то утверждение,
+ * которое здесь и делается.
+ */
+test('кольцо фокуса таблицы постов совпадает с таблицей контента Instagram', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop-1440', 'таблицы — desktop-раскладка');
+
+  /** Непрозрачные сегменты box-shadow сфокусированного триггера — это и есть кольцо. */
+  const ringOf = async (route: string, selector: string) => {
+    await bootDemo(page, route);
+    const trigger = page.locator(selector).first();
+    await expect(trigger).toBeVisible({ timeout: 20_000 });
+    await trigger.focus();
+    const shadow = await trigger.evaluate((el) => {
+      if (!el.matches(':focus-visible')) return null;
+      return getComputedStyle(el).boxShadow;
+    });
+    expect(shadow, `${selector} должен принимать :focus-visible`).not.toBeNull();
+    return (shadow ?? '')
+      .split(/,(?![^(]*\))/)
+      .map((seg) => seg.trim())
+      .filter((seg) => seg.length > 0 && !/^rgba\(0, 0, 0, 0\)( 0px)+$/.test(seg));
+  };
+
+  const posts = await ringOf('/posts', '[data-post-open-trigger]');
+  const igContent = await ringOf('/instagram/content', '[data-ig-content-open-trigger]');
+  expect(posts.length, `у таблицы постов не отрисовано кольцо: ${posts.join(' | ')}`).toBeGreaterThan(0);
+  expect(posts).toEqual(igContent);
 });

@@ -1412,8 +1412,12 @@ async def _qr_watch(qid):
     except asyncio.CancelledError:
         raise
     except Exception as e:
+        # str(e) наружу НЕ уходит: этот статус доезжает до браузера, а текст исключения Telethon
+        # ничего не говорит пользователю и заодно рассказывает постороннему про версию и
+        # внутренности приватного сервиса. Наружу — код, в лог — исходное исключение (L-4).
+        log.warning(f'qr_watch failed: {e}')
         entry['status'] = 'error'
-        entry['error'] = str(e)
+        entry['error'] = 'login_failed'
         await _safe_disconnect(entry['client'])
         return
     try:
@@ -1421,8 +1425,9 @@ async def _qr_watch(qid):
     except asyncio.CancelledError:
         raise
     except Exception as e:
+        log.warning(f'qr_watch finish failed: {e}')
         entry['status'] = 'error'
-        entry['error'] = str(e)
+        entry['error'] = 'finish_failed'
         await _safe_disconnect(entry['client'])
 
 
@@ -1501,8 +1506,9 @@ async def qr_password(id: str = Query(...), password: str = Body(..., embed=True
     try:
         await _qr_finish(entry)
     except Exception as e:
+        log.warning(f'qr_password finish failed: {e}')
         _QR.pop(id, None)
-        return {'status': 'error', 'error': str(e)}
+        return {'status': 'error', 'error': 'finish_failed'}   # код, не текст драйвера (L-4)
     out = {'status': 'ok', 'session': entry['session'], 'channels': entry.get('channels', []),
            'tg_user_id': entry.get('tg_user_id'), 'username': entry.get('username')}
     _QR.pop(id, None)

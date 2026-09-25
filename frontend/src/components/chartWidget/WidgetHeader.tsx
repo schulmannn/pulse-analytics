@@ -44,7 +44,7 @@ export function WidgetHeader({
   // frame title + switcher + menu as one row.
   const floating = strip && !stripToolbar && !reorder;
   return (
-    <div className={floating ? 'absolute -top-1 right-0 z-10 flex items-center' : 'flex shrink-0 items-center gap-3'}>
+    <div className={floating ? 'absolute -top-1 right-0 z-10 flex items-center' : 'relative flex shrink-0 items-center gap-3'}>
       <h3
         title={label}
         className={floating ? 'sr-only' : 'widget-title min-w-0 flex-1 truncate text-sm font-medium tracking-tight text-foreground'}
@@ -53,9 +53,8 @@ export function WidgetHeader({
       </h3>
       {action && (
         <div
+          data-widget-action
           className="flex shrink-0 items-center gap-2"
-          onPointerDown={(event) => event.stopPropagation()}
-          onClick={(event) => event.stopPropagation()}
         >
           {action}
         </div>
@@ -86,7 +85,9 @@ export function WidgetHeader({
           type="button"
           aria-label={`Развернуть виджет «${label}»`}
           onClick={onExpand}
-          className={`sr-only ${removePresence.mounted || reorder ? 'hidden' : ''}`}
+          className={`sr-only focus:not-sr-only focus:absolute focus:right-10 focus:top-0 focus:z-20 focus:inline-flex focus:h-8 focus:items-center focus:rounded-full focus:border focus:border-border focus:bg-card focus:px-3 focus:text-xs focus:shadow-sm ${
+            removePresence.mounted || reorder ? 'hidden' : ''
+          }`}
         >
           Развернуть
         </button>

@@ -19,6 +19,8 @@
 
 'use strict';
 
+const { createIntervalRunner } = require('./intervalRunner');
+
 const { boundedAllSettled } = require('../lib/boundedSettled');
 
 function createOperationalRunner({
@@ -29,6 +31,10 @@ function createOperationalRunner({
   // Опциональная третья полоса: почасовой свип доставки упоминаний (mentionNotifyJob). Расписание
   // «в какой час/дни слать» живёт в самой подписке; свип лишь даёт тик чаще раза в день.
   processMentionNotify = null,
+  // Опциональная четвёртая полоса: проактивное продление токенов Instagram (igTokenRefreshJob).
+  // Раньше продление происходило только при чтении экрана — аккаунт, на который перестали смотреть,
+  // молча доезжал до истечения. Полоса идемпотентна: окно перепроверяется на каждом продлении.
+  processIgTokenRefresh = null,
   // Канонический публичный origin (config.http.publicUrl) — базой для ссылок в письмах отчётов;
   // request-объекта здесь нет, поэтому appBase(req) недоступен.
   publicUrl,
@@ -39,23 +45,18 @@ function createOperationalRunner({
   setTimeoutFn = setTimeout,
   clearTimeoutFn = clearTimeout,
 } = {}) {
-  let timer = null;
-  let running = false;   // in-process single-flight
-  let stopped = false;
-  let started = false;
-
-  // Один проход, защищённый in-process single-flight: перекрывающийся вызов (гонка таймера или
-  // ручной триггер) сразу выходит, не удваивая работу. Возвращается наружу (`runOnce`) — тестируемо
-  // и пригодно как ручной триггер.
-  async function runOnce() {
-    if (!enabled || stopped) return { skipped: true };
-    if (running) return { skipped: true };   // single-flight: не запускаем перекрывающийся проход
-    running = true;
-    try {
-      // jobTracker.run сам глотает ошибки задачи и во время дренажа отклоняет новую работу
-      // ({ accepted:false }) — тогда проход просто не выполняется. Дожидаемся, чтобы single-flight
-      // держался до конца реальной работы прохода.
-      const result = await jobTracker.run(async () => {
+  // Жизненный цикл — общий (createIntervalRunner): single-flight, обёртка в jobTracker, unref-таймеры,
+  // идемпотентные start/stop. Здесь остаётся только САМ ПРОХОД — то, чем бегунки и различаются
+  // (аудит #554: шестьдесят строк были побайтово одинаковы в обоих файлах).
+  const loop = createIntervalRunner({
+    jobTracker,
+    job: 'operational_pass',
+    intervalMs,
+    initialDelayMs,
+    enabled,
+    setTimeoutFn,
+    clearTimeoutFn,
+    pass: async () => {
         // Независимые полосы под concurrency 2: отчёты (собственный durable per-report/period
         // reservation-гейт и внутренний bounded dispatch), maintenance (durable per-UTC-day гейт)
         // и — если передана — доставка упоминаний (durable per-МСК-day гейт per-подписка).
@@ -65,56 +66,23 @@ function createOperationalRunner({
           () => processReportSchedules(publicUrl),
           () => runDailyMaintenanceOnce(),
           ...(processMentionNotify ? [() => processMentionNotify()] : []),
+          ...(processIgTokenRefresh ? [() => processIgTokenRefresh()] : []),
         ];
-        const [rep, maint, mentions] = await boundedAllSettled(lanes, (fn) => fn(), 2);
+        const [rep, maint, ...rest] = await boundedAllSettled(lanes, (fn) => fn(), 2);
+        // Хвост позиционен ровно так же, как собран выше: опциональные полосы не сдвигают друг друга.
+        const mentions = processMentionNotify ? rest.shift() : null;
+        const igToken = processIgTokenRefresh ? rest.shift() : null;
         // Только безопасные статусы — ни result, ни user-данные в лог не попадают.
         log('info', 'operational_pass_done', {
           rep: rep.status,
           maint: maint.status,
           ...(mentions ? { mentions: mentions.status } : {}),
+          ...(igToken ? { igToken: igToken.status } : {}),
         });
-      }, { job: 'operational_pass' });
-      if (result && result.accepted === false) return { skipped: true };
-      return { skipped: false };
-    } finally {
-      running = false;
-    }
-  }
+    },
+  });
 
-  function schedule(delayMs) {
-    if (stopped) return;
-    timer = setTimeoutFn(tick, delayMs);
-    if (timer && typeof timer.unref === 'function') timer.unref();
-  }
-
-  async function tick() {
-    timer = null;
-    if (stopped) return;
-    await runOnce();
-    if (!stopped) schedule(intervalMs);   // перепланируем только если ещё не остановлены
-  }
-
-  // Стартует бегунок: один раз, не в DB-disabled режиме, не после stop(). Первый проход отложен.
-  function start() {
-    if (!enabled || started || stopped) return;
-    started = true;
-    schedule(initialDelayMs);
-  }
-
-  // Останавливает планирование новых проходов и гасит таймер. Идемпотентен. Уже сабмиченный в
-  // jobTracker проход дожидается сам tracker в waitForIdle.
-  function stop() {
-    stopped = true;
-    if (timer) { clearTimeoutFn(timer); timer = null; }
-  }
-
-  return {
-    start,
-    stop,
-    runOnce,
-    get isRunning() { return running; },
-    get isStopped() { return stopped; },
-  };
+  return loop;
 }
 
 module.exports = { createOperationalRunner };

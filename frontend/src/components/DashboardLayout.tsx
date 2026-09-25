@@ -1,14 +1,24 @@
+import { Suspense, lazy, useEffect } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useChannels, useIgProfile } from '@/api/queries';
 import { useDemo } from '@/lib/demo-context';
 import { useMediaQuery } from '@/lib/useMediaQuery';
+import { readStoredAppearance, useThemeStudioOpen } from '@/lib/appearanceStorage';
+import { lazyWithReload } from '@/lib/lazyWithReload';
 import { useWidgetPrefsSync } from '@/lib/widgetPrefsStore';
 import { cn } from '@/lib/utils';
 import { NETWORKS, NetworkGlyph } from '@/lib/networks';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { MobileBottomNav, MobileHeader } from '@/components/layout/MobileNav';
-import { FEED_ROUTES, routeTitle, useActiveNetwork } from '@/components/layout/nav';
+import { isFeedRoute, routeTitle, useActiveNetwork } from '@/components/layout/nav';
 import { Button } from '@/components/ui/button';
+
+/** Студия оформления — редкая поверхность и ЛЕНИВАЯ: закрытая панель не стоит оболочке ничего. */
+const AppearanceDock = lazy(
+  lazyWithReload(() =>
+    import('@/components/settings/AppearanceDock').then((m) => ({ default: m.AppearanceDock })),
+  ),
+);
 
 interface DashboardLayoutProps {
   email?: string;
@@ -24,9 +34,21 @@ export function DashboardLayout({ email, role, avatar }: DashboardLayoutProps) {
   // hooks/effects twice. Conditional render keeps a single instance per breakpoint.
   const isMd = useMediaQuery('(min-width: 768px)');
   const { pathname } = useLocation();
-  const isDesktopMetricRoute = isMd && pathname.startsWith('/metrics/');
+  const isDesktopExplorerRoute =
+    isMd && (pathname.startsWith('/metrics/') || pathname.startsWith('/widgets/'));
   // Widget customisation follows the account (user_prefs), not the browser.
   useWidgetPrefsSync();
+  // Панель студии живёт в localStorage, а не в URL: её открывают, чтобы ХОДИТЬ по страницам и
+  // смотреть, как перекрашиваются графики, — параметр запроса терялся бы на первом переходе.
+  const studioOpen = useThemeStudioOpen();
+  // Сохранённое семейство: CSS-переменную ставит прерисовочный бутстрап из кэша, но файл шрифта
+  // просить некому — модуль палитр при свежем кэше не поднимается вовсе. Карта загрузчиков тоже
+  // ленивая: пользователь на каноне (или на системном шрифте) не тянет ни её, ни шрифты.
+  const savedFont = readStoredAppearance()?.font;
+  useEffect(() => {
+    if (!savedFont || savedFont === 'canon' || savedFont === 'system') return;
+    void import('@/lib/appearanceFonts').then((module) => module.loadAppearanceFont(savedFont));
+  }, [savedFont]);
   return (
     // Desktop shell — inset-панель («завершение области», владелец/Kimi-референс): контент живёт
     // в скруглённом окне с зазором от краёв вьюпорта и СОБСТВЕННЫМ скроллом, так что нижняя
@@ -35,11 +57,24 @@ export function DashboardLayout({ email, role, avatar }: DashboardLayoutProps) {
     // scrollbar-gutter:stable у единственного desktop-скроллера резервирует полосу под классический
     // скроллбар: его появление/исчезновение больше не меняет ширину контента и не будит
     // ResizeObserver-волну по всем карточкам (источник покадровых штормов после прокрутки).
-    <div className="flex min-h-screen bg-background text-foreground md:h-screen md:gap-2.5 md:overflow-hidden md:p-2.5">
+    <div
+      className={cn(
+        'flex min-h-screen bg-background text-foreground md:h-screen md:gap-2.5 md:overflow-hidden md:p-2.5',
+        // Открытая студия НЕ перекрывает оболочку, а раздвигает её: панель встаёт на место
+        // сайдбара, и навигация осталась бы под ней — а ходить по разделам и смотреть, как
+        // перекрасились их графики, ровно и есть смысл панели. 21.25rem = 10px отступа панели +
+        // её 320px + 10px зазора. Сдвиг разовый (открыл/закрыл), без перехода: анимировать
+        // раскладку значит пересчитывать её каждый кадр (см. канон в DESIGN_TOKENS).
+        studioOpen && 'md:pl-[21.25rem]',
+      )}
+    >
       <Sidebar email={email} role={role} avatar={avatar} />
-      <div className="flex min-w-0 flex-1 flex-col md:overflow-y-auto md:rounded-2xl md:border md:border-border md:scrollbar-gutter-stable">
+      <div
+        data-dashboard-scroll
+        className="flex min-w-0 flex-1 flex-col md:relative md:overflow-y-auto md:rounded-2xl md:border md:border-border md:scrollbar-gutter-stable"
+      >
         {isMd ? (
-          isDesktopMetricRoute ? null : <Topbar />
+          isDesktopExplorerRoute ? null : <Topbar />
         ) : (
           <MobileHeader email={email} role={role} avatar={avatar} platformNav={<PlatformNav />} />
         )}
@@ -47,7 +82,7 @@ export function DashboardLayout({ email, role, avatar }: DashboardLayoutProps) {
         <main
           className={cn(
             'flex-1 px-4 pb-24 sm:px-6 md:pb-5',
-            isDesktopMetricRoute ? 'pt-3' : 'pt-5',
+            isDesktopExplorerRoute ? 'pt-3' : 'pt-5',
           )}
         >
           <div className="mx-auto w-full max-w-(--breakpoint-2xl)">
@@ -57,6 +92,11 @@ export function DashboardLayout({ email, role, avatar }: DashboardLayoutProps) {
         </main>
       </div>
       <MobileBottomNav />
+      {studioOpen && (
+        <Suspense fallback={null}>
+          <AppearanceDock />
+        </Suspense>
+      )}
     </div>
   );
 }
@@ -87,7 +127,7 @@ function DemoBanner() {
     It remains for utility pages such as admin, bugs and reports. */
 function Topbar() {
   const { pathname } = useLocation();
-  const title = FEED_ROUTES.includes(pathname) ? null : routeTitle(pathname);
+  const title = isFeedRoute(pathname) ? null : routeTitle(pathname);
   if (!title) return null;
   return (
     <header data-dashboard-topbar className="sticky top-0 z-sticky flex h-14 items-center gap-3 border-b bg-background/80 px-4 backdrop-blur-sm sm:gap-4 sm:px-6 print:hidden">
@@ -115,6 +155,7 @@ function PlatformNav() {
   const channels = data?.channels ?? [];
   const nets = NETWORKS.filter((n) => !data || demo || channels.some((c) => n.hasChannel(c)));
   if (nets.length < 2) return null;
+  const compact = nets.length >= 4;
 
   // Segment count follows the connected-network count (same trick as MobileBottomNav's columns).
   const GRID_COLS: Record<number, string> = { 2: 'grid-cols-2', 3: 'grid-cols-3', 4: 'grid-cols-4' };
@@ -130,10 +171,12 @@ function PlatformNav() {
             <button
               key={p.key}
               type="button"
+              data-mobile-touch-target=""
               onClick={() => navigate(p.home)}
               aria-current={active ? 'true' : undefined}
               className={cn(
-                'relative flex items-center justify-center gap-2 px-2 py-2 text-sm transition-colors',
+                'relative flex min-h-11 min-w-0 items-center justify-center py-2 transition-colors',
+                compact ? 'gap-1 px-1 text-xs' : 'gap-2 px-2 text-sm',
                 active ? 'bg-muted/60 font-medium text-foreground' : 'bg-background text-muted-foreground hover:text-foreground',
               )}
             >

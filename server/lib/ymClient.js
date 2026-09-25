@@ -1,5 +1,7 @@
 'use strict';
 
+const { readRetryAfterHeader, parseRetryAfterMs } = require('./retryAfter');
+
 // ── Яндекс.Метрика (Reporting/Management API) — единственная точка исходящих вызовов ────────
 // Зеркалит lib/msClient по духу и контракту (заголовок OAuth, один ретрай на всплеск квоты),
 // но с двумя надстройками, которых у МС-путей нет и которые Метрике объективно нужны:
@@ -36,18 +38,6 @@ function tokenDigest(token) {
   return crypto.createHash('sha256').update(String(token)).digest('hex').slice(0, 16);
 }
 
-// Retry-After ответа (секунды ИЛИ HTTP-дата) → миллисекунды. Здесь значение НЕ кэпается:
-// для 429 cap применяется только к внутреннему ожиданию, а для 420 роут должен получить
-// исходную длинную паузу и честно передать её клиенту.
-function parseRetryAfter(res) {
-  const raw = res && res.headers && typeof res.headers.get === 'function' ? res.headers.get('retry-after') : null;
-  if (raw == null || raw === '') return null;
-  const secs = Number(raw);
-  if (Number.isFinite(secs) && secs >= 0) return Math.round(secs * 1000);
-  const at = Date.parse(raw);
-  if (Number.isFinite(at)) return Math.max(0, at - Date.now());
-  return null;
-}
 
 // Счётный семафор: не более `max` одновременных держателей. release() отдаёт слот ждущему,
 // если он есть (active не трогаем — слот просто переходит), иначе освобождает его.
@@ -127,7 +117,7 @@ function createYmClient({ fetchImpl, log, sleepImpl, maxConcurrency = YM_MAX_CON
       // quota + распарсенный Retry-After для роута; ТОКЕНА в метке нет (он только в заголовке).
       if (status === 429 || status === 420) {
         err.quota = true;
-        const retryMs = parseRetryAfter(res);
+        const retryMs = parseRetryAfterMs(readRetryAfterHeader(res), Date.now());
         if (retryMs != null) err.retryAfterMs = retryMs;
       }
       throw err;

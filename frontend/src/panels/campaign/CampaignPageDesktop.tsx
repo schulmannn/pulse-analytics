@@ -5,8 +5,9 @@ import { ChartSection } from '@/components/ChartWidget';
 import { EmptyState } from '@/components/EmptyState';
 import { Icon } from '@/components/nav-icons';
 import { LineChart } from '@/components/LineChart';
-import { PieChart } from '@/components/PieChart';
+import { RadialShare } from '@/components/RadialShare';
 import { Button } from '@/components/ui/button';
+import { CAMPAIGNS_LIST } from '@/components/campaigns/routes';
 import {
   CampaignColorDot,
   CampaignStatusChip,
@@ -25,6 +26,7 @@ import {
 } from '@/lib/campaignSummary';
 import {
   applyTimelineMode,
+  capTimelineMode,
   resolveTimelineMode,
   scopeNote,
   sourceLeaderboard,
@@ -32,7 +34,7 @@ import {
 } from '@/lib/campaignPageModel';
 import { campaignSourceKey } from '@/lib/campaignSources';
 import { PillSelect } from '@/components/PillSelect';
-import { fmt } from '@/lib/format';
+import { fmt, timeAxisFromDayKeys } from '@/lib/format';
 import { markdownToPlainText } from '@/lib/markdown';
 import { cn } from '@/lib/utils';
 import { CampaignPostsTable } from '@/panels/campaign/CampaignPostsTable';
@@ -136,8 +138,14 @@ export function CampaignPageDesktop(props: CampaignViewProps) {
                 fixedSize="half"
                 drillTo={campaignMetricPath(props.campaign.id, 'formats', searchParams)}
               >
+                {/* Полукольцо (выбор владельца) — унификация языка долей с Возраст/Пол Метрики и
+                    статусами МС; полная круговая ушла. Форматы — части целого по числу публикаций. */}
                 {slices.values.length > 0 ? (
-                  <PieChart values={slices.values} labels={slices.labels} titles={slices.titles} />
+                  <RadialShare
+                    segments={slices.labels.map((label, i) => ({ key: label, label, value: slices.values[i] ?? 0 }))}
+                    unitWord="публ."
+                    centerCaption="публикаций"
+                  />
                 ) : (
                   <EmptyState compact title="Нет данных о форматах." />
                 )}
@@ -203,7 +211,7 @@ function TimelineExplorer({
 
   const segmented =
     modes.length > 1 ? (
-      <div className="inline-flex items-center gap-1 rounded-full border border-border p-0.5" role="group" aria-label="Режим графика">
+      <fieldset className="inline-flex items-center gap-1 rounded-full border border-border p-0.5" aria-label="Режим графика">
         {modes.map((m) => {
           const on = m.key === active.key;
           return (
@@ -224,7 +232,7 @@ function TimelineExplorer({
             </button>
           );
         })}
-      </div>
+      </fieldset>
     ) : null;
 
   return (
@@ -236,11 +244,16 @@ function TimelineExplorer({
         fixedSize="full"
         drillTo={campaignMetricPath(campaignId, 'timeline', searchParams, active.key)}
       >
-        {active.kind === 'line' ? (
-          <LineChart values={active.values} labels={active.labels} titles={active.titles} showPoints fullAxes />
-        ) : (
-          <BarChart values={active.values} labels={active.labels} titles={active.titles} />
-        )}
+        {/* Кап длинной серии перед рендером (canon CLAUDE.md): линия — LTTB, столбцы — недели. */}
+        {(() => {
+          const shown = capTimelineMode(active);
+          const axisLetters = shown.days ? timeAxisFromDayKeys(shown.days) : undefined;
+          return shown.kind === 'line' ? (
+            <LineChart values={shown.values} labels={shown.labels} axisLabels={axisLetters} titles={shown.titles} showPoints fullAxes />
+          ) : (
+            <BarChart values={shown.values} labels={shown.labels} axisLabels={axisLetters} titles={shown.titles} />
+          );
+        })()}
       </ChartSection>
     </WidgetGroup>
   );
@@ -265,7 +278,7 @@ function CampaignHeader({
   return (
     <div className="space-y-3">
       <Link
-        to="/posts?view=campaigns"
+        to={CAMPAIGNS_LIST}
         className="inline-flex w-fit items-center gap-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
       >
         <Icon name="chevron" className="size-3.5 rotate-90" />

@@ -8,6 +8,8 @@
 
 'use strict';
 
+const { readRetryAfterHeader, parseRetryAfterSeconds } = require('../lib/retryAfter');
+
 const { fetchWithTimeout } = require('../lib/http');
 
 // ── Detailed (idempotent) send policy for scheduled reports (sendEmailDetailed only) ────────────
@@ -23,20 +25,6 @@ const EMAIL_BACKOFF_BUDGET_MS = 1000; // hard ceiling on cumulative backoff slee
 // rejected locally rather than truncated into a possible collision.
 const EMAIL_IDEMPOTENCY_KEY_MAX = 256;
 
-// Retry-After may be an integer number of seconds or an HTTP-date; return whole seconds (≥0) or null
-// when absent/unparseable/overflowing. `nowMs` injected so the HTTP-date branch stays deterministic.
-function parseRetryAfterSeconds(headerValue, nowMs) {
-  if (headerValue == null) return null;
-  const s = String(headerValue).trim();
-  if (s === '') return null;
-  if (/^\d+$/.test(s)) {
-    const seconds = Number(s);
-    return Number.isSafeInteger(seconds) ? seconds : null;
-  }
-  const t = Date.parse(s);
-  if (!Number.isFinite(t)) return null;
-  return Math.max(0, Math.ceil((t - nowMs) / 1000));
-}
 
 // Pull Resend's machine error `name` (e.g. 'concurrent_idempotent_requests', 'invalid_idempotent_request')
 // out of an error body WITHOUT ever surfacing the message/full body. Resend returns the name either at
@@ -158,7 +146,7 @@ function createEmailService({ config, fetchImpl, sleep, now } = {}) {
     }
     let name = null;
     try { name = parseResendErrorName(await res.json()); } catch { /* malformed body — classify by status */ }
-    const retryAfter = parseRetryAfterSeconds(res.headers && res.headers.get && res.headers.get('retry-after'), clock());
+    const retryAfter = parseRetryAfterSeconds(readRetryAfterHeader(res), clock());
     if (status === 429) return { outcome: 'retryable', status, retryAfter };
     const retryMeta = retryAfter == null ? {} : { retryAfter };
     if (status >= 500) return { outcome: 'ambiguous', reason: 'http_5xx', status, ...retryMeta };
@@ -174,11 +162,13 @@ function createEmailService({ config, fetchImpl, sleep, now } = {}) {
   // under a ≤1s sleep budget. Success and permanent rejection return immediately; retryable (429) and
   // ambiguous (network/5xx/409) retry until exhausted/over-budget, then return their classification.
   // Never logs or returns the API key, recipient, HTML or full response bodies.
-  async function sendEmailDetailed(to, subject, html, { idempotencyKey } = {}) {
+  async function sendEmailDetailed(to, subject, html, { idempotencyKey, text } = {}) {
     if (!RESEND_API_KEY) {
       // Parity with legacy sendEmail's dev branch: no provider → treat as sent so local/report flows
       // complete. The scheduled job additionally gates on configured(), so this never runs in prod.
-      console.log('[email:dev] scheduled report send skipped (RESEND_API_KEY unset)');
+      // Строку читают ДВА вызывающих (отчёты и приглашения) — поэтому она называет адресата и тему,
+      // а не «scheduled report»: иначе лог врал бы про происхождение письма.
+      console.log(`[email:dev] to=${to} · "${subject}" (RESEND_API_KEY unset — not sent)`);
       return { outcome: 'sent', dev: true };
     }
     const key = String(idempotencyKey || '');
@@ -193,7 +183,9 @@ function createEmailService({ config, fetchImpl, sleep, now } = {}) {
       'Idempotency-Key': key,
     };
     // Same payload string across every retry — Resend requires an identical body for a reused key.
-    const payload = JSON.stringify({ from: EMAIL_FROM, to, subject, html });
+    // text — текстовая альтернатива (multipart). Письмо без text/plain выглядит для фильтров
+    // хуже, а получателю в клиенте, который режет ссылки, только она и оставляет рабочий адрес.
+    const payload = JSON.stringify(text ? { from: EMAIL_FROM, to, subject, html, text } : { from: EMAIL_FROM, to, subject, html });
     let backoffSpent = 0;
     for (let attempt = 1; ; attempt++) {
       const cls = await resendAttempt(headers, payload);

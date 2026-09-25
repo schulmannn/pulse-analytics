@@ -119,8 +119,6 @@ async function boot(page: Page, route: string, campaignMembers: string[] = []) {
   });
 
   await page.addInitScript(() => {
-    localStorage.setItem('pulse_token', 'e2e-token');
-    localStorage.setItem('pulse_token_exp', String(Date.now() + 60 * 60 * 1000));
     localStorage.setItem('pulse_channel', '1');
     localStorage.setItem('pulse_theme', 'dark');
   });
@@ -184,6 +182,37 @@ test.describe('Instagram chart cards — /metrics/ig-*', () => {
     await expect(page.getByRole('toolbar', { name: 'Тип графика' })).toHaveCount(0);
   });
 
+  /**
+   * Вердикт над сеткой (R6). У IG-карты «затишье» не было НИГДЕ, а «лучший слот» печатался под
+   * сеткой. Страница метрики — самая широкая поверхность продукта и живёт ВНЕ контейнера `tile`,
+   * поэтому оба сегмента вердикта обязаны быть видимы здесь: гейт по ширине тайла на странице,
+   * у которой тайла нет, не имеет права ничего прятать.
+   */
+  test('вердикт над сеткой называет пик и затишье, и оба видимы вне тайла', async ({ page }) => {
+    await boot(page, '/metrics/ig-best-time');
+
+    const verdict = page.locator('[data-slot="heatmap-verdict"]');
+    await expect(verdict).toContainText('Пик');
+    await expect(verdict).toContainText('18:00');
+    await expect(verdict).toContainText('120 онлайн');
+    // Затишье — минимум среди НЕнулевых часов фикстуры (9:00 · 40), а не ноль ночью.
+    await expect(verdict).toContainText('Тише всего');
+    await expect(verdict).toContainText('9:00');
+    await expect(verdict).toContainText('40 онлайн');
+    // Видимость, а не только наличие в разметке.
+    await expect(verdict.getByText('Тише всего')).toBeVisible();
+
+    // Порядок в документе: вердикт РАНЬШЕ первой клетки сетки; старой строки снизу нет.
+    const verdictFirst = await page.evaluate(() => {
+      const v = document.querySelector('[data-slot="heatmap-verdict"]');
+      const c = document.querySelector('[data-heatmap-cell]');
+      if (!v || !c) return null;
+      return (v.compareDocumentPosition(c) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+    });
+    expect(verdictFirst).toBe(true);
+    await expect(page.getByText('лучший слот', { exact: false })).toHaveCount(0);
+  });
+
   test('клик по «Вовлечённость по форматам» на /instagram/content ведёт на route', async ({ page }) => {
     await boot(page, '/instagram/content');
     await page.getByRole('heading', { name: 'Вовлечённость по форматам', exact: true }).click();
@@ -200,6 +229,10 @@ test.describe('Instagram chart cards — /metrics/ig-*', () => {
 
     await expect(page).toHaveURL(/\/metrics\/ig-format-engagement\?campaign=1$/);
     await expect(page.locator('[role="dialog"]')).toHaveCount(0);
+    // URL меняется раньше коммита нового роута: без ожидания h1 страницы метрики getByText ловил
+    // ещё не снятый «Контент» (чип формата в строке, вкладка «Reels», карточка «Форматы») — три
+    // совпадения и strict-mode отказ в CI. h1 с этим именем есть только у страницы метрики.
+    await expect(page.getByRole('heading', { name: 'Вовлечённость по форматам', level: 1 })).toBeVisible();
     await expect(page.getByText('Reels', { exact: true })).toBeVisible();
     // Account-level breakdown contains Feed, but the selected campaign contains only reel1.
     await expect(page.getByText('Лента', { exact: true })).toHaveCount(0);

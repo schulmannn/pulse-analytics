@@ -244,3 +244,23 @@ describe('igOverviewCharts', () => {
     expect(igOverviewCharts(series, SINCE, UNTIL).views.values).toEqual([]);
   });
 });
+
+describe('igWindowCharts — буквенная ось короткого окна (владелец, 2026-08-14)', () => {
+  it('окно ≤ 8 дней: overviewCharts несут axisLabels-буквы, labels остаются датами', () => {
+    const metrics = igWindowMetrics(fixedRaw());
+    // Окно day(7)..day(14) = 8 дней; в данных 7 точек: 2026-07-08 (среда) … 2026-07-14 (вторник).
+    const letters = ['W', 'T', 'F', 'S', 'S', 'M', 'T'];
+    expect(metrics.overviewCharts.views.axisLabels).toEqual(letters);
+    expect(metrics.overviewCharts.interactions.axisLabels).toEqual(letters);
+    expect(metrics.overviewCharts.engagement.axisLabels).toEqual(letters);
+    // Полные даты не тронуты — тултип называет день.
+    expect(metrics.overviewCharts.views.labels).toHaveLength(7);
+    expect(metrics.overviewCharts.views.labels[0]).not.toBe('W');
+  });
+
+  it('длинное окно остаётся на датах (axisLabels нет)', () => {
+    const raw = fixedRaw();
+    const metrics = igWindowMetrics({ ...raw, since: Date.parse('2026-07-01'), until: Date.parse('2026-07-15') });
+    expect(metrics.overviewCharts.views.axisLabels).toBeUndefined();
+  });
+});

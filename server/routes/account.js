@@ -2,6 +2,9 @@
 
 const rateLimit = require('express-rate-limit');
 
+// Через сколько секунд повторить экспорт, если заняты все слоты одновременных выгрузок.
+const EXPORT_BUSY_RETRY_AFTER_SEC = 60;
+
 /**
  * Account-scoped + admin routes, extracted verbatim from index.js:
  *   • GET  /api/config            — public SPA runtime config (no secrets)
@@ -17,7 +20,17 @@ const rateLimit = require('express-rate-limit');
  * app and injected. Every admin/account write stays behind requireAuth (+ requireSuper where it
  * was) and the same self-lockout / superuser guards as before.
  */
-function registerAccountRoutes({ app, requireAuth, requireSuper, db, audit, sendEmail, emailShell, GOOGLE_CLIENT_ID }) {
+function registerAccountRoutes({
+  app,
+  requireAuth,
+  requireSuper,
+  db,
+  audit,
+  sendEmail,
+  emailShell,
+  GOOGLE_CLIENT_ID,
+  clearSessionCookie = () => {},
+}) {
   // Public runtime config for the SPA (no secrets). Currently just the Google client id so the login
   // UI can decide whether to show the "Sign in with Google" button.
   app.get('/api/config', (req, res) => {
@@ -133,6 +146,15 @@ function registerAccountRoutes({ app, requireAuth, requireSuper, db, audit, send
         },
       });
       if (outcome === 'not_found') return res.status(404).json({ error: 'Пользователь не найден' });
+      // Занят лимит одновременных выгрузок (свой второй экспорт или чужие) — ни байта ещё не
+      // ушло, так что отвечаем честным 503 + Retry-After; фронт покажет текст вместо битого файла.
+      if (outcome === 'busy') {
+        res.setHeader('Retry-After', String(EXPORT_BUSY_RETRY_AFTER_SEC));
+        return res.status(503).json({
+          error: 'Сейчас уже идёт выгрузка данных — попробуйте через минуту',
+          retry_after: EXPORT_BUSY_RETRY_AFTER_SEC,
+        });
+      }
       if (outcome === 'ok') audit(req, 'account.exported', {}).catch(() => {});
       // 'aborted' / 'stream_error': ответ уже завершён/уничтожен — второй раз не отвечаем.
     } catch (e) { next(e); }
@@ -165,6 +187,7 @@ function registerAccountRoutes({ app, requireAuth, requireSuper, db, audit, send
         'остаточные копии в резервных бэкапах существуют ещё до 30 дней.</p>')).catch(() => {});
       const ok = await db.deleteUserAccount(req.user.uid);
       if (!ok) return res.status(404).json({ error: 'Пользователь не найден' });
+      clearSessionCookie(req, res);
       res.json({ ok: true });
     } catch (e) { next(e); }
   });

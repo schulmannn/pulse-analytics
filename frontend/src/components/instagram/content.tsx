@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { fmt } from '@/lib/format';
+import { formatByRole } from '@/lib/metricNumber';
 import { EmptyState } from '@/components/EmptyState';
 import { BarChart } from '@/components/BarChart';
 import { RichText } from '@/components/RichText';
@@ -43,7 +44,12 @@ export function FormatsBlock({
   }
   return (
     <WidgetGroup id="ig-formats" className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-6">
-      <ChartSection title="Вовлечённость по форматам" defaultSize="full" drillTo={drillTo} variants={breakdownVariants(list)} />
+      <ChartSection
+        title="Вовлечённость по форматам"
+        defaultSize="full"
+        drillTo={drillTo}
+        variants={breakdownVariants(list, { columns: { label: 'Формат', value: 'Взаимодействия' } })}
+      />
     </WidgetGroup>
   );
 }
@@ -198,7 +204,7 @@ export function ReelsBlock({ posts, campaignId }: { posts: IgPost[]; campaignId?
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-1 gap-x-6 gap-y-4 border-t border-border pt-4 sm:grid-cols-3">
-        <KpiCard label="Reels" value={fmt.num(r.count)} />
+        <KpiCard label="Reels" value={formatByRole(r.count, 'headline')} />
         <KpiCard label="Ср. время просмотра" value={`${r.avgWatchAll} сек`} />
         <KpiCard label="Суммарно просмотрено" value={`${fmt.short(Math.round(r.totalWatchHours))} ч`} />
       </div>
@@ -246,7 +252,7 @@ export function HashtagsBlock({ posts }: { posts: IgPost[] }) {
               <td className="p-4 text-right tabular-nums">{s.avgEr.toFixed(2)}%</td>
               <td className="p-4 text-right font-medium tabular-nums">
                 {Math.abs(s.lift) < 0.5 ? (
-                  <span className="text-muted-foreground/60">≈0%</span>
+                  <span className="text-muted-foreground">≈0%</span>
                 ) : (
                   <span className={s.lift > 0 ? 'text-verdant' : 'text-ember'}>
                     {s.lift > 0 ? '+' : ''}{s.lift.toFixed(0)}%
@@ -420,9 +426,9 @@ export function StoriesBlock({ stories }: { stories: IgStory[] | undefined }) {
         <p className="px-1 text-xs text-status-warn">Данные историй исчезнут через ~{hoursLeft} ч (24-часовое окно Instagram).</p>
       )}
       <div className="grid grid-cols-2 gap-x-6 gap-y-4 border-t border-border pt-4 lg:grid-cols-4">
-        <KpiCard label="Историй" value={fmt.num(list.length)} />
-        <KpiCard label="Охват" value={fmt.short(sum('reach'))} />
-        <KpiCard label="Ответы" value={fmt.num(sum('replies'))} />
+        <KpiCard label="Историй" value={formatByRole(list.length, 'headline')} />
+        <KpiCard label="Охват" value={formatByRole(sum('reach'), 'headline')} />
+        <KpiCard label="Ответы" value={formatByRole(sum('replies'), 'headline')} />
         <KpiCard label="Досматриваемость" value={`${Math.round(avgCompletion * 100)}%`} />
       </div>
       {/* Both story cards share the standard 6-column dashboard grid. */}
@@ -431,7 +437,7 @@ export function StoriesBlock({ stories }: { stories: IgStory[] | undefined }) {
           <ChartSection
             title="Навигация по историям"
             drillTo="/metrics/ig-story-navigation"
-            variants={breakdownVariants(navItems)}
+            variants={breakdownVariants(navItems, { columns: { label: 'Действие', value: 'Переходы' } })}
           />
         ) : (
           <ChartSection title="Навигация по историям" drillTo="/metrics/ig-story-navigation">

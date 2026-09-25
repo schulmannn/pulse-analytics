@@ -9,6 +9,7 @@ const {
 } = require('../lib/msTopProducts');
 const { SEGMENT_ORDER } = require('../domain/msRfm');
 const { hasWorkspaceRole } = require('../middleware/tenant');
+const { makeResolveSourceChannel } = require('./sourceRouteKit');
 
 /**
  * Роуты МойСклада (/api/ms/{connect,summary,top-products,top-customers,status,account,backfill,
@@ -153,9 +154,12 @@ function registerMsRoutes({ app, requireAuth, db, audit, msCrypto, msFetch, msBa
 
   // Единый маппинг ошибок msFetch для data-роутов. 429 (уже ПОСЛЕ одной внутренней повторной
   // попытки клиента) → честный 503 с retry-хинтом: у МС жёсткий лимит 45 запросов/3с, «зайди
-  // через пару секунд» точнее, чем маскировать под 502. 401/403 от МС = токен отозван/права
-  // сняты УЖЕ ПОСЛЕ connect'а — это не «сервис упал», а действие пользователя в МойСкладе:
-  // отвечаем 401 + машинный code, чтобы UI показал reconnect-CTA вместо «попробуйте позже».
+  // через пару секунд» точнее, чем маскировать под 502. 401 от МС = токен отозван УЖЕ ПОСЛЕ
+  // connect'а — это не «сервис упал», а действие пользователя в МойСкладе: отвечаем 401 + машинный
+  // code, чтобы UI показал reconnect-CTA вместо «попробуйте позже» (фронт по этому коду НЕ считает
+  // 401 концом нашей сессии — lib/authRedirect). 403 от МС = токен жив, но сотруднику не выданы
+  // права на этот отчёт/справочник (connect проверяет только employee/organization): переподключение
+  // тем же токеном ничего не даст, поэтому отдельный code ms_forbidden и честный текст про права.
   // Всё остальное (сеть/5xx) → 502 «МойСклад недоступен». В лог — только path-контекст/статус,
   // никогда токен.
   function sendMsError(res, e, ctx) {
@@ -168,10 +172,16 @@ function registerMsRoutes({ app, requireAuth, db, audit, msCrypto, msFetch, msBa
         retry_after: e.retryAfter != null ? e.retryAfter : null,
       });
     }
-    if (status === 401 || status === 403) {
+    if (status === 401) {
       return res.status(401).json({
         error: 'Токен отозван МойСкладом — переподключите источник',
         code: 'ms_token_revoked',
+      });
+    }
+    if (status === 403) {
+      return res.status(403).json({
+        error: 'МойСклад отказал в доступе: у сотрудника, чей токен подключён, нет прав на эти данные',
+        code: 'ms_forbidden',
       });
     }
     return res.status(502).json({ error: 'МойСклад недоступен' });
@@ -199,37 +209,13 @@ function registerMsRoutes({ app, requireAuth, db, audit, msCrypto, msFetch, msBa
     }
   }
 
-  // Резолв канала запроса + строки ms_accounts БЕЗ расшифровки токена. Канал приходит тем же
-  // путём, что у resolveIg: ?channel= / заголовок x-channel-id, при их отсутствии — дефолтный
-  // канал пользователя (db.getChannelOrDefault — тот же ownership/disabled-предикат, что
-  // getChannel). Явный id без доступа → 403 ВСЕГДА (не раскрываем существование канала, даже
-  // для status). optional=true (status) смягчает только «не подключён»-исходы: нет каналов или
-  // нет учётки → { channel?, acc:null } вместо 404, чтобы status честно ответил connected:false.
-  // Возвращает { channel, acc } или null (ответ уже отправлен).
-  async function resolveMsChannel(req, res, { optional = false } = {}) {
-    if (!db.enabled) {
-      res.status(503).json({ error: 'База данных недоступна' });
-      return null;
-    }
-    const channelId = parseInt(req.query.channel || req.headers['x-channel-id'], 10) || 0;
-    const channel = await db.getChannelOrDefault(channelId, req.user).catch(() => null);
-    if (!channel) {
-      if (channelId) {
-        res.status(403).json({ error: 'Нет доступа к этому каналу' });
-        return null;
-      }
-      if (optional) return { channel: null, acc: null };
-      res.status(404).json({ error: 'МойСклад не подключён к этому каналу' });
-      return null;
-    }
-    const acc = await db.getMsAccount(channel.id).catch(() => null);
-    if (!acc || !acc.access_token_enc) {
-      if (optional) return { channel, acc: null };
-      res.status(404).json({ error: 'МойСклад не подключён к этому каналу' });
-      return null;
-    }
-    return { channel, acc };
-  }
+  // Канал пользователя + строка ms_accounts: общий резолв источников (routes/sourceRouteKit).
+  const resolveMsChannel = makeResolveSourceChannel({
+    db,
+    getAccount: (id) => db.getMsAccount(id),
+    secretField: 'access_token_enc',
+    notConnected: 'МойСклад не подключён к этому каналу',
+  });
 
   // Пер-запросная идентичность МойСклада для live-вызовов (расшифрованный токен). Мок-фолбэка,
   // в отличие от IG, нет: без подключённого склада роут честно отвечает 404 и UI показывает
@@ -792,8 +778,8 @@ function registerMsRoutes({ app, requireAuth, db, audit, msCrypto, msFetch, msBa
   // DB-агрегата. Сбой словаря НЕ роняет роут — rows с name:null (зеркало деградации
   // loadStatesDict), и такой деградированный ответ сознательно НЕ кэшируем: следующий запрос
   // попробует имена снова, а не залипнет безымянным на весь TTL. Исключение — 401/403 от МС:
-  // токен отозван, честный ms_token_revoked-путь (reconnect-CTA, как у остальных data-роутов);
-  // молчаливый name:null здесь прятал бы умершее подключение.
+  // честный ms_token_revoked/ms_forbidden-путь sendMsError (как у остальных data-роутов);
+  // молчаливый name:null здесь прятал бы умершее подключение или нехватку прав.
   app.get('/api/ms/top-customers', requireAuth, async (req, res, next) => {
     try {
       const period = parseMsPeriod(req);
@@ -890,9 +876,9 @@ function registerMsRoutes({ app, requireAuth, db, audit, msCrypto, msFetch, msBa
   // оканчивается …/entity/saleschannel/<uuid> — тем же uuid ключуем). Кэш 1 час
   // (`ms:channels:<channelId>` — msCachePurge при disconnect его тоже снимет, слот канала третий);
   // словарь меняется редко. Мягкая деградация как у loadStatesDict: сеть/5xx → null
-  // (sales-by-channel отдаёт голые id), неуспех НЕ кэшируем. ИСКЛЮЧЕНИЕ — 401/403: токен отозван,
-  // re-throw наружу → ms_token_revoked-путь роута (молчаливый name:null прятал бы умершее
-  // подключение, как в top-customers).
+  // (sales-by-channel отдаёт голые id), неуспех НЕ кэшируем. ИСКЛЮЧЕНИЕ — 401/403 (токен отозван /
+  // нет прав): re-throw наружу → ms_token_revoked/ms_forbidden-путь роута (молчаливый name:null
+  // прятал бы умершее подключение, как в top-customers).
   async function loadChannelsDict(ms) {
     const cacheKey = `ms:channels:${ms.channel.id}`;
     const cached = cacheGet(cacheKey);
@@ -941,8 +927,8 @@ function registerMsRoutes({ app, requireAuth, db, audit, msCrypto, msFetch, msBa
       try {
         dict = await loadChannelsDict(ms);
       } catch (e) {
-        // 401/403 из словаря = отозванный токен: честный reconnect-CTA (loadChannelsDict глотает
-        // только сеть/5xx → null; ms_token_revoked он пробрасывает наверх).
+        // 401/403 из словаря = отозванный токен / нет прав: честный ответ sendMsError
+        // (loadChannelsDict глотает только сеть/5xx → null; 401/403 он пробрасывает наверх).
         return sendMsError(res, e, { route: 'sales-by-channel', channelId: ms.channel.id });
       }
       let totalOrders = 0;
@@ -1022,6 +1008,12 @@ function registerMsRoutes({ app, requireAuth, db, audit, msCrypto, msFetch, msBa
       const ms = await resolveMs(req, res);
       if (!ms) return;
 
+      // `channel` в единственном числе — legacy-имя фильтра по каналу ПРОДАЖ (UUID МойСклада).
+      // Оно совпадает с именем канала АРЕНДАТОРА, и пока резолвер разбирал его лениво
+      // (`parseInt(...) || 0`), такой запрос уезжал на дефолтный канал: UUID даёт NaN, NaN даёт 0,
+      // 0 значит «по умолчанию». Ровно этим сломалась лента заказов СДЭКа (#502). Теперь
+      // tenantChannelId берёт `?channel` только чистым числом, поэтому legacy-путь работает как
+      // задумано, а не подменяет арендатора.
       const raw = typeof req.query.channels === 'string' ? req.query.channels
         : typeof req.query.channel === 'string' ? req.query.channel   // legacy single
           : '';
@@ -1212,7 +1204,7 @@ function registerMsRoutes({ app, requireAuth, db, audit, msCrypto, msFetch, msBa
   // Токен нужен только словарю имён/адресов: /entity/counterparty OR-фильтром по id строк
   // СТРАНИЦЫ, чанками по 25 id (зеркало top-customers, но страница может быть до 200 строк).
   // Кэш — весь ответ по (period, segment, limit, offset); деградация словаря (не-401/403) →
-  // name/address:null БЕЗ кэша, 401/403 → ms_token_revoked-путь.
+  // name/address:null БЕЗ кэша, 401/403 → ms_token_revoked/ms_forbidden-путь sendMsError.
   const MS_RFM_CUST_LIMIT_DEFAULT = 50;
   const MS_RFM_CUST_LIMIT_MAX = 200;
   const MS_RFM_CUST_DICT_CHUNK = 25;

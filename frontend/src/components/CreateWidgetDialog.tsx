@@ -36,8 +36,8 @@ export function CreateWidgetDialog({
   // preview and the eventual stored widget can never diverge.
   const patch = (p: Partial<WidgetConfig>) => setDraft((d) => normalizeWidget({ ...d, ...p }) ?? d);
 
-  // Radix (ui/dialog) владеет порталом, focus-trap'ом, Escape, скролл-локом и возвратом фокуса —
-  // ручной контракт (useFocusTrap + capture-Escape + body.overflow) ушёл целиком.
+  // Radix (ui/dialog) владеет порталом, focus-trap'ом, Escape, скролл-локом и возвратом фокуса;
+  // прежний ручной focus/Escape/body-overflow контракт удалён.
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="grid max-w-3xl grid-cols-1 gap-5 sm:grid-cols-[minmax(0,1fr)_300px]">
@@ -82,8 +82,9 @@ export function CreateWidgetDialog({
           <div className="mt-4 flex items-center justify-end gap-3 border-t border-border pt-3">
             <button
               type="button"
+              data-mobile-touch-target=""
               onClick={onClose}
-              className="text-sm text-muted-foreground transition-colors hover:text-foreground"
+              className="inline-flex min-h-11 items-center px-2 text-sm text-muted-foreground transition-colors hover:text-foreground sm:min-h-0"
             >
               Отмена
             </button>

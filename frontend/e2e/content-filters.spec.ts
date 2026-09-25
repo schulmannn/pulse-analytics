@@ -89,8 +89,6 @@ async function boot(page: Page, seedCampaignMembers: number[] = []) {
   });
 
   await page.addInitScript(() => {
-    localStorage.setItem('pulse_token', 'e2e-token');
-    localStorage.setItem('pulse_token_exp', String(Date.now() + 60 * 60 * 1000));
     localStorage.setItem('pulse_channel', '1');
     localStorage.setItem('pulse_theme', 'dark');
   });
@@ -189,13 +187,32 @@ test.describe('Контент — URL-фильтры (desktop)', () => {
     const downloadPromise = page.waitForEvent('download');
     await page.getByRole('button', { name: 'Экспорт показанных публикаций в CSV' }).click();
     const download = await downloadPromise;
-    expect(download.suggestedFilename()).toMatch(/^telegram-content-тестовый-канал-\d{4}-\d{2}-\d{2}_\d{4}-\d{2}-\d{2}\.csv$/u);
+    // Слаг транслитерирован: Chrome отбрасывает весь `download` с не-ASCII (см. slugify).
+    expect(download.suggestedFilename()).toMatch(/^telegram-content-testovyy-kanal-\d{4}-\d{2}-\d{2}_\d{4}-\d{2}-\d{2}\.csv$/);
     const downloadPath = await download.path();
     if (!downloadPath) throw new Error('Telegram content CSV has no local download path');
     const csv = await readFile(downloadPath, 'utf8');
     expect(csv).toContain('launch beta');
     expect(csv).not.toContain('launch alpha');
     expect(csv).not.toContain('old post');
+  });
+
+  // Канон дельт (U3, «один голос»): дельты «к медиане» в таблице контента читаются MUTED —
+  // verdant/ember зарезервированы за оценочной дельтой сравнения периодов на metric-странице.
+  // Направление при этом остаётся читаемым по знаку (+/−/±), а не по одному цвету.
+  test('дельты к медиане в таблице контента — muted, без verdant/ember', async ({ page }) => {
+    await boot(page);
+    await page.goto('/posts?period=all'); // 5 постов = MEDIAN_MIN_SAMPLE, иначе дельты скрыты
+    const rows = page.locator('table tbody tr');
+    await expect(rows).toHaveCount(5);
+
+    const deltas = page.locator('table tbody [title="к медиане за период"]');
+    expect(await deltas.count()).toBeGreaterThan(0);
+    for (const className of await deltas.evaluateAll((els) => els.map((el) => el.className))) {
+      expect(className).toContain('text-muted-foreground');
+    }
+    await expect(deltas.first()).toHaveText(/^[+−±]/);
+    await expect(page.locator('table [class*="text-verdant"], table [class*="text-ember"]')).toHaveCount(0);
   });
 
   test('активный фильтр кампании позволяет убрать membership из таблицы (пост не удаляется)', async ({ page }) => {

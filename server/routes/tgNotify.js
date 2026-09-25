@@ -2,6 +2,7 @@
 
 const crypto = require('crypto');
 const { parseStartPayload } = require('../lib/tgNotifyText');
+const { hasWorkspaceRole } = require('../middleware/tenant');
 
 /**
  * Уведомления об упоминаниях в личку Telegram — привязка бота и личная подписка.
@@ -17,6 +18,9 @@ const { parseStartPayload } = require('../lib/tgNotifyText');
  *  - GET/PUT /api/tg/mention-notify — статус и тумблер подписки на ВЫБРАННЫЙ канал. Подписка
  *    личная (uid+channel): достаточно ВИДЕТЬ канал (SQL-boundary channelAccessSql в репо) —
  *    поиск в джобе идёт через собственную managed-сессию подписчика и его же квоту searchPosts.
+ *  - POST /api/tg/mention-notify/run — ручной прогон «Прислать сейчас»: owner/admin + durable
+ *    кулдаун (см. ниже), потому что один вызов = один searchPosts из дневной квоты владельца
+ *    сессии + до девяти сообщений ОБЩИМ ботом продукта.
  *  - DELETE /api/tg/mention-notify/binding — отвязать чат (подписки остаются и молчат до новой
  *    привязки).
  *
@@ -29,6 +33,24 @@ function registerTgNotifyRoutes({
   const DB_OFF = { error: 'База данных выключена — уведомления недоступны' };
   const BOT_OFF = { error: 'Бот уведомлений не настроен' };
   const LINK_TTL_MINUTES = 15;
+
+  // Ручной прогон стоит дневной квоты searchPosts (~10/день) и шлёт карточки ОБЩИМ на весь продукт
+  // ботом — тот же owner/admin-гейт, что у живого поиска в routes/mentions.js (там же и причина).
+  const canEdit = (req) => hasWorkspaceRole(req.channel, req.user, 'admin');
+
+  // Окно между ручными прогонами. Durable (строка jobs через runJobOnce), а не счётчик в памяти:
+  // рестарт процесса и вторая реплика не обнуляют кулдаун. Ключ — календарное окно, как день-ключ
+  // планового джоба (`${channel}:${uid}:${day}` в jobs/mentionNotifyJob): один прогон на окно, а
+  // Retry-After честно называет остаток ЭТОГО окна.
+  const RUN_COOLDOWN_MINUTES = 10;
+  function runWindow(now = Date.now()) {
+    const ms = RUN_COOLDOWN_MINUTES * 60 * 1000;
+    const startedAt = Math.floor(now / ms) * ms;
+    return { key: String(startedAt / ms), retryAfterSec: Math.max(1, Math.ceil((startedAt + ms - now) / 1000)) };
+  }
+  // Отказы ДО расхода квоты и отправки: окно за них не берём (иначе клик по кнопке с ненастроенной
+  // подпиской «съедал» бы десять минут, ничего не защищая).
+  const FREE_REFUSAL_REASONS = new Set(['not_configured', 'not_runnable']);
 
   const timingSafeEq = (a, b) => {
     const da = crypto.createHash('sha256').update(String(a)).digest();
@@ -228,13 +250,53 @@ function registerTgNotifyRoutes({
   });
 
   // ── Ручной тест-прогон «Прислать сейчас» ────────────────────────────────────────────────────────
-  // Явное действие пользователя: тратит ЕГО квоту searchPosts вне планового дня-ключа. Джоб сам
-  // проверяет полную выполнимость (binding+rules+сессия+enabled) — здесь только маппинг ответа.
+  // Явное действие пользователя: тратит ЕГО квоту searchPosts вне планового дня-ключа и шлёт до
+  // девяти сообщений общим ботом. Поэтому два гейта поверх requireAuth/resolveChannel: роль
+  // owner/admin (viewer не должен жечь чужую квоту и писать в общий архив канала) и durable
+  // кулдаун. Джоб сам проверяет полную выполнимость (binding+rules+сессия+enabled) — здесь только
+  // гейты и маппинг ответа.
   app.post('/api/tg/mention-notify/run', requireAuth, resolveChannel, async (req, res, next) => {
     try {
       if (!db.enabled || !req.channel || req.channel.id == null) return res.status(400).json(DB_OFF);
+      if (!canEdit(req)) return res.status(403).json({ error: 'Недостаточно прав в этом воркспейсе' });
       if (!runMentionNotifyTest) return res.status(503).json(BOT_OFF);
-      const out = await runMentionNotifyTest(req.channel.id, req.user.uid);
+
+      const cooldown = runWindow();
+      let outcome;
+      try {
+        outcome = await db.runJobOnce(
+          'mention_notify_manual',
+          `${req.channel.id}:${req.user.uid}:${cooldown.key}`,
+          async () => {
+            const result = await runMentionNotifyTest(req.channel.id, req.user.uid);
+            // Отказ до расхода квоты — не «прогон»: бросаем, чтобы runJobOnce записал строку failed,
+            // и следующий claim того же окна переклеймил её (claimJob переклеймливает failed).
+            if (!result.ok && FREE_REFUSAL_REASONS.has(result.reason)) {
+              const free = new Error(`manual run refused: ${result.reason}`);
+              free.code = 'manual_run_free_refusal';
+              free.result = result;
+              throw free;
+            }
+            return result;
+          },
+        );
+      } catch (e) {
+        if (!e || e.code !== 'manual_run_free_refusal') throw e;
+        outcome = { skipped: false, result: e.result };
+      }
+      // Окно уже занято своим же прошлым прогоном (или параллельным кликом) — честный 429 с
+      // остатком окна, а не тихий второй расход квоты.
+      if (outcome.skipped) {
+        res.set('Retry-After', String(cooldown.retryAfterSec));
+        return res.status(429).json({
+          ok: false,
+          reason: 'cooldown',
+          error: `Слишком часто: ручной прогон доступен раз в ${RUN_COOLDOWN_MINUTES} минут — попробуйте позже`,
+          retry_after_sec: cooldown.retryAfterSec,
+        });
+      }
+
+      const out = outcome.result;
       audit(req, 'tg.mention_notify.test_run', { channel_id: req.channel.id, ok: out.ok }).catch(() => {});
       if (!out.ok) {
         const status = out.reason === 'not_runnable' ? 409 : 503;
@@ -244,9 +306,12 @@ function registerTgNotifyRoutes({
           reauth_required: 'Сессия Telegram недействительна — переподключите аккаунт',
           bot_blocked: 'Бот заблокирован в Telegram — привяжите чат заново',
           send_failed: 'Не удалось отправить сообщение, попробуйте позже',
+          send_throttled: 'Telegram просит подождать — остальные карточки придут следующим прогоном',
           search_failed: 'Поиск не удался (квота или сбой Telegram), попробуйте позже',
           session_decrypt_failed: 'Сессия Telegram недоступна — переподключите аккаунт',
         };
+        // Троттлинг Телеграма знает СВОЙ срок ожидания — отдаём его клиенту, а не общий кулдаун.
+        if (out.retry_after_sec) res.set('Retry-After', String(out.retry_after_sec));
         return res.status(status).json({ ok: false, reason: out.reason, error: RU[out.reason] || RU.search_failed });
       }
       res.json(out);

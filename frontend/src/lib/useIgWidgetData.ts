@@ -7,11 +7,16 @@ import { useMemo } from 'react';
 import { useIgBreakdowns, useIgHistory, useIgInsights, useIgOnline, useIgProfile } from '@/api/queries';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { DEFAULT_WIDGET_DAYS, widgetPeriodValue } from '@/lib/period';
-import { resolveWidgetMetric, type DataContext, type WidgetResult } from '@/lib/resolveWidgetMetric';
+import { resolveWidgetMetric, type DataContext } from '@/lib/resolveWidgetMetric';
 import type { WidgetConfig } from '@/lib/widgetConfig';
+import { widgetDataStateOf, type WidgetDataState } from '@/lib/widgetDataState';
 import { useWidgetInView } from '@/lib/widgetViewport';
 
-export function useIgWidgetData(config: WidgetConfig): { result: WidgetResult; isLoading: boolean } {
+// Ошибка ≠ пустота. Если запрос упал, `isPending` становится false, данные остаются undefined,
+// резолвер честно отдаёт `empty`, и карточка печатала «Нет данных за период» — то есть выдавала
+// сбой сети за достоверный ответ «за этот период пусто». Отдаём ошибку отдельным флагом и даём
+// повтор: гейтим по ТЕМ ЖЕ запросам, что и `isLoading`, чтобы состояния были взаимоисключающими.
+export function useIgWidgetData(config: WidgetConfig): WidgetDataState {
   const days = config.period ?? DEFAULT_WIDGET_DAYS;
   const period = useMemo(() => widgetPeriodValue(days), [days]);
 
@@ -50,6 +55,15 @@ export function useIgWidgetData(config: WidgetConfig): { result: WidgetResult; i
   // Loading = a channel is selected AND the core IG sources (profile + insights) are still pending
   // → show a shaped skeleton instead of flashing «Нет данных». channelId gate avoids a forever
   // skeleton when the queries are disabled (no channel = a real empty state, not loading).
-  const isLoading = channelId != null && (profileQ.isPending || insightsQ.isPending);
-  return { result, isLoading };
+  const state = widgetDataStateOf({
+    channelId,
+    pending: [profileQ.isPending, insightsQ.isPending],
+    errored: [profileQ.isError, insightsQ.isError],
+    fetching: [profileQ.isFetching, insightsQ.isFetching],
+  });
+  const retry = () => {
+    void profileQ.refetch();
+    void insightsQ.refetch();
+  };
+  return { result, ...state, retry };
 }

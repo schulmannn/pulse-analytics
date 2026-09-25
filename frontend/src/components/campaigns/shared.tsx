@@ -1,6 +1,7 @@
 import type { Campaign, CampaignStatus } from '@/api/schemas';
 import { CAMPAIGN_STATUS_LABEL } from '@/api/schemas';
 import { Badge } from '@/components/ui/badge';
+import { fmt } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
 /** Роли, которым сервер разрешает изменять кампанию (viewer — read-only). UI прячет
@@ -58,12 +59,10 @@ export function NetworkBadge({ network }: { network: string }) {
   );
 }
 
-/** «10 июн — 12 июн» / «с 10 июн» / «—» для start/end дат кампании. */
+/** «10 июн. — 12 июн.» / «с 10 июн.» / «—» для start/end дат кампании. Формат даты — общий
+    канон приложения (`fmt.day`), без локального «безточечного» варианта. */
 export function campaignPeriodLabel(c: Pick<Campaign, 'start_date' | 'end_date'>): string {
-  const d = (iso: string) => {
-    const dt = new Date(`${iso}T00:00:00`);
-    return dt.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' }).replace('.', '');
-  };
+  const d = (iso: string) => fmt.day(iso);
   if (c.start_date && c.end_date) return `${d(c.start_date)} — ${d(c.end_date)}`;
   if (c.start_date) return `с ${d(c.start_date)}`;
   if (c.end_date) return `до ${d(c.end_date)}`;

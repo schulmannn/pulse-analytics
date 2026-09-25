@@ -152,6 +152,17 @@ test('metric line chart flows from one period shape into the next', async ({ pag
   await expect(morphGroup).toHaveAttribute('data-chart-morph-state', 'idle');
 });
 
+test('subscriber metric always renders the total curve even for a stale bar deep-link', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop-1440', 'Desktop-only metric explorer contract');
+  await bootDemo(page, '/metrics/subscribers?chart=bar', { theme: 'dark' });
+
+  await expect(page.getByRole('heading', { name: 'Подписчики', level: 1 })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Динамика подписчиков' })).toBeVisible();
+  await expect(page.getByRole('toolbar', { name: 'Тип графика' })).toHaveCount(0);
+  await expect(page.locator('svg[data-chart-kind="bar"]')).toHaveCount(0);
+  await expect(page.locator('svg[data-chart-kind="line"][data-chart-expanded]').first()).toBeVisible();
+});
+
 test('metric explorer gives the plot desktop space and exposes a hover inspector', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop-1440', 'Desktop-only metric explorer contract');
   await bootDemo(page, '/metrics/views', { theme: 'dark' });
@@ -164,9 +175,13 @@ test('metric explorer gives the plot desktop space and exposes a hover inspector
   const chart = page.locator('svg[data-chart-kind="line"][data-chart-expanded]').first();
   await chart.waitFor({ state: 'visible', timeout: 15_000 });
   await expect(chart).toHaveAttribute('data-chart-curve', 'smooth');
-  await expect(chart).toHaveAttribute('data-chart-comparison', 'area');
+  // Канон «previous-period stays dashed/no-fill»: у прошлого периода ТОЛЬКО штриховая линия —
+  // ни своей area, ни сплошного штриха (залитое сравнение мутило пересечения с текущей заливкой).
+  await expect(chart).toHaveAttribute('data-chart-comparison', 'dashed');
   await expect(chart.locator('[data-chart-series="primary-area"]')).toHaveCount(1);
-  await expect(chart.locator('[data-chart-series="comparison-area"]')).toHaveCount(1);
+  await expect(chart.locator('[data-chart-series="comparison-area"]')).toHaveCount(0);
+  await expect(chart.locator('[data-chart-series="comparison"]')).toHaveAttribute('stroke-dasharray', '5 4');
+  await expect(chart.locator('[data-chart-series="comparison"]')).toHaveAttribute('fill', 'none');
   await chart.scrollIntoViewIfNeeded();
   await page.waitForTimeout(300);
 
@@ -496,7 +511,7 @@ test('legacy Home cards use one config path and preserve old prefs during migrat
     history: {
       id: 'legacy-history',
       metricId: 'legacy:history',
-      viz: 'bar',
+      viz: 'line',
       period: 90,
       size: 'full',
       title: 'Моя история',
@@ -532,9 +547,11 @@ test('desktop Home splits the legacy Telegram «Показатели» composite
   // A saved board with the composite between two other widgets, plus the composite's old per-card
   // prefs (period + source) that each split card must inherit.
   await page.addInitScript(() => {
+    if (localStorage.getItem('e2e_home_kpi_split_seeded') === '1') return;
     localStorage.setItem('pulse_home_blocks', JSON.stringify({ keys: ['week', 'kpi', 'growth'] }));
     localStorage.setItem('pulse_widget_configs', '[]');
     localStorage.setItem('pulse_widget_prefs', JSON.stringify({ 'home-kpi': { period: 90, source: 3, includeToday: false } }));
+    localStorage.setItem('e2e_home_kpi_split_seeded', '1');
   });
 
   await bootDemo(page, '/home', { theme: 'dark' });

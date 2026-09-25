@@ -8,7 +8,7 @@ import { selectPill } from './helpers';
  * архивировать кампанию.
  *
  * Демо-режим здесь НЕ используется: client.ts блокирует в нём все записи, поэтому
- * поднимаем «авторизованную» сессию (pulse_token) и мокируем ВЕСЬ /api/* одним
+ * мокируем ВЕСЬ /api/* одним
  * stateful-роутом — кампании живут в замыкании теста, как настоящая БД.
  */
 
@@ -215,8 +215,6 @@ async function bootCampaigns(page: Page) {
   });
 
   await page.addInitScript(() => {
-    localStorage.setItem('pulse_token', 'e2e-token');
-    localStorage.setItem('pulse_token_exp', String(Date.now() + 60 * 60 * 1000));
     localStorage.setItem('pulse_channel', '1');
     localStorage.setItem('pulse_theme', 'dark');
   });
@@ -279,8 +277,11 @@ test.describe('Кампании (desktop)', () => {
     await page.keyboard.press('Enter');
     await expect(sourceFilter).toHaveAttribute('aria-expanded', 'true');
     await expect(page.getByRole('listbox', { name: 'Фильтр по источнику кампании' })).toBeVisible();
+    // Кадр ВЬЮПОРТА, не fullPage: fullPage-съёмка прокручивает страницу, Radix пересчитывает
+    // popper и теряет клавиатурный контекст открытого списка — следующий ArrowDown уходил в
+    // никуда, и тест падал примерно в трети прогонов. Открытый список и так во вьюпорте.
     const selectShot = testInfo.outputPath('campaign-pill-select-dark.png');
-    await page.screenshot({ path: selectShot, fullPage: true });
+    await page.screenshot({ path: selectShot });
     await testInfo.attach('campaign-pill-select-dark', { path: selectShot, contentType: 'image/png' });
     await page.keyboard.press('ArrowDown');
     // Radix moves the active option in a deferred callback. Wait for that focus transfer before

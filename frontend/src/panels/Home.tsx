@@ -319,11 +319,11 @@ export function Home() {
               className="edit-toggle btn-pill text-sm font-medium"
             >
               <span className="edit-toggle-icons" aria-hidden="true">
-                <svg className="i-edit" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <svg aria-hidden="true" focusable="false" className="i-edit" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M12 20h9" />
                   <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z" />
                 </svg>
-                <svg className="i-done" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <svg aria-hidden="true" focusable="false" className="i-done" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   {/* pathLength=1 normalises the stroke length so the CSS draw-on (dasharray/offset) needs no measuring */}
                   <path d="M20 6 9 17l-5-5" pathLength={1} />
                 </svg>
@@ -428,7 +428,7 @@ export function Home() {
  * The single Home add flow: the metric catalogue → build dialog → pin. Lifted out of the edit-mode
  * dock so the desktop header button, the dock and the empty state all open the SAME modal chain and
  * add through one path (no duplicate catalog instance, no double mutation). Focus restore is handled
- * by the modals themselves (useFocusTrap snapshots whatever element opened them, restores on close).
+ * by the Radix dialogs themselves (the shared wrapper snapshots the opener and restores it on close).
  */
 function useHomeAdd(): { openCatalog: () => void; node: ReactNode } {
   const [catalogOpen, setCatalogOpen] = useState(false);

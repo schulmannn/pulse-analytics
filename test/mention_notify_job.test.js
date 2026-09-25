@@ -30,7 +30,10 @@ const MENTION = (id, extra = {}) => ({
   views: 10, query: 'brand', ...extra,
 });
 
-function makeJob({ subs = [SUB], searchResult, searchError, fresh, sendResults, health = [], runJobOnce } = {}) {
+function makeJob({
+  subs = [SUB], searchResult, searchError, fresh, sendResults, health = [], runJobOnce,
+  archive, bot,
+} = {}) {
   const calls = { search: [], sent: [], upserted: [], marked: [], unbound: [], logs: [], health, jobKeys: [] };
   const db = {
     enabled: true,
@@ -41,15 +44,24 @@ function makeJob({ subs = [SUB], searchResult, searchError, fresh, sendResults, 
       calls.jobKeys.push(key);
       return { skipped: false, result: await fn() };
     }),
-    filterNewMentions: async (_channelId, list) => (fresh !== undefined ? fresh : list),
-    upsertMentions: async (channelId, list) => { calls.upserted.push({ channelId, count: list.length }); return list.length; },
+    // `archive` (Set ключей «channel:msg») делает архив НАСТОЯЩИМ: filterNew читает то, что записал
+    // upsert. Нужен там, где важна связка прогонов, а не одиночный вызов.
+    filterNewMentions: async (_channelId, list) => {
+      if (archive) return list.filter((m) => !archive.has(`${m.channel_id}:${m.msg_id}`));
+      return fresh !== undefined ? fresh : list;
+    },
+    upsertMentions: async (channelId, list) => {
+      calls.upserted.push({ channelId, count: list.length });
+      if (archive) for (const m of list) archive.add(`${m.channel_id}:${m.msg_id}`);
+      return list.length;
+    },
     markMentionNotifyRun: async (channelId, uid, arg) => { calls.marked.push({ channelId, uid, ...arg }); return true; },
     unbindMentionNotifyChat: async (chatId) => { calls.unbound.push(chatId); return true; },
     recordTgSessionSuccess: async (uid) => { health.push(['success', uid]); return true; },
     recordTgSessionFailure: async (uid, _v, arg) => { health.push(['failure', uid, arg]); return true; },
     rotateTgSessionCiphertext: async () => true,
   };
-  const tgBot = {
+  const tgBot = bot || {
     configured: () => true,
     sendMessage: async (chatId, text) => {
       calls.sent.push({ chatId, text });
@@ -137,6 +149,78 @@ test('a blocked bot unbinds the chat and records bot_blocked without touching th
   assert.deepEqual(calls.unbound, [555]);
   assert.equal(calls.upserted.length, 0);                 // send-first: сбой доставки не двигает архив
   assert.equal(calls.marked[0].errorCode, 'bot_blocked');
+});
+
+// ── Флуд-контроль Телеграма (429 / retry_after) ────────────────────────────────────────────────────
+
+test('429 mid-batch: delivered cards land in the archive and are never re-sent by the next run', async () => {
+  const all = [MENTION(1), MENTION(2), MENTION(3), MENTION(4), MENTION(5)];
+  const archive = new Set();
+  const first = makeJob({
+    searchResult: { available: true, all },
+    archive,
+    // Третья отправка упирается во флуд-контроль общего бота.
+    sendResults: [{ ok: true }, { ok: true }, { ok: false, throttled: true, retryAfterSec: 30 }],
+  });
+  await first.job.processMentionNotify({ now: NOW });
+  assert.equal(first.calls.sent.length, 3, 'после 429 остаток пачки не отправляется');
+  assert.deepEqual(first.calls.upserted, [{ channelId: 7, count: 2 }], 'в архив ушли ТОЛЬКО доставленные');
+  // Прогон состоялся частично: watermark двигаем, но ошибка честно записана.
+  assert.deepEqual(first.calls.marked, [{ channelId: 7, uid: 11, notified: true, errorCode: 'send_throttled' }]);
+
+  // Следующий прогон видит тот же результат поиска, но архив уже помнит доставленное.
+  const second = makeJob({ searchResult: { available: true, all }, archive });
+  await second.job.processMentionNotify({ now: NOW });
+  const texts = second.calls.sent.map((s) => s.text);
+  assert.equal(texts.length, 3, 'ушёл ровно недоставленный остаток');
+  for (const n of [1, 2]) {
+    assert.ok(!texts.some((t) => t.includes(`упоминание ${n}`)), `карточка ${n} НЕ дублируется`);
+  }
+  for (const n of [3, 4, 5]) {
+    assert.ok(texts.some((t) => t.includes(`упоминание ${n}`)), `карточка ${n} доехала`);
+  }
+});
+
+test('429 on the very first card: nothing archived, watermark untouched, seed stays a seed', async () => {
+  const archive = new Set();
+  const { job, calls } = makeJob({
+    subs: [{ ...SUB, last_notified_at: null }],
+    searchResult: { available: true, all: [MENTION(1), MENTION(2)] },
+    archive,
+    sendResults: [{ ok: false, throttled: true, retryAfterSec: 5 }],
+  });
+  await job.processMentionNotify({ now: NOW });
+  assert.equal(calls.sent.length, 1);
+  assert.equal(archive.size, 0, 'недоставленное не «архивируется задним числом»');
+  // notified=false: иначе следующий прогон перестал бы быть seed'ом и выплюнул бы весь архив.
+  assert.deepEqual(calls.marked, [{ channelId: 7, uid: 11, notified: false, errorCode: 'send_throttled' }]);
+});
+
+test('429 is parsed from the real Bot API envelope (parameters.retry_after), not thrown', async () => {
+  const posted = [];
+  const { createTgBot } = require('../server/lib/tgBot');
+  const bot = createTgBot({
+    token: 'bot:token',
+    fetchImpl: async (url, init) => {
+      posted.push({ url, body: JSON.parse(init.body) });
+      // Первая карточка уходит, вторая ловит флуд-контроль.
+      return posted.length === 1
+        ? { json: async () => ({ ok: true, result: { message_id: 1 } }) }
+        : { json: async () => ({ ok: false, error_code: 429, description: 'Too Many Requests', parameters: { retry_after: 17 } }) };
+    },
+  });
+  const archive = new Set();
+  const { job, calls } = makeJob({
+    searchResult: { available: true, all: [MENTION(1), MENTION(2), MENTION(3)] },
+    archive,
+    bot,
+  });
+  const out = await job.runMentionNotifyTest(7, 11);
+  assert.deepEqual(out, { ok: false, reason: 'send_throttled', sent: 1, retry_after_sec: 17 });
+  assert.equal(posted.length, 2, 'после 429 третья карточка не отправляется');
+  assert.ok(!posted.some((p) => p.url.includes('bot:token') === false), 'токен уходит только в URL Bot API');
+  assert.deepEqual(calls.upserted, [{ channelId: 7, count: 1 }], 'архивирована ровно одна доставленная карточка');
+  assert.deepEqual(calls.marked, [{ channelId: 7, uid: 11, notified: true, errorCode: 'send_throttled' }]);
 });
 
 test('an unavailable search result is a failure, not an empty success', async () => {

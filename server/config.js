@@ -62,6 +62,14 @@ function loadConfig(env = process.env) {
       // Валидируется как целое в 1..1000 (validateConfig): оператор может уменьшить дефолт, но не
       // отключить ограничение памяти гигантской страницей.
       gdprExportPageSize: Number(env.GDPR_EXPORT_PAGE_SIZE || 1000),
+      // Экспорт держит коннект ОСНОВНОГО пула на всё время стрима (server.timeout = 0), поэтому
+      // два потолка: сколько ждём, пока клиент заберёт очередной кусок ответа ('drain'), прежде
+      // чем разорвать выгрузку и вернуть коннект (щедро: медленный, но живой клиент успевает), и
+      // сколько выгрузок идёт одновременно — сверх лимита роут отвечает 503 + Retry-After. Иначе
+      // несколько непрочитываемых выгрузок съедали весь пул и вставал весь API. Здесь — заданное
+      // значение; фасад берёт его зажатым под свой пул (gdprExportConcurrencyLimit).
+      gdprExportDrainTimeoutMs: Number(env.GDPR_EXPORT_DRAIN_TIMEOUT_MS || 60000),
+      gdprExportMaxConcurrent: Number(env.GDPR_EXPORT_MAX_CONCURRENT || 2),
       // Fail-fast timeouts (мс). Без них пул мог висеть на выдаче коннекта, а зависший
       // запрос — держать соединение бесконечно; db-unavailable→503 маппинг уже есть в db/errors.
       connectionTimeoutMs: Number(env.PG_CONNECTION_TIMEOUT_MS || 3000),
@@ -74,6 +82,10 @@ function loadConfig(env = process.env) {
     auth: Object.freeze({
       sessionSecret: env.SESSION_SECRET || '',
       sessionTtlMs: 7 * 24 * 60 * 60 * 1000,
+      // Sliding idle refresh is bounded by an absolute lifetime. A successful
+      // password re-authentication starts a new absolute window.
+      sessionAbsoluteTtlMs:
+        Number(env.SESSION_ABSOLUTE_TTL_DAYS || 30) * 24 * 60 * 60 * 1000,
       adminEmail: normalizeEmail(env.ADMIN_EMAIL),
       adminPassword: env.ADMIN_PASSWORD || '',
       googleClientId: env.GOOGLE_CLIENT_ID || '',
@@ -102,6 +114,11 @@ function loadConfig(env = process.env) {
       // Ключ шифрования OAuth-токенов Яндекс.Метрики (AES-256-GCM, lib/ym_crypto) — по образцу
       // moysklad.tokenKey: пусто = connect-флоу inert (/api/ym/connect отвечает 503).
       tokenKey: env.YM_TOKEN_KEY || '',
+    }),
+    rusender: Object.freeze({
+      // Ключ шифрования API-ключей Rusender (AES-256-GCM, lib/rusender_crypto) — по образцу
+      // metrika.tokenKey: пусто = connect-флоу inert (/api/rusender/connect отвечает 503).
+      tokenKey: env.RUSENDER_KEY || '',
     }),
     telegram: Object.freeze({
       botToken: env.TG_BOT_TOKEN || '',
@@ -150,6 +167,13 @@ function loadConfig(env = process.env) {
       // 4096: у Sonnet 5 adaptive thinking включён по умолчанию и расходует тот же бюджет,
       // что и видимый ответ — 2048 рисковал бы обрывом на середине.
       maxOutputTokens: Number(env.AI_MAX_OUTPUT_TOKENS || 4096),
+    }),
+    cdek: Object.freeze({
+      // Потолок строк одной выгрузки СДЭК. Годовой файл склада — ~1100 строк, так что 100 000
+      // это запас, а не ограничение; смысл кэпа в том, чтобы разбор оставался синхронным и
+      // предсказуемым по памяти. Файл, который в него не влезет, — сигнал вынести разбор в job,
+      // а не молча поднять число.
+      maxRows: Number(env.CDEK_MAX_ROWS || 100000),
     }),
     cache: Object.freeze({
       // In-memory response cache (infrastructure/memoryCache) — bounded LRU. maxEntries caps retained
@@ -231,6 +255,15 @@ function validateConfig(config) {
 
   if (prod && !config.auth.sessionSecret) {
     add('auth.sessionSecret', 'SESSION_SECRET обязателен в production (подписывает сессии дашборда).');
+  }
+  if (!Number.isInteger(config.auth.sessionAbsoluteTtlMs)
+      || config.auth.sessionAbsoluteTtlMs % (24 * 60 * 60 * 1000) !== 0
+      || config.auth.sessionAbsoluteTtlMs < config.auth.sessionTtlMs
+      || config.auth.sessionAbsoluteTtlMs > 365 * 24 * 60 * 60 * 1000) {
+    add(
+      'auth.sessionAbsoluteTtlMs',
+      'SESSION_ABSOLUTE_TTL_DAYS должен быть целым числом в диапазоне 7..365.',
+    );
   }
   if (prod && !config.database.url && !config.database.allowDbLess) {
     add('database.url', 'DATABASE_URL обязателен в production, если не задан ALLOW_DBLESS=true.');
@@ -469,6 +502,26 @@ function validateConfig(config) {
   ) {
     add('database.gdprExportPageSize', 'GDPR_EXPORT_PAGE_SIZE должен быть целым числом в диапазоне 1..1000.');
   }
+  // Сторож медленного читателя экспорта: меньше 5с рвал бы живых клиентов на мобильной сети,
+  // больше 10 мин снова позволял бы надолго занять коннект основного пула.
+  if (
+    !Number.isInteger(config.database.gdprExportDrainTimeoutMs) ||
+    config.database.gdprExportDrainTimeoutMs < 5000 ||
+    config.database.gdprExportDrainTimeoutMs > 600000
+  ) {
+    add('database.gdprExportDrainTimeoutMs', 'GDPR_EXPORT_DRAIN_TIMEOUT_MS должен быть целым числом (мс) в диапазоне 5000..600000.');
+  }
+  // Одновременные выгрузки: 0 — экспорт всегда 503, больше 8 — лимит уже ничего не ограничивает.
+  // Соотношение с PGPOOL_MAX сюда НЕ входит: лимит не меньше пула зажимается
+  // (gdprExportConcurrencyLimit) с предупреждением (collectConfigWarnings), а не валит старт
+  // web/worker/migrate на проде с маленьким пулом.
+  if (
+    !Number.isInteger(config.database.gdprExportMaxConcurrent) ||
+    config.database.gdprExportMaxConcurrent < 1 ||
+    config.database.gdprExportMaxConcurrent > 8
+  ) {
+    add('database.gdprExportMaxConcurrent', 'GDPR_EXPORT_MAX_CONCURRENT должен быть целым числом в диапазоне 1..8.');
+  }
   // Instagram OAuth admission-контроль. cap вне [1..64] бессмыслен (0 = connect всегда 503, гигантский
   // = нет защиты от пикового fan-out); acquire-таймаут держим в [100мс..10с]: слишком мало = ложные
   // busy под нормальной нагрузкой, слишком много = запрос висит на переполненном контроллере.
@@ -502,4 +555,42 @@ function validateConfig(config) {
   return errors;
 }
 
-module.exports = { loadConfig, validateConfig, ConfigError, parseCsv, normalizeEmail, isProductionEnv };
+// Эффективный лимит одновременных GDPR-выгрузок для пула размером poolMax. Каждая выгрузка держит
+// коннект этого пула на весь стрим, поэтому лимит оставляет пулу хотя бы один коннект:
+// min(заданное, PGPOOL_MAX − 1), но не меньше 1 (0 означал бы «экспорт всегда 503»). Нецелые и
+// неположительные значения возвращаются как есть — их отвергает validateConfig.
+function gdprExportConcurrencyLimit({ gdprExportMaxConcurrent, poolMax }) {
+  if (
+    !Number.isInteger(gdprExportMaxConcurrent) || gdprExportMaxConcurrent < 1 ||
+    !Number.isInteger(poolMax) || poolMax < 1
+  ) {
+    return gdprExportMaxConcurrent;
+  }
+  return Math.min(gdprExportMaxConcurrent, Math.max(1, poolMax - 1));
+}
+
+// Предупреждения того же вида { field, message }: конфиг рабочий, но применён не так, как задан.
+// В отличие от validateConfig, старт они НЕ валят ни в каком окружении — main.js только логирует.
+function collectConfigWarnings(config) {
+  const warnings = [];
+  const { gdprExportMaxConcurrent: requested, poolMax } = config.database;
+  if (
+    Number.isInteger(requested) && requested >= 1 &&
+    Number.isInteger(poolMax) && poolMax >= 1 &&
+    requested >= poolMax
+  ) {
+    const effective = gdprExportConcurrencyLimit(config.database);
+    warnings.push({
+      field: 'database.gdprExportMaxConcurrent',
+      message: effective < poolMax
+        ? `GDPR_EXPORT_MAX_CONCURRENT=${requested} не меньше PGPOOL_MAX=${poolMax}: одновременных GDPR-выгрузок будет не больше ${effective}, чтобы экспорт не занял весь основной пул.`
+        : `PGPOOL_MAX=${poolMax}: GDPR-выгрузка может занять единственный коннект основного пула на всё время стрима; подними PGPOOL_MAX хотя бы до 2.`,
+    });
+  }
+  return warnings;
+}
+
+module.exports = {
+  loadConfig, validateConfig, collectConfigWarnings, gdprExportConcurrencyLimit,
+  ConfigError, parseCsv, normalizeEmail, isProductionEnv,
+};

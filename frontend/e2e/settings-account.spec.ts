@@ -30,17 +30,16 @@ async function bootSettings(page: Page, deleteStub: DeleteStub = {}) {
     return r.fulfill({ status: 404, json: { error: 'not_available_in_test' } });
   });
   await page.addInitScript(() => {
-    localStorage.setItem('pulse_token', 'e2e-token');
-    localStorage.setItem('pulse_token_exp', String(Date.now() + 3_600_000));
   });
-  await page.goto('/settings');
-  // Danger-zone живёт в секции «Безопасность» (SecuritySection), а /settings открывается на «Профиле».
-  await page.getByRole('button', { name: 'Безопасность' }).click();
+  await page.goto('/settings?section=security');
+  await expect(page.getByRole('heading', { name: 'Безопасность', level: 2 })).toBeVisible({
+    timeout: 25_000,
+  });
   await expect(page.getByRole('button', { name: 'Удалить аккаунт' })).toBeVisible();
   return deletes;
 }
 
-test.beforeEach(async ({ page }, testInfo) => {
+test.beforeEach(({ page: _page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop-1440', 'desktop settings surface');
 });
 
@@ -77,7 +76,7 @@ test('подтверждённое удаление шлёт DELETE c confirm и
   expect(deletes).toEqual([{ confirm: 'user@example.com' }]);
 });
 
-test('ошибка сервера остаётся в диалоге и не уводит со страницы', async ({ page }) => {
+test('ошибка сервера остаётся в подтверждении и не уводит со страницы', async ({ page }) => {
   await bootSettings(page, {
     status: 400,
     body: JSON.stringify({ error: 'Подтверждение не совпадает с email аккаунта' }),

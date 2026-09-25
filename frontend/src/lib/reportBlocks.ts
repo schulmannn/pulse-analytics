@@ -22,7 +22,7 @@ export const REPORT_BLOCKS: Array<{ key: ReportBlockKey; label: string }> = [
   { key: 'week', label: 'Неделя канала' },
   { key: 'kpi-summary', label: 'Сводка' },
   { key: 'metric-views', label: 'Просмотры по дням' },
-  { key: 'metric-subscribers', label: 'Подписчики по дням' },
+  { key: 'metric-subscribers', label: 'Динамика подписчиков' },
   { key: 'metric-reactions', label: 'Реакции по дням' },
   { key: 'weekly-table', label: 'По неделям' },
   { key: 'insights', label: 'Наблюдения' },

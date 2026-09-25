@@ -1,8 +1,12 @@
-import { useContext, useLayoutEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useContext, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { WidgetGrid } from '@/components/widgets/WidgetGrid';
+import { BoardSkeleton } from '@/components/BoardSkeleton';
+import { ShareTrack } from '@/components/ShareRows';
+import { ChartBand } from '@/components/ChartBand';
+import { Link, useNavigate } from 'react-router-dom';
 import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
 import { observeSize } from '@/lib/observeSize';
-import { useMsFunnel, useMsReturns, useMsSummary } from '@/api/queries';
+import { useMsFunnel, useMsReturns, useMsSummary } from '@/api/ms';
 import { MsTopProductsCard } from '@/panels/sklad/MsTopProducts';
 import { MsStockCard } from '@/panels/sklad/MsStock';
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
@@ -12,25 +16,18 @@ import { BarChart } from '@/components/BarChart';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { ChartSkeleton, TableSkeleton } from '@/components/ui/dataSkeleton';
+import { KpiValue } from '@/components/chartWidget/KpiValue';
+import { DeltaPill } from '@/components/DeltaPill';
+import { RadialShare } from '@/components/RadialShare';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { Sparkline } from '@/components/Sparkline';
-import { lttbDownsample } from '@/lib/downsample';
-import { fmt } from '@/lib/format';
-import { usePagePeriod } from '@/lib/period';
-import { useMsPagePeriod, type MsPeriod } from '@/lib/msPeriod';
-import {
-  aggregatePlotPoints,
-  bucketPoints,
-  densifyDayPoints,
-  fmtMetric,
-  metricTotal,
-  metricValue,
-  CHART_MAX_POINTS,
-  GRAIN_BUCKET_WORD,
-  type DayPoint,
-  type Grain,
-  type Metric,
-} from '@/lib/msSeries';
+import { pctDelta, type MetricDelta } from '@/lib/delta';
+import { CHART_MAX_POINTS, lttbDownsample } from '@/lib/downsample';
+import { fmt, timeAxisFromDayKeys } from '@/lib/format';
+import { formatByRole, formatMoney } from '@/lib/metricNumber';
+import { usePagePeriod, useCardShowsPeriod } from '@/lib/period';
+import { msPreviousPeriod, useMsPagePeriod, type MsPeriod } from '@/lib/msPeriod';
+import { aggregatePlotPoints, bucketPoints, densifyDayPoints, fmtMetric, metricTotal, metricValue, GRAIN_BUCKET_WORD, type DayPoint, type Grain, type Metric } from '@/lib/msSeries';
 
 /**
  * Обзор «МойСклада» — первый не-социальный источник. Все числа приходят СЕРВЕР-АГРЕГИРОВАННЫМИ
@@ -38,6 +35,79 @@ import {
  * для этой страницы не нужны. Величины (выручка ₽, заказы) — свои и никогда не смешиваются с
  * просмотрами/охватом соцсетей (канон TG-views ≠ IG-reach).
  */
+
+/**
+ * Тело story-карточки Обзора склада: hero-число слева, ряд по дням справа. Вынесено из трёх
+ * инлайновых копий, чтобы «Линия»/«Столбцы» объявлялись один раз. Контрол типа графика — не новый:
+ * EditWidgetDialog показывает карусель, как только карточка объявит больше одного варианта.
+ */
+function MsStoryBody({
+  label,
+  value,
+  delta,
+  caption,
+  values,
+  labels,
+  axisLabels,
+  formatValue,
+  emptyTitle,
+  drillTo,
+  drillLabel,
+  viz = 'line',
+}: {
+  label?: string;
+  value: string;
+  delta?: MetricDelta | null;
+  caption?: string;
+  values: number[];
+  labels: string[];
+  /** Ось букв короткого дневного окна (канон timeAxisFromDayKeys). */
+  axisLabels?: string[];
+  formatValue: (v: number) => string;
+  emptyTitle: string;
+  drillTo: string;
+  drillLabel: string;
+  viz?: 'line' | 'bar';
+}) {
+  const navigate = useNavigate();
+  return (
+    <ChartCardBody
+      label={label}
+      value={value}
+      delta={delta}
+      caption={caption}
+      onValueClick={() => navigate(drillTo)}
+      drillLabel={drillLabel}
+    >
+      {values.length <= 1 ? (
+        <EmptyState compact size="chart" title={emptyTitle} />
+      ) : viz === 'bar' ? (
+        <ChartBand>
+          <BarChart
+            values={values}
+            labels={labels}
+            axisLabels={axisLabels}
+            titles={values.map((v, i) => `${labels[i] ?? ''}: ${formatValue(v)}`)}
+            formatValue={formatValue}
+          />
+        </ChartBand>
+      ) : (
+        <Sparkline
+          values={values}
+          labels={labels}
+          axisLabels={axisLabels}
+          area
+          strokeWidth={2}
+          interactive
+          caption=""
+          formatValue={formatValue}
+          className="h-full min-h-14 w-full"
+        />
+      )}
+    </ChartCardBody>
+  );
+}
+
 export function MsOverview() {
   const pp = usePagePeriod();
   // «Всё» (0) обслуживается из нашего дневного архива ms_daily (слайс 2а), живые окна — 7/30/90;
@@ -45,34 +115,54 @@ export function MsOverview() {
   const days = pp ? pp.days : 30;
   const period = useMsPagePeriod();
   const windowLabel = pp?.range ? 'за выбранный период' : days === 0 ? 'за всё время' : `за ${days} дн.`;
+  const showPeriod = useCardShowsPeriod();
   const summary = useMsSummary(period);
+  // Канон карточки-метрики: число + дельта к ПРЕДЫДУЩЕМУ равному окну (паттерн YmOverview).
+  // У «Всё» честного предшественника нет (msPreviousPeriod → null) — запрос не уходит, и
+  // previous.data при выключенном запросе НЕ читаем: fallback-ключ совпал бы с текущим окном.
+  const previousPeriod = useMemo(() => msPreviousPeriod(period), [period]);
+  const previous = useMsSummary(previousPeriod ?? period, { enabled: previousPeriod != null });
+  const navigate = useNavigate();
   // «Всё» (0) бэк со слайса 4 считает честно: полный диапазон от старейшего заказа архива
   // (страничная добивка отчёта + кэш 1 час) — подмена 0→30 больше не нужна.
   const [funnelMetric, setFunnelMetric] = useState<'orders' | 'revenue'>('orders');
   const funnel = useMsFunnel(period);
   const returns = useMsReturns(period);
+  // Прошлое окно возвратов — только при живом previousPeriod (та же грабля fallback-ключа).
+  const previousReturns = useMsReturns(previousPeriod ?? period, { enabled: previousPeriod != null });
 
   if (summary.isPending) {
-    return (
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-6">
-        {Array.from({ length: 2 }).map((_, i) => (
-          <div key={i} className="h-[264px] rounded-2xl border border-border bg-card p-5 lg:col-span-3">
-            <ChartSkeleton />
-          </div>
-        ))}
-      </div>
-    );
+    // Семь карточек борда: выручка, заказы, средний чек, статусы, товары, возвраты, остатки.
+    return <BoardSkeleton tiles={['half', 'half', 'half', 'half', 'half', 'half', 'half']} />;
   }
 
   if (summary.isError) {
-    const status = (summary.error as { status?: number } | null)?.status;
-    if (status === 401) {
-      // Токен отозван на стороне МойСклада — честный reconnect-CTA вместо «недоступен».
+    const { status, code } = (summary.error as { status?: number; code?: string } | null) ?? {};
+    // Различаем по машинному коду, а не по статусу: 401 без кода — это наша истёкшая сессия (её
+    // уводит на /login lib/authRedirect), а не отзыв токена МойСклада.
+    if (code === 'ms_token_revoked') {
+      // Токен отозван на стороне МойСклада — честный reconnect-CTA вместо «недоступен». Замены
+      // токена у подключённого МойСклада на /connect нет (только «Отключить»), поэтому называем
+      // путь целиком; DELETE /api/ms/account сносит только учётку, архив ms_daily остаётся.
       return (
         <EmptyState
           title="Токен МойСклада отозван"
-          reason="Источник перестал принимать наш токен — создайте новый в МойСкладе и переподключите."
-          action={{ to: '/connect', label: 'Переподключить МойСклад' }}
+          reason="Источник перестал принимать наш токен — создайте новый в МойСкладе, затем на странице подключений отключите старый и вставьте новый. История продаж сохранится."
+          action={{ to: '/connect?source=moysklad', label: 'Переподключить МойСклад' }}
+        />
+      );
+    }
+    if (code === 'ms_forbidden') {
+      // 403 от МойСклада: токен жив, но сотруднику, чей он, не выданы права на отчёты. Переподключение
+      // тем же токеном ничего не изменит — называем настоящую причину и то, что дашборд читает
+      // (показатели продаж/заказов, заказы и возвраты покупателей, контрагенты, каналы продаж,
+      // отчёты прибыльности и остатков). Кнопки нет сознательно: у подключённого МойСклада на /connect нет замены токена
+      // (только «Отключить»), а права проверяются МойСкладом на каждом запросе — после их выдачи
+      // хватает обновить страницу.
+      return (
+        <EmptyState
+          title="Не хватает прав в МойСкладе"
+          reason="МойСклад не отдаёт показатели продаж и заказов сотруднику, чей токен подключён. Для дашборда ему нужен просмотр «Показателей», «Заказов покупателей», «Возвратов покупателей», «Контрагентов», «Каналов продаж», отчётов «Прибыльность» и «Остатки», а также право видеть себестоимость и прибыль. Выдайте права в карточке сотрудника в МойСкладе и обновите страницу — переподключать токен не нужно."
         />
       );
     }
@@ -80,9 +170,10 @@ export function MsOverview() {
       // Канал есть, а токена МойСклада на нём нет — честный onboarding вместо пустых карточек.
       return (
         <EmptyState
+          ghost="bars"
           title="МойСклад не подключён"
           reason="Укажите токен API — и здесь появятся выручка, заказы и топ товаров."
-          action={{ to: '/connect', label: 'Подключить МойСклад' }}
+          action={{ to: '/connect?source=moysklad', label: 'Подключить МойСклад' }}
         />
       );
     }
@@ -100,8 +191,8 @@ export function MsOverview() {
   // Канон графиков: длинные серии (окно «Всё» после лет архива ms_daily) даунсэмплятся до ~140
   // точек ПЕРЕД рендером — как в Charts/MsClients; labels/titles строятся из той же выборки,
   // чтобы тултипы совпадали с точками. Оконные 7/30/90 короче порога и проходят как есть.
-  const revSeries = lttbDownsample(revenue.series, 140, (p) => p.value);
-  const ordSeries = lttbDownsample(orders.series, 140, (p) => p.count);
+  const revSeries = lttbDownsample(revenue.series, CHART_MAX_POINTS, (p) => p.value);
+  const ordSeries = lttbDownsample(orders.series, CHART_MAX_POINTS, (p) => p.count);
   const revLabels = revSeries.map((p) => fmt.day(p.day));
   const revValues = revSeries.map((p) => p.value);
   const ordLabels = ordSeries.map((p) => fmt.day(p.day));
@@ -117,56 +208,55 @@ export function MsOverview() {
   const avgLabels = avgSampled.map((p) => fmt.day(p.day));
   const avgValues = avgSampled.map((p) => p.sum / p.count);
   const avgTotal = orders.totalCount > 0 ? orders.totalSum / orders.totalCount : null;
+  // Дельты — только при живом прошлом окне (см. previousPeriod выше); один prev-фетч кормит все
+  // три story-карточки. Средний чек сравнивается с чеком прошлого окна той же формулой.
+  const prev = previousPeriod != null ? previous.data : undefined;
+  const revenueDelta = prev ? pctDelta(revenue.total, prev.revenue.total) : null;
+  const ordersDelta = prev ? pctDelta(orders.totalCount, prev.orders.totalCount) : null;
+  const prevAvg = prev && prev.orders.totalCount > 0 ? prev.orders.totalSum / prev.orders.totalCount : null;
+  const avgDelta = avgTotal != null && prevAvg != null ? pctDelta(avgTotal, prevAvg) : null;
+
+  // На ленте окно уже стоит полосой в шапке страницы — подпись карточки его не повторяет
+  // (владелец). На Главной страничного периода нет, там подпись вернётся сама.
+  const periodInLabel = showPeriod ? windowLabel : undefined;
+  // Пропсы story-тел вынесены: «Линия» и «Столбцы» это ОДНА карточка в двух подачах,
+  // дублировать её данные в двух вариантах — прямой путь к их расхождению.
+  const revStory = { label: periodInLabel, value: formatMoney(revenue.total), delta: revenueDelta, values: revValues, labels: revLabels, axisLabels: timeAxisFromDayKeys(revSeries.map((p) => p.day)), formatValue: (v: number) => `${formatMoney(v, 'exact')}`, emptyTitle: 'Недостаточно дней для графика.', drillTo: '/metrics/ms-revenue', drillLabel: 'Выручка' };
+  const ordStory = { label: periodInLabel, value: formatByRole(orders.totalCount, 'headline'), delta: ordersDelta, caption: `на ${formatMoney(orders.totalSum, 'axis')}`, values: ordValues, labels: ordLabels, axisLabels: timeAxisFromDayKeys(ordSeries.map((p) => p.day)), formatValue: fmt.num, emptyTitle: 'Недостаточно дней для графика.', drillTo: '/metrics/ms-orders', drillLabel: 'Заказы' };
+  const avgStory = { label: periodInLabel, value: formatMoney(avgTotal), delta: avgDelta, caption: 'по дням с заказами', values: avgValues, labels: avgLabels, axisLabels: timeAxisFromDayKeys(avgSampled.map((p) => p.day)), formatValue: (v: number) => `${formatMoney(v, 'exact')}`, emptyTitle: 'Недостаточно дней с заказами для графика.', drillTo: '/metrics/ms-aov', drillLabel: 'Средний чек' };
 
   return (
-    <div className="grid grid-cols-1 gap-6 lg:grid-cols-6">
-      <ChartWidget id="ms-revenue" title="Выручка" fixedSize="half" drillTo="/metrics/ms-revenue">
-        <ChartCardBody value={`${fmt.short(revenue.total)} ₽`} caption={windowLabel}>
-          {revValues.length > 1 ? (
-            <LineChart
-              values={revValues}
-              labels={revLabels}
-              titles={revSeries.map((p) => `${fmt.day(p.day)}: ${fmt.num(p.value)} ₽`)}
-              yMin={0}
-            />
-          ) : (
-            <EmptyState compact size="chart" title="Недостаточно дней для графика." />
-          )}
-        </ChartCardBody>
-      </ChartWidget>
+    <WidgetGrid className="grid grid-cols-1 gap-6 lg:grid-cols-6">
+      {/* Story-карточки — та же грамматика, что у Обзоров TG/IG/Метрики (steep story card):
+          подпись окна, hero-число, дельта к прошлому периоду и area-спарклайн без осей. Полные
+          оси и тултипы по датам живут на /metrics/ms-* (MsSummaryExplorer ниже в этом файле).
+          Тонирована ОДНА карточка доски — «Выручка»; остальные нейтральны с канонным акцентом. */}
+      <ChartWidget id="ms-revenue" title="Выручка" fixedSize="half" defaultColor={1} defaultTinted drillTo="/metrics/ms-revenue"
+        variants={[
+          // Столбцы на story-плитке склада не помещаются в 264px без внутреннего скролла
+          // (гейт плотности), поэтому лицо карточки ведёт искрой; «Столбцы» остаются вариантом,
+          // а в конструкторе виджетов дефолт метрики — bar (widgetMetrics).
+          { key: 'line', label: 'Линия', render: <MsStoryBody {...revStory} /> },
+          { key: 'bar', label: 'Столбцы', render: <MsStoryBody {...revStory} viz="bar" /> },
+        ]}
+      />
 
-      <ChartWidget id="ms-orders" title="Заказы" fixedSize="half" drillTo="/metrics/ms-orders">
-        <ChartCardBody
-          value={fmt.num(orders.totalCount)}
-          caption={`на ${fmt.short(orders.totalSum)} ₽ ${windowLabel}`}
-        >
-          {ordValues.length > 1 ? (
-            <LineChart
-              values={ordValues}
-              labels={ordLabels}
-              titles={ordSeries.map((p) => `${fmt.day(p.day)}: ${fmt.num(p.count)} · ${fmt.num(p.sum)} ₽`)}
-              yMin={0}
-            />
-          ) : (
-            <EmptyState compact size="chart" title="Недостаточно дней для графика." />
-          )}
-        </ChartCardBody>
-      </ChartWidget>
+      <ChartWidget id="ms-orders" title="Заказы" fixedSize="half" drillTo="/metrics/ms-orders"
+        variants={[
+          // Столбцы на story-плитке склада не помещаются в 264px без внутреннего скролла
+          // (гейт плотности), поэтому лицо карточки ведёт искрой; «Столбцы» остаются вариантом,
+          // а в конструкторе виджетов дефолт метрики — bar (widgetMetrics).
+          { key: 'line', label: 'Линия', render: <MsStoryBody {...ordStory} /> },
+          { key: 'bar', label: 'Столбцы', render: <MsStoryBody {...ordStory} viz="bar" /> },
+        ]}
+      />
 
-      <ChartWidget id="ms-avg-check" title="Средний чек" fixedSize="half" drillTo="/metrics/ms-aov">
-        <ChartCardBody value={avgTotal != null ? `${fmt.short(avgTotal)} ₽` : '—'} caption={`${windowLabel} · по дням с заказами`}>
-          {avgValues.length > 1 ? (
-            <LineChart
-              values={avgValues}
-              labels={avgLabels}
-              titles={avgSampled.map((p) => `${fmt.day(p.day)}: ${fmt.num(Math.round(p.sum / p.count))} ₽`)}
-              yMin={0}
-            />
-          ) : (
-            <EmptyState compact size="chart" title="Недостаточно дней с заказами для графика." />
-          )}
-        </ChartCardBody>
-      </ChartWidget>
+      <ChartWidget id="ms-avg-check" title="Средний чек" fixedSize="half" drillTo="/metrics/ms-aov"
+        variants={[
+          { key: 'line', label: 'Линия', render: <MsStoryBody {...avgStory} /> },
+          { key: 'bar', label: 'Столбцы', render: <MsStoryBody {...avgStory} viz="bar" /> },
+        ]}
+      />
 
       <ChartWidget id="ms-funnel" title="Статусы заказов" fixedSize="half" drillTo="/metrics/ms-funnel">
         <div className="mb-1 flex justify-end">
@@ -240,7 +330,17 @@ export function MsOverview() {
         ) : !returns.data ? (
           <EmptyState compact size="chart" title="Нет данных о возвратах за период." />
         ) : (
-          <MsReturnsCardBody data={returns.data} period={period} windowLabel={windowLabel} />
+          <MsReturnsCardBody
+            data={returns.data}
+            period={period}
+            windowLabel={windowLabel}
+            delta={
+              previousPeriod != null && previousReturns.data && previousReturns.data.count > 0
+                ? pctDelta(returns.data.count, previousReturns.data.count)
+                : null
+            }
+            onDrill={() => navigate('/metrics/ms-returns')}
+          />
         )}
       </ChartWidget>
 
@@ -249,7 +349,7 @@ export function MsOverview() {
       <ChartWidget id="ms-stock" title="Остатки" fixedSize="half" drillTo="/metrics/ms-stock">
         <MsStockCard period={period} />
       </ChartWidget>
-    </div>
+    </WidgetGrid>
   );
 }
 
@@ -261,10 +361,16 @@ function MsReturnsCardBody({
   data,
   period,
   windowLabel,
+  delta,
+  onDrill,
 }: {
   data: NonNullable<ReturnType<typeof useMsReturns>['data']>;
   period: MsPeriod;
   windowLabel: string;
+  /** Дельта числа возвратов к пред. равному окну (канон п.7). */
+  delta?: MetricDelta | null;
+  /** Дрилл на /metrics/ms-returns — число становится настоящей кнопкой (канон п.2). */
+  onDrill?: () => void;
 }) {
   // Реальная дневная линия числа возвратов: архивную серию (только дни с возвратами)
   // дозаполняем календарными нулями по окну, затем даунсэмплим до канона ~140 точек.
@@ -272,7 +378,7 @@ function MsReturnsCardBody({
     data.series.map((r) => ({ day: r.day, orders: r.count, sum: r.sum })),
     period,
   );
-  const sampled = lttbDownsample(dense, 140, (p) => p.orders);
+  const sampled = lttbDownsample(dense, CHART_MAX_POINTS, (p) => p.orders);
   const expanded = useContext(ChartExpandedContext);
   // Высоту svg считаем от ФАКТИЧЕСКОЙ высоты слота (паттерн band-измерения WidgetRenderer), а не
   // от бюджета «тело минус оценка шапки/сносок»: оценка расходилась с фактом на единицы px и
@@ -290,10 +396,18 @@ function MsReturnsCardBody({
   return (
     <div className="flex h-full min-h-0 flex-col pt-1">
       <div className="shrink-0">
-        <div className="kpi-accent text-3xl font-medium leading-none tabular-nums tracking-tight">
-          {fmt.num(data.count)}
+        <div className="flex items-baseline gap-2.5">
+          {/* Рецепт числа берётся из KpiValue, а не набирается тут: копия отставала от канона —
+              значение шло мимо KpiNumber, то есть не морфилось при смене периода, как у соседних
+              карточек. */}
+          <KpiValue
+            text={formatByRole(data.count, 'headline')}
+            onDrill={onDrill}
+            drillLabel="Возвраты"
+          />
+          <DeltaPill delta={delta} />
         </div>
-        <div className="mt-1.5 text-2xs text-muted-foreground">{`на ${fmt.short(data.sum)} ₽ ${windowLabel}`}</div>
+        <div className="mt-1.5 text-2xs text-muted-foreground">{`на ${formatMoney(data.sum, 'axis')} ${windowLabel}`}</div>
       </div>
       {/* overflow-hidden — страховка на кадр между измерением слота и ре-рендером графика. */}
       <div ref={slotRef} className="mt-2 min-h-0 flex-1 overflow-hidden">
@@ -305,7 +419,8 @@ function MsReturnsCardBody({
               <LineChart
                 values={sampled.map((p) => p.orders)}
                 labels={sampled.map((p) => fmt.day(p.day))}
-                titles={sampled.map((p) => `${fmt.day(p.day)}: ${fmt.num(p.orders)} · ${fmt.short(p.sum)} ₽`)}
+                axisLabels={timeAxisFromDayKeys(sampled.map((p) => p.day))}
+                titles={sampled.map((p) => `${fmt.day(p.day)}: ${fmt.num(p.orders)} · ${formatMoney(p.sum, 'axis')}`)}
                 yMin={0}
               />
             </ExpandedChartHeightContext.Provider>
@@ -406,6 +521,9 @@ export function MsSummaryExplorer({
 
   const values = points.map((p) => metricValue(metric, p));
   const labels = points.map((p) => fmt.day(p.day));
+  // Временна́я ось (timeAxisCore): буквы короткого окна / EN-месяцы длинного; не-дневные ключи
+  // корзин хелпер отсекает сам.
+  const axisLabels = timeAxisFromDayKeys(points.map((p) => p.day), { monthsOnly: grain !== 'day' });
   const titles = points.map((p) => `${fmt.day(p.day)}: ${fmtMetric(metric, metricValue(metric, p))}`);
   const comparisonDayPoints: DayPoint[] | null =
     comparisonPeriod && comparison.data
@@ -451,6 +569,7 @@ export function MsSummaryExplorer({
             ghostLabel="Пред. период"
             legendToggle={false}
             labels={labels}
+            axisLabels={axisLabels}
             titles={titles}
             height={expandedHeight ?? undefined}
           />
@@ -462,6 +581,7 @@ export function MsSummaryExplorer({
             ghostTitles={ghostOk ? comparisonPoints.map((p) => fmt.day(p.day)) : undefined}
             legendToggle={false}
             labels={labels}
+            axisLabels={axisLabels}
             titles={titles}
             yMin={0}
             height={expandedHeight ?? undefined}
@@ -509,7 +629,33 @@ export function MsFunnelRows({
   const restOrders = tail.reduce((acc, row) => acc + row.orders, 0) + noState;
   const restSum = tail.reduce((acc, row) => acc + row.sum, 0) + noStateSum;
   const totalSum = rows.reduce((acc, row) => acc + row.sum, 0) + noStateSum;
-  const max = Math.max(1, ...top.map((row) => Math.max(0, selectedValue(row))));
+  // Знаменатель — целое по ВЫБРАННОЙ метрике (заказы или сумма), включая строки без статуса:
+  // доля статуса считается от всего окна, а не от показанной четвёрки.
+  const statusTotal =
+    rows.reduce((acc, row) => acc + Math.max(0, selectedValue(row)), 0)
+    + Math.max(0, metric === 'orders' ? noState : noStateSum);
+  // Компакт карточки — составное полукольцо (выбор владельца, унификация с Возраст/Пол Метрики):
+  // статусы окна — части целого, итог в центре, безстатусный остаток кольцо дорисует само из
+  // total. Полный список с построчными числами остаётся на развороте и /metrics/ms-funnel.
+  if (!expanded) {
+    return (
+      <RadialShare
+        segments={ranked.map((r) => ({
+          key: r.state_id,
+          label: r.name ?? 'Статус без имени',
+          value: Math.max(0, selectedValue(r)),
+        }))}
+        total={statusTotal}
+        unitWord={metric === 'orders' ? 'заказов' : '₽'}
+        centerCaption={metric === 'orders' ? 'заказов' : '₽ выручки'}
+        format={metric === 'orders' ? fmt.num : (v) => fmt.short(v)}
+        // Кольцо слева, легенда справа: в тайле над телом уже стоит переключатель Заказы/Выручка,
+        // столбик «кольцо + легенда» по высоте не помещается. Топ-3 + хвост — по той же причине.
+        layout="row"
+        legendMax={3}
+      />
+    );
+  }
   return (
     <div className={expanded ? 'space-y-2 pt-1' : 'space-y-1.5'}>
       {top.map((r) => (
@@ -523,20 +669,15 @@ export function MsFunnelRows({
             </span>
             <span className="shrink-0 tabular-nums text-muted-foreground">
               {metric === 'orders' ? (
-                <><span className="font-medium text-foreground">{fmt.num(r.orders)}</span> · {fmt.short(r.sum)} ₽</>
+                <><span className="font-medium text-foreground">{fmt.num(r.orders)}</span> · {formatMoney(r.sum, 'axis')}</>
               ) : (
-                <><span className="font-medium text-foreground">{fmt.short(r.sum)} ₽</span> · {fmt.num(r.orders)}</>
+                <><span className="font-medium text-foreground">{formatMoney(r.sum, 'axis')}</span> · {fmt.num(r.orders)}</>
               )}
             </span>
           </div>
-          <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted">
-            <div
-              className="h-full rounded-full"
-              style={{
-                width: `${Math.max(4, Math.round((Math.max(0, selectedValue(r)) / max) * 100))}%`,
-                backgroundColor: 'hsl(var(--chart-role-primary) / 0.75)',
-              }}
-            />
+          {/* Доля от ЦЕЛОГО окна, а не от крупнейшего статуса. */}
+          <div className="mt-1 flex">
+            <ShareTrack pct={statusTotal > 0 ? (Math.max(0, selectedValue(r)) / statusTotal) * 100 : 0} height="h-1.5" />
           </div>
         </div>
       ))}
@@ -545,7 +686,7 @@ export function MsFunnelRows({
           {metric === 'orders' ? (
             <>Ещё {fmt.num(restOrders)} {noState > 0 ? `заказов (из них без статуса ${fmt.num(noState)})` : 'заказов'} из {fmt.num(totalOrders)}.</>
           ) : (
-            <>Ещё {fmt.short(restSum)} ₽ {noStateSum !== 0 ? `(без статуса ${fmt.short(noStateSum)} ₽)` : 'выручки'} из {fmt.short(totalSum)} ₽.</>
+            <>Ещё {formatMoney(restSum, 'axis')} {noStateSum !== 0 ? `(без статуса ${formatMoney(noStateSum, 'axis')})` : 'выручки'} из {formatMoney(totalSum, 'axis')}.</>
           )}
         </p>
       )}
@@ -564,7 +705,7 @@ export const RETURNS_METRIC_OPTIONS: Array<{ value: MsReturnsMetric; content: st
 /** Формат значения выбранной метрики возвратов (число — штуки, сумма — рубли). */
 export function fmtReturnsMetric(metric: MsReturnsMetric, value: number | null): string {
   if (value == null) return '—';
-  return metric === 'count' ? fmt.num(value) : `${fmt.short(value)} ₽`;
+  return metric === 'count' ? fmt.num(value) : `${formatMoney(value, 'axis')}`;
 }
 
 /** Итог метрики возвратов за окно (сумма по дням серии). */
@@ -633,6 +774,7 @@ export function MsReturnsExplorer({
 
   const values = points.map((p) => metricValue(seriesMetric, p));
   const labels = points.map((p) => fmt.day(p.day));
+  const axisLabels = timeAxisFromDayKeys(points.map((p) => p.day), { monthsOnly: grain !== 'day' });
   const titles = points.map((p) => `${fmt.day(p.day)}: ${fmtReturnsMetric(metric, metricValue(seriesMetric, p))}`);
   const comparisonPoints = comparisonPeriod && comparison.data
     ? aggregatePlotPoints(
@@ -654,6 +796,7 @@ export function MsReturnsExplorer({
           ghostLabel="Пред. период"
           legendToggle={false}
           labels={labels}
+          axisLabels={axisLabels}
           titles={titles}
           height={expandedHeight ?? undefined}
         />
@@ -665,6 +808,7 @@ export function MsReturnsExplorer({
           ghostTitles={ghostOk ? comparisonPoints.map((p) => fmt.day(p.day)) : undefined}
           legendToggle={false}
           labels={labels}
+          axisLabels={axisLabels}
           titles={titles}
           yMin={0}
           height={expandedHeight ?? undefined}

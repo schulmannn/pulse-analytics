@@ -39,8 +39,6 @@ async function bootSourceMemory(page: Page) {
   await page.addInitScript(() => {
     if (localStorage.getItem('source_memory_seeded')) return;
     localStorage.setItem('source_memory_seeded', '1');
-    localStorage.setItem('pulse_token', 'e2e-token');
-    localStorage.setItem('pulse_token_exp', String(Date.now() + 60 * 60 * 1000));
     localStorage.setItem('pulse_theme', 'dark');
     localStorage.setItem('pulse_network', 'tg');
     localStorage.setItem('pulse_channel', '1');

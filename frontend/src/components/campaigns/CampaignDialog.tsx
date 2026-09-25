@@ -171,7 +171,7 @@ export function CampaignDialog({
                     'size-6 rounded-full border border-transparent transition-transform',
                     color === preset
                       ? 'ring-2 ring-primary ring-offset-2 ring-offset-card'
-                      : 'hover:scale-110',
+                      : 'hover-fine:scale-110',
                   )}
                   style={{ backgroundColor: campaignColorCss(preset) }}
                 />
@@ -193,7 +193,7 @@ export function CampaignDialog({
                   className={cn(
                     'flex-1 border-r border-border px-2 py-1.5 text-xs transition-colors last:border-r-0',
                     status === s
-                      ? 'bg-primary/10 font-medium text-primary'
+                      ? 'bg-primary/10 font-medium text-accent-foreground'
                       : 'text-muted-foreground hover:bg-muted/50',
                   )}
                 >
@@ -234,7 +234,7 @@ export function CampaignDialog({
             <Button type="button" variant="ghost" size="sm" onClick={onClose}>
               Отмена
             </Button>
-            <Button type="submit" size="sm" disabled={pending || !name.trim()}>
+            <Button type="submit" size="sm" pending={pending} disabled={pending || !name.trim()}>
               {pending ? 'Сохранение…' : initial ? 'Сохранить' : 'Создать'}
             </Button>
           </DialogFooter>

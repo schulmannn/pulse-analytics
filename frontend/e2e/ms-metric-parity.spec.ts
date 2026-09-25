@@ -28,12 +28,14 @@ test('all MoySklad drill targets use the shared full metric-page grammar', async
     await expect(page).toHaveURL(new RegExp(`${route.replaceAll('/', '\\/')}$`));
     await expect(page.getByRole('heading', { name: title, level: 1 })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Сравнение' })).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'О метрике' })).toBeVisible();
+    // «О метрике» убран со всех метрик-страниц (владелец, 2026-07-27) — техническая информация.
+    await expect(page.getByRole('heading', { name: 'О метрике' })).toHaveCount(0);
     await expect(page.getByRole('link', { name: /МойСклад ·/ })).toBeVisible();
     await expect(page.getByRole('dialog')).toHaveCount(0);
     if (route === '/metrics/ms-funnel') {
       await expect(page.getByText('Заказы, созданные в выбранном окне, по последнему сохранённому статусу')).toBeVisible();
-      await expect(page.getByText(/Это не история переходов, не конверсия и не порядок этапов/)).toBeVisible();
+      // Методологическая оговорка жила в убранном «О метрике» (владелец, 2026-07-27).
+      await expect(page.getByText(/Это не история переходов, не конверсия и не порядок этапов/)).toHaveCount(0);
       await expect(page.getByText('Воронка статусов', { exact: true })).toHaveCount(0);
     }
     expect(await overflowingCards(page)).toEqual([]);

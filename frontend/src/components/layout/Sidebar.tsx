@@ -1,12 +1,14 @@
-import { useEffect, useId, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { NavLink } from 'react-router-dom';
+import { isPlainLeftClick, useViewTransitionNavigate } from '@/lib/viewTransitionNavigate';
 import { openCommandPalette } from '@/lib/command-palette';
 import { PLAN_LABEL, usePlan } from '@/lib/plan';
 import { useMediaQuery } from '@/lib/useMediaQuery';
 import { useSidebarMode } from '@/lib/sidebar';
 import { cn } from '@/lib/utils';
 import { Icon, PanelToggleGlyph } from '@/components/nav-icons';
+import { Kbd, KbdGroup } from '@/components/ui/kbd';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -22,11 +24,35 @@ import { useActiveNetworkNav, type NavLinkDef } from './nav';
  * persisted (localStorage `pulse_sidebar`). No hover-expand overlay: the rail stays a rail
  * until toggled. Until the user chooses, the default is responsive — expanded at ≥lg, rail
  * on md–lg. <md the sidebar is hidden (MobileHeader + MobileBottomNav take over).
+ *
+ * The mode switch animates on the POINTER path only. A keyboard shortcut is fired dozens of times a
+ * day by the people who know it, and a repeated 300ms tween on a shortcut stops reading as polish and
+ * starts reading as lag — so Ctrl+B snaps (see `toggleFromKeyboard`).
  */
 export function Sidebar({ email, role, avatar }: { email?: string; role?: string; avatar?: string | null }) {
   const isMd = useMediaQuery('(min-width: 768px)');
   const isLg = useMediaQuery('(min-width: 1024px)');
   const { rail, toggle } = useSidebarMode(isLg);
+  const shellRef = useRef<HTMLElement>(null);
+
+  /**
+   * Toggle with the width/copy tween suppressed for exactly this switch. `data-instant` is written
+   * imperatively BEFORE the state update so the attribute and the new width land in the same commit
+   * (a React state flag would race the paint); a double rAF clears it once the new layout has been
+   * painted, so the next pointer toggle animates normally.
+   */
+  const toggleFromKeyboard = useCallback(() => {
+    const el = shellRef.current;
+    if (el) {
+      el.dataset.instant = 'true';
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          delete el.dataset.instant;
+        });
+      });
+    }
+    toggle();
+  }, [toggle]);
 
   // Global Ctrl+B / ⌘B toggle. Skipped while typing (input / textarea / contenteditable) and
   // below md (no sidebar to toggle). ⌘K stays with the command palette — no key overlap.
@@ -37,14 +63,15 @@ export function Sidebar({ email, role, avatar }: { email?: string; role?: string
       const t = e.target;
       if (t instanceof HTMLElement && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
       e.preventDefault();
-      toggle();
+      toggleFromKeyboard();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [isMd, toggle]);
+  }, [isMd, toggleFromKeyboard]);
 
   return (
     <aside
+      ref={shellRef}
       aria-label="Боковая панель"
       data-rail={rail ? 'true' : 'false'}
       className={cn(
@@ -127,11 +154,16 @@ function SidebarToggle({ rail, onToggle }: { rail: boolean; onToggle: () => void
         id={tipId}
         role="tooltip"
         data-sidebar-tooltip
-        className="sidebar-tooltip rounded-lg border bg-popover px-2.5 py-1.5 text-xs text-popover-foreground"
+        // rounded-xl, а не -lg: радиус тултипов один на всё приложение (аудит #554: три разных
+        // радиуса в одном классе поверхностей). Значение взято от ChartTooltip — решение владельца
+        // 2026-08-14 «острые углы → закруглённое всё».
+        className="sidebar-tooltip rounded-xl border bg-popover px-2.5 py-1.5 text-xs text-popover-foreground"
       >
         <span className="whitespace-nowrap">{label}</span>
-        <kbd className="sidebar-key font-mono text-2xs">Ctrl</kbd>
-        <kbd className="sidebar-key font-mono text-2xs">B</kbd>
+        <KbdGroup>
+          <Kbd>Ctrl</Kbd>
+          <Kbd>B</Kbd>
+        </KbdGroup>
       </span>
     </div>
   );
@@ -212,17 +244,30 @@ function SidebarNavGroup({ label, items, rail }: { label?: string; items: NavLin
     reserved for links/brand. NavLink emits aria-current="page" on the active row by itself.
     Rail: icon only, centered, with the label as a title tooltip + aria-label. */
 function NavItem({ to, label, icon, end, rail }: NavLinkDef & { rail?: boolean }) {
+  const vtNavigate = useViewTransitionNavigate();
   return (
     <NavLink
       to={to}
       end={end}
+      // View Transitions (волна B): перехват обычного левого клика → навигация внутри
+      // document.startViewTransition (plain BrowserRouter — RR-проп инертен; см.
+      // lib/viewTransitionNavigate). Модификаторы/средняя кнопка уходят браузеру как раньше.
+      onClick={(event) => {
+        if (!isPlainLeftClick(event)) return;
+        event.preventDefault();
+        vtNavigate(to);
+      }}
       title={rail ? label : undefined}
       aria-label={rail ? label : undefined}
       className={({ isActive }) =>
         cn(
           // The first grid track is exactly the rail's available width (64px − 2 × 12px nav inset),
           // so every glyph remains centred on x=32 in both modes while only the copy track collapses.
-          'sidebar-nav-item relative grid h-9 grid-cols-[40px_minmax(0,1fr)] items-center overflow-hidden rounded-xl text-sm transition-colors',
+          // БЕЗ overflow-hidden: маркер активного пункта в рейле вынесен на кромку полосы
+          // (-left-3, ровно ширина отступа nav), и клип строки съедал бы его. Подпись обрезает
+          // себя сама (`.sidebar-copy { overflow: hidden }`), а сам <nav> держит overflow-x-hidden
+          // на время схлопывания — так что клип строки был подстраховкой, а не несущей стеной.
+          'sidebar-nav-item relative grid h-9 grid-cols-[40px_minmax(0,1fr)] items-center rounded-xl text-sm transition-colors',
           isActive
             ? 'sidebar-nav-item-active font-medium text-foreground'
             : 'text-ink2 hover:bg-hover-row/60 hover:text-foreground',
@@ -231,10 +276,15 @@ function NavItem({ to, label, icon, end, rail }: NavLinkDef & { rail?: boolean }
     >
       {({ isActive }) => (
         <>
+          {/* Маркер активного пункта в свёрнутом рейле. Стоит НА КРОМКЕ полосы (-left-3 = отступ
+              nav), а не в 12px от неё: у левого края он читается как индикатор кромки, а рядом с
+              иконкой выглядел пятном (жалоба владельца). Цвет — акцент, а не чистые чернила:
+              чернильная засечка на 3px кричала громче самой иконки, и она же следует акценту
+              студии оформления. Скругление только справа — слева он прижат к краю. */}
           {isActive && (
             <span
               aria-hidden="true"
-              className="sidebar-rail-active absolute left-0 top-1/2 h-4 w-[3px] rounded-full bg-foreground"
+              className="sidebar-rail-active absolute -left-3 top-1/2 h-5 w-[3px] rounded-r-full bg-primary"
             />
           )}
           <span className="flex justify-center">

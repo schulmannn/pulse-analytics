@@ -1,35 +1,27 @@
-import { useContext, useState } from 'react';
-import { ChartExpandedContext } from '@/components/ExpandableChart';
-import {
-  useYmAge,
-  useYmCities,
-  useYmCountries,
-  useYmDevices,
-  useYmExits,
-  useYmGender,
-  useYmGoals,
-  useYmHourly,
-  useYmLandings,
-  useYmMessengers,
-  useYmPages,
-  useYmReferrers,
-  useYmSocial,
-  useYmSources,
-  useYmSummary,
-  useYmUtm,
-} from '@/api/queries';
+import { useMemo, useState } from 'react';
+import { KpiValue } from '@/components/chartWidget/KpiValue';
+import { useNavigate } from 'react-router-dom';
+import { useYmGoals, useYmHourly, useYmSummary } from '@/api/ym';
 import { PillSelect } from '@/components/PillSelect';
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
 import { ChartCardBody } from '@/components/chartWidget/ChartCardBody';
-import { LineChart } from '@/components/LineChart';
+import { ChartTooltip, useHeatmapTip } from '@/components/ChartTooltip';
+import { Sparkline } from '@/components/Sparkline';
+import { BarChart } from '@/components/BarChart';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
-import { ChartSkeleton, TableSkeleton } from '@/components/ui/dataSkeleton';
+import { ChartSkeleton } from '@/components/ui/dataSkeleton';
+import { DeltaPill } from '@/components/DeltaPill';
 import { InlineSpark } from '@/components/InlineSpark';
-import { lttbDownsample } from '@/lib/downsample';
-import { fmt } from '@/lib/format';
-import { usePagePeriod } from '@/lib/period';
-import { useMsPagePeriod } from '@/lib/msPeriod';
+import { pctDelta, type MetricDelta } from '@/lib/delta';
+import { CHART_MAX_POINTS, lttbDownsample } from '@/lib/downsample';
+import { fmt, timeAxisFromDayKeys } from '@/lib/format';
+import { formatByRole } from '@/lib/metricNumber';
+import { usePagePeriod, useCardShowsPeriod } from '@/lib/period';
+import { msPreviousPeriod, useMsPagePeriod } from '@/lib/msPeriod';
+import { YM_BREAKDOWNS } from '@/panels/metrika/ymBreakdowns';
+import { WidgetGrid } from '@/components/widgets/WidgetGrid';
+import { BoardSkeleton } from '@/components/BoardSkeleton';
 
 /**
  * Обзор «Яндекс.Метрики» — веб-аналитика сайта рядом с аналитикой каналов. Все числа приходят
@@ -37,86 +29,77 @@ import { useMsPagePeriod } from '@/lib/msPeriod';
  * ym_daily и best-effort обогащает точными live-итогами). Величины (визиты, посетители, просмотры
  * страниц) — свои и никогда не смешиваются с TG-просмотрами или IG-охватом. Когда period totals
  * недоступны, подпись посетителей честно отмечает, что итог является суммой дневных уникальных.
+ *
+ * 14 разрезов (источники/гео/демография/цели/UTM/страницы) живут ОДНОЙ таблицей в
+ * `ymBreakdowns.tsx` — та же дефиниция кормит и карточку доски, и полностраничный `/metrics/ym-*`.
+ * Каждая карточка тянет свои данные сама и (deferData) откладывает запрос, пока не подойдёт к
+ * вьюпорту: раньше все 17 запросов летели на каждый вход в /metrika и на каждую смену периода.
  */
-/** Локализация типов устройств по стабильному значению ym:s:deviceCategory. Reporting API может
-    вернуть числовой id, а документация группировки называет строковые значения — поддерживаем оба. */
-export const YM_DEVICE_LABELS: Record<string, string> = {
-  '1': 'Десктоп',
-  '2': 'Смартфоны',
-  '3': 'Планшеты',
-  '4': 'ТВ',
-  desktop: 'Десктоп',
-  mobile: 'Смартфоны',
-  tablet: 'Планшеты',
-  tv: 'ТВ',
-};
 
-/** Локализация возрастных групп по стабильному id ym:s:ageInterval (нижняя граница интервала).
-    lang=ru обычно уже отдаёт русскую подпись, но по id мы даём единый продуктовый формат и не
-    зависим от языка ответа API; неизвестный id падает на имя из ответа. */
-export const YM_AGE_LABELS: Record<string, string> = {
-  '17': 'До 18 лет',
-  '18': '18–24 года',
-  '25': '25–34 года',
-  '35': '35–44 года',
-  '45': '45–54 года',
-  '55': '55 лет и старше',
-};
-
-/** Локализация пола по стабильному значению ym:s:gender (male/female), имя API — фолбэк. */
-export const YM_GENDER_LABELS: Record<string, string> = {
-  male: 'Мужчины',
-  female: 'Женщины',
-};
-
-/** Методологическая подпись соцдема: оценочная природа, фактическое покрытие и privacy-redaction
-    перечисляются отдельно. При нулевом total процент не выдумывается. */
-export const demographicsFootnote = (data: {
-  coverage_percent: number | null;
-  contains_sensitive_data: boolean;
-}): string => {
-  const coverage =
-    data.coverage_percent == null
-      ? null
-      : `определено для ${data.coverage_percent.toLocaleString('ru-RU', { maximumFractionDigits: 1 })}% визитов`;
-  const base = ['Оценка Метрики (Crypta)', coverage].filter(Boolean).join(' · ');
-  return data.contains_sensitive_data
-    ? `${base}. Часть данных скрыта при малой выборке.`
-    : `${base}.`;
-};
-
-/** Вторичный контекст строки разреза: посетители + отказы (когда доступны). Отказы nullable —
-    «—»-семантика: при null подпункт отказов просто опускается, а не превращается в «0%». */
-export const breakdownNote = (users: number, bounceRate: number | null): string =>
-  [
-    `${fmt.num(users)} чел.`,
-    bounceRate != null ? `${bounceRate.toLocaleString('ru-RU', { maximumFractionDigits: 1 })}% отказов` : null,
-  ]
-    .filter(Boolean)
-    .join(' · ');
-
-/** Контекст выбранной цели для строки разреза: конверсия (CR, %) + число достижений. Возвращает
-    null, когда цель не выбрана (goalId==null) — тогда строка остаётся с базовым (визиты/отказы)
-    контекстом. Конверсия/достижения nullable по отдельности: показываем то, что реально пришло. */
-export const goalNote = (
-  goalId: number | null | undefined,
-  reaches: number | null | undefined,
-  conversion: number | null | undefined,
-): string | null => {
-  if (goalId == null) return null;
+/** Тело story-карточки Обзора Метрики — hero слева, дневной ряд справа, «Линия»/«Столбцы». */
+function YmStoryBody({
+  windowLabel,
+  title,
+  total,
+  delta,
+  caption,
+  values,
+  labels,
+  axisLabels,
+  onDrill,
+  viz = 'line',
+}: {
+  windowLabel?: string;
+  title: string;
+  total: number | null;
+  delta: MetricDelta | null;
+  caption?: string;
+  values: number[];
+  labels: string[];
+  /** Ось букв короткого дневного окна (канон timeAxisFromDayKeys). */
+  axisLabels?: string[];
+  onDrill: () => void;
+  viz?: 'line' | 'bar';
+}) {
   return (
-    [
-      conversion != null ? `CR ${conversion.toLocaleString('ru-RU', { maximumFractionDigits: 2 })}%` : null,
-      reaches != null ? `${fmt.num(reaches)} достиж.` : null,
-    ]
-      .filter(Boolean)
-      .join(' · ') || null
+    <ChartCardBody
+      label={windowLabel}
+      value={fmt.short(total)}
+      delta={delta}
+      caption={caption}
+      onValueClick={onDrill}
+      drillLabel={title}
+    >
+      {values.length <= 1 ? (
+        <EmptyState compact size="chart" title="Недостаточно дней для графика." />
+      ) : viz === 'bar' ? (
+        <div className="min-h-14 w-full flex-1">
+          <BarChart
+            values={values}
+            labels={labels}
+            axisLabels={axisLabels}
+            titles={values.map((v, i) => `${labels[i] ?? ''}: ${fmt.num(v)}`)}
+            formatValue={fmt.num}
+          />
+        </div>
+      ) : (
+        <Sparkline
+          values={values}
+          labels={labels}
+          axisLabels={axisLabels}
+          area
+          strokeWidth={2}
+          interactive
+          // caption включает hover-читалку «дата · значение · Δ» (Sparkline рисует её только
+          // при заданном caption) — значения по дням остаются читаемы прямо с карточки.
+          caption=""
+          formatValue={fmt.num}
+          className="h-full min-h-14 w-full"
+        />
+      )}
+    </ChartCardBody>
   );
-};
-
-/** Склейка базового и целевого контекста строки в одну note-строку (базовый всегда, цель — если есть). */
-export const joinNote = (base: string | null, goal: string | null): string | null =>
-  [base, goal].filter(Boolean).join(' · ') || null;
+}
 
 export function YmOverview() {
   const pp = usePagePeriod();
@@ -125,6 +108,10 @@ export function YmOverview() {
   // хелпер): «Всё» (0) берёт серии из ym_daily, живые окна — 7/30/90/точный диапазон.
   const period = useMsPagePeriod();
   const windowLabel = pp?.range ? 'за выбранный период' : days === 0 ? 'за всё время' : `за ${days} дн.`;
+  // На ленте окно уже в шапке страницы — карточка его не повторяет (владелец).
+  const periodInLabel = useCardShowsPeriod() ? windowLabel : undefined;
+  // Словарь целей нужен САМОЙ доске (опции синхронных селекторов), поэтому единственный разрез,
+  // который остаётся на уровне страницы. Карточка «Цели» читает тот же ключ — второго запроса нет.
   const goals = useYmGoals(period);
   // Одна ЯВНО выбранная цель атрибуции на всю доску: источники/UTM/устройства/страницы входа
   // читают один и тот же выбор. Селекторы появляются, ТОЛЬКО когда на счётчике есть цели. Храним
@@ -139,20 +126,17 @@ export function YmOverview() {
   const selectedGoalId = validGoalValue !== '' ? Number(validGoalValue) : null;
 
   const summary = useYmSummary(period);
-  const sources = useYmSources(period, selectedGoalId);
-  const referrers = useYmReferrers(period);
-  const social = useYmSocial(period);
-  const messengers = useYmMessengers(period);
-  const countries = useYmCountries(period);
-  const cities = useYmCities(period);
-  const age = useYmAge(period);
-  const gender = useYmGender(period);
-  const devices = useYmDevices(period, selectedGoalId);
-  const utm = useYmUtm(period, selectedGoalId);
-  const pages = useYmPages(period);
-  const landings = useYmLandings(period, selectedGoalId);
+  // Канон карточки-метрики: число + сравнение с ПРЕДЫДУЩИМ равным окном. Раньше карточки Метрики
+  // были единственными в продукте без дельты — «5.7k» без ответа на «больше или меньше, чем было».
+  // Окно берём тем же хелпером, что МойСклад (msPreviousPeriod); у «Всё» честного предшественника
+  // нет — запрос не уходит и дельта не показывается (как в rail'е /metrics/ym-*). ВАЖНО: при
+  // выключенном запросе fallback-ключ (previousPeriod ?? period) совпадает с текущим окном и
+  // previous.data вернул бы ТЕКУЩУЮ сводку из кэша — поэтому data читается только через
+  // previousPeriod != null (см. prev ниже), а не напрямую.
+  const previousPeriod = useMemo(() => msPreviousPeriod(period), [period]);
+  const previous = useYmSummary(previousPeriod ?? period, { enabled: previousPeriod != null });
   const hourly = useYmHourly(period);
-  const exits = useYmExits(period);
+  const navigate = useNavigate();
   // Общие опции + рендер синхронного селектора цели (одинаковое value/handler на всех карточках,
   // card-specific aria-label). Показываем ТОЛЬКО при наличии целей — иначе UI как прежде.
   const goalOptions = [
@@ -173,20 +157,20 @@ export function YmOverview() {
     ) : undefined;
 
   if (summary.isPending) {
+    // Форма борда один в один: три метрики → полоса качества → часы → разрезы. Разрезы берём
+    // из того же источника, что и борд, — иначе число разъедется при первом же новом разрезе.
     return (
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-6">
-        {Array.from({ length: 2 }).map((_, i) => (
-          <div key={i} className="h-[264px] rounded-2xl border border-border bg-card p-5 lg:col-span-3">
-            <ChartSkeleton />
-          </div>
-        ))}
-      </div>
+      <BoardSkeleton
+        tiles={['half', 'half', 'half', 'strip', 'half', ...YM_BREAKDOWNS.map(() => 'half' as const)]}
+      />
     );
   }
 
   if (summary.isError) {
-    const status = (summary.error as { status?: number } | null)?.status;
-    if (status === 401) {
+    const { status, code } = (summary.error as { status?: number; code?: string } | null) ?? {};
+    // Различаем по машинному коду, а не по статусу: 401 без кода — это наша истёкшая сессия (её
+    // уводит на /login lib/authRedirect), а не отзыв токена Яндекса.
+    if (code === 'ym_token_revoked') {
       // Токен отозван на стороне Яндекса — честный reconnect-CTA вместо «недоступна».
       return (
         <EmptyState
@@ -200,6 +184,7 @@ export function YmOverview() {
       // Канал есть, а счётчика Метрики на нём нет — честный onboarding вместо пустых карточек.
       return (
         <EmptyState
+          ghost="bars"
           title="Яндекс.Метрика не подключена"
           reason="Укажите OAuth-токен — и здесь появятся визиты, посетители и источники трафика."
           action={{ to: '/connect?source=metrika', label: 'Подключить Метрику' }}
@@ -218,30 +203,54 @@ export function YmOverview() {
 
   const { visits, users, pageviews } = summary.data;
   // Канон графиков: длинные серии (окно «Всё» после лет архива ym_daily) даунсэмплятся до ~140
-  // точек ПЕРЕД рендером; labels/titles строятся из той же выборки, чтобы тултипы совпадали с
-  // точками. Оконные 7/30/90 короче порога и проходят как есть.
+  // точек ПЕРЕД рендером; labels строятся из той же выборки, чтобы ховер совпадал с точками.
+  // Оконные 7/30/90 короче порога и проходят как есть.
+  //
+  // Грамматика карточки — ОБЩАЯ с Обзорами Telegram и Instagram (steep story card): подпись окна,
+  // крупное число, дельта к прошлому периоду и area-спарклайн без осей справа. Полные оси, точки,
+  // сравнение и статистика живут на своей поверхности — `/metrics/ym-*`, куда ведёт drillTo.
+  // `story` помечает ЕДИНСТВЕННУЮ тонированную карточку доски (канон: дефолт — нейтральная
+  // поверхность, цветная заливка — ручной инструмент одной истории; остальные карточки несут
+  // канонный iris-акцент на серии).
   const metricCard = (
     id: string,
     title: string,
-    block: { total: number; series: Array<{ day: string; value: number }> },
-    caption: string,
+    story: boolean,
+    block: { total: number | null; series: Array<{ day: string; value: number }> },
+    prevTotal: number | null | undefined,
+    caption?: string,
   ) => {
-    const sampled = lttbDownsample(block.series, 140, (p) => p.value);
+    const sampled = lttbDownsample(block.series, CHART_MAX_POINTS, (p) => p.value);
+    const delta =
+      block.total != null && prevTotal != null && prevTotal > 0
+        ? pctDelta(block.total, prevTotal)
+        : null;
+    // Одна карточка в двух подачах — данные объявляются РАЗ, иначе «Линия» и «Столбцы»
+    // разъедутся при следующей правке.
+    const storyProps = {
+      windowLabel: periodInLabel,
+      title,
+      total: block.total,
+      delta,
+      caption,
+      values: sampled.map((p) => p.value),
+      labels: sampled.map((p) => fmt.day(p.day)),
+      axisLabels: timeAxisFromDayKeys(sampled.map((p) => p.day)),
+      onDrill: () => navigate(`/metrics/${id}`),
+    };
     return (
-      <ChartWidget id={id} title={title} fixedSize="half" drillTo={`/metrics/${id}`}>
-        <ChartCardBody value={fmt.short(block.total)} caption={caption}>
-          {sampled.length > 1 ? (
-            <LineChart
-              values={sampled.map((p) => p.value)}
-              labels={sampled.map((p) => fmt.day(p.day))}
-              titles={sampled.map((p) => `${fmt.day(p.day)}: ${fmt.num(p.value)}`)}
-              yMin={0}
-            />
-          ) : (
-            <EmptyState compact size="chart" title="Недостаточно дней для графика." />
-          )}
-        </ChartCardBody>
-      </ChartWidget>
+      <ChartWidget
+        id={id}
+        title={title}
+        fixedSize="half"
+        defaultColor={story ? 1 : undefined}
+        defaultTinted={story}
+        drillTo={`/metrics/${id}`}
+        variants={[
+          { key: 'line', label: 'Линия', render: <YmStoryBody {...storyProps} /> },
+          { key: 'bar', label: 'Столбцы', render: <YmStoryBody {...storyProps} viz="bar" /> },
+        ]}
+      />
     );
   };
 
@@ -251,523 +260,54 @@ export function YmOverview() {
   // «Посетители» за окно теперь период-точные, когда сервер дал body.totals; при «Всё» без
   // живого токена подпись остаётся честной «сумма по дням».
   const exactTotals = meta?.exact_period_totals === true;
-  const usersCaption = exactTotals ? windowLabel : `${windowLabel} · сумма по дням`;
+  const usersCaption = exactTotals ? undefined : 'сумма по дням';
+  // Прошлое окно приходит своим запросом и может ещё грузиться — тогда дельты просто нет.
+  // Гейт по previousPeriod обязателен (см. комментарий у хука выше).
+  const prev = previousPeriod != null ? previous.data : undefined;
 
   return (
-    <div className="grid grid-cols-1 gap-6 lg:grid-cols-6">
-      {metricCard('ym-visits', 'Визиты', visits, windowLabel)}
-      {metricCard('ym-users', 'Посетители', users, usersCaption)}
-      {metricCard('ym-pageviews', 'Просмотры страниц', pageviews, windowLabel)}
+    <WidgetGrid className="grid grid-cols-1 gap-6 lg:grid-cols-6">
+      {metricCard('ym-visits', 'Визиты', true, visits, prev?.visits.total)}
+      {metricCard('ym-users', 'Посетители', false, users, prev?.users.total, usersCaption)}
+      {metricCard('ym-pageviews', 'Просмотры страниц', false, pageviews, prev?.pageviews.total)}
 
       {/* Качество трафика: отказы/длительность/глубина/новые/роботы — nullable, «—» когда недоступно. */}
-      <YmQualityStrip quality={quality} qualitySeries={qualitySeries} meta={meta} windowLabel={windowLabel} />
+      <YmQualityStrip
+        quality={quality}
+        qualitySeries={qualitySeries}
+        prevQuality={previousPeriod != null ? prev?.quality ?? null : null}
+        meta={meta}
+        windowLabel={windowLabel}
+      />
 
       {/* Трафик по часам: суточный heatmap-профиль визитов (ym:s:hour) — когда приходят посетители.
           Полные 24 клетки, подпись отмечает час пика. Визиты — своя единица, не TG/IG-метрики. */}
       <YmHourlyCard hourly={hourly} windowLabel={windowLabel} />
 
-      <ChartWidget
-        id="ym-sources"
-        title="Источники трафика"
-        fixedSize="half"
-        drillTo="/metrics/ym-sources"
-        action={goalSelect('Цель для источников трафика')}
-      >
-        {sources.isPending ? (
-          <TableSkeleton rows={4} columns={2} className="py-2" />
-        ) : sources.isError ? (
-          <ErrorState
-            compact
-            size="table"
-            className="py-4"
-            title="Не удалось получить источники трафика"
-            reason={sources.error instanceof Error ? sources.error.message : 'ошибка'}
-            onRetry={() => sources.refetch()}
-            retrying={sources.isFetching}
-          />
-        ) : sources.data.rows.length === 0 ? (
-          <EmptyState compact size="table" title="Нет визитов за период." />
-        ) : (
-          <YmBreakdownRows
-            rows={sources.data.rows.map((r) => ({
-              key: r.id ?? r.name ?? 'unknown',
-              label: r.name ?? 'Другие источники',
-              value: r.visits,
-              note: joinNote(
-                `${fmt.num(r.users)} чел.`,
-                goalNote(sources.data.goal_id, r.goal_reaches, r.goal_conversion),
-              ),
-            }))}
-            tailWord="визитов"
-            unitTotal={sources.data.visits_total}
-          />
-        )}
-      </ChartWidget>
-
-      {/* Реферальные сайты: внешние домены (externalRefererDomain) — визиты + отказы по строке. */}
-      <ChartWidget id="ym-referrers" title="Реферальные сайты" fixedSize="half" drillTo="/metrics/ym-referrers">
-        {referrers.isPending ? (
-          <TableSkeleton rows={4} columns={2} className="py-2" />
-        ) : referrers.isError ? (
-          <ErrorState
-            compact
-            size="table"
-            className="py-4"
-            title="Не удалось получить реферальные сайты"
-            reason={referrers.error instanceof Error ? referrers.error.message : 'ошибка'}
-            onRetry={() => referrers.refetch()}
-            retrying={referrers.isFetching}
-          />
-        ) : referrers.data.rows.length === 0 ? (
-          <EmptyState
-            compact
-            size="table"
-            title="Реферальных переходов за период нет."
-            reason="Здесь появятся внешние сайты, приводящие трафик по ссылкам."
-          />
-        ) : (
-          <YmBreakdownRows
-            rows={referrers.data.rows.map((r) => ({
-              key: r.name ?? r.id ?? 'unknown',
-              label: r.name ?? r.id ?? 'домен',
-              value: r.visits,
-              note: breakdownNote(r.users, r.bounce_rate),
-            }))}
-            tailWord="визитов"
-            unitTotal={referrers.data.visits_total}
-          />
-        )}
-      </ChartWidget>
-
-      {/* Соцсети: конкретные сети (lastsignSocialNetwork) — визиты + отказы по строке. */}
-      <ChartWidget id="ym-social" title="Соцсети" fixedSize="half" drillTo="/metrics/ym-social">
-        {social.isPending ? (
-          <TableSkeleton rows={4} columns={2} className="py-2" />
-        ) : social.isError ? (
-          <ErrorState
-            compact
-            size="table"
-            className="py-4"
-            title="Не удалось получить соцсети"
-            reason={social.error instanceof Error ? social.error.message : 'ошибка'}
-            onRetry={() => social.refetch()}
-            retrying={social.isFetching}
-          />
-        ) : social.data.rows.length === 0 ? (
-          <EmptyState
-            compact
-            size="table"
-            title="Переходов из соцсетей за период нет."
-            reason="Здесь появятся конкретные соцсети, приводящие трафик."
-          />
-        ) : (
-          <YmBreakdownRows
-            rows={social.data.rows.map((r) => ({
-              key: r.id ?? r.name ?? 'unknown',
-              label: r.name ?? r.id ?? 'соцсеть',
-              value: r.visits,
-              note: breakdownNote(r.users, r.bounce_rate),
-            }))}
-            tailWord="визитов"
-            unitTotal={social.data.visits_total}
-          />
-        )}
-      </ChartWidget>
-
-      {/* Мессенджеры: отдельная размерность Метрики — Telegram не теряется внутри «Соцсетей». */}
-      <ChartWidget id="ym-messengers" title="Мессенджеры" fixedSize="half" drillTo="/metrics/ym-messengers">
-        {messengers.isPending ? (
-          <TableSkeleton rows={4} columns={2} className="py-2" />
-        ) : messengers.isError ? (
-          <ErrorState
-            compact
-            size="table"
-            className="py-4"
-            title="Не удалось получить мессенджеры"
-            reason={messengers.error instanceof Error ? messengers.error.message : 'ошибка'}
-            onRetry={() => messengers.refetch()}
-            retrying={messengers.isFetching}
-          />
-        ) : messengers.data.rows.length === 0 ? (
-          <EmptyState
-            compact
-            size="table"
-            title="Переходов из мессенджеров за период нет."
-            reason="Здесь появятся Telegram и другие мессенджеры, приводящие трафик."
-          />
-        ) : (
-          <YmBreakdownRows
-            rows={messengers.data.rows.map((r) => ({
-              key: r.id ?? r.name ?? 'unknown',
-              label: r.name ?? r.id ?? 'мессенджер',
-              value: r.visits,
-              note: breakdownNote(r.users, r.bounce_rate),
-            }))}
-            tailWord="визитов"
-            unitTotal={messengers.data.visits_total}
-          />
-        )}
-      </ChartWidget>
-
-      {/* Устройства: тип устройства (deviceCategory) — локализация по стабильному id, имя — фолбэк. */}
-      <ChartWidget
-        id="ym-devices"
-        title="Устройства"
-        fixedSize="half"
-        drillTo="/metrics/ym-devices"
-        action={goalSelect('Цель для устройств')}
-      >
-        {devices.isPending ? (
-          <TableSkeleton rows={4} columns={2} className="py-2" />
-        ) : devices.isError ? (
-          <ErrorState
-            compact
-            size="table"
-            className="py-4"
-            title="Не удалось получить устройства"
-            reason={devices.error instanceof Error ? devices.error.message : 'ошибка'}
-            onRetry={() => devices.refetch()}
-            retrying={devices.isFetching}
-          />
-        ) : devices.data.rows.length === 0 ? (
-          <EmptyState compact size="table" title="Нет визитов за период." />
-        ) : (
-          <YmBreakdownRows
-            rows={devices.data.rows.map((r) => ({
-              key: r.id ?? r.name ?? 'unknown',
-              label: (r.id != null ? YM_DEVICE_LABELS[r.id] : undefined) ?? r.name ?? 'Другие устройства',
-              value: r.visits,
-              note: joinNote(
-                breakdownNote(r.users, r.bounce_rate),
-                goalNote(devices.data.goal_id, r.goal_reaches, r.goal_conversion),
-              ),
-            }))}
-            tailWord="визитов"
-            unitTotal={devices.data.visits_total}
-          />
-        )}
-      </ChartWidget>
-
-      {/* Страны: география посетителей (regionCountry) — визиты + отказы по строке, имя lang=ru. */}
-      <ChartWidget id="ym-countries" title="Страны" fixedSize="half" drillTo="/metrics/ym-countries">
-        {countries.isPending ? (
-          <TableSkeleton rows={4} columns={2} className="py-2" />
-        ) : countries.isError ? (
-          <ErrorState
-            compact
-            size="table"
-            className="py-4"
-            title="Не удалось получить страны"
-            reason={countries.error instanceof Error ? countries.error.message : 'ошибка'}
-            onRetry={() => countries.refetch()}
-            retrying={countries.isFetching}
-          />
-        ) : countries.data.rows.length === 0 ? (
-          <EmptyState compact size="table" title="Нет визитов за период." />
-        ) : (
-          <YmBreakdownRows
-            rows={countries.data.rows.map((r) => ({
-              key: r.id ?? r.name ?? 'unknown',
-              label: r.name ?? r.id ?? 'страна',
-              value: r.visits,
-              note: breakdownNote(r.users, r.bounce_rate),
-            }))}
-            tailWord="визитов"
-            unitTotal={countries.data.visits_total}
-            footnote="География определяется Метрикой по данным визита, а не по GPS."
-          />
-        )}
-      </ChartWidget>
-
-      {/* Города: география посетителей (regionCity) — отдельная от страны размерность. */}
-      <ChartWidget id="ym-cities" title="Города" fixedSize="half" drillTo="/metrics/ym-cities">
-        {cities.isPending ? (
-          <TableSkeleton rows={4} columns={2} className="py-2" />
-        ) : cities.isError ? (
-          <ErrorState
-            compact
-            size="table"
-            className="py-4"
-            title="Не удалось получить города"
-            reason={cities.error instanceof Error ? cities.error.message : 'ошибка'}
-            onRetry={() => cities.refetch()}
-            retrying={cities.isFetching}
-          />
-        ) : cities.data.rows.length === 0 ? (
-          <EmptyState compact size="table" title="Нет визитов за период." />
-        ) : (
-          <YmBreakdownRows
-            rows={cities.data.rows.map((r) => ({
-              key: r.id ?? r.name ?? 'unknown',
-              label: r.name ?? r.id ?? 'город',
-              value: r.visits,
-              note: breakdownNote(r.users, r.bounce_rate),
-            }))}
-            tailWord="визитов"
-            unitTotal={cities.data.visits_total}
-          />
-        )}
-      </ChartWidget>
-
-      {/* Возраст: демография посетителей (ageInterval) — локализация по стабильному id, имя — фолбэк. */}
-      <ChartWidget id="ym-age" title="Возраст" fixedSize="half" drillTo="/metrics/ym-age">
-        {age.isPending ? (
-          <TableSkeleton rows={4} columns={2} className="py-2" />
-        ) : age.isError ? (
-          <ErrorState
-            compact
-            size="table"
-            className="py-4"
-            title="Не удалось получить возраст"
-            reason={age.error instanceof Error ? age.error.message : 'ошибка'}
-            onRetry={() => age.refetch()}
-            retrying={age.isFetching}
-          />
-        ) : age.data.rows.length === 0 ? (
-          <div>
-            <EmptyState compact size="table" title="Демографические данные недоступны за период." />
-            <p className="text-2xs text-muted-foreground">{demographicsFootnote(age.data)}</p>
-          </div>
-        ) : (
-          <YmBreakdownRows
-            rows={age.data.rows.map((r) => ({
-              key: r.id ?? r.name ?? 'unknown',
-              label: (r.id != null ? YM_AGE_LABELS[r.id] : undefined) ?? r.name ?? 'возраст неизвестен',
-              value: r.visits,
-              note: breakdownNote(r.users, r.bounce_rate),
-            }))}
-            tailWord="визитов"
-            unitTotal={age.data.visits_total}
-            footnote={demographicsFootnote(age.data)}
-          />
-        )}
-      </ChartWidget>
-
-      {/* Пол: демография посетителей (gender) — локализация по стабильному id male/female. */}
-      <ChartWidget id="ym-gender" title="Пол" fixedSize="half" drillTo="/metrics/ym-gender">
-        {gender.isPending ? (
-          <TableSkeleton rows={4} columns={2} className="py-2" />
-        ) : gender.isError ? (
-          <ErrorState
-            compact
-            size="table"
-            className="py-4"
-            title="Не удалось получить пол"
-            reason={gender.error instanceof Error ? gender.error.message : 'ошибка'}
-            onRetry={() => gender.refetch()}
-            retrying={gender.isFetching}
-          />
-        ) : gender.data.rows.length === 0 ? (
-          <div>
-            <EmptyState compact size="table" title="Демографические данные недоступны за период." />
-            <p className="text-2xs text-muted-foreground">{demographicsFootnote(gender.data)}</p>
-          </div>
-        ) : (
-          <YmBreakdownRows
-            rows={gender.data.rows.map((r) => ({
-              key: r.id ?? r.name ?? 'unknown',
-              label: (r.id != null ? YM_GENDER_LABELS[r.id] : undefined) ?? r.name ?? 'не определён',
-              value: r.visits,
-              note: breakdownNote(r.users, r.bounce_rate),
-            }))}
-            tailWord="визитов"
-            unitTotal={gender.data.visits_total}
-            footnote={demographicsFootnote(gender.data)}
-          />
-        )}
-      </ChartWidget>
-
-      {/* Цели: reaches за окно + конверсия отдельной метрикой (CR не выводится из reaches). */}
-      <ChartWidget id="ym-goals" title="Цели" fixedSize="half" drillTo="/metrics/ym-goals">
-        {goals.isPending ? (
-          <TableSkeleton rows={4} columns={2} className="py-2" />
-        ) : goals.isError ? (
-          <ErrorState
-            compact
-            size="table"
-            className="py-4"
-            title="Не удалось получить цели"
-            reason={goals.error instanceof Error ? goals.error.message : 'ошибка'}
-            onRetry={() => goals.refetch()}
-            retrying={goals.isFetching}
-          />
-        ) : goals.data.rows.length === 0 ? (
-          <EmptyState
-            compact
-            size="table"
-            title="На счётчике нет целей."
-            reason="Настройте цели в Яндекс.Метрике — конверсии появятся здесь."
-          />
-        ) : (
-          <YmBreakdownRows
-            rows={goals.data.rows.map((g) => ({
-              key: g.id,
-              label: g.name ?? `Цель ${g.id}`,
-              value: g.reaches,
-              // Конверсия — не знаковая дельта (fmt.pct) и не целое (fmt.num): доли процента
-              // значимы, локаль ru даёт запятую.
-              note: `CR ${g.conversion_rate.toLocaleString('ru-RU', { maximumFractionDigits: 2 })}%`,
-            }))}
-            tailWord="достижений"
-            footnote={goals.data.truncated ? 'Показаны первые 20 целей счётчика.' : null}
-          />
-        )}
-      </ChartWidget>
-
-      {/* UTM: только размеченные визиты в строках; неразмеченные — честной сноской, не строкой. */}
-      <ChartWidget
-        id="ym-utm"
-        title="UTM-метки"
-        fixedSize="half"
-        drillTo="/metrics/ym-utm"
-        action={goalSelect('Цель для UTM-меток')}
-      >
-        {utm.isPending ? (
-          <TableSkeleton rows={4} columns={2} className="py-2" />
-        ) : utm.isError ? (
-          <ErrorState
-            compact
-            size="table"
-            className="py-4"
-            title="Не удалось получить UTM-разметку"
-            reason={utm.error instanceof Error ? utm.error.message : 'ошибка'}
-            onRetry={() => utm.refetch()}
-            retrying={utm.isFetching}
-          />
-        ) : utm.data.rows.length === 0 ? (
-          <EmptyState
-            compact
-            size="table"
-            title="UTM-меток за период нет."
-            reason="Размечайте ссылки в постах utm_source — источники появятся здесь."
-          />
-        ) : (
-          <YmBreakdownRows
-            rows={utm.data.rows.map((r) => ({
-              key: r.id ?? r.name ?? 'unknown',
-              label: r.name ?? r.id ?? 'utm',
-              value: r.visits,
-              note: joinNote(`${fmt.num(r.users)} чел.`, goalNote(utm.data.goal_id, r.goal_reaches, r.goal_conversion)),
-            }))}
-            tailWord="визитов"
-            unitTotal={utm.data.tagged_visits}
-            footnote={
-              utm.data.untagged_visits > 0
-                ? `Без метки — ${fmt.num(utm.data.untagged_visits)} визитов из ${fmt.num(utm.data.visits_total)}.`
-                : null
-            }
-          />
-        )}
-      </ChartWidget>
-
-      {/* Топ-страницы: hits-отчёт (просмотры страниц ≠ визиты — другая единица, чем сверху). */}
-      <ChartWidget id="ym-pages" title="Топ-страницы" fixedSize="half" drillTo="/metrics/ym-pages">
-        {pages.isPending ? (
-          <TableSkeleton rows={4} columns={2} className="py-2" />
-        ) : pages.isError ? (
-          <ErrorState
-            compact
-            size="table"
-            className="py-4"
-            title="Не удалось получить страницы"
-            reason={pages.error instanceof Error ? pages.error.message : 'ошибка'}
-            onRetry={() => pages.refetch()}
-            retrying={pages.isFetching}
-          />
-        ) : pages.data.rows.length === 0 ? (
-          <EmptyState compact size="table" title="Нет просмотров за период." />
-        ) : (
-          <YmBreakdownRows
-            rows={pages.data.rows.map((r) => ({
-              key: r.path,
-              label: r.path,
-              value: r.pageviews,
-              note: `${fmt.num(r.users)} чел.`,
-            }))}
-            tailWord="просмотров"
-            unitTotal={pages.data.pageviews_total}
-          />
-        )}
-      </ChartWidget>
-
-      {/* Страницы входа (startURLPath): визиты + отказы, опц. конверсия выбранной цели. */}
-      <ChartWidget
-        id="ym-landings"
-        title="Страницы входа"
-        fixedSize="half"
-        drillTo="/metrics/ym-landings"
-        action={goalSelect('Цель для страниц входа')}
-      >
-        {landings.isPending ? (
-          <TableSkeleton rows={4} columns={2} className="py-2" />
-        ) : landings.isError ? (
-          <ErrorState
-            compact
-            size="table"
-            className="py-4"
-            title="Не удалось получить страницы входа"
-            reason={landings.error instanceof Error ? landings.error.message : 'ошибка'}
-            onRetry={() => landings.refetch()}
-            retrying={landings.isFetching}
-          />
-        ) : landings.data.rows.length === 0 ? (
-          <EmptyState compact size="table" title="Нет визитов по страницам входа за период." />
-        ) : (
-          <YmBreakdownRows
-            rows={landings.data.rows.map((r) => ({
-              key: r.path,
-              label: r.path,
-              value: r.visits,
-              // Отказы всегда; конверсия/достижения цели — только когда цель выбрана и метрика пришла.
-              note: joinNote(
-                r.bounce_rate != null
-                  ? `${r.bounce_rate.toLocaleString('ru-RU', { maximumFractionDigits: 1 })}% отказов`
-                  : null,
-                goalNote(landings.data.goal_id, r.goal_reaches, r.goal_conversion),
-              ),
-            }))}
-            tailWord="визитов"
-            unitTotal={landings.data.visits_total}
-          />
-        )}
-      </ChartWidget>
-
-      {/* Страницы выхода (endURLPath): зеркало входов — где визиты заканчиваются, + отказы по строке. */}
-      <ChartWidget id="ym-exits" title="Страницы выхода" fixedSize="half" drillTo="/metrics/ym-exits">
-        {exits.isPending ? (
-          <TableSkeleton rows={4} columns={2} className="py-2" />
-        ) : exits.isError ? (
-          <ErrorState
-            compact
-            size="table"
-            className="py-4"
-            title="Не удалось получить страницы выхода"
-            reason={exits.error instanceof Error ? exits.error.message : 'ошибка'}
-            onRetry={() => exits.refetch()}
-            retrying={exits.isFetching}
-          />
-        ) : exits.data.rows.length === 0 ? (
-          <EmptyState compact size="table" title="Нет визитов по страницам выхода за период." />
-        ) : (
-          <YmBreakdownRows
-            rows={exits.data.rows.map((r) => ({
-              key: r.path,
-              label: r.path,
-              value: r.visits,
-              note: breakdownNote(r.users, r.bounce_rate),
-            }))}
-            tailWord="визитов"
-            unitTotal={exits.data.visits_total}
-          />
-        )}
-      </ChartWidget>
-    </div>
+      {/* 14 разрезов из общей таблицы: карточка = заголовок + (опц.) селектор цели + тело разреза.
+          deferData откладывает запрос карточки, пока она не подойдёт к вьюпорту. */}
+      {YM_BREAKDOWNS.map((def) => (
+        <ChartWidget
+          key={def.key}
+          id={def.key}
+          title={def.title}
+          fixedSize="half"
+          drillTo={`/metrics/${def.key}`}
+          deferData
+          action={def.goalAria ? goalSelect(def.goalAria) : undefined}
+        >
+          <def.Body period={period} goalId={selectedGoalId} surface="board" />
+        </ChartWidget>
+      ))}
+    </WidgetGrid>
   );
 }
 
 /** Трафик по часам суток: доступная heatmap-сетка из 24 клеток (визиты по часу 0..23) + пик.
-    Насыщенность каждой клетки нормирована на максимум текущего окна; title/aria-label сохраняют
-    точные визиты и посетителей. Пустое окно — EmptyState, а не декоративная сетка нулей. */
+    Насыщенность каждой клетки нормирована на максимум текущего окна; aria-label сохраняет точные
+    визиты и посетителей, hover дублирует их канонным ChartTooltip (нативный HTML title убран —
+    нестилизуемый острый прямоугольник, вне канона скруглённых читалок). Пустое окно — EmptyState,
+    а не декоративная сетка нулей. */
 function YmHourlyCard({
   hourly,
   windowLabel,
@@ -777,6 +317,7 @@ function YmHourlyCard({
 }) {
   const padHour = (h: number): string => String(h).padStart(2, '0');
   const maxVisits = Math.max(0, ...(hourly.data?.rows ?? []).map((row) => row.visits));
+  const { wrapRef, tip } = useHeatmapTip();
   return (
     <ChartWidget id="ym-hourly" title="Трафик по часам" fixedSize="half" drillTo="/metrics/ym-hourly">
       {hourly.isPending ? (
@@ -796,7 +337,7 @@ function YmHourlyCard({
       ) : (
         <ChartCardBody
           label="Визиты"
-          value={fmt.short(hourly.data.visits_total)}
+          value={formatByRole(hourly.data.visits_total, 'headline')}
           caption={
             <span className="space-y-0.5">
               <span className="block">
@@ -808,21 +349,28 @@ function YmHourlyCard({
             </span>
           }
         >
+          <div ref={wrapRef} className="relative h-full">
           <div className="grid h-full grid-cols-12 content-center gap-x-1 gap-y-2">
             {hourly.data.rows.map((row) => {
-              const opacity = maxVisits > 0 ? Math.max(0.1, row.visits / maxVisits) : 0.08;
+              // Ноль — реальное отсутствие (канон п.8): час без визитов рисуется нейтральным
+              // треком, а не самой бледной СТУПЕНЬЮ брендовой шкалы — иначе «0» неотличим от «мало».
+              const zero = row.visits === 0;
+              const opacity = zero ? 1 : maxVisits > 0 ? Math.max(0.1, row.visits / maxVisits) : 0.08;
               const title = `${padHour(row.hour)}:00 — ${fmt.num(row.visits)} визитов, ${fmt.num(row.users)} посетителей`;
               return (
                 <div
                   key={row.hour}
                   role="img"
                   aria-label={title}
-                  title={title}
-                  className="min-w-0 text-center"
+                  data-heatmap-tip={title}
+                  className="min-w-0 cursor-crosshair text-center"
                 >
                   <div
-                    className="h-8 rounded-sm"
-                    style={{ backgroundColor: 'hsl(var(--brand-iris))', opacity }}
+                    className="h-8 rounded-sm transition-opacity dur-base ease-house"
+                    style={{
+                      backgroundColor: zero ? 'hsl(var(--border) / 0.3)' : 'hsl(var(--brand-iris))',
+                      opacity,
+                    }}
                   />
                   <span className="mt-1 block text-2xs tabular-nums text-muted-foreground">
                     {row.hour % 3 === 0 ? row.hour : '\u00a0'}
@@ -830,6 +378,8 @@ function YmHourlyCard({
                 </div>
               );
             })}
+          </div>
+          <ChartTooltip tip={tip} />
           </div>
         </ChartCardBody>
       )}
@@ -839,9 +389,9 @@ function YmHourlyCard({
 
 /** Форматтеры качества: nullable-aware, русская локаль. «—» — «нет данных», не «0». */
 const fmtQualityPct = (v: number | null | undefined): string =>
-  v == null ? '—' : `${v.toLocaleString('ru-RU', { maximumFractionDigits: 1 })}%`;
+  v == null ? '—' : fmt.pctFixed(v, 1);
 const fmtQualityNum = (v: number | null | undefined, digits = 2): string =>
-  v == null ? '—' : v.toLocaleString('ru-RU', { maximumFractionDigits: digits });
+  v == null ? '—' : fmt.numFixed(v, digits);
 /** Секунды → «м:сс» (или «с» под минутой). null → «—». */
 const fmtDuration = (v: number | null | undefined): string => {
   if (v == null) return '—';
@@ -871,6 +421,8 @@ interface YmQualityTile {
   value: string;
   /** Ключ дневной серии качества для тренд-спарклайна (тренд — по РЕАЛЬНЫМ точкам, null пропущены). */
   seriesKey: YmQualitySeriesKey;
+  /** Дельта к предыдущему окну — только у аддитивных потоков (новые, роботы-счётчик). */
+  delta?: MetricDelta | null;
 }
 
 /** Доля роботов + их число: «12,3% · 45». Оба null → «—»; показываем, а не исключаем молча. */
@@ -888,6 +440,7 @@ const fmtRobots = (pct: number | null | undefined, count: number | null | undefi
 function YmQualityStrip({
   quality,
   qualitySeries,
+  prevQuality,
   meta,
   windowLabel,
 }: {
@@ -901,6 +454,11 @@ function YmQualityStrip({
     robot_percentage?: number | null;
   } | null;
   qualitySeries: YmQualitySeries | null;
+  /** Качество ПРЕДЫДУЩЕГО равного окна (null при «Всё»/отсутствии) — дельты аддитивных тайлов. */
+  prevQuality: {
+    new_users: number | null;
+    robot_visits?: number | null;
+  } | null;
   meta: {
     exact_period_totals: boolean;
     all_time?: boolean;
@@ -911,16 +469,38 @@ function YmQualityStrip({
   } | null;
   windowLabel: string;
 }) {
+  // Дельты — только у АДДИТИВНЫХ потоков («Новые» и счётчик «Роботы»): доли/длительности/глубина
+  // сравниваются не процентом, а п.п./секундами — вне минимальной грамматики тайла.
   const tiles: YmQualityTile[] = [
     { key: 'bounce', label: 'Отказы', value: fmtQualityPct(quality?.bounce_rate), seriesKey: 'bounce_rate' },
     { key: 'dur', label: 'Средний визит', value: fmtDuration(quality?.avg_visit_duration_seconds), seriesKey: 'avg_visit_duration_seconds' },
     { key: 'depth', label: 'Глубина', value: fmtQualityNum(quality?.page_depth), seriesKey: 'page_depth' },
-    { key: 'new', label: 'Новые', value: fmt.short(quality?.new_users ?? null), seriesKey: 'new_users' },
+    {
+      key: 'new',
+      label: 'Новые',
+      value: fmt.short(quality?.new_users ?? null),
+      seriesKey: 'new_users',
+      delta:
+        quality?.new_users != null && prevQuality?.new_users != null && prevQuality.new_users > 0
+          ? pctDelta(quality.new_users, prevQuality.new_users)
+          : null,
+    },
     { key: 'pctnew', label: 'Доля новых', value: fmtQualityPct(quality?.percent_new_visitors), seriesKey: 'percent_new_visitors' },
-    { key: 'robots', label: 'Роботы', value: fmtRobots(quality?.robot_percentage, quality?.robot_visits), seriesKey: 'robot_percentage' },
+    {
+      key: 'robots',
+      label: 'Роботы',
+      value: fmtRobots(quality?.robot_percentage, quality?.robot_visits),
+      seriesKey: 'robot_percentage',
+      delta:
+        quality?.robot_visits != null && prevQuality?.robot_visits != null && prevQuality.robot_visits > 0
+          ? pctDelta(quality.robot_visits, prevQuality.robot_visits)
+          : null,
+    },
   ];
-  // Тренд-спарклайн: только РЕАЛЬНЫЕ дневные точки метрики (null = «нет данных» пропускаем), и
-  // только когда их ≥2 — иначе InlineSpark сам ничего не рисует, но экономим и пустой контейнер.
+  // Тренд-спарклайн: только РЕАЛЬНЫЕ дневные точки метрики. null-дни пропускаются ОСОЗНАННО — это
+  // ряд НАБЛЮДЕНИЙ (конвенция «Среднего чека» МС: день без данных = неопределённое наблюдение, не
+  // ноль и не разрыв замера), спарк декоративен (aria-hidden), значение уже дано числом. Рисуем
+  // только при ≥2 точках — иначе InlineSpark сам ничего не рисует, но экономим и пустой контейнер.
   const trendValues = (key: YmQualitySeriesKey): number[] => {
     const points = qualitySeries?.[key];
     if (!Array.isArray(points)) return [];
@@ -961,10 +541,19 @@ function YmQualityStrip({
           return (
             <div key={t.key} className="min-w-0">
               <div className="text-2xs tracking-wide text-muted-foreground">{t.label}</div>
-              <div className="mt-0.5 text-lg font-medium tabular-nums tracking-tight text-foreground">{t.value}</div>
+              <div className="mt-0.5 flex items-baseline gap-2">
+                {/* Рецепт крупного числа живёт в KpiValue — набирать его классами на месте значит
+                  завести пятую копию, которая разойдётся (аудит #554). */}
+                <KpiValue text={t.value} size="xs" morph={false} />
+                {/* DeltaPill сам скрывается при flat/null — отдельных веток не нужно. */}
+                <DeltaPill delta={t.delta} />
+              </div>
+              {/* 20px вместо 16: на 16 при домене от нуля искра «Качества трафика» вырождалась в
+                  зигзаг без формы (аудит #554, D17). Домен теперь по данным, а высота даёт размаху
+                  место. */}
               {trend.length >= 2 && (
-                <div className="mt-1 h-4">
-                  <InlineSpark values={trend} width={72} height={16} />
+                <div className="mt-1 h-5">
+                  <InlineSpark values={trend} width={72} height={20} />
                 </div>
               )}
             </div>
@@ -976,62 +565,6 @@ function YmQualityStrip({
         Роботы «по поведению» учтены в визитах и качестве, а не исключены автоматически.
       </p>
       {notes.length > 0 && <p className="mt-1 text-2xs text-muted-foreground">{notes.join(' · ')}</p>}
-    </div>
-  );
-}
-
-/** Общие строки breakdown-карточек Метрики (источники/цели/UTM/страницы): компактный топ-4 по
-    value + сводный хвост «Ещё N <word> [из M]»; разворот карточки показывает ВСЕ строки отчёта.
-    Бары — тихий одноцветный канон (цвет серии, не оценка), как статусы заказов у МС. */
-export function YmBreakdownRows({
-  rows,
-  tailWord,
-  unitTotal = null,
-  footnote = null,
-}: {
-  rows: Array<{ key: string; label: string; value: number; note: string | null }>;
-  /** Слово хвоста в родительном падеже множественного («визитов», «достижений», «просмотров»). */
-  tailWord: string;
-  /** Итог ПОЛНОГО отчёта для «Ещё N … из M.»; null — хвост без «из M». */
-  unitTotal?: number | null;
-  /** Приглушённая сноска под списком (усечение целей, визиты без метки). */
-  footnote?: string | null;
-}) {
-  const expanded = useContext(ChartExpandedContext);
-  // Сервер уже сортирует по убыванию; пересортировка здесь — страховка стабильности вида.
-  const ranked = [...rows].sort((a, b) => b.value - a.value || a.key.localeCompare(b.key));
-  const top = expanded ? ranked : ranked.slice(0, 4);
-  const tail = expanded ? [] : ranked.slice(4);
-  const restValue = tail.reduce((acc, row) => acc + row.value, 0);
-  const max = Math.max(1, ...top.map((row) => Math.max(0, row.value)));
-  return (
-    <div className={expanded ? 'space-y-2 pt-1' : 'space-y-1.5'}>
-      {top.map((r) => (
-        <div key={r.key}>
-          <div className="flex items-baseline justify-between gap-3 text-xs">
-            <span className="min-w-0 truncate text-foreground">{r.label}</span>
-            <span className="shrink-0 tabular-nums text-muted-foreground">
-              <span className="font-medium text-foreground">{fmt.num(r.value)}</span>
-              {r.note != null && <>{' · '}{r.note}</>}
-            </span>
-          </div>
-          <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted">
-            <div
-              className="h-full rounded-full"
-              style={{
-                width: `${Math.max(4, Math.round((Math.max(0, r.value) / max) * 100))}%`,
-                backgroundColor: 'hsl(var(--chart-role-primary) / 0.75)',
-              }}
-            />
-          </div>
-        </div>
-      ))}
-      {restValue > 0 && (
-        <p className="text-2xs text-muted-foreground">
-          Ещё {fmt.num(restValue)} {tailWord}{unitTotal != null ? ` из ${fmt.num(unitTotal)}` : ''}.
-        </p>
-      )}
-      {footnote != null && <p className="text-2xs text-muted-foreground">{footnote}</p>}
     </div>
   );
 }

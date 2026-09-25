@@ -10,16 +10,22 @@ export default defineConfig({
   base: '/',
   // Tailwind v4 через first-party Vite-плагин (быстрее PostCSS-пути; postcss.config.js удалён).
   plugins: [react(), tailwindcss()],
+  // Лениво-импортируемая зависимость (components/KpiNumber): без пре-бандла dev-сервер открывает
+  // её посреди сессии («new dependency discovered» → reload), и e2e ловит зависший Suspense-фолбэк.
+  optimizeDeps: { include: ['@number-flow/react'] },
   resolve: {
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
   },
   build: {
+    // Machine-readable chunk graph for route-level bundle budgets. It is emitted under
+    // dist/.vite/manifest.json and never requested by browsers.
+    manifest: true,
     rollupOptions: {
       output: {
         // Stable vendor chunk (framework + data layer) separate from app code: it changes
         // only on dependency bumps, so returning users keep it cached across app deploys.
-        // framer-motion is deliberately NOT listed — only the lazy-loaded Landing imports
-        // it, so Rollup places it in the Landing async chunk (never in the entry).
+        // The public landing uses native CSS/Web APIs for motion; no animation runtime belongs in
+        // this framework/data vendor boundary.
         manualChunks(id: string) {
           if (!id.includes('node_modules')) return undefined;
           if (
@@ -29,18 +35,17 @@ export default defineConfig({
           ) {
             return 'vendor';
           }
+          // react-virtual — нишевая виртуализация длинных таблиц (сегодня только МС-маршрут):
+          // в shell-vendor не тащим, пусть живёт в lazy-чанках потребителей.
+          if (/[\\/]node_modules[\\/]@tanstack[\\/](react-virtual|virtual-core)[\\/]/.test(id)) return undefined;
           if (/[\\/]node_modules[\\/]@tanstack[\\/]/.test(id)) return 'vendor';
-          if (/[\\/]node_modules[\\/]zod[\\/]/.test(id)) return 'vendor';
-          // shadcn primitives are copied into the app, while their accessible interaction runtime
-          // comes from Radix. Keep that stable runtime out of the frequently-changing app entry;
-          // menus, dialogs, selects and tooltips can share one long-lived browser cache.
-          if (
-            /[\\/]node_modules[\\/](@radix-ui|@floating-ui|lucide-react|class-variance-authority|react-remove-scroll|react-remove-scroll-bar|react-style-singleton|use-callback-ref|use-sidecar)[\\/]/.test(
-              id,
-            )
-          ) {
-            return 'ui-vendor';
-          }
+          // Validation belongs to API route chunks; public boot/auth probing uses a tiny shape
+          // guard and must not preload all of Zod before it knows which route graph is needed.
+          if (/[\\/]node_modules[\\/]zod[\\/]/.test(id)) return 'schema-vendor';
+          // Do not force every Radix primitive into one manual chunk. That aggregate developed a
+          // React/runtime edge and became an eager ~44 KB gzip preload even on public pages that
+          // render no dialog/menu at all. Rollup now extracts only UI code genuinely shared by the
+          // lazy route that needs it; framework/data caching remains stable in `vendor`.
           return undefined;
         },
       },

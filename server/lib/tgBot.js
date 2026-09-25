@@ -5,11 +5,18 @@
    TG_BOT_TOKEN, что и статистика канала в routes/tg.js (getChat/getChatMemberCount) — бот один.
    Никакой очереди: объёмы — единицы сообщений в день на пользователя; отправка последовательная
    в джобе. 403 (пользователь заблокировал бота / чат удалён) — НЕ ошибка транспорта, а сигнал
-   отвязки: возвращаем { blocked: true }, отвязку решает вызывающий.
+   отвязки: возвращаем { blocked: true }, отвязку решает вызывающий. 429 (флуд-контроль,
+   parameters.retry_after) — тоже НЕ перманентная ошибка: { throttled: true, retryAfterSec }, и
+   вызывающий сам решает, что делать с остатком пачки. Токен бота один на весь продукт, поэтому
+   отличать «притормози» от «сломано» обязательно: на глухом throw джоб ронял весь прогон и
+   следующий свип переотправлял уже доставленные карточки.
 
    Токен НИКОГДА не логируется; в сообщениях об ошибках только method + код Телеграма. */
 
 const DEFAULT_TIMEOUT_MS = 12000;
+// Потолок доверия к retry_after апстрима: дольше часа ждать всё равно нечего (день-ключ джоба
+// закроет прогон раньше), а мусорное/огромное значение не должно утекать в Retry-After клиенту.
+const MAX_RETRY_AFTER_SEC = 3600;
 
 function createTgBot({ token = '', fetchImpl, log = () => {} } = {}) {
   const BASE = 'https://api.telegram.org/bot';
@@ -17,6 +24,15 @@ function createTgBot({ token = '', fetchImpl, log = () => {} } = {}) {
   let webhookEnsured = false;   // идемпотентный setWebhook: один раз на процесс достаточно
 
   const configured = () => !!token;
+
+  // parameters.retry_after Телеграма (секунды) → положительное целое в разумных границах либо null
+  // («429 без срока» — тоже троттлинг, просто без подсказки, сколько ждать).
+  function retryAfterSecOf(json) {
+    const raw = json && json.parameters ? json.parameters.retry_after : null;
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n <= 0) return null;
+    return Math.min(MAX_RETRY_AFTER_SEC, Math.ceil(n));
+  }
 
   async function call(method, params = {}, timeoutMs = DEFAULT_TIMEOUT_MS) {
     if (!token) {
@@ -31,9 +47,14 @@ function createTgBot({ token = '', fetchImpl, log = () => {} } = {}) {
     }, timeoutMs);
     const json = await res.json().catch(() => ({}));
     if (!json.ok) {
-      const e = new Error(`Bot API ${method}: ${json.error_code || res.status}`);
-      e.code = 'bot_api_error';
-      e.errorCode = json.error_code || res.status;
+      const errorCode = json.error_code || res.status;
+      const e = new Error(`Bot API ${method}: ${errorCode}`);
+      // 429 маркируем отдельным кодом и несём срок ожидания: sendMessage превращает его в
+      // структурный { throttled }, а getUsername/ensureWebhook (их вызывающие и так отвечают 503)
+      // видят обычную ошибку — семантика тех потоков не меняется.
+      e.code = errorCode === 429 ? 'bot_throttled' : 'bot_api_error';
+      e.errorCode = errorCode;
+      if (errorCode === 429) e.retryAfterSec = retryAfterSecOf(json);
       throw e;
     }
     return json.result;
@@ -63,7 +84,9 @@ function createTgBot({ token = '', fetchImpl, log = () => {} } = {}) {
   }
 
   // Личное сообщение. HTML-разметка (вызывающий обязан экранировать через tgNotifyText.escapeHtml),
-  // превью выключено — карточки компактные. 403 → { ok:false, blocked:true } (сигнал отвязки).
+  // превью выключено — карточки компактные. Два НЕ-исключительных исхода, которые вызывающий обязан
+  // различать: 403 → { ok:false, blocked:true } (сигнал отвязки), 429 → { ok:false, throttled:true,
+  // retryAfterSec } (притормозить, но НЕ считать доставленное недоставленным). Остальное — throw.
   async function sendMessage(chatId, text) {
     try {
       await call('sendMessage', {
@@ -75,6 +98,9 @@ function createTgBot({ token = '', fetchImpl, log = () => {} } = {}) {
       return { ok: true };
     } catch (e) {
       if (e && e.errorCode === 403) return { ok: false, blocked: true };
+      if (e && e.code === 'bot_throttled') {
+        return { ok: false, throttled: true, retryAfterSec: e.retryAfterSec || null };
+      }
       throw e;
     }
   }

@@ -23,6 +23,30 @@
     // `color-scheme` до загрузки CSS: нативный фон документа, скроллбары и контролы сразу тёмные.
     // Дальше значение ведёт ThemeProvider (инлайновый стиль перебивает :root/.dark из index.css).
     html.style.colorScheme = dark ? 'dark' : 'light';
+
+    // ПОЛЬЗОВАТЕЛЬСКАЯ ТЕМА («Оформление»). Здесь ничего не считается: студия кладёт в
+    // localStorage готовый CSS со штампом генератора в первой строке, бутстрап только вставляет
+    // его. Ключ, штамп и id зеркалят src/lib/appearanceStorage.ts — меняешь там, меняй здесь;
+    // расхождение штампов лишь откладывает применение до монтирования оболочки. Файл едет в
+    // браузер БЕЗ минификации (public/), поэтому комментарий здесь короткий.
+    var cached = null;
+    try {
+      cached = localStorage.getItem('pulse_appearance_css');
+    } catch (e2) {
+      /* localStorage may be unavailable */
+    }
+    var split = cached ? cached.indexOf('\n') : -1;
+    if (split > 0 && cached.slice(0, split) === '1') {
+      var css = cached.slice(split + 1);
+      // Кэш свой, но проверка дешевле доверия: длина, отсутствие внешних загрузок и разметки.
+      // textContent не парсит HTML, так что вставка не может вырваться из <style>.
+      if (css.length < 20000 && !/[<>]|@import|url\(|expression\(/i.test(css)) {
+        var style = document.createElement('style');
+        style.id = 'pulse-appearance';
+        style.textContent = css;
+        document.head.appendChild(style);
+      }
+    }
   } catch (e) {
     /* тема — не повод ронять загрузку приложения */
   }

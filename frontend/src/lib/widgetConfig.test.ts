@@ -89,7 +89,7 @@ describe('legacy widgets (U6) — `legacy:<key>` configs', () => {
   });
 
   it('keeps supported legacy chart presentations and falls back to the legacy default', () => {
-    expect(normalizeWidget({ metricId: 'legacy:history', viz: 'bar' })!.viz).toBe('bar');
+    expect(normalizeWidget({ metricId: 'legacy:history', viz: 'bar' })!.viz).toBe('line');
     expect(normalizeWidget({ metricId: 'legacy:history', viz: 'donut' })!.viz).toBe('line');
     expect(normalizeWidget({ metricId: 'legacy:mentions', viz: 'line' })!.viz).toBe('line');
     expect(normalizeWidget({ metricId: 'legacy:mentions', viz: 'kpi' })!.viz).toBe('bar');
@@ -153,9 +153,9 @@ describe('legacy widgets (U6) — `legacy:<key>` configs', () => {
     expect(legacyConfigSeed('kpi', { tinted: false })).toEqual({ style: { tinted: false } });
   });
 
-  it('legacyConfigSeed migrates the old line/bar preference into config viz', () => {
-    expect(legacyConfigSeed('history', { variant: 'bar' })).toEqual({ viz: 'bar' });
-    expect(legacyConfigSeed('history', { variant: 'bar-values' })).toEqual({ viz: 'bar' });
+  it('legacyConfigSeed drops retired history bars while preserving supported chart preferences', () => {
+    expect(legacyConfigSeed('history', { variant: 'bar' })).toEqual({});
+    expect(legacyConfigSeed('history', { variant: 'bar-values' })).toEqual({});
     expect(legacyConfigSeed('mentions', { variant: 'line' })).toEqual({ viz: 'line' });
     expect(legacyConfigSeed('heatmap', { variant: 'line' })).toEqual({});
   });
@@ -169,8 +169,8 @@ describe('legacy widgets (U6) — `legacy:<key>` configs', () => {
     expect(w.source).toBe(4);
     expect(w.style).toEqual({ color: 3 });
     expect(w.size).toBe('full'); // legacy default kept when prefs carry no size
-    expect(healedLegacyConfig('history', { variant: 'bar' })!.viz).toBe('bar');
-    expect(healedLegacyConfig('history', { variant: 'bar-values' })!.viz).toBe('bar');
+    expect(healedLegacyConfig('history', { variant: 'bar' })!.viz).toBe('line');
+    expect(healedLegacyConfig('history', { variant: 'bar-values' })!.viz).toBe('line');
     // No prefs → the plain deterministic config (equivalent to legacyHomeConfig).
     expect(healedLegacyConfig('history', {})).toEqual(legacyHomeConfig('history'));
     // A garbage prefs period can't produce an invalid config (normalizeWidget drops it).

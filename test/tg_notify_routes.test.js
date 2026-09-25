@@ -18,9 +18,24 @@ function createRoutes(overrides = {}) {
     delete(path, ...handlers) { routes.set(`DELETE ${path}`, handlers); },
   };
   const calls = { audit: [], logs: [], sent: [], unbound: [], links: [], subs: [], testRuns: [] };
+  // Durable-кулдаун ручного прогона живёт в таблице jobs — стаб повторяет контракт runJobOnce:
+  // succeeded-ключ больше не клеймится (skipped), failed переклеймливается (свободный ретрай).
+  const jobs = overrides.jobs || new Map();
   const db = {
     enabled: true,
     isDbUnavailable: () => false,
+    runJobOnce: async (kind, key, fn) => {
+      const id = `${kind}:${key}`;
+      if (jobs.get(id) === 'succeeded') return { skipped: true, job: { status: 'succeeded' } };
+      try {
+        const result = await fn();
+        jobs.set(id, 'succeeded');
+        return { skipped: false, result };
+      } catch (e) {
+        jobs.set(id, 'failed');
+        throw e;
+      }
+    },
     issueMentionNotifyLink: async (uid, tokenHash, ttl) => { calls.links.push({ uid, tokenHash, ttl }); return true; },
     bindMentionNotifyByToken: async (tokenHash) => (tokenHash === sha256('validtoken123') ? 42 : null),
     getMentionNotifyBinding: async () => ({ uid: 11, chat_id: 555, username: 'user', bound_at: '2026-07-22T10:00:00+00:00' }),
@@ -64,14 +79,15 @@ function createRoutes(overrides = {}) {
     runMentionNotifyTest: overrides.runMentionNotifyTest
       || (async (channelId, uid) => { calls.testRuns.push({ channelId, uid }); return { ok: true, seed: false, found: 2, fresh: 1, sent: 1 }; }),
   });
-  return { routes, db, calls };
+  return { routes, db, calls, jobs };
 }
 
 async function invoke(handlers, req = {}) {
   const res = {
     statusCode: 200,
+    headers: {},
     status(code) { this.statusCode = code; return this; },
-    set() { return this; },
+    set(k, v) { this.headers[k] = v; return this; },
     json(body) { this.body = body; return this; },
   };
   let nextError = null;
@@ -239,6 +255,68 @@ test('POST run maps the job outcome: 200 with counters, 409 for a not-ready subs
   const broken = createRoutes({ runMentionNotifyTest: async () => ({ ok: false, reason: 'search_failed' }) });
   const res503 = await invoke(broken.routes.get('POST /api/tg/mention-notify/run'));
   assert.equal(res503.statusCode, 503);
+});
+
+// ── Ручной прогон: роль + durable-кулдаун ─────────────────────────────────────────────────────────
+
+test('POST run is owner/admin only — a viewer cannot burn the quota or write the shared archive', async () => {
+  const { routes, calls } = createRoutes();
+  const res = await invoke(routes.get('POST /api/tg/mention-notify/run'), {
+    channel: { id: 7, owner_uid: 99, member_role: 'viewer' },
+  });
+  assert.equal(res.statusCode, 403);
+  assert.match(res.body.error, /Недостаточно прав/);
+  assert.equal(calls.testRuns.length, 0, 'до джоба (и до квоты searchPosts) дело не дошло');
+});
+
+test('POST run: a second call inside the window is a 429 with Retry-After, not a second quota spend', async () => {
+  const { routes, calls } = createRoutes();
+  const first = await invoke(routes.get('POST /api/tg/mention-notify/run'));
+  assert.equal(first.statusCode, 200);
+
+  const second = await invoke(routes.get('POST /api/tg/mention-notify/run'));
+  assert.equal(second.statusCode, 429);
+  assert.equal(second.body.reason, 'cooldown');
+  assert.match(second.body.error, /Слишком часто/);
+  const retryAfter = Number(second.headers['Retry-After']);
+  assert.ok(Number.isInteger(retryAfter) && retryAfter > 0 && retryAfter <= 600, `Retry-After: ${retryAfter}`);
+  assert.equal(calls.testRuns.length, 1, 'второй клик не дошёл до поиска');
+});
+
+test('POST run: owner outside the window runs again (the cooldown key is per window, not forever)', async () => {
+  const { routes, calls, jobs } = createRoutes();
+  await invoke(routes.get('POST /api/tg/mention-notify/run'));
+  jobs.clear();                                     // окно сменилось — прежний ключ больше не занят
+  const again = await invoke(routes.get('POST /api/tg/mention-notify/run'));
+  assert.equal(again.statusCode, 200);
+  assert.equal(calls.testRuns.length, 2);
+});
+
+test('POST run: a refusal before any quota spend does not eat the cooldown window', async () => {
+  let runs = 0;
+  const { routes } = createRoutes({
+    runMentionNotifyTest: async () => {
+      runs += 1;
+      return runs === 1 ? { ok: false, reason: 'not_runnable' } : { ok: true, seed: false, found: 0, fresh: 0, sent: 1 };
+    },
+  });
+  const refused = await invoke(routes.get('POST /api/tg/mention-notify/run'));
+  assert.equal(refused.statusCode, 409);
+  // Подписку починили и нажали снова в том же окне — 429 здесь был бы наказанием ни за что.
+  const ok = await invoke(routes.get('POST /api/tg/mention-notify/run'));
+  assert.equal(ok.statusCode, 200);
+  assert.equal(runs, 2);
+});
+
+test('POST run: bot throttling maps to a Russian 503 carrying Telegram’s own Retry-After', async () => {
+  const { routes } = createRoutes({
+    runMentionNotifyTest: async () => ({ ok: false, reason: 'send_throttled', sent: 3, retry_after_sec: 42 }),
+  });
+  const res = await invoke(routes.get('POST /api/tg/mention-notify/run'));
+  assert.equal(res.statusCode, 503);
+  assert.equal(res.body.reason, 'send_throttled');
+  assert.match(res.body.error, /подождать/);
+  assert.equal(res.headers['Retry-After'], '42');
 });
 
 test('PUT enable requires binding, rules and a live session (409 with reason)', async () => {

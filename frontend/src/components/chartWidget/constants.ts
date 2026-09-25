@@ -1,6 +1,19 @@
 import type { PeriodDays } from '@/lib/period';
 import type { WidgetSize } from '@/lib/widgetPrefsStore';
 
+/**
+ * Пилюли периода карточки. Живут ЗДЕСЬ, а не в EditWidgetDialog: строка пилюль на самой карточке
+ * читает тот же список, и статический импорт константы из модуля диалога держал весь редактор
+ * (вместе с ui/switch и ui/select) в чанке КАЖДОГО маршрута с графиками — при том что диалог
+ * открывается по действию и до первого клика не нужен вовсе.
+ */
+export const WIDGET_PERIODS: Array<{ days: PeriodDays; label: string }> = [
+  { days: 7, label: '7д' },
+  { days: 30, label: '30д' },
+  { days: 90, label: '90д' },
+  { days: 0, label: 'Всё' },
+];
+
 export const SIZE_COL_SPAN: Record<WidgetSize, string> = {
   third: 'lg:col-span-2',
   half: 'lg:col-span-3',
@@ -32,7 +45,7 @@ export const SIZE_DEFER_RENDER: Record<WidgetSize, string> = {
 export const REMOVE_EXIT_MS = 200;
 
 export const ICON_BUTTON_CLASS =
-  'widget-icon inline-flex h-8 w-8 sm:h-7 sm:w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted';
+  'widget-icon inline-flex h-11 w-11 sm:h-7 sm:w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted';
 
 export const MENU_ITEM_CLASS =
   'flex w-full items-center gap-2.5 rounded px-2.5 py-1.5 text-left text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40';

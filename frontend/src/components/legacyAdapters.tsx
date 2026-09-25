@@ -28,7 +28,7 @@ export const LEGACY_RENDER: Record<LegacyKey, (config: WidgetConfig) => ReactNod
   kpi: () => <KpiGrid />,
   growth: () => <SubscriberGrowth />,
   'top-posts': () => <TopPosts variant="cards" />,
-  history: (config) => <HistoryWidgetBody viz={config.viz} />,
+  history: () => <HistoryWidgetBody />,
   velocity: (config) => <VelocityWidgetBody viz={config.viz} />,
   heatmap: () => <HeatmapWidgetBody />,
   mentions: (config) => (

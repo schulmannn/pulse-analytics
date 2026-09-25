@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { bootDemo, overflowingCards } from './helpers';
+import { bootDemo, expandWidget, overflowingCards } from './helpers';
 
 test.beforeEach(async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop-1440', 'MoySklad analytics is desktop-first');
@@ -16,7 +16,7 @@ test('product card stays a compact ranking; expanded opens on concentration and 
   await expect(card.getByRole('button', { name: 'Концентрация' })).toHaveCount(0);
 
   // «Развернуть» ведёт на полностраничный отчёт /metrics/ms-products (не модалка), открытый на концентрации.
-  await page.getByRole('button', { name: 'Развернуть виджет «Товары»' }).click();
+  await expandWidget(page, 'Товары');
   await expect(page).toHaveURL(/\/metrics\/ms-products$/);
   await expect(page.getByRole('heading', { name: 'Товары', level: 1 })).toBeVisible();
   await expect(page.getByRole('dialog')).toHaveCount(0);

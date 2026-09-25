@@ -121,9 +121,27 @@ export function addWidgetForMetric(metricId: string): WidgetConfig | null {
   return w ? addWidgetConfig(w) : null;
 }
 
-/** Patch a widget by id (validated after merge). No-op if the id is unknown. */
+/** Patch a widget by id (validated after merge). No-op if the id is unknown.
+ *
+ *  ЧАСТИЧНЫЙ патч: ключи, которых в `patch` нет, сохраняются. Снять поле этим НЕЛЬЗЯ — для
+ *  «применить целиком, вместе со снятыми полями» есть {@link replaceWidgetConfig}. */
 export function updateWidgetConfig(id: string, patch: Partial<WidgetConfig>) {
   const next = getWidgetConfigs().map((c) => (c.id === id ? { ...c, ...patch, id: c.id } : c));
+  write(normalizeWidgets(next));
+}
+
+/**
+ * Заменить конфиг целиком (id сохраняется). Нужен там, где источник истины — ПОЛНЫЙ конфиг, а не
+ * дельта: полностраничный эксплорер отдаёт свой draft.
+ *
+ * Почему не `updateWidgetConfig`: тот мержит спредом, а `normalizeWidget` не кладёт в объект
+ * ключи со снятым значением (нет сравнения — нет `comparison`). Спред тогда сохранял СТАРОЕ
+ * значение, и снять с эксплорера сравнение, цель, фильтр, заголовок, акцент или источник было
+ * физически невозможно: превью показывало «выключено», «Применить к виджету» отрабатывало вхолостую,
+ * а кнопка навсегда оставалась активной, потому что config так и не догонял draft.
+ */
+export function replaceWidgetConfig(id: string, config: WidgetConfig) {
+  const next = getWidgetConfigs().map((c) => (c.id === id ? { ...config, id: c.id } : c));
   write(normalizeWidgets(next));
 }
 

@@ -13,8 +13,9 @@ import {
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { LineChart } from '@/components/LineChart';
-import { PieChart } from '@/components/PieChart';
+import { RadialShare } from '@/components/RadialShare';
 import { SegmentedControl } from '@/components/SegmentedControl';
+import { CAMPAIGNS_LIST } from '@/components/campaigns/routes';
 import {
   CampaignColorDot,
   CampaignStatusChip,
@@ -32,6 +33,7 @@ import {
   applyTimelineMode,
   resolveTimelineMode,
   sourceLeaderboard,
+  capTimelineMode,
   timelineModes,
   type TimelineMode,
 } from '@/lib/campaignPageModel';
@@ -41,21 +43,17 @@ import {
   parseCampaignSourceKey,
   type CampaignSourceScope,
 } from '@/lib/campaignSources';
+import { timeAxisFromDayKeys } from '@/lib/format';
 import { useExplorerChartHeight } from '@/lib/useExplorerChartHeight';
 import { CampaignSourceLeaderboard } from '@/panels/campaign/CampaignSourceLeaderboard';
 import {
   campaignBackPath,
   isCampaignMetricKey,
 } from '@/panels/campaign/campaignMetricKeys';
-import { AboutRow, MetricBackLink, MetricColumns, MetricDescriptor, WindowBarShell, RailSection } from '@/components/metric/shared';
+import { MetricColumns, MetricDescriptor, WindowBarShell, RailSection, MetricPageHeader} from '@/components/metric/shared';
 
 type ChartKind = 'line' | 'bar';
 
-interface AboutDef {
-  formula: string;
-  included: string;
-  source: string;
-}
 
 /**
  * Dedicated visual explorers for `/campaigns/:id`. They intentionally reuse the campaign summary
@@ -98,7 +96,7 @@ export function CampaignMetricPage() {
     return (
       <EmptyState
         title="График кампании не найден"
-        action={{ to: '/posts?view=campaigns', label: 'К списку кампаний' }}
+        action={{ to: CAMPAIGNS_LIST, label: 'К списку кампаний' }}
       />
     );
   }
@@ -134,7 +132,7 @@ export function CampaignMetricPage() {
     return (
       <EmptyState
         title="Кампания не найдена"
-        action={{ to: '/posts?view=campaigns', label: 'К списку кампаний' }}
+        action={{ to: CAMPAIGNS_LIST, label: 'К списку кампаний' }}
       />
     );
   }
@@ -178,7 +176,6 @@ function CampaignMetricShell({
   backTo,
   term,
   descriptor,
-  about,
   comparison,
   children,
 }: {
@@ -187,13 +184,12 @@ function CampaignMetricShell({
   backTo: string;
   term: string;
   descriptor: string;
-  about: AboutDef;
   comparison: ReactNode;
   children: ReactNode;
 }) {
   return (
     <div className="space-y-5">
-      <MetricBackLink to={backTo}>{campaign.name}</MetricBackLink>
+      <MetricPageHeader back={{ to: backTo, label: campaign.name }} />
 
       <div>
         <div className="flex flex-wrap items-center gap-2">
@@ -213,13 +209,7 @@ function CampaignMetricShell({
         rail={
           <>
             <RailSection title="Сравнение">{comparison}</RailSection>
-            <RailSection title="О графике">
-              <dl className="space-y-3 text-sm">
-                <AboutRow label="Как считается" text={about.formula} />
-                <AboutRow label="Что учитывается" text={about.included} />
-                <AboutRow label="Источник" text={about.source} />
-              </dl>
-            </RailSection>
+            {/* «О графике» убран — техническая информация не для конечного пользователя (владелец). */}
             <Link
               to={backTo}
               className="inline-flex items-center gap-1 text-xs font-medium text-primary transition-colors hover:text-primary/80"
@@ -315,13 +305,6 @@ function CampaignTimelineMetric({
       backTo={backTo}
       term={active?.title ?? 'Динамика кампании'}
       descriptor={`${sourceDescriptor(source)} · значения сгруппированы по дате публикации`}
-      about={{
-        formula:
-          'Публикации группируются по календарной дате. В режиме TG суммируются просмотры Telegram, в режиме IG — охваты публикаций Instagram без дедупликации аудитории, в режиме публикаций — число материалов.',
-        included:
-          'TG-просмотры и IG-охват никогда не складываются в одну серию: это разные методологии. Переключатель показателя заменяет ряд целиком.',
-        source: 'Серверная сводка публикаций, добавленных в кампанию.',
-      }}
       comparison={
         <p className="text-xs leading-relaxed text-muted-foreground">
           {cmp
@@ -348,21 +331,29 @@ function CampaignTimelineMetric({
           ) : undefined
         }
       >
+        {/* Кап длинной серии перед рендером (canon CLAUDE.md): линия — LTTB, столбцы — недели. */}
         {!active ? (
           <EmptyState compact size="chart" title="Нет данных для графика динамики." />
-        ) : kind === 'line' ? (
-          <LineChart
-            values={active.values}
-            labels={active.labels}
-            titles={active.titles}
-            yMin={0}
-            showPoints
-            fullAxes
-            markAnomalies
-            markExtremes
-          />
         ) : (
-          <BarChart values={active.values} labels={active.labels} titles={active.titles} />
+          (() => {
+            const shown = capTimelineMode(kind === 'line' ? { ...active, kind: 'line' } : { ...active, kind: 'bar' });
+            const axisLetters = shown.days ? timeAxisFromDayKeys(shown.days) : undefined;
+            return kind === 'line' ? (
+              <LineChart
+                values={shown.values}
+                labels={shown.labels}
+                axisLabels={axisLetters}
+                titles={shown.titles}
+                yMin={0}
+                showPoints
+                fullAxes
+                markAnomalies
+                markExtremes
+              />
+            ) : (
+              <BarChart values={shown.values} labels={shown.labels} axisLabels={axisLetters} titles={shown.titles} />
+            );
+          })()
         )}
       </CampaignReportCard>
       {modes.length > 1 && active && (
@@ -399,13 +390,6 @@ function CampaignSourcesMetric({
       backTo={backTo}
       term="Источники кампании"
       descriptor={`${sourceDescriptor(source)} · вклад считается только внутри методологии своей платформы`}
-      about={{
-        formula:
-          'Источники упорядочены по числу публикаций. Полоса показывает долю результата источника внутри своей платформы: TG — просмотры, IG — сумма охватов.',
-        included:
-          'Доли Telegram и Instagram нормируются раздельно и не сравниваются между собой. Число публикаций остаётся единственной общей величиной.',
-        source: 'Серверная разбивка кампании по источникам.',
-      }}
       comparison={
         <p className="text-xs leading-relaxed text-muted-foreground">
           Это распределение источников внутри кампании, а не одна метрика периода — сравнение с
@@ -439,13 +423,6 @@ function CampaignFormatsMetric({
       backTo={backTo}
       term="Форматы кампании"
       descriptor={`${sourceDescriptor(source)} · распределение публикаций по платформе и типу контента`}
-      about={{
-        formula:
-          'Каждый сектор — число публикаций одного формата внутри платформы. TG и IG разделены в подписях, а размер сектора использует сопоставимое число материалов.',
-        included:
-          'В подсказке дополнительно показана собственная метрика платформы: просмотры TG или сумма охватов IG. Они не складываются между сетями.',
-        source: 'Серверная разбивка кампании по форматам публикаций.',
-      }}
       comparison={
         <p className="text-xs leading-relaxed text-muted-foreground">
           Это состав кампании по форматам, а не временной ряд — сравнение периодов и переключатель
@@ -454,8 +431,14 @@ function CampaignFormatsMetric({
       }
     >
       <CampaignReportCard id="campaign-page-formats" title="По числу публикаций">
+        {/* Полукольцо (выбор владельца) — отчётная поверхность показывает ВСЮ легенду. */}
         {slices.values.length > 0 ? (
-          <PieChart values={slices.values} labels={slices.labels} titles={slices.titles} />
+          <RadialShare
+            segments={slices.labels.map((label, i) => ({ key: label, label, value: slices.values[i] ?? 0 }))}
+            unitWord="публ."
+            centerCaption="публикаций"
+            legendMax={Infinity}
+          />
         ) : (
           <EmptyState compact size="chart" title="Нет данных о форматах." />
         )}

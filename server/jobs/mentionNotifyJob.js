@@ -16,6 +16,13 @@
 // дешевле потери). Первый прогон подписки (last_notified_at IS NULL) СИДИРУЕТСЯ: одна сводка
 // вместо пачки карточек — свежая подписка не выплёвывает весь архив.
 //
+// ТРОТТЛИНГ (429 flood-control общего бота) — отдельный, НЕ провальный исход того же порядка:
+// отправка остатка пачки прекращается, а upsert получает РОВНО доставленные упоминания. Тем самым
+// инвариант «архивировано ⇔ доставлено» держится на подмножестве: уже отправленные карточки не
+// уйдут повторно НИКОГДА, а недоставленные останутся «новыми» для следующего прогона. Прогон при
+// этом закрывается как выполненный (last_error='send_throttled'), а не падает: иначе часовой свип
+// пере-клеймил бы день-ключ и заново потратил searchPosts — ту самую квоту ~10/день.
+//
 // Сессии дешифруются ТОЛЬКО здесь (createTgSessionDecryptor — с lazy-rewrite под активный ключ)
 // и уходят исключительно в тело приватного mtproto-вызова. Ошибки в БД/логах — только safe-коды.
 
@@ -56,6 +63,7 @@ function dueBySchedule(sub, msk) {
 
 const SAFE_ERROR_CODES = new Set([
   'reauth_required', 'session_decrypt_failed', 'search_failed', 'send_failed', 'bot_blocked',
+  'send_throttled',
 ]);
 const safeCode = (code) => (SAFE_ERROR_CODES.has(code) ? code : 'search_failed');
 
@@ -124,7 +132,11 @@ function createMentionNotifyJob({
     const fresh = isSeed ? [] : await db.filterNewMentions(sub.channel_id, all);
 
     let sent = 0;
-    const send = async (text) => {
+    let throttled = null;          // { retryAfterSec } — Телеграм попросил притормозить
+    const delivered = [];          // упоминания, чьи карточки РЕАЛЬНО ушли (архивируем при троттлинге)
+    // Возвращает true, если сообщение доставлено, и false при троттлинге (вызывающий прекращает
+    // пачку). Блокировка бота остаётся исключением — это не «позже», а «больше никогда».
+    const send = async (text, mention = null) => {
       const out = await tgBot.sendMessage(sub.chat_id, text);
       if (out && out.blocked) {
         // Пользователь заблокировал бота: сносим привязку, чтобы не долбить 403 каждый день.
@@ -133,7 +145,13 @@ function createMentionNotifyJob({
         err.notifyCode = 'bot_blocked';
         throw err;
       }
+      if (out && out.throttled) {
+        throttled = { retryAfterSec: out.retryAfterSec || null };
+        return false;
+      }
       sent += 1;
+      if (mention) delivered.push(mention);
+      return true;
     };
 
     try {
@@ -143,12 +161,12 @@ function createMentionNotifyJob({
         // Стабильный порядок — старые раньше (как читается лента).
         const ordered = [...fresh].sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')));
         for (const mention of ordered.slice(0, MAX_CARDS_PER_RUN)) {
-          await send(formatMentionCard(mention));
+          if (!await send(formatMentionCard(mention), mention)) break;   // троттлинг — остаток на следующий прогон
         }
-        if (ordered.length > MAX_CARDS_PER_RUN) {
+        if (!throttled && ordered.length > MAX_CARDS_PER_RUN) {
           await send(formatOverflowMessage(ordered.length - MAX_CARDS_PER_RUN, appUrl));
         }
-        if (test && ordered.length === 0) {
+        if (!throttled && test && ordered.length === 0) {
           await send(formatTestPing(sub.channel_title || sub.channel_username));
         }
       }
@@ -161,8 +179,17 @@ function createMentionNotifyJob({
 
     // Архив прирастает ПОСЛЕ успешной доставки (см. шапку про порядок). Ошибка записи роняет
     // прогон в failed — ретрай следующего тика доставит дубль, но не потеряет упоминания.
-    await db.upsertMentions(sub.channel_id, all);
-    return { seed: isSeed, found: all.length, fresh: fresh.length, sent };
+    // При троттлинге пишем ТОЛЬКО доставленное: недоставленные остаются новыми (придут следующим
+    // прогоном), доставленные — уже в архиве и повторно не отправятся.
+    await db.upsertMentions(sub.channel_id, throttled ? delivered : all);
+    return {
+      seed: isSeed,
+      found: all.length,
+      fresh: fresh.length,
+      sent,
+      throttled: !!throttled,
+      retryAfterSec: throttled ? throttled.retryAfterSec : null,
+    };
   }
 
   // Обход всех выполнимых подписок. Последовательно: каждая подписка — своя сессия, но бот один,
@@ -180,7 +207,7 @@ function createMentionNotifyJob({
     if (!subs.length) return;
 
     const day = msk.date;
-    let done = 0, notified = 0, failed = 0, skipped = 0, capped = false;
+    let done = 0, notified = 0, failed = 0, skipped = 0, throttled = 0, capped = false;
     for (const sub of subs) {
       if (done >= MAX_SUBSCRIPTIONS_PER_RUN) { capped = true; break; }
       let started = false;
@@ -191,8 +218,16 @@ function createMentionNotifyJob({
         });
         if (outcome.skipped) { skipped++; continue; }
         done++;
-        notified += outcome.result && outcome.result.sent ? 1 : 0;
-        await db.markMentionNotifyRun(sub.channel_id, sub.uid, { notified: true, errorCode: null });
+        const result = outcome.result || {};
+        notified += result.sent ? 1 : 0;
+        if (result.throttled) throttled++;
+        // Прогон СОСТОЯЛСЯ (в т.ч. частично) → watermark двигаем как раньше. Исключение —
+        // троттлинг без единой доставки: там ничего не доставлено, и seed-прогон обязан остаться
+        // seed'ом, иначе завтра он выплюнул бы весь архив карточками.
+        await db.markMentionNotifyRun(sub.channel_id, sub.uid, {
+          notified: result.throttled ? result.sent > 0 : true,
+          errorCode: result.throttled ? 'send_throttled' : null,
+        });
       } catch (e) {
         if (started) done++;
         failed++;
@@ -202,7 +237,7 @@ function createMentionNotifyJob({
         log('error', 'mention_notify_failed', { channel_id: sub.channel_id, uid: sub.uid, code });
       }
     }
-    log(capped ? 'warn' : 'info', 'mention_notify_done', { total: subs.length, done, notified, failed, skipped, capped });
+    log(capped ? 'warn' : 'info', 'mention_notify_done', { total: subs.length, done, notified, failed, skipped, throttled, capped });
   }
 
   // Ручной прогон «Прислать сейчас» (кнопка в диалоге): игнорирует расписание и день-ключ —
@@ -218,7 +253,15 @@ function createMentionNotifyJob({
     if (!sub) return { ok: false, reason: 'not_runnable' };
     try {
       const result = await runSubscription(sub, { test: true });
-      await db.markMentionNotifyRun(channelId, uid, { notified: true, errorCode: null });
+      await db.markMentionNotifyRun(channelId, uid, {
+        notified: result.throttled ? result.sent > 0 : true,
+        errorCode: result.throttled ? 'send_throttled' : null,
+      });
+      // Троттлинг — честный отказ для UI (часть карточек не ушла), но НЕ провал прогона: уже
+      // доставленное записано в архив и повторно не отправится. Срок ожидания отдаём наверх.
+      if (result.throttled) {
+        return { ok: false, reason: 'send_throttled', sent: result.sent, retry_after_sec: result.retryAfterSec };
+      }
       return { ok: true, seed: !!result.seed, found: result.found, fresh: result.fresh, sent: result.sent };
     } catch (e) {
       const code = safeCode(e && e.notifyCode);

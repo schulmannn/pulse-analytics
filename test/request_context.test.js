@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { runWithRequestId, getRequestId } = require('../server/lib/requestContext');
+const { runWithRequestId, getRequestId, runDetached } = require('../server/lib/requestContext');
 const { requestContext } = require('../server/lib/observability');
 const { createMtprotoClient } = require('../server/lib/mtproto-client');
 
@@ -69,6 +69,52 @@ test('mtproto calls outside a request store (background jobs) send no x-request-
     assert.ok(!('x-request-id' in call.options.headers), 'no header without a request id');
     assert.equal(call.options.headers['x-internal-token'], 't');
   }
+});
+
+// Прод-путь routes/tg.js: fire-and-forget сбор стартует ИЗНУТРИ обработчика (внутри store) и
+// переживает ответ. Без runDetached отцепленная цепочка наследовала бы store, и минуты Telethon-
+// работы уходили бы в mtproto с x-request-id закрытого запроса. Предыдущий тест проверял вызов,
+// сделанный ВНЕ store вообще, — то есть моделировал не тот путь.
+test('detached fire-and-forget work started inside a request sends no x-request-id', async () => {
+  const calls = [];
+  const client = recordingClient(calls);
+
+  let background;
+  await runWithRequestId('req-detach-1234', async () => {
+    // Внутри запроса заголовок обязан быть — это НЕ фон.
+    await client.mtprotoFetch('/health');
+    // …а это — фон после ответа: стартует здесь, живёт дольше запроса.
+    background = runDetached(() =>
+      Promise.resolve()
+        .then(() => new Promise((r) => setTimeout(r, 1)))
+        .then(() => client.mtprotoPost('/qr/collect', { body: { a: 1 } })));
+  });
+  await background;
+
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].options.headers['x-request-id'], 'req-detach-1234', 'in-request call keeps the id');
+  assert.ok(
+    !('x-request-id' in calls[1].options.headers),
+    'detached background work must not inherit the finished request id',
+  );
+  assert.equal(calls[1].options.headers['x-internal-token'], 't', 'auth header untouched');
+});
+
+test('runDetached hides the store from synchronous reads and returns the callback result', async () => {
+  const seen = await runWithRequestId('req-detach-5678', async () => {
+    const inside = getRequestId();
+    const detached = await runDetached(async () => {
+      const immediate = getRequestId();
+      await new Promise((r) => setTimeout(r, 1));
+      return { immediate, afterAwait: getRequestId() };
+    });
+    return { inside, detached, restored: getRequestId() };
+  });
+
+  assert.equal(seen.inside, 'req-detach-5678');
+  assert.equal(seen.detached.immediate, undefined, 'store is gone right away');
+  assert.equal(seen.detached.afterAwait, undefined, 'and stays gone across awaits');
+  assert.equal(seen.restored, 'req-detach-5678', 'the request itself keeps its id');
 });
 
 test('an invalid or empty request id is never sent upstream', async () => {

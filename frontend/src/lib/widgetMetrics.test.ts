@@ -116,6 +116,17 @@ describe('widgetMetrics catalogue', () => {
     expect(levels).toEqual(['ig.followers', 'tg.subscribers']);
   });
 
+  // Подписчики — stock, а не дневной flow: уровень аудитории рисуется общей кривой, столбец от нуля
+  // врал бы, что это набранное за день. #429 закрепил это для истории и /metrics/subscribers,
+  // но каталог виджетов всё ещё предлагал «Столбцы». Сохранённый `bar` нормализуется в `line`
+  // штатной валидацией normalizeWidget (viz вне supportedViz → defaultViz).
+  it('level series metrics offer the curve only — never bars', () => {
+    for (const metric of WIDGET_METRICS.filter((m) => m.seriesAgg === 'level')) {
+      expect(metric.supportedViz, metric.id).toEqual(['line']);
+      expect(metric.defaultViz, metric.id).toBe('line');
+    }
+  });
+
   it('METRIC_BY_ID / getMetric / isMetricId round-trip', () => {
     for (const m of WIDGET_METRICS) {
       expect(METRIC_BY_ID[m.id]).toBe(m);

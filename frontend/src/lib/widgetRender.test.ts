@@ -127,3 +127,31 @@ describe('effectiveViz — graceful fallback', () => {
     expect(effectiveViz('donut', false, true)).toBe('donut'); // без unit (старые вызовы) — поведение прежнее
   });
 });
+
+describe('seriesToChart — буквенная ось короткого окна (конфиг-виджеты)', () => {
+  const daily = (dates: string[]) =>
+    ({
+      metricId: 'x',
+      kind: 'series',
+      unit: 'number',
+      series: dates.map((date, i) => ({ date, value: i + 1 })),
+    }) as WidgetResult;
+
+  it('дневная серия ≤ 8 точек с размахом ≤ 8 дней несёт буквы; labels остаются датами', () => {
+    // 2026-06-08 — понедельник.
+    const week = ['2026-06-08', '2026-06-09', '2026-06-10', '2026-06-11', '2026-06-12', '2026-06-13', '2026-06-14'];
+    const c = seriesToChart(daily(week));
+    expect(c.axisLabels).toEqual(['M', 'T', 'W', 'T', 'F', 'S', 'S']);
+    expect(c.labels[0]).not.toBe('M');
+  });
+
+  it('длинный размах, недельные корзины и недельный grain остаются датами', () => {
+    // Три точки, растянутые на месяц: два понедельника получили бы одну «M».
+    expect(seriesToChart(daily(['2026-06-01', '2026-06-15', '2026-06-29'])).axisLabels).toBeUndefined();
+    // Недельная агрегация: ключ корзины — понедельник, буква дня лгала бы.
+    const weekly = { ...daily(['2026-06-01', '2026-06-08']), meta: { seriesGrain: 'week' } } as WidgetResult;
+    expect(seriesToChart(weekly).axisLabels).toBeUndefined();
+    // Месячные корзины не парсятся как дневные ключи.
+    expect(seriesToChart(daily(['2026-05', '2026-06'])).axisLabels).toBeUndefined();
+  });
+});

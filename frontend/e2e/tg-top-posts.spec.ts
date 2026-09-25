@@ -51,10 +51,30 @@ test.describe('TG Обзор — карточки топ-постов + пери
     // Открываем календарь и выбираем окно двумя календарными месяцами ранее — демо-посты укладываются
     // в последние ~23 дня, поэтому это окно гарантированно пустое (детерминированный сдвиг контента).
     await periodGroup.getByRole('button', { name: 'Свой период' }).click();
-    await page.getByRole('button', { name: 'Предыдущий месяц' }).click();
-    await page.getByRole('button', { name: 'Предыдущий месяц' }).click();
-    await page.getByRole('button', { name: /^5\s/ }).click();
-    await page.getByRole('button', { name: /^15\s/ }).click();
+    // Календарь активности дал демо-фикстурам год дневных точек, поэтому «два месяца назад»
+    // больше не пустое окно. Уходим за пределы годового ряда — проверка та же: карточка с
+    // разрешимой датой обязана честно сказать «нет данных», а не подставить последние точки.
+    for (let back = 0; back < 13; back += 1) {
+      await page.getByRole('button', { name: 'Предыдущий месяц' }).click();
+    }
+    // Derive the dates from the same relative month we navigated to. Absolute May 2026 selectors
+    // expired as soon as the real current month moved on, even though the product stayed correct.
+    const targetMonth = new Date();
+    targetMonth.setDate(1);
+    targetMonth.setMonth(targetMonth.getMonth() - 13);
+    const targetDate = (day: number) =>
+      new Date(targetMonth.getFullYear(), targetMonth.getMonth(), day);
+    const dayKey = (day: number) => targetDate(day).toLocaleDateString('ru-RU');
+    const rangeStart = page.locator(`button[data-day="${dayKey(5)}"]`);
+    const rangeMiddle = page.locator(`button[data-day="${dayKey(10)}"]`);
+    const rangeEnd = page.locator(`button[data-day="${dayKey(15)}"]`);
+    await rangeStart.click();
+    await rangeEnd.click();
+    // Standard range geometry: one continuous band, with semantic endpoints instead of three
+    // unrelated filled day buttons (the old custom calendar regression).
+    await expect(rangeStart).toHaveAttribute('data-range-start', 'true');
+    await expect(rangeMiddle).toHaveAttribute('data-range-middle', 'true');
+    await expect(rangeEnd).toHaveAttribute('data-range-end', 'true');
     await page.getByRole('button', { name: 'Применить' }).click();
 
     // Диапазон помечен: пресеты неактивны, а чип несёт сам диапазон в доступном имени (с «–»).
@@ -86,10 +106,17 @@ test.describe('TG Обзор — карточки топ-постов + пери
       .getByRole('heading', { name: 'История подписчиков' })
       .locator('xpath=ancestor::section[1]');
     // Subscriber archive is deeper than the post/graph fixture, so it still has rows here. The
-    // calendar-day key must not shift in UTC-3: the selected 5–15 May window ends on 15, never 16.
+    // Calendar-day keys must not shift in UTC-3: the selected 5–15 window ends on the chosen local
+    // day, never on the following one. The month is relative so this remains valid year-round.
+    const axisDateLabel = (day: number) =>
+      targetDate(day)
+        .toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })
+        .replace(/\.$/, '');
+    const expectedEndLabel = axisDateLabel(15);
+    const shiftedEndLabel = axisDateLabel(16);
     await expect(historyCard.getByText('11 дн. в периоде', { exact: false })).toBeVisible();
-    await expect(historyCard.getByText(/15 мая/)).toBeVisible();
-    await expect(historyCard.getByText(/16 мая/)).toHaveCount(0);
+    await expect(historyCard.getByText(expectedEndLabel)).toBeVisible();
+    await expect(historyCard.getByText(shiftedEndLabel)).toHaveCount(0);
   });
 
   test('один датапикер на каждой рабочей вкладке: внутри карточек нет собственных период-пилюль', async ({ page }) => {

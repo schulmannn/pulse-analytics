@@ -161,9 +161,14 @@ test.describe('desktop /home workspace (dark, 1440)', () => {
     const restWidth = (await board.boundingBox())!.width;
     await page.locator('button.edit-toggle').click();
     await expect(page.locator('button.edit-toggle')).toHaveAttribute('aria-pressed', 'true');
-    // Narrows immediately (no need to wait out a tween) and by the same amount.
+    // Narrows by the same amount as with motion. Ждём КАДР, а не твин: «мгновенность» уже
+    // доказана строкой выше (transition-duration ≈ 0), а стиль/лейаут борды долетают на следующем
+    // расчёте после коммита кнопки — одиночное чтение сразу после aria-pressed ловило ещё старую
+    // ширину. Соседний тест (с анимацией) поллит ровно по этой же причине.
+    await expect
+      .poll(async () => Math.round(restWidth - (await board.boundingBox())!.width))
+      .toBeGreaterThanOrEqual(90);
     const editWidth = (await board.boundingBox())!.width;
-    expect(restWidth - editWidth).toBeGreaterThanOrEqual(90);
     expect(restWidth - editWidth).toBeLessThanOrEqual(120);
   });
 
@@ -204,6 +209,8 @@ test.describe('desktop /home workspace (dark, 1440)', () => {
     const cardBefore = await barCard.boundingBox();
     const handleBox = await barHandle.boundingBox();
     expect(cardBefore && handleBox).toBeTruthy();
+    const cardSurface = barCard.locator('[data-widget-card]');
+    const restingShadow = await cardSurface.evaluate((element) => getComputedStyle(element).boxShadow);
     await page.mouse.move(handleBox!.x + handleBox!.width / 2, handleBox!.y + handleBox!.height / 2);
     await page.mouse.down();
     await page.mouse.move(handleBox!.x + handleBox!.width / 2 + 220, handleBox!.y + handleBox!.height / 2, {
@@ -212,8 +219,12 @@ test.describe('desktop /home workspace (dark, 1440)', () => {
     const cardDuring = await barCard.boundingBox();
     expect(cardDuring!.width).toBeGreaterThan(cardBefore!.width + 150);
     await expect(barCard).toHaveAttribute('data-widget-resizing', '');
+    await expect.poll(() => cardSurface.evaluate((element) => getComputedStyle(element).boxShadow))
+      .not.toBe(restingShadow);
     await page.mouse.up();
     await expect(barCard).not.toHaveAttribute('data-widget-resizing', '');
+    await expect.poll(() => cardSurface.evaluate((element) => getComputedStyle(element).boxShadow))
+      .toBe(restingShadow);
     await expect(page).toHaveURL(/\/home$/);
     await expect(barCard).toHaveAttribute('data-widget-size', 'half');
     await expect(barHandle).toHaveAttribute('aria-valuetext', 'M');
@@ -240,9 +251,13 @@ test.describe('desktop /home workspace (dark, 1440)', () => {
     const weekHandle = weekCard.getByRole('slider', {
       name: 'Изменить размер виджета «Неделя канала»',
     });
+    // Ужимаем, а не растягиваем: «Неделя канала» теперь по умолчанию full (рассказ не влезает в
+    // 264px фикс-тайла), и ArrowRight с полной ширины никуда не ведёт — сохранять было бы нечего.
+    // Проверяемый контракт тот же: у curated/prefs-карточки размер уезжает в widget prefs, а не в
+    // configs.
     await weekHandle.focus();
-    await page.keyboard.press('ArrowRight');
-    await expect(weekCard).toHaveAttribute('data-widget-size', 'full');
+    await page.keyboard.press('ArrowLeft');
+    await expect(weekCard).toHaveAttribute('data-widget-size', 'half');
 
     const saved = await page.evaluate(() => {
       const configs = JSON.parse(localStorage.getItem('pulse_widget_configs') ?? '[]') as Array<{
@@ -259,7 +274,7 @@ test.describe('desktop /home workspace (dark, 1440)', () => {
       };
     });
     expect(saved.configs).toMatchObject({ 'resize-bar': 'full', 'resize-line': 'half' });
-    expect(saved.weekSize).toBe('full');
+    expect(saved.weekSize).toBe('half');
 
     await page.getByRole('heading', { name: 'Главная', exact: true }).click();
     const shot = testInfo.outputPath('home-widget-corner-resize-dark.png');
@@ -326,11 +341,13 @@ test.describe('desktop /home workspace (dark, 1440)', () => {
     const growth = byTitle('Рост подписчиков');
     const instagram = byTitle('IG · Охват по дням');
     const topPosts = byTitle('Топ постов');
-    expect(Math.abs(week.width - growth.width)).toBeLessThanOrEqual(2);
-    expect(week.top).toBe(growth.top);
-    expect(week.left).toBeLessThan(growth.left);
+    // «Неделя канала» больше не половинка рядом с «Ростом подписчиков»: рассказ не влезает в 264px
+    // фикс-тайла, поэтому карточка занимает ряд целиком и получает контентную высоту. Проверяем
+    // это, а не прежнее соседство: она шире соседа и стоит на своей строке НАД ним.
+    expect(week.width).toBeGreaterThan(growth.width * 1.8);
+    expect(week.top).toBeLessThan(growth.top);
     expect(instagram.top).toBeLessThan(topPosts.top);
-    expect(instagram.width).toBeGreaterThan(week.width * 1.8);
+    expect(Math.abs(instagram.width - week.width)).toBeLessThanOrEqual(2);
 
     await page.waitForTimeout(300);
     const defaultShot = testInfo.outputPath('home-default-dark.png');
@@ -360,9 +377,26 @@ test.describe('mobile /home invariant (430)', () => {
     // The desktop-only header «Добавить виджет» is hidden < md — only the empty-card primary remains.
     await expect(page.getByRole('button', { name: 'Добавить виджет', exact: true })).toHaveCount(1);
 
-    // The empty state stays the framed card (its verbatim mobile branch).
-    const card = page.locator('.rounded-xl.border.bg-card').filter({ hasText: 'На Главной пока пусто' });
+    // Пустое состояние остаётся карточкой в рамке (своя мобильная ветка).
+    //
+    // Проверка идёт по РИСОВАННОЙ рамке, а не по классу радиуса. Прежний селектор
+    // `.rounded-xl.border.bg-card` протух молча: карточки переехали на `rounded-2xl` вместе с
+    // каноном скруглений, а тест никогда не выполнялся — гейт mobile-430 гонял два файла из
+    // восьмидесяти шести (аудит #554, проход №2, N8). Радиус — деталь оформления и меняется
+    // решением владельца; «в рамке ли карточка» — контракт, за который тест и отвечает.
+    const card = page.locator('div').filter({ hasText: 'На Главной пока пусто' }).last();
     await expect(card).toBeVisible();
+    const framed = await card.evaluate((el) => {
+      const cs = getComputedStyle(el);
+      return {
+        border: Number.parseFloat(cs.borderTopWidth) > 0,
+        radius: Number.parseFloat(cs.borderTopLeftRadius),
+        filled: cs.backgroundColor !== 'rgba(0, 0, 0, 0)',
+      };
+    });
+    expect(framed.border, 'у пустой карточки есть рамка').toBe(true);
+    expect(framed.radius, 'и скругление').toBeGreaterThan(0);
+    expect(framed.filled, 'и своя подложка').toBe(true);
 
     // The edit chip is still the compact icon control (narrower than its reserved slot).
     const slot = page.locator('.edit-toggle-slot');

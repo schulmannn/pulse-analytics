@@ -1,11 +1,13 @@
 import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { WidgetTargetContext } from '@/components/ExpandableChart';
+import { useViewTransitionNavigate } from '@/lib/viewTransitionNavigate';
+import { WidgetTargetContext, ChartCardTitleContext } from '@/components/ExpandableChart';
 import { ThrowInRender } from '@/components/WidgetErrorBoundary';
 import { GroupCtx, prefersReducedMotion } from '@/components/widgets/WidgetGroup';
 import { maxSize } from '@/components/widgets/variants';
 import { observeSize } from '@/lib/observeSize';
+import { defaultWidgetTint, resolveWidgetTint } from '@/lib/widgetSurface';
 import {
   WidgetPeriodProvider,
   resolveEffectivePeriod,
@@ -35,7 +37,9 @@ export function useChartSectionModel(props: ChartSectionProps) {
     variants,
     defaultSize,
     defaultColor,
+    defaultTinted,
     fixedSize,
+    chartHeight,
     expand,
     drillTo,
     periodControl,
@@ -52,6 +56,7 @@ export function useChartSectionModel(props: ChartSectionProps) {
   const [editOpen, setEditOpen] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
+  const vtNavigate = useViewTransitionNavigate();
   const sectionRef = useRef<HTMLElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const originRectRef = useRef<DOMRect | null>(null);
@@ -77,7 +82,9 @@ export function useChartSectionModel(props: ChartSectionProps) {
       // before navigating so 7/30/90/custom never snaps back to an unrelated old metric-page value.
       if (pagePeriod?.range) explorerPeriod.setRange(pagePeriod.range);
       else if (pagePeriod) explorerPeriod.setDays(pagePeriod.days);
-      navigate(drillTo);
+      // View Transitions (волна B): карточка → метрик-страница нативным кроссфейдом
+      // (ручной паттерн — plain BrowserRouter, см. lib/viewTransitionNavigate).
+      vtNavigate(drillTo);
       return;
     }
     originRectRef.current = sectionRef.current?.getBoundingClientRect() ?? null;
@@ -89,7 +96,7 @@ export function useChartSectionModel(props: ChartSectionProps) {
       },
       { replace: false },
     );
-  }, [drillTo, explorerPeriod, navigate, pagePeriod, setSearchParams, widgetId]);
+  }, [drillTo, explorerPeriod, vtNavigate, pagePeriod, setSearchParams, widgetId]);
   const closeExpand = useCallback(() => {
     // Закрытие (Escape/крестик/backdrop) чистит ?detail= из ЖИВОГО URL, а не из снапшота рендера:
     // react-router передаёт функциональному апдейтеру searchParams из замыкания ПОСЛЕДНЕГО рендера
@@ -177,8 +184,24 @@ export function useChartSectionModel(props: ChartSectionProps) {
       : children
     : <ThrowInRender error={variantResult.error} />;
 
-  const activeColor = (configEditor ? configEditor.color : prefs.color) ?? defaultColor;
-  const activeTinted = (configEditor ? configEditor.tinted : prefs.tinted) ?? true;
+  // ВЫБОР ПОЛЬЗОВАТЕЛЯ и ДЕФОЛТ ХОСТА — разные вещи, и с появлением студии оформления разница
+  // стала видимой: акцент карточки, который никто не выбирал, обязан следовать акценту темы, а
+  // выбранный руками — остаться собой. `activeColor` по-прежнему «эффективный слот» (нужен
+  // логике заливки и редактору), а красит карточку теперь `chosenColor`.
+  const chosenColor = (configEditor ? configEditor.color : prefs.color) ?? null;
+  const activeColor = chosenColor ?? defaultColor;
+  // Дефолт «цветного фона» приходит от хоста (см. defaultWidgetTint) — сохранённый выбор
+  // пользователя главнее. Считаем его от ОБЪЯВЛЕННОГО ХОСТОМ `defaultColor`, а НЕ от
+  // эффективного `activeColor`: иначе карточка, которой пользователь сам выбрал акцент (а
+  // переключатель не трогал), молча теряла бы заливку, которая у неё была. Тот же дефолт уезжает
+  // в редактор карточки, иначе переключатель «Цветной фон» показывал бы состояние, которого на
+  // карточке нет (и мигал бы при выборе свотча).
+  const tintedDefault = defaultWidgetTint(defaultColor, defaultTinted);
+  const activeTinted = resolveWidgetTint(
+    configEditor ? configEditor.tinted : prefs.tinted,
+    defaultColor,
+    defaultTinted,
+  );
   const activeTarget = configEditor ? (configEditor.target ?? null) : (prefs.target ?? null);
   const chosenSize: WidgetSize =
     fixedSize ?? (configEditor ? configEditor.size : prefs.size) ?? defaultSize ?? 'third';
@@ -197,7 +220,9 @@ export function useChartSectionModel(props: ChartSectionProps) {
     },
     [configEditor, defaultSize, prefs, resizeMinSize, updatePrefs],
   );
-  const fillHeight = effectiveSize === 'full' ? null : bodyHeight;
+  // Авто-высотному full сообщать графику нечего — тело растёт ПОД него. Но если карточка
+  // объявила высоту явно (chartHeight, аудит #554 D15), измеренный тайл — честный ответ.
+  const fillHeight = effectiveSize === 'full' && chartHeight == null ? null : bodyHeight;
   const label = prefs.title || title;
   const bodyResetKeys = [bodyResetKey, activeVariant?.key ?? null, widgetDays];
   const richExpand = !!(
@@ -206,6 +231,7 @@ export function useChartSectionModel(props: ChartSectionProps) {
   );
   const overlayBody = (
     <WidgetPeriodProvider value={widgetPeriod}>
+      <ChartCardTitleContext.Provider value={label}>
       <WidgetTargetContext.Provider value={activeTarget}>
         {variantResult.ok
           ? activeVariant
@@ -214,6 +240,7 @@ export function useChartSectionModel(props: ChartSectionProps) {
           : <ThrowInRender error={variantResult.error} />}
         {activeVariant ? children : null}
       </WidgetTargetContext.Provider>
+      </ChartCardTitleContext.Provider>
     </WidgetPeriodProvider>
   );
 
@@ -224,12 +251,24 @@ export function useChartSectionModel(props: ChartSectionProps) {
   if (sequenceIndex >= 0) outerStyle.order = sequenceIndex;
   if (prefs.hidden) outerStyle.display = 'none';
 
-  const accentVars: Record<string, string> | null = activeColor
+  // Слот акцента карточки: явный выбор пользователя — свой номер, дефолт хоста — общий
+  // `--accent-card`, который в каноне АЛИАС `--chart-1-accent` (то есть для канонической темы это
+  // правка-ничто), а при выбранном акценте студии следует ему. Карточка без дефолта не скоупит
+  // ничего и наследует роль primary темы — так было и раньше.
+  const accentSlot = chosenColor
+    ? `var(--chart-${chosenColor}-accent)`
+    : defaultColor
+      ? 'var(--accent-card)'
+      : null;
+  const accentDeep = chosenColor
+    ? `var(--chart-${chosenColor}-accent-deep)`
+    : 'var(--accent-card-deep)';
+  const accentVars: Record<string, string> | null = accentSlot
     ? {
-        '--brand-iris': `var(--chart-${activeColor}-accent)`,
-        '--brand-iris-deep': `var(--chart-${activeColor}-accent-deep)`,
-        '--chart-role-primary': `var(--chart-${activeColor}-accent)`,
-        '--chart-role-selection': `var(--chart-${activeColor}-accent)`,
+        '--brand-iris': accentSlot,
+        '--brand-iris-deep': accentDeep,
+        '--chart-role-primary': accentSlot,
+        '--chart-role-selection': accentSlot,
       }
     : null;
   if (accentVars) Object.assign(outerStyle as Record<string, string>, accentVars);
@@ -274,6 +313,7 @@ export function useChartSectionModel(props: ChartSectionProps) {
       innerStyle,
       activeColor,
       activeTinted,
+      tintedDefault,
       activeTarget,
     },
     controls: {

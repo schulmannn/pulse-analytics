@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { useParams } from 'react-router-dom';
 import { EmptyState } from '@/components/EmptyState';
 import { WidgetExplorer } from '@/components/WidgetExplorer';
-import { updateWidgetConfig, useWidgetConfigs } from '@/lib/widgetStore';
+import { replaceWidgetConfig, useWidgetConfigs } from '@/lib/widgetStore';
 
 /** Dedicated, shareable explorer route for every config-driven Home card. */
 export function WidgetMetricPage() {
@@ -28,7 +28,7 @@ export function WidgetMetricPage() {
       key={config.id}
       config={config}
       backTo="/home"
-      onApply={(next) => updateWidgetConfig(config.id, next)}
+      onApply={(next) => replaceWidgetConfig(config.id, next)}
     />
   );
 }

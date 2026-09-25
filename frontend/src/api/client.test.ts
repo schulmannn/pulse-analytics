@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { ApiError, apiGet, apiSend } from './client';
 
+const WriteResponseSchema = z.object({ ok: z.boolean().optional() }).passthrough();
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -16,7 +18,9 @@ describe('ApiError retry metadata', () => {
       headers: { 'Content-Type': 'application/json', 'Retry-After': '60' },
     })));
 
-    await expect(apiSend('POST', '/api/tg/qr/start')).rejects.toMatchObject({
+    await expect(
+      apiSend('POST', '/api/tg/qr/start', undefined, WriteResponseSchema),
+    ).rejects.toMatchObject({
       name: 'ApiError',
       status: 503,
       retryAfter: 60,
@@ -31,11 +35,56 @@ describe('ApiError retry metadata', () => {
       headers: { 'Content-Type': 'application/json' },
     })));
 
-    await expect(apiSend('POST', '/api/tg/qr/start')).rejects.toMatchObject({
+    await expect(
+      apiSend('POST', '/api/tg/qr/start', undefined, WriteResponseSchema),
+    ).rejects.toMatchObject({
       name: 'ApiError',
       status: 503,
       retryAfter: undefined,
     });
+  });
+});
+
+describe('apiSend response contracts', () => {
+  it('returns the schema-narrowed successful response', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => Response.json({ ok: true, ignored: 'server extension' })),
+    );
+
+    await expect(
+      apiSend('POST', '/api/example', { value: 1 }, z.object({ ok: z.literal(true) })),
+    ).resolves.toEqual({ ok: true });
+  });
+
+  it('turns a successful response with schema drift into a non-retryable ApiError', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => Response.json({ ok: 'yes' })),
+    );
+
+    await expect(
+      apiSend('POST', '/api/example', undefined, z.object({ ok: z.boolean() })),
+    ).rejects.toMatchObject({
+      name: 'ApiError',
+      status: 0,
+      network: undefined,
+      message: 'Формат данных не совпадает с ожидаемым',
+    });
+  });
+
+  it('validates a 204 as null instead of bypassing the call-site schema', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(null, { status: 204 })),
+    );
+
+    await expect(
+      apiSend('DELETE', '/api/example', undefined, z.null()),
+    ).resolves.toBeNull();
+    await expect(
+      apiSend('DELETE', '/api/example', undefined, z.object({ ok: z.boolean() })),
+    ).rejects.toMatchObject({ name: 'ApiError', status: 0 });
   });
 });
 
@@ -74,6 +123,54 @@ describe('api error humanization', () => {
     const err = await failGet();
     expect(err.status).toBe(404);
     expect(err.message).toBe('Канал не найден');
+  });
+
+  // server/app.js отдаёт `{ error: 'internal_error' }` на любой необработанный 500 — токен нужен
+  // логам/мониторингу, но пользователю обязан достаться русский текст, а не машинный код.
+  it('never shows the internal_error token — falls back to the human 500 message', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => Response.json({ error: 'internal_error', request_id: 'req-1' }, { status: 500 })),
+    );
+    const err = await failGet();
+    expect(err.status).toBe(500);
+    expect(err.message).toBe('Сервер временно недоступен — попробуйте позже');
+    expect(err.message).not.toContain('internal_error');
+  });
+
+  it('hides the other machine codes the server emits (404 not_found, 403 csrf, 400 not_configured)', async () => {
+    const cases = [
+      { code: 'not_found', status: 404, human: 'Данные не найдены' },
+      { code: 'csrf', status: 403, human: 'Нет доступа к этому разделу' },
+      { code: 'not_configured', status: 400, human: 'Не удалось выполнить запрос (код 400)' },
+      { code: 'session_decrypt_failed', status: 500, human: 'Сервер временно недоступен — попробуйте позже' },
+    ];
+    for (const { code, status, human } of cases) {
+      vi.stubGlobal('fetch', vi.fn(async () => Response.json({ error: code }, { status })));
+      const err = await failGet();
+      expect(err.message).toBe(human);
+      expect(err.message).not.toContain(code);
+    }
+  });
+
+  it('keeps a human Russian 400 message untouched', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => Response.json({ error: 'Подключение Telegram по QR не настроено на сервере' }, { status: 400 })),
+    );
+    const err = await failGet();
+    expect(err.status).toBe(400);
+    expect(err.message).toBe('Подключение Telegram по QR не настроено на сервере');
+  });
+
+  it('still reads retry_after from a body whose error field is a machine code', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => Response.json({ error: 'internal_error', retry_after: 30 }, { status: 500 })),
+    );
+    const err = await failGet();
+    expect(err.retryAfter).toBe(30);
+    expect(err.message).toBe('Сервер временно недоступен — попробуйте позже');
   });
 
   it('maps a bodyless 429 to a human message and still reads Retry-After', async () => {

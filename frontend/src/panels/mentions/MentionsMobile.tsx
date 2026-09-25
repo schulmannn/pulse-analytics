@@ -1,7 +1,7 @@
 import { useMentions, useMentionsArchive } from '@/api/queries';
-import { compareDdMm } from '@/lib/dates';
-import { fmt, ddmmDay } from '@/lib/format';
+import { dayKeyToTs, fmt, timeAxisFromDayKeys } from '@/lib/format';
 import { BarChart } from '@/components/BarChart';
+import { KpiValue } from '@/components/chartWidget/KpiValue';
 import { Skeleton } from '@/components/ui/skeleton';
 import type { Mentions as MentionsData } from '@/api/schemas';
 
@@ -62,9 +62,11 @@ export function MentionsMobile() {
         </p>
         {liveError && <p className="mb-4 text-sm text-destructive">{liveError}</p>}
         <button
+          type="button"
+          data-mobile-touch-target=""
           onClick={refresh}
           disabled={refreshing}
-          className="btn-pill bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+          className="btn-pill inline-flex min-h-11 items-center bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50 sm:min-h-0"
         >
           {refreshing ? 'Поиск…' : 'Загрузить упоминания'}
         </button>
@@ -97,9 +99,11 @@ export function MentionsMobile() {
           Сохранённый архив Telegram. Ручное обновление запускает живой поиск и расходует дневную квоту.
         </p>
         <button
+          type="button"
+          data-mobile-touch-target=""
           onClick={refresh}
           disabled={refreshing}
-          className="btn-pill shrink-0 border border-border bg-background px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-hover-row disabled:opacity-50"
+          className="btn-pill inline-flex min-h-11 shrink-0 items-center border border-border bg-background px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-hover-row disabled:opacity-50 sm:min-h-0"
         >
           {refreshing ? 'Обновление…' : 'Обновить'}
         </button>
@@ -117,15 +121,15 @@ export function MentionsMobile() {
       <div className="grid grid-cols-1 gap-px border-t border-border bg-border sm:grid-cols-3">
         <div className="bg-background p-5">
           <div className="text-xs tracking-wide text-muted-foreground">Упоминаний</div>
-          <div className="mt-2 text-3xl font-medium tabular-nums tracking-tight">{fmt.num(total)}</div>
+          <KpiValue size="compact" text={fmt.num(total)} className="mt-2" />
         </div>
         <div className="bg-background p-5">
           <div className="text-xs tracking-wide text-muted-foreground">Каналов</div>
-          <div className="mt-2 text-3xl font-medium tabular-nums tracking-tight text-ink2">{fmt.num(uniqueChannels)}</div>
+          <KpiValue size="compact" text={fmt.num(uniqueChannels)} className="mt-2  text-ink2" />
         </div>
         <div className="bg-background p-5">
           <div className="text-xs tracking-wide text-muted-foreground">Суммарный охват</div>
-          <div className="mt-2 text-3xl font-medium tabular-nums tracking-tight text-ink3">{fmt.kpi(totalViews)}</div>
+          <KpiValue size="compact" text={fmt.kpi(totalViews)} className="mt-2  text-ink3" />
         </div>
       </div>
 
@@ -206,26 +210,28 @@ export function MentionsMobile() {
   );
 }
 
-/** Slice the dd.mm-keyed archive by day count and build both chart presentations. Tolerant of both
-    «DD.MM» (live/archive) and «YYYY-MM-DD» (demo fixture) keys so the demo chart renders too. */
+/** Slice the day-keyed archive by day count and build both chart presentations. Tolerant of both
+    «DD.MM» (live/archive) and «YYYY-MM-DD» (demo fixture) keys so the demo chart renders too.
+    СОРТИРОВКА — по разобранному ключу (`dayKeyToTs`, epoch-ms с выводом года через Новый год),
+    подписи форматируются `fmt.day` уже ПОСЛЕ сортировки: одна форма («13 июл.») и для столбцов,
+    и для линии, а порядок серии не зависит от формата подписи. */
 function mentionsWindow(byDay: Record<string, number>, days: number) {
-  const norm = (key: string): string => {
-    // YYYY-MM-DD → DD.MM (demo fixture emits ISO days in the legacy by_day map).
-    const iso = key.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-    return iso ? `${iso[3]}.${iso[2]}` : key;
-  };
-  const entries = Object.entries(byDay).map(([k, v]) => [norm(k), v] as const);
-  entries.sort((a, b) => compareDdMm(a[0], b[0]));
+  const entries = Object.entries(byDay)
+    .map(([key, value]) => ({ ts: dayKeyToTs(key), value: value ?? 0 }))
+    .sort((a, b) => (a.ts ?? 0) - (b.ts ?? 0));
   const sliced = days === 0 ? entries : entries.slice(-days);
-  const dates = sliced.map((e) => e[0]);
-  const values = sliced.map((e) => e[1] ?? 0);
-  const titles = sliced.map((e) => `${ddmmDay(e[0])}: ${fmt.num(e[1] ?? 0)}`);
-  const axisLabels = [
-    ddmmDay(dates[0] ?? ''),
-    ddmmDay(dates[Math.floor(dates.length / 2)] ?? ''),
-    ddmmDay(dates[dates.length - 1] ?? ''),
+  const values = sliced.map((e) => e.value);
+  const labels = sliced.map((e) => fmt.day(e.ts));
+  const titles = sliced.map((e) => `${fmt.day(e.ts)}: ${fmt.num(e.value)}`);
+  // Трёхточечная свёртка ДЛЯ labels линии (прежний компакт-паттерн этой поверхности); настоящая
+  // ось букв короткого окна (проп axisLabels чартов) — weekAxis, по ключам самой серии.
+  const compactLabels = [
+    labels[0] ?? '',
+    labels[Math.floor(labels.length / 2)] ?? '',
+    labels[labels.length - 1] ?? '',
   ];
-  return { dates, values, titles, axisLabels };
+  const weekAxis = timeAxisFromDayKeys(sliced.map((e) => e.ts));
+  return { labels, values, titles, compactLabels, weekAxis };
 }
 
 /** «Упоминаний по дням» on the Mentions surface. It keeps its source-screen ChartSection. */
@@ -245,23 +251,23 @@ export function MentionsByDayWidget({ byDay, id, homeKey }: { byDay: Record<stri
             label: 'Столбцы',
             // No wrapper padding: the chart fills the measured tile body exactly, so an extra pt-*
             // here would push it past the fixed tile and grow an inner scrollbar.
-            render: <BarChart values={w.values} labels={w.dates} titles={w.titles} />,
+            render: <BarChart values={w.values} labels={w.labels} axisLabels={w.weekAxis} titles={w.titles} />,
           },
           {
             key: 'line',
             label: 'Линия',
-            render: <LineChart values={w.values} labels={w.axisLabels} titles={w.titles} yMin={0} />,
+            render: <LineChart values={w.values} labels={w.compactLabels} axisLabels={w.weekAxis} titles={w.titles} yMin={0} />,
           },
         ];
       }}
       expand={{
         renderExpanded: (days) => {
           const w = mentionsWindow(byDay, days);
-          return <LineChart values={w.values} labels={w.axisLabels} titles={w.titles} yMin={0} markAnomalies markExtremes />;
+          return <LineChart values={w.values} labels={w.compactLabels} axisLabels={w.weekAxis} titles={w.titles} yMin={0} markAnomalies markExtremes />;
         },
         renderExpandedBar: (days) => {
           const w = mentionsWindow(byDay, days);
-          return <BarChart values={w.values} labels={w.dates} titles={w.titles} />;
+          return <BarChart values={w.values} labels={w.labels} axisLabels={w.weekAxis} titles={w.titles} />;
         },
         statsFor: (days) => mentionsWindow(byDay, days).values,
       }}
@@ -284,8 +290,8 @@ export function MentionsWidgetBody({ viz }: { viz: WidgetViz }) {
 
   const w = mentionsWindow(archive.data?.by_day ?? {}, days);
   return viz === 'line'
-    ? <LineChart values={w.values} labels={w.axisLabels} titles={w.titles} yMin={0} />
-    : <BarChart values={w.values} labels={w.dates} titles={w.titles} />;
+    ? <LineChart values={w.values} labels={w.compactLabels} axisLabels={w.weekAxis} titles={w.titles} yMin={0} />
+    : <BarChart values={w.values} labels={w.labels} axisLabels={w.weekAxis} titles={w.titles} />;
 }
 
 function MentionsSkeletons() {

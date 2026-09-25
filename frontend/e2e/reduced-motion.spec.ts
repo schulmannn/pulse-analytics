@@ -4,7 +4,7 @@ import { bootDemo } from './helpers';
 
 /**
  * prefers-reduced-motion gate. Every animation in the app is either hand-gated (targeted
- * `animation: none` rules / framer useReducedMotion on the landing) or neutralised by the global
+ * `animation: none` rules / the landing's media-query gate) or neutralised by the global
  * safety net in index.css (0.01ms × 1 iteration). The observable invariant: with reduced motion
  * emulated, NOTHING is left running after the page settles — jiggle, shimmer, twinkle included.
  */
@@ -110,7 +110,7 @@ test('reduced motion: home edit mode works and does not jiggle', async ({ page }
   await expect(toggle).toHaveAttribute('aria-pressed', 'false');
 });
 
-test('reduced motion: public landing renders static (framer gated)', async ({ page }) => {
+test('reduced motion: public landing renders its CSS-native motion static', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   // Logged-out = an explicit 401 from the me endpoint (offline without the stub the proxy 500s and
   // the app rightly shows the error state, not the landing).

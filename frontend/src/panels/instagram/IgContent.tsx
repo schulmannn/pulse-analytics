@@ -2,7 +2,7 @@ import { useSearchParams } from 'react-router-dom';
 import type { IgData } from '@/lib/useIgData';
 import { CampaignsView } from '@/components/campaigns/CampaignsView';
 import { useMediaQuery } from '@/lib/useMediaQuery';
-import { cn } from '@/lib/utils';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { IgContentDesktop } from '@/panels/instagram/IgContentDesktop';
 import { IgContentMobile } from '@/panels/instagram/IgContentMobile';
 
@@ -27,34 +27,26 @@ export function IgContent({ ig }: { ig: IgData }) {
       { replace: true },
     );
 
-  const tabs = (
-    <div className="flex flex-wrap gap-1" role="tablist" aria-label="Раздел контента">
-      {([['posts', 'Публикации'], ['campaigns', 'Кампании']] as const).map(([key, label]) => (
-        <button
-          key={key}
-          type="button"
-          role="tab"
-          aria-selected={view === key}
-          onClick={() => setView(key)}
-          className={cn(
-            'btn-pill px-3 py-1 text-xs font-medium transition-colors',
-            view === key ? 'bg-primary/15 text-foreground' : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
-          )}
-        >
-          {label}
-        </button>
-      ))}
-    </div>
-  );
-
-  if (view === 'campaigns') {
-    return (
-      <div className="space-y-6">
-        {tabs}
+  return (
+    <Tabs
+      value={view}
+      onValueChange={(next) => setView(next as 'posts' | 'campaigns')}
+      className="space-y-6"
+    >
+      {/* Зеркало TG-«Контента»: тот же line-вариант второго уровня навигации — менять парой. */}
+      <TabsList aria-label="Раздел контента" variant="line" className="justify-start">
+        {([['posts', 'Публикации'], ['campaigns', 'Кампании']] as const).map(([key, label]) => (
+          <TabsTrigger key={key} value={key}>
+            {label}
+          </TabsTrigger>
+        ))}
+      </TabsList>
+      <TabsContent value="campaigns" className="mt-0">
         <CampaignsView />
-      </div>
-    );
-  }
-
-  return isDesktop ? <IgContentDesktop ig={ig} tabs={tabs} /> : <IgContentMobile ig={ig} tabs={tabs} />;
+      </TabsContent>
+      <TabsContent value="posts" className="mt-0">
+        {isDesktop ? <IgContentDesktop ig={ig} /> : <IgContentMobile ig={ig} />}
+      </TabsContent>
+    </Tabs>
+  );
 }
