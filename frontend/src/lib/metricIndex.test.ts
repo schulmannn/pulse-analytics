@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import ts from 'typescript';
+import { parseSync } from 'vite';
 import { describe, expect, it } from 'vitest';
 import { DRILL_KEYS } from '@/lib/kpiDerive';
 import {
@@ -53,41 +53,61 @@ const routed = METRIC_INDEX_ENTRIES.filter((entry) => entry.route != null);
 /** Литерал `const <name> = { ключ: строка | boolean, … }` из исходника. Так индекс сверяется с
  *  константами страниц и резолвера, не импортируя сами React-модули в node-окружение тестов:
  *  поменяли константу там — тест здесь краснеет. */
+/** Узел ESTree из `parseSync` (oxc внутри Vite). Компиляторного API у TypeScript 7 нет, поэтому
+ *  исходники разбирает парсер, который уже есть в сборке. */
+type AstNode = { type: string; start: number; end: number; [key: string]: unknown };
+
+const isNode = (value: unknown): value is AstNode =>
+  typeof value === 'object' && value !== null && typeof (value as { type?: unknown }).type === 'string';
+
+function walk(node: AstNode, visit: (node: AstNode) => void): void {
+  visit(node);
+  for (const [key, value] of Object.entries(node)) {
+    if (key === 'parent') continue;
+    if (Array.isArray(value)) for (const item of value) { if (isNode(item)) walk(item, visit); }
+    else if (isNode(value)) walk(value, visit);
+  }
+}
+
+function parseSource(file: string, source: string): AstNode {
+  const { program, errors } = parseSync(file, source);
+  if (errors.length > 0) throw new Error(`${file}: ${errors[0].message}`);
+  return program as unknown as AstNode;
+}
+
 function readConstObject(relPath: string, name: string): Record<string, string | boolean> {
   const file = fileURLToPath(new URL(relPath, import.meta.url));
-  const sourceFile = ts.createSourceFile(file, readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true);
+  const source = readFileSync(file, 'utf8');
   const hits: Array<Record<string, string | boolean>> = [];
-  const visit = (node: ts.Node): void => {
+  walk(parseSource(file, source), (node) => {
+    const id = node.id as AstNode | undefined;
+    const init = node.init as AstNode | null | undefined;
     if (
-      ts.isVariableDeclaration(node) &&
-      ts.isIdentifier(node.name) &&
-      node.name.text === name &&
-      node.initializer &&
-      ts.isObjectLiteralExpression(node.initializer)
+      node.type !== 'VariableDeclarator' ||
+      id?.type !== 'Identifier' ||
+      id.name !== name ||
+      init?.type !== 'ObjectExpression'
     ) {
-      const out: Record<string, string | boolean> = {};
-      for (const prop of node.initializer.properties) {
-        const init = ts.isPropertyAssignment(prop) ? prop.initializer : null;
-        const key = ts.isPropertyAssignment(prop) && (ts.isIdentifier(prop.name) || ts.isStringLiteral(prop.name))
-          ? prop.name.text
-          : null;
-        const value = init == null
-          ? undefined
-          : ts.isStringLiteral(init)
-            ? init.text
-            : init.kind === ts.SyntaxKind.TrueKeyword
-              ? true
-              : init.kind === ts.SyntaxKind.FalseKeyword
-                ? false
-                : undefined;
-        if (key == null || value === undefined) throw new Error(`${relPath} ${name}: не литерал — ${prop.getText()}`);
-        out[key] = value;
-      }
-      hits.push(out);
+      return;
     }
-    ts.forEachChild(node, visit);
-  };
-  visit(sourceFile);
+    const out: Record<string, string | boolean> = {};
+    for (const prop of init.properties as AstNode[]) {
+      const keyNode = prop.key as AstNode | undefined;
+      const valueNode = prop.type === 'Property' && !prop.computed ? (prop.value as AstNode) : null;
+      const key = keyNode?.type === 'Identifier'
+        ? (keyNode.name as string)
+        : keyNode?.type === 'Literal' && typeof keyNode.value === 'string'
+          ? keyNode.value
+          : null;
+      const raw = valueNode?.type === 'Literal' ? valueNode.value : undefined;
+      const value = typeof raw === 'string' || typeof raw === 'boolean' ? raw : undefined;
+      if (valueNode == null || key == null || value === undefined) {
+        throw new Error(`${relPath} ${name}: не литерал — ${source.slice(prop.start, prop.end)}`);
+      }
+      out[key] = value;
+    }
+    hits.push(out);
+  });
   if (hits.length !== 1) throw new Error(`${relPath}: ${name} найден ${hits.length} раз`);
   return hits[0];
 }
@@ -395,13 +415,11 @@ describe('metricIndex — модуль общего чанка', () => {
   const source = readFileSync(file, 'utf8');
 
   it('не содержит текстов для людей: ни одной кириллической строки вне комментариев', () => {
-    const sourceFile = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
     const literals: string[] = [];
-    const visit = (node: ts.Node): void => {
-      if (ts.isStringLiteralLike(node) || ts.isTemplateLiteralToken(node)) literals.push(node.text);
-      ts.forEachChild(node, visit);
-    };
-    visit(sourceFile);
+    walk(parseSource(file, source), (node) => {
+      if (node.type === 'Literal' && typeof node.value === 'string') literals.push(node.value);
+      if (node.type === 'TemplateElement') literals.push((node.value as { cooked: string | null; raw: string }).cooked ?? '');
+    });
     // Сам сканер работает: ключи маршрутов в выборке есть.
     expect(literals).toContain('ms-revenue');
     expect(literals.filter((text) => /[А-Яа-яЁё]/.test(text))).toEqual([]);
