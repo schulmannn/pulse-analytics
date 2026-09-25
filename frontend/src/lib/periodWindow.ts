@@ -19,6 +19,11 @@
  *
  * Ожидания закреплены зеркальными векторами test/fixtures/period-vectors.json: их же читает
  * серверный node --test, поэтому клиент и сервер не могут разойтись в окне и прошлом окне.
+ *
+ * Контракт U01 здесь ещё не весь — остальное приезжает со своими первыми потребителями: maxDays у
+ * resolvePeriod и хуки usePreviousPeriod/readPrevious — 3.6/3.7; bucketKey/weekdayOf/hourOf и
+ * векторы корзин и дня недели — 3.10 (зона — OD-8); useCardPeriodLabel — 3.11. Пока векторы держат
+ * окно, прошлое окно, «год назад», грануляцию и покрытие, но НЕ корзины и день недели.
  */
 
 export type PeriodDays = 7 | 30 | 90 | 0;
@@ -176,8 +181,10 @@ export function baselineWindow(window: PeriodWindow, mode: BaselineMode): Period
 }
 
 /** How the archive covers the previous window: `full` — compared honestly; `partial` — the archive
-    starts inside it; `none` — it starts after it (or nothing is dated); null — «Всё» has no baseline. */
-export type BaselineCoverage = 'full' | 'partial' | 'none' | null;
+    starts inside it; `none` — it starts after it; `undated` — no row has a usable day, so the window
+    cannot be applied honestly and the rows come back as they are (splitCalendarRows' windowable=false);
+    null — «Всё» has no baseline. */
+export type BaselineCoverage = 'full' | 'partial' | 'none' | 'undated' | null;
 
 export interface WindowRows<T> {
   current: T[];
@@ -189,7 +196,9 @@ export interface WindowRows<T> {
 /**
  * Current and previous-window rows of a day-keyed series. The previous window is compared only when
  * the archive reaches its first day (the splitCalendarRows rule): a half-covered baseline would
- * inflate the delta. Rows with a malformed day are skipped; «Всё» returns the rows untouched.
+ * inflate the delta. Rows with a malformed day are skipped; «Всё» returns the rows untouched. With no
+ * dated row at all a bounded window returns the rows untouched too, marked `undated` — as
+ * splitCalendarRows does, rather than a fabricated empty series.
  */
 export function splitWindowRows<T>(
   rows: T[],
@@ -202,9 +211,10 @@ export function splitWindowRows<T>(
     const day = dayOf(row, index);
     return isDayKey(day) ? [{ row, day }] : [];
   });
+  if (dated.length === 0) return { current: rows, previous: null, coverage: 'undated' };
   const current = dated.filter(({ day }) => day >= from && day <= to).map(({ row }) => row);
   const base = baselineWindow(window, 'prev');
-  if (!base?.from || !base.to || dated.length === 0) return { current, previous: null, coverage: 'none' };
+  if (!base?.from || !base.to) return { current, previous: null, coverage: 'none' };
   const { from: baseFrom, to: baseTo } = base;
   const earliest = dated.reduce((min, { day }) => (day < min ? day : min), dated[0].day);
   if (earliest <= baseFrom) {

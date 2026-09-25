@@ -20,6 +20,7 @@ import {
   splitCalendarRows,
   splitWindowRows,
   yearAgoDay,
+  type BaselineCoverage,
   type DayZone,
   type Grain,
   type PeriodWindow,
@@ -57,7 +58,7 @@ interface Vectors {
     days: string[];
     current: string[];
     previous: string[] | null;
-    coverage: 'full' | 'partial' | 'none' | null;
+    coverage: BaselineCoverage;
   }>;
 }
 
@@ -205,11 +206,11 @@ describe.each(TIMEZONES)('period vectors при TZ=%s', (tz) => {
   });
 
   it('прежний splitCalendarRows на полных локальных днях отбирает те же строки', () => {
+    let undated = 0;
     for (const v of V.rows) {
       const { from, to } = v.window;
-      const dated = v.days.filter((day) => isDayKey(day));
-      // Разные по замыслу ветки: у «Всё» и у ряда без дат прежняя функция отдаёт строки как есть.
-      if (!from || !to || dated.length === 0) continue;
+      // У «Всё» прежняя функция окна не получает вовсе (null) — эту ветку сверять не с чем.
+      if (!from || !to) continue;
       const split = splitCalendarRows(
         v.days,
         { from: periodDateTimestamp(from), to: endOfLocalDay(periodDateTimestamp(to)) },
@@ -219,7 +220,11 @@ describe.each(TIMEZONES)('period vectors при TZ=%s', (tz) => {
         current: v.current,
         previous: v.previous,
       });
+      // Ряд без единой даты: обе функции отдают строки как есть (windowable=false ↔ coverage 'undated').
+      expect(split.windowable, v.name).toBe(v.coverage !== 'undated');
+      if (v.coverage === 'undated') undated += 1;
     }
+    expect(undated).toBeGreaterThan(0);
   });
 });
 
