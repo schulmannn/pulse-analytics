@@ -92,15 +92,10 @@ export function strideEvery<T>(arr: T[], max: number): T[] {
   return out;
 }
 
-/** Индексы прореживания, согласованные с strideEvery (та же схема шага), чтобы X совпадал у линий. */
-export function pickIndexes(total: number, max: number): number[] {
-  if (total <= max) return Array.from({ length: total }, (_, i) => i);
-  const step = Math.ceil(total / max);
-  const out: number[] = [];
-  for (let i = 0; i < total; i += step) out.push(i);
-  if (out[out.length - 1] !== total - 1) out.push(total - 1);
-  return out;
-}
+/** Индексы прореживания, согласованные с strideEvery (та же схема шага), чтобы X совпадал у линий.
+    Живут в lib/downsample рядом с LTTB: их берут и не-МС модули (lib/chartSeries), которым нельзя
+    тянуть за собой msPeriod с React. Реэкспорт сохраняет прежние импорты. */
+export { pickIndexes } from '@/lib/downsample';
 
 /**
  * Точки для АГРЕГАТНОЙ линии/столбцов одной метрики. Для выручки/заказов — вся дозаполненная сетка
