@@ -1,14 +1,17 @@
 import { expect, test, type Page } from '@playwright/test';
+import { bootDemo } from './helpers';
 
 /**
  * Отзыв токена МойСклада/Метрики — «Переподключить», а не выход на /login и не «Повторить».
  *
  * Сервер отдаёт отзыв сегодня 401 + ms/ym_token_revoked, а после единого sendSourceError — 409 +
- * source_reauth. Обе формы проверяются на всех поверхностях источника: Обзор, страница метрики и
- * виджет Главной. Контроль: 401 без кода — истёкшая сессия Atlavue — по-прежнему ведёт на /login.
+ * source_reauth. Обе формы проверяются на всех поверхностях источника: Обзор, страница метрики,
+ * выгрузка CSV и виджет Главной. Контроль: 401 без кода — истёкшая сессия Atlavue — по-прежнему
+ * ведёт на /login.
  *
  * Boot БЕЗ pulse_demo: в демо 401-редирект выключен целиком, и спек прошёл бы вхолостую. Весь API
- * мокается роутами (образец ig-reauth.spec).
+ * мокается роутами (образец ig-reauth.spec). Исключение — выгрузка CSV: она идёт прямым apiGet мимо
+ * кэша, 401-редирект её не касается ни в демо, ни без него, а листинг сегмента даёт МС-стаб bootDemo.
  */
 
 type Form = 'legacy' | 'unified' | 'session';
@@ -110,6 +113,29 @@ for (const form of ['legacy', 'unified'] as const) {
     await expect(page.getByRole('link', { name: 'Переподключить' }).first()).toHaveAttribute('href', '/connect?source=moysklad');
     await expect(page).toHaveURL(/\/metrics\/ms-revenue/);
     await expect(page.getByRole('button', { name: 'Повторить' })).toHaveCount(0);
+  });
+
+  // Выгрузка CSV сегмента ходит прямым apiGet мимо кэша листинга: листинг уже на экране, а токен
+  // отзывают между ним и кликом. Ошибка выгрузки — тоже ошибка data-роута МойСклада.
+  test(`${form}: выгрузка CSV сегмента RFM — «Переподключить», а не «Повторить»`, async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== 'desktop-1440', 'MoySklad analytics is desktop-first');
+    await bootDemo(page, '/metrics/ms-rfm?segment=champions', { theme: 'dark' });
+    await expect(page.getByText('300 покупателей')).toBeVisible();
+    // Отказывает только выгрузка (свой limit=200); листинг сегмента (limit=50) пришёл раньше.
+    await page.route(/\/api\/ms\/rfm-customers\?(?:.*&)?limit=200(?:&|$)/, (route) => {
+      const { status, body } = revoked(form, 'ms');
+      return route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
+    });
+
+    await page.getByRole('button', { name: 'Выгрузить CSV' }).click();
+    await expect(page.getByText('Токен МойСклада отозван')).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Переподключить', exact: true })).toHaveAttribute(
+      'href',
+      '/connect?source=moysklad',
+    );
+    await expect(page.getByText('Не удалось выгрузить CSV')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Повторить' })).toHaveCount(0);
+    await expect(page).toHaveURL(/\/metrics\/ms-rfm/);
   });
 
   test(`${form}: страница метрики Метрики — «Переподключить Метрику»`, async ({ page }, testInfo) => {

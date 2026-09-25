@@ -24,23 +24,20 @@ const PUBLIC_PATHS = new Set(['/login', '/invite']);
  * показывает «Переподключить» (он читает api/sourceErrors.sourceErrorKind). Редирект на /login
  * выдавал отзыв токена за разлогин и прятал эту кнопку — источник становился недоступен совсем.
  * У Instagram та же ситуация отдаётся 409 `ig_reauth` и сюда не доходит.
+ *
+ * Allow-list — точные коды, не пространство имён: легаси-формы отзыва плюс `source_reauth` единого
+ * sendSourceError (он отдаёт отзыв 409 и сюда доходить не должен, код в списке — страховка на
+ * переход). Каждый код списка sourceErrorKind узнаёт как 'reauth' (тест в api/sourceErrors.test):
+ * иначе такой 401 уже не уводил бы на /login, но и «Переподключить» не давал — остался бы «Повторить»,
+ * который вернёт тот же отказ. Прочие `source_*` (недоступность, «не подключён») с 401 не приходят —
+ * сервер 401 для ошибок источника не отдаёт; если придут, это прежний выход на /login, а не молча
+ * проглоченный отказ. Новый код добавляется сюда и в словарь sourceErrorKind.
  */
-const LEGACY_SOURCE_TOKEN_CODES: ReadonlySet<string> = new Set(['ms_token_revoked', 'ym_token_revoked']);
+export const SOURCE_ACCESS_CODES: ReadonlySet<string> = new Set(['ms_token_revoked', 'ym_token_revoked', 'source_reauth']);
 
-/**
- * Пространство имён `source_*` зарезервировано под ошибки источников единого sendSourceError
- * (`source_reauth`, `source_unavailable`, `source_not_connected`). Сессию приложения такими кодами
- * сервер не помечает: 401 requireAuth приходит без кода.
- */
-const SOURCE_CODE_NAMESPACE = /^source_[a-z0-9]+(?:_[a-z0-9]+)*$/;
-
-/**
- * Allow-list: 401 с таким кодом — отказ источника, а не истёкшая сессия. Совпадение точное:
- * легаси-коды списком, новые — только в snake_case-пространстве `source_`. 401 без кода и с любым
- * другим кодом по-прежнему ведёт на /login.
- */
+/** 401 с таким кодом — отказ источника, а не истёкшая сессия. 401 без кода и с любым другим кодом по-прежнему ведёт на /login. */
 export function isSourceAccessCode(code: unknown): code is string {
-  return typeof code === 'string' && (LEGACY_SOURCE_TOKEN_CODES.has(code) || SOURCE_CODE_NAMESPACE.test(code));
+  return typeof code === 'string' && SOURCE_ACCESS_CODES.has(code);
 }
 
 function hasSourceAccessCode(error: unknown): boolean {

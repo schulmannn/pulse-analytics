@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { ApiError, apiGet } from '@/api/client';
-import { isSourceAccessCode } from '@/lib/authRedirect';
+import { isSourceAccessCode, SOURCE_ACCESS_CODES } from '@/lib/authRedirect';
 import { sourceErrorKind } from './sourceErrors';
 
 const apiError = (status: number, code?: string, extra: { retryAfter?: number; network?: boolean } = {}) => {
@@ -82,7 +82,10 @@ describe('sourceErrorKind: прочие состояния источника', 
 
 describe('allow-list 401-редиректа и словарь состояний согласованы', () => {
   it('всякий 401, который не разлогинивает, экран источника узнаёт как отзыв', () => {
-    for (const code of ['ms_token_revoked', 'ym_token_revoked', 'source_reauth']) {
+    // Весь список, а не выборка: код, пропущенный мимо /login, но незнакомый словарю, оставил бы
+    // экран без «Переподключить» — с «Повторить», который вернёт тот же отказ.
+    expect(SOURCE_ACCESS_CODES.size).toBeGreaterThan(0);
+    for (const code of SOURCE_ACCESS_CODES) {
       expect(isSourceAccessCode(code), code).toBe(true);
       expect(sourceErrorKind(apiError(401, code)), code).toBe('reauth');
     }

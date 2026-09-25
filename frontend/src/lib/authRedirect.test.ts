@@ -4,6 +4,7 @@ import { ApiError, apiGet } from '@/api/client';
 import {
   isSourceAccessCode,
   redirectBrowserOnUnauthorized,
+  SOURCE_ACCESS_CODES,
   shouldRedirectOnUnauthorized,
 } from './authRedirect';
 
@@ -67,17 +68,16 @@ describe('shouldRedirectOnUnauthorized', () => {
     ).toBe(false);
   });
 
-  it('does not log out on a 401 carrying a unified source_* code (sendSourceError namespace)', () => {
-    // Единый sendSourceError отдаёт отзыв 409 source_reauth и сюда не доходит, но если код из
-    // пространства source_* всё-таки приедет с 401 — это отказ источника, а не наша сессия.
-    for (const code of ['source_reauth', 'source_unavailable', 'source_not_connected']) {
-      expect(shouldRedirectOnUnauthorized({ status: 401, code }, '/sklad', false), code).toBe(false);
-      expect(shouldRedirectOnUnauthorized({ status: 401, code }, '/home', false), code).toBe(false);
-    }
+  it('does not log out on a 401 carrying source_reauth of the unified sendSourceError', () => {
+    // Единый sendSourceError отдаёт отзыв 409 source_reauth и сюда не доходит, но если этот код
+    // всё-таки приедет с 401 — это отказ источника, а не наша сессия.
+    expect(shouldRedirectOnUnauthorized({ status: 401, code: 'source_reauth' }, '/sklad', false)).toBe(false);
+    expect(shouldRedirectOnUnauthorized({ status: 401, code: 'source_reauth' }, '/home', false)).toBe(false);
     // Будущая форма отзыва — 409: редиректа не было и нет.
     expect(shouldRedirectOnUnauthorized({ status: 409, code: 'source_reauth' }, '/sklad', false)).toBe(false);
-    // Пространство — точное: обрезки и похожие коды не выключают выход по истёкшей сессии.
-    for (const code of ['source', 'source_', 'sourcereauth', 'Source_reauth', 'x_source_reauth']) {
+    // Список — точные коды, а не пространство source_*: прочие коды источника с 401 (их сервер не
+    // отдаёт) и похожие обрезки не выключают выход по истёкшей сессии.
+    for (const code of ['source_unavailable', 'source_not_connected', 'source_token_expired', 'source', 'source_', 'sourcereauth', 'Source_reauth', 'x_source_reauth']) {
       expect(shouldRedirectOnUnauthorized({ status: 401, code }, '/sklad', false), code).toBe(true);
     }
   });
@@ -167,16 +167,13 @@ describe('shouldRedirectOnUnauthorized', () => {
 });
 
 describe('isSourceAccessCode: allow-list глобального 401-редиректа', () => {
-  it('легаси-коды списком и пространство source_*', () => {
-    expect(isSourceAccessCode('ms_token_revoked')).toBe(true);
-    expect(isSourceAccessCode('ym_token_revoked')).toBe(true);
-    expect(isSourceAccessCode('source_reauth')).toBe(true);
-    expect(isSourceAccessCode('source_unavailable')).toBe(true);
-    expect(isSourceAccessCode('source_not_connected')).toBe(true);
+  it('легаси-коды отзыва и source_reauth — ровно список SOURCE_ACCESS_CODES', () => {
+    expect([...SOURCE_ACCESS_CODES].sort()).toEqual(['ms_token_revoked', 'source_reauth', 'ym_token_revoked']);
+    for (const code of SOURCE_ACCESS_CODES) expect(isSourceAccessCode(code), code).toBe(true);
   });
 
-  it('совпадение точное: без кода, чужой код, обрезок и не-snake_case — не источник', () => {
-    for (const code of [undefined, null, 42, '', 'csrf', 'ig_token_revoked', 'ig_reauth', 'source', 'source_', 'sourcereauth', 'Source_reauth', 'source_Reauth', 'source__reauth', 'source_reauth_', ' source_reauth', 'x_source_reauth']) {
+  it('совпадение точное: без кода, чужой код, другой source_*, обрезок и не-snake_case — не источник', () => {
+    for (const code of [undefined, null, 42, '', 'csrf', 'ig_token_revoked', 'ig_reauth', 'ms_forbidden', 'source_unavailable', 'source_not_connected', 'source_token_expired', 'source', 'source_', 'sourcereauth', 'Source_reauth', 'source_Reauth', 'source__reauth', 'source_reauth_', ' source_reauth', 'x_source_reauth']) {
       expect(isSourceAccessCode(code), String(code)).toBe(false);
     }
   });

@@ -133,19 +133,29 @@ describe('SourceErrorState: всё остальное — прежний ErrorSt
 });
 
 // SOURCE-КОНТРАКТ (образец RusenderErrorState.test): каждая поверхность МойСклада и Метрики рисует
-// провал ЗАПРОСА через SourceErrorState. Голый ErrorState с `.error` запроса снова спрятал бы
-// «Переподключить» за «Повторить» — а при смене формы отзыва на 409 никто бы этого не заметил.
-const PANEL_DIRS = ['../panels/sklad', '../panels/metrika'] as const;
+// провал data-роута через SourceErrorState. Голый ErrorState снова спрятал бы «Переподключить» за
+// «Повторить» — а при смене формы отзыва на 409 никто бы этого не заметил. Папка задаёт источник:
+// `source="ym"` в теле МойСклада повёл бы отзыв его токена на /connect Метрики. `error=` и `reason=`
+// — одна и та же ошибка: иначе состояние выбирается по одному запросу, а текст берётся из другого.
+const PANEL_DIRS = [
+  ['../panels/sklad', 'ms'],
+  ['../panels/metrika', 'ym'],
+] as const;
 
 describe('Поверхности МойСклада и Метрики разбирают ошибку запроса через sourceErrorKind', () => {
-  for (const dir of PANEL_DIRS) {
+  for (const [dir, network] of PANEL_DIRS) {
     const url = new URL(`${dir}/`, import.meta.url);
     const files = readdirSync(fileURLToPath(url)).filter((file) => file.endsWith('.tsx') && !file.includes('.test.'));
     for (const file of files) {
       it(`${dir.replace('../', '')}/${file}`, () => {
         const source = readFileSync(fileURLToPath(new URL(file, url)), 'utf8');
-        const bare = [...source.matchAll(/<ErrorState\b[\s\S]*?\/>/g)].map((m) => m[0]);
-        expect(bare.filter((block) => /\w\.error\b/.test(block)), 'ErrorState с ошибкой запроса').toEqual([]);
+        expect(source.match(/<ErrorState\b/g) ?? [], 'голый ErrorState').toEqual([]);
+        for (const [block] of source.matchAll(/<SourceErrorState\b[\s\S]*?\/>/g)) {
+          expect(block, 'источник папки').toContain(`source="${network}"`);
+          const error = /\serror=\{([\w.]+)\}/.exec(block)?.[1];
+          expect(error, `error= ошибки запроса в\n${block}`).toBeDefined();
+          expect(block, 'reason= из той же ошибки').toMatch(new RegExp(`\\sreason=\\{${(error ?? '').replace(/\./g, '\\.')}\\b`));
+        }
       });
     }
   }

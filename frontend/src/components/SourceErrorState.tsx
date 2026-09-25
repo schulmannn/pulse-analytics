@@ -60,6 +60,10 @@ type SourceErrorStateProps = ComponentProps<typeof ErrorState> & {
  * вместо «Повторить», который вернёт тот же отказ, — причина и путь наружу. Раскладка та же:
  * `compact`/`size`/`className` переходят в EmptyState, резерв высоты у них общий. Любая другая
  * ошибка — прежний ErrorState со всеми переданными пропсами.
+ *
+ * Временный носитель (фаза 1): ACCESS_COPY и выбор состояния здесь — ровно то, что U04 отдаёт
+ * errorCopyOf/sourceAccessOf (фаза 4.3). 4.3 заменяет этот компонент и переносит тексты туда, а не
+ * заводит вторую таблицу текстов доступа рядом. Пока он знает только МойСклад и Метрику.
  */
 export function SourceErrorState({ source, error, ...errorProps }: SourceErrorStateProps) {
   const kind = sourceErrorKind(error);
