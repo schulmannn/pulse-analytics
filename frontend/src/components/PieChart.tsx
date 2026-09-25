@@ -5,7 +5,7 @@ import { formatShare } from '@/lib/breakdownShare';
 import { observeSize } from '@/lib/observeSize';
 import { useMorphValues } from '@/lib/useMorphValues';
 import { ChartTooltip } from '@/components/ChartTooltip';
-import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
+import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/chartWidget/contexts';
 
 interface PieChartProps {
   values: number[];

@@ -1,6 +1,6 @@
 import { useContext, useState } from 'react';
 import { cn } from '@/lib/utils';
-import { ChartExpandedContext } from '@/components/ExpandableChart';
+import { ChartExpandedContext } from '@/components/chartWidget/contexts';
 import {
   DropdownMenu,
   DropdownMenuContent,

@@ -19,7 +19,7 @@ import {
   type CdekBreakdownDim,
 } from '@/panels/cdek/CdekFilterRail';
 import { LineChart } from '@/components/LineChart';
-import { ChartExpandedContext, WidgetTargetContext } from '@/components/ExpandableChart';
+import { ChartExpandedContext, WidgetTargetContext } from '@/components/chartWidget/contexts';
 import { BarChart } from '@/components/BarChart';
 import { ShareRows } from '@/components/ShareRows';
 import { SegmentedControl } from '@/components/SegmentedControl';

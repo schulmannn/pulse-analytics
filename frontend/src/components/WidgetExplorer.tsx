@@ -3,7 +3,7 @@ import { WidgetConfigControls } from '@/components/ConfigEditDialog';
 import { WidgetBody } from '@/components/ConfigWidget';
 import { WidgetErrorBoundary } from '@/components/WidgetErrorBoundary';
 import { Button } from '@/components/ui/button';
-import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
+import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/chartWidget/contexts';
 import { MetricBackLink } from '@/components/metric/shared';
 import { ChannelScope } from '@/lib/channel-context';
 import { editorSpec } from '@/lib/widgetCapabilities';

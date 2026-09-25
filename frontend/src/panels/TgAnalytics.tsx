@@ -18,7 +18,6 @@ import { SegmentedControl } from '@/components/SegmentedControl';
 import { pctDelta } from '@/lib/delta';
 import { EmptyState } from '@/components/EmptyState';
 import {
-  calendarWindowForDays,
   calendarWindowForPeriod,
   splitCalendarRows,
   useWidgetPeriod,
@@ -70,7 +69,7 @@ interface GraphSeriesOpts {
   includeToday?: boolean;
 }
 
-/** Rich-expand windowing for a graphs (daily-flow) series over a CALENDAR window (`win`, epoch ms;
+/** Windowing for a graphs (daily-flow) series over a CALENDAR window (`win`, epoch ms;
     `null` = «Всё»), with ms-timestamp labels + RU tooltips. Windowing by date — not by slicing the
     last N points — is what makes the series honour the page top bar (including a custom «Свой»
     range) and show the true current window even when the archive is stale or gappy. Points whose
@@ -259,7 +258,7 @@ function deriveTgAnalytics(
 
   // 6) Views & reposts — two separate widgets (daily FLOWS, so zero-based bars are honest).
   // (The subscriber-LEVEL «Рост подписчиков» card lived here; removed as a duplicate — the level
-  // trend is «История подписчиков» (full archive + rich explorer) and the daily net is «Чистый
+  // trend is «История подписчиков» (full archive, drill to /metrics/subscribers) and the daily net is «Чистый
   // прирост подписчиков» below, so a third level+delta card only repeated both.)
   const interGroup = graphs?.interactions;
   const interSeries = interGroup?.series ?? [];
@@ -1064,10 +1063,10 @@ export function TgAnalytics({
           </ChartSection>
         )}
         {/* Дубль-развязка (аудит 5.1): «Просмотры по дням» (views_summary, фикс-14д + ghost) и
-            «Просмотры» (graphs-серия, rich expand/grain) показывали одни и те же дневные просмотры
+            «Просмотры» (graphs-серия, грануляция) показывали одни и те же дневные просмотры
             на каналах с broadcast-статистикой. Теперь эта карточка — ЧЕСТНЫЙ FALLBACK только для
             каналов без graphs (мелкие/QR: views_summary есть, статистики нет); на больших остаётся
-            один rich «Просмотры», а сравнение периодов живёт на метрик-странице просмотров. */}
+            один graphs-«Просмотры», а сравнение периодов живёт на метрик-странице просмотров. */}
         {inGroup('dynamics') && !viewSeries && vbdLabels.length >= 2 && (
           <ChartSection
             title="Просмотры по дням"
@@ -1125,21 +1124,6 @@ export function TgAnalytics({
             title={ruSeriesName(viewSeries.name) || 'Просмотры'}
             defaultSize="half"
             drillTo="/metrics/views"
-            // Rich explorer (steep): «Развернуть» grows 1М/3М/6М/Всё pills, a line↔bar toggle and a
-            // Мин/Макс/Среднее/Сумма strip — windowing the full graphs series the inline card can't.
-            // Линия развёрнутого вида капается (capLineSeries); бары/статы — полное окно.
-            expand={{
-              grainable: true,
-              renderExpanded: (days, grain) => {
-                const w = capLineSeries(windowGraphSeries(viewSeries.values, interGroup.x, calendarWindowForDays(days), 'просмотров', { grain }));
-                return <LineChart values={w.values} labels={w.labels} axisLabels={w.axisLabels} titles={w.titles} markAnomalies markExtremes />;
-              },
-              renderExpandedBar: (days, grain) => {
-                const w = windowGraphSeries(viewSeries.values, interGroup.x, calendarWindowForDays(days), 'просмотров', { grain });
-                return <BarChart values={w.values} labels={w.labels} axisLabels={w.axisLabels} titles={w.titles} />;
-              },
-              statsFor: (days, grain) => windowGraphSeries(viewSeries.values, interGroup.x, calendarWindowForDays(days), 'просмотров', { grain }).values,
-            }}
             seriesOptions
             periodControl
             variants={viewsVariants}
@@ -1151,18 +1135,6 @@ export function TgAnalytics({
             title={ruSeriesName(shareSeries.name) || 'Репосты'}
             defaultSize="half"
             drillTo="/metrics/forwards"
-            expand={{
-              grainable: true,
-              renderExpanded: (days, grain) => {
-                const w = capLineSeries(windowGraphSeries(shareSeries.values, interGroup.x, calendarWindowForDays(days), 'репостов', { grain }));
-                return <LineChart values={w.values} labels={w.labels} axisLabels={w.axisLabels} titles={w.titles} markAnomalies markExtremes />;
-              },
-              renderExpandedBar: (days, grain) => {
-                const w = windowGraphSeries(shareSeries.values, interGroup.x, calendarWindowForDays(days), 'репостов', { grain });
-                return <BarChart values={w.values} labels={w.labels} axisLabels={w.axisLabels} titles={w.titles} />;
-              },
-              statsFor: (days, grain) => windowGraphSeries(shareSeries.values, interGroup.x, calendarWindowForDays(days), 'репостов', { grain }).values,
-            }}
             seriesOptions
             periodControl
             variants={sharesVariants}

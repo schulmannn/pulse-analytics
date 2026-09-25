@@ -29,7 +29,7 @@ import { ChartSection } from '@/components/ChartWidget';
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
 import { Breakdown, type BreakdownColumns } from '@/components/Breakdown';
-import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
+import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/chartWidget/contexts';
 import { DeltaPill } from '@/components/DeltaPill';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { EmptyState } from '@/components/EmptyState';

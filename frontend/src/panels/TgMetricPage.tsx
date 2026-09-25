@@ -6,7 +6,7 @@ import { ChartSection as ChartWidget } from '@/components/ChartWidget';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { PeriodChips } from '@/components/PeriodChips';
 import { SourceIdentity } from '@/components/SourceIdentity';
-import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
+import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/chartWidget/contexts';
 import { Breakdown, type BreakdownColumns } from '@/components/Breakdown';
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';

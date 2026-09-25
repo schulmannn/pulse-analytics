@@ -1,5 +1,5 @@
 import { useContext } from 'react';
-import { ExpandedChartHeightContext } from '@/components/ExpandableChart';
+import { ExpandedChartHeightContext } from '@/components/chartWidget/contexts';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 

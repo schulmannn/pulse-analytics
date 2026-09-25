@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { observeSize } from '@/lib/observeSize';
-import { ExpandedChartHeightContext } from '@/components/ExpandableChart';
+import { ExpandedChartHeightContext } from '@/components/chartWidget/contexts';
 import { cn } from '@/lib/utils';
 
 /**

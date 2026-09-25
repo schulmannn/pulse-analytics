@@ -56,11 +56,13 @@ export const ConfigWidget = memo(function ConfigWidget({ config, homeKey }: { co
   const { network: sourceNetwork, channelId: effectiveSource } = useWidgetSourceChannel(config, {
     pinned: !!homeKey,
   });
-  // Drilldown (steep #9): only the six core TG metrics have a metric page (/metrics/:drillKey), so
-  // only those cards' hero value + chart points navigate. Everything else (IG, breakdowns, legacy)
-  // has no page → no drill. A card pinned to ДРУГОЙ канал (в т.ч. авто-пин Главной) is not
-  // drilled: the metric page reads the global switcher channel, so drilling would silently show
-  // the wrong channel's data; пин, совпадающий с активным каналом, дриллится как раньше.
+  // Drilldown (steep #9): the hero value + chart points navigate only where the catalog declares a
+  // target — `drillKey` for the six core TG metrics (/metrics/:drillKey) and `drillTo` for МойСклад/
+  // Метрика (their section, /sklad and /metrika). IG (its metric pages exist but the catalog names
+  // none), breakdowns and legacy composites declare nothing → no drill. A card pinned to ДРУГОЙ
+  // канал (в т.ч. авто-пин Главной) is not drilled: the metric page reads the global switcher
+  // channel, so drilling would silently show the wrong channel's data; пин, совпадающий с активным
+  // каналом, дриллится как раньше.
   // Previews and the explorer sandbox never pass onDrill, so they stay static regardless.
   const drillKey = metric?.drillKey;
   // drillTo — absolute-path drill для метрик без страницы /metrics/:drillKey (МС → /sklad);

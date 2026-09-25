@@ -4,7 +4,7 @@ import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { WidgetConfigControls } from '@/components/ConfigEditDialog';
 import { WidgetBody } from '@/components/ConfigWidget';
 import { WidgetErrorBoundary } from '@/components/WidgetErrorBoundary';
-import { ExpandedChartHeightContext } from '@/components/ExpandableChart';
+import { ExpandedChartHeightContext } from '@/components/chartWidget/contexts';
 import { ChannelScope } from '@/lib/channel-context';
 import { editorSpec } from '@/lib/widgetCapabilities';
 import { getMetric } from '@/lib/widgetMetrics';

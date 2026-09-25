@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { SwatchButton } from '@/components/ui/swatch-button';
 import { ChannelScope } from '@/lib/channel-context';
-import { ExpandedChartHeightContext } from '@/components/ExpandableChart';
+import { ExpandedChartHeightContext } from '@/components/chartWidget/contexts';
 import { DEFAULT_WIDGET_DAYS } from '@/lib/period';
 import type { PeriodDays } from '@/lib/period';
 import { PERIOD_PRESETS } from '@/lib/periodWindow';

@@ -1,10 +1,10 @@
 {
-  "total": 1154,
+  "total": 1152,
   "rules": {
     "lint/complexity/noImportantStyles": 7,
     "lint/complexity/noUselessCatch": 1,
     "lint/complexity/noUselessEscapeInRegex": 1,
-    "lint/complexity/noUselessFragments": 3,
+    "lint/complexity/noUselessFragments": 1,
     "lint/complexity/noUselessSwitchCase": 3,
     "lint/complexity/useOptionalChain": 381,
     "lint/correctness/noUnusedFunctionParameters": 35,

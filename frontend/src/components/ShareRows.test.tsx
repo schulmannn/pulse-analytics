@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { ExpandedChartHeightContext } from './ExpandableChart';
+import { ExpandedChartHeightContext } from './chartWidget/contexts';
 import { RadialShare } from './RadialShare';
 import { ShareRows, ShareTrack } from './ShareRows';
 

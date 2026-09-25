@@ -16,7 +16,7 @@ import {
   chartControlAriaLabel,
   nextChartControlIndex,
 } from '@/lib/chartOverlayControl';
-import { ChartExpandedContext, ChartRefLinesContext, ExpandedChartHeightContext, WidgetTargetContext } from '@/components/ExpandableChart';
+import { ChartExpandedContext, ExpandedChartHeightContext, WidgetTargetContext } from '@/components/chartWidget/contexts';
 import { clampTargetToDomain, targetTooltipRow } from '@/lib/targetDomain';
 
 interface BarChartProps {
@@ -82,10 +82,10 @@ interface BarChartProps {
    * hero-карточки, референс Mercury Insights). `label` идёт в `<title>` штриха, а не на полотно:
    * почему — см. `printed` у RefMarker.
    *
-   * Третий повод для такой линии и первый, приходящий ПРОПОМ: цель виджета живёт в
-   * `WidgetTargetContext`, «Мин/Макс/Среднее» разворота — в `ChartRefLinesContext`, и оба
-   * контекста ставит оболочка карточки, а не тело. Среднее знает только тело (оно считает его по
-   * тому же окну, из которого взяло столбцы), поэтому ему нужен обычный проп.
+   * Второй повод для такой линии и первый, приходящий ПРОПОМ: цель виджета живёт в
+   * `WidgetTargetContext`, и этот контекст ставит оболочка карточки, а не тело. Среднее знает
+   * только тело (оно считает его по тому же окну, из которого взяло столбцы), поэтому ему нужен
+   * обычный проп.
    */
   referenceLine?: { value: number; label: string } | null;
   /** Compact shadcn-style tooltip and higher-contrast series treatment for the metric explorer. */
@@ -93,10 +93,10 @@ interface BarChartProps {
 }
 
 /**
- * Пунктирный ориентир поверх столбцов — ОДИН рецепт на три повода (цель виджета, линии разворота,
- * среднее окна). Пара `<line>` + `<text>` уже жила в двух копиях, и копии успели разойтись по
- * непрозрачности (0.8 у цели против 0.7 у линий разворота); третья копия разошлась бы так же.
- * Непрозрачность осталась параметром, чтобы правка не двигала пиксели существующих двух.
+ * Пунктирный ориентир поверх столбцов — ОДИН рецепт на оба повода (цель виджета, среднее окна).
+ * Рецепт появился, когда пара `<line>` + `<text>` жила в двух копиях (цель и «Линии» ныне
+ * снесённого rich-разворота) и копии успели разойтись по непрозрачности (0.8 против 0.7); третья
+ * копия разошлась бы так же. Непрозрачность осталась параметром.
  */
 function RefMarker({
   y,
@@ -115,14 +115,13 @@ function RefMarker({
   /**
    * Печатать подпись НА полотне.
    *
-   * Цель и линии разворота печатают: цель обычно стоит ВЫШЕ данных (её ещё не достигли), линии
-   * разворота включаются кнопкой и живут в высоком оверлее, где над крайними столбцами есть воздух.
+   * Цель печатает: она обычно стоит ВЫШЕ данных (её ещё не достигли), и над столбцами есть воздух.
    * Среднее окна — другой случай: оно по определению внутри размаха, то есть подпись ВСЕГДА ложится
    * на столбцы, и серый текст поверх заливки серии не читается (замер на демо). Хосту, который уже
    * печатает это число на лице карточки, вторая копия не нужна — остаётся штрих и `<title>`.
    */
   printed?: boolean;
-  /** Крюк для гейтов; у цели и линий разворота его нет — их видно по тексту подписи. */
+  /** Крюк для гейтов; у цели его нет — её видно по тексту подписи. */
   slot?: string;
 }) {
   return (
@@ -275,7 +274,6 @@ export function BarChart({
   const [hostHeight, setHostHeight] = useState(0);
   // Expanded (modal) rendering opts into value labels + y ticks.
   const expanded = useContext(ChartExpandedContext);
-  const refLines = useContext(ChartRefLinesContext);
   // The overlay dictates its explorer height; inline renders keep the caller's `height`.
   const ctxHeight = useContext(ExpandedChartHeightContext);
   // Per-widget goal line — same source LineChart reads, so the target survives the
@@ -631,21 +629,11 @@ export function BarChart({
             text={`цель ${fmt.short(target ?? clamped.value)}${clamped.clipped ? ' ↑' : ''}`}
           />
         )}
-
-        {/* Min/Max/Average reference lines (overlay «Линии» toggle) — dashed hairlines at the visible
-            extremes + mean, above the bars. */}
-        {refLines && (
-          <>
-            {([['макс', refLines.max], ['сред.', refLines.avg], ['мин', refLines.min]] as const).map(([lbl, v]) => (
-              <RefMarker key={lbl} y={barTop(v)} from={gutterW} to={chartWidth} opacity={0.7} text={`${lbl} ${fmt.short(v)}`} />
-            ))}
-          </>
-        )}
       </>
     );
 
     return { chartWidth, chartHeight, graphHeight, offsetX, itemWidth, bars, ghostBars, stacked, barTop, barCenterX, underLayer, overLayer };
-  }, [values, labels, axisLabels, activeGhost, hasGhost, target, refLines, referenceLine, width, ctxHeight, hostHeight, height, expanded, comparisonStyle, gapIdx, gapPatternId]);
+  }, [values, labels, axisLabels, activeGhost, hasGhost, target, referenceLine, width, ctxHeight, hostHeight, height, expanded, comparisonStyle, gapIdx, gapPatternId]);
 
   // ── UPDATE morph: the silhouette flows into the new shape on a data change ────────────────
   // Heights (the ONE dimension the data owns — x/width are layout) tween from the previously

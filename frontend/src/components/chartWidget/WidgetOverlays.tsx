@@ -1,9 +1,7 @@
 import { Suspense, lazy, type CSSProperties, type ReactNode } from 'react';
-import { ChartExpandOverlay } from '@/components/ExpandableChart';
+import { ChartExpandOverlay } from './ChartExpandOverlay';
 import { WidgetErrorBoundary } from '@/components/WidgetErrorBoundary';
 import { lazyWithReload } from '@/lib/lazyWithReload';
-import type { ChartExpandConfig } from '@/components/ExpandableChart';
-import type { PeriodDays } from '@/lib/period';
 import type { WidgetPrefs, WidgetSize } from '@/lib/widgetPrefsStore';
 import type { WidgetVariant } from '@/components/widgets/variants';
 
@@ -71,10 +69,6 @@ interface WidgetExpandOverlayProps {
   widgetId: string;
   label: string;
   accentStyle: CSSProperties | null;
-  periodControl: boolean;
-  days: PeriodDays;
-  expand?: ChartExpandConfig;
-  richExpand: boolean;
   resetKeys: unknown[];
   body: ReactNode;
 }
@@ -87,10 +81,6 @@ export function WidgetExpandOverlay({
   widgetId,
   label,
   accentStyle,
-  periodControl,
-  days,
-  expand,
-  richExpand,
   resetKeys,
   body,
 }: WidgetExpandOverlayProps) {
@@ -101,16 +91,6 @@ export function WidgetExpandOverlay({
     <ChartExpandOverlay
       title={label}
       accentStyle={accentStyle ?? undefined}
-      // A rich explorer owns window controls even when the working page suppresses card-local
-      // period controls. Seed it from the authoritative page/widget window; otherwise opening a
-      // 30-day MoySklad/TG/IG card silently highlighted the overlay's 90-day fallback.
-      initialDays={richExpand || periodControl ? days : undefined}
-      renderExpanded={richExpand ? expand?.renderExpanded : undefined}
-      renderExpandedBar={richExpand ? expand?.renderExpandedBar : undefined}
-      statsFor={richExpand ? expand?.statsFor : undefined}
-      statsSum={expand?.statsSum ?? true}
-      grainable={richExpand ? expand?.grainable : undefined}
-      extraControls={richExpand ? expand?.extraControls : undefined}
       onClose={onClose}
       originRect={originRect}
     >

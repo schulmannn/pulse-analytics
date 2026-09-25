@@ -9,7 +9,7 @@ import { ChartSection as ChartWidget } from '@/components/ChartWidget';
 import {
   ChartExpandedContext,
   ExpandedChartHeightContext,
-} from '@/components/ExpandableChart';
+} from '@/components/chartWidget/contexts';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { LineChart } from '@/components/LineChart';

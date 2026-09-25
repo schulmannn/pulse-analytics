@@ -5,7 +5,7 @@ import { ShareTrack } from '@/components/ShareRows';
 import { useMsChannelSeries, useMsGeography, useMsSalesByChannel } from '@/api/ms';
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
 import { ChartCardBody } from '@/components/chartWidget/ChartCardBody';
-import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
+import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/chartWidget/contexts';
 import { MultiLineChart } from '@/components/MultiLineChart';
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
@@ -35,8 +35,8 @@ import { aggregatePlotPoints, bucketPoints, densifyDayPoints, fmtMetric, metricT
  * «Выручка по каналу» перешла со Steep-паттерна одного PillSelect на честный МУЛЬТИвыбор внутри
  * графика: по умолчанию все каналы агрегированы (фильтр = агрегация выбранных), можно выбрать
  * несколько, а «Разбить по каналам» рисует их отдельными сериями (bounded читаемым лимитом).
- * Развёрнутый режим переиспользует общий ChartExpandOverlay (фокус-трап, период/грануляция/линия-
- * столбцы) и добавляет MS-контролы через shared `expand.extraControls` — без MS-only модалки.
+ * Развёрнутого режима на месте нет: каждая карточка ведёт на свой маршрут `/metrics/ms-*`, где
+ * живут период, грануляция, тип графика и MS-контролы (метрика, вид, мультивыбор каналов).
  */
 export function MsChannels() {
   const pp = usePagePeriod();

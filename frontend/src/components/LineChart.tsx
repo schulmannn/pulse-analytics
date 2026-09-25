@@ -11,7 +11,7 @@ import { nearestPointIndex } from '@/lib/chartHover';
 import { axisLabelIndexes } from '@/lib/chartLabels';
 import { ChartTooltip, type TooltipRow, type TooltipState } from '@/components/ChartTooltip';
 import { SeriesLegend } from '@/components/metric/seriesLegend';
-import { ChartExpandedContext, ChartRefLinesContext, ExpandedChartHeightContext, WidgetTargetContext } from '@/components/ExpandableChart';
+import { ChartExpandedContext, ExpandedChartHeightContext, WidgetTargetContext } from '@/components/chartWidget/contexts';
 import { clampTargetToDomain, targetTooltipRow } from '@/lib/targetDomain';
 import { observeSize } from '@/lib/observeSize';
 import {
@@ -270,7 +270,6 @@ export function LineChart({
   // Dashboard cards are axis-free sparkline-style reads (steep); the expanded overlay and
   // metric pages provide the context (or set fullAxes) for the full nice-tick y-axis.
   const expanded = useContext(ChartExpandedContext);
-  const refLines = useContext(ChartRefLinesContext);
   const ctxHeight = useContext(ExpandedChartHeightContext);
   // Per-widget goal line («Целевой уровень»): provided by ChartSection, null everywhere else.
   const targetCtx = useContext(WidgetTargetContext);
@@ -634,26 +633,6 @@ export function LineChart({
             </text>
           </>
         )}
-
-        {/* Min/Max/Average reference lines (overlay «Линии» toggle) — dashed hairlines at the visible
-            extremes + mean, read faster than the numeric stats strip. Drawn under the series line. */}
-        {refLines && (
-          <>
-            {([['макс', refLines.max], ['сред.', refLines.avg], ['мин', refLines.min]] as const).map(([lbl, v]) => (
-              <g key={lbl} className="pointer-events-none">
-                <line x1={gutterW} y1={yFor(v)} x2={W} y2={yFor(v)} stroke="hsl(var(--chart-role-neutral))" strokeDasharray="6 4" strokeWidth="1.2" opacity="0.7" vectorEffect="non-scaling-stroke" />
-                <text
-                  x={W - 4}
-                  y={yFor(v) - 4 < 10 ? yFor(v) + 12 : yFor(v) - 4}
-                  textAnchor="end"
-                  className="pointer-events-none select-none fill-muted-foreground text-2xs font-medium tabular-nums"
-                >
-                  {lbl} {fmt.short(v)}
-                </text>
-              </g>
-            ))}
-          </>
-        )}
       </>
     );
 
@@ -736,7 +715,7 @@ export function LineChart({
       staticUnder, staticOver,
       morphGeom: { primary: primaryPoints, ghost: ghostPoints, baseY } as MorphGeom,
     };
-  }, [values, labels, axisLabels, activeGhost, geomGhost, hasGhostLegend, target, refLines, yMin, yMax, width, ctxHeight, height, expanded, showAxes, markExtremes, showPoints, anomalyIdx, gradientId, gapPatternId, rhea, comparison, richStyle]);
+  }, [values, labels, axisLabels, activeGhost, geomGhost, hasGhostLegend, target, yMin, yMax, width, ctxHeight, height, expanded, showAxes, markExtremes, showPoints, anomalyIdx, gradientId, gapPatternId, rhea, comparison, richStyle]);
 
   // Hover-only lines remain one passive named graphic. Pointer scrubbing is supplementary to its
   // accessible summary and is registered on the DOM node. A drillable line instead uses the real

@@ -1,7 +1,7 @@
 import { useContext } from 'react';
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
+import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/chartWidget/contexts';
 import { EmptyState } from '@/components/EmptyState';
 import { formatShare } from '@/lib/breakdownShare';
 import { useMeasuredBox } from '@/lib/useMeasuredBox';

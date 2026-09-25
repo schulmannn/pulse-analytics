@@ -2,7 +2,7 @@ import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, u
 import type { CSSProperties } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useViewTransitionNavigate } from '@/lib/viewTransitionNavigate';
-import { WidgetTargetContext, ChartCardTitleContext } from '@/components/ExpandableChart';
+import { WidgetTargetContext, ChartCardTitleContext } from './contexts';
 import { ThrowInRender } from '@/components/WidgetErrorBoundary';
 import { GroupCtx, prefersReducedMotion } from '@/components/widgets/WidgetGroup';
 import { maxSize } from '@/components/widgets/variants';
@@ -40,7 +40,6 @@ export function useChartSectionModel(props: ChartSectionProps) {
     defaultTinted,
     fixedSize,
     chartHeight,
-    expand,
     drillTo,
     periodControl,
     strip,
@@ -225,10 +224,6 @@ export function useChartSectionModel(props: ChartSectionProps) {
   const fillHeight = effectiveSize === 'full' && chartHeight == null ? null : bodyHeight;
   const label = prefs.title || title;
   const bodyResetKeys = [bodyResetKey, activeVariant?.key ?? null, widgetDays];
-  const richExpand = !!(
-    expand &&
-    (expand.renderExpanded || expand.renderExpandedBar || expand.statsFor)
-  );
   const overlayBody = (
     <WidgetPeriodProvider value={widgetPeriod}>
       <ChartCardTitleContext.Provider value={label}>
@@ -331,7 +326,6 @@ export function useChartSectionModel(props: ChartSectionProps) {
       open: expandOpen,
       openExpand,
       closeExpand,
-      richExpand,
       accentStyle: accentVars as CSSProperties | null,
       overlayBody,
     },

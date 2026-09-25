@@ -4,7 +4,7 @@ import { BoardSkeleton } from '@/components/BoardSkeleton';
 import { ShareTrack } from '@/components/ShareRows';
 import { ChartBand } from '@/components/ChartBand';
 import { Link, useNavigate } from 'react-router-dom';
-import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
+import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/chartWidget/contexts';
 import { observeSize } from '@/lib/observeSize';
 import { useMsFunnel, useMsReturns, useMsSummary } from '@/api/ms';
 import { sourceErrorKind } from '@/api/sourceErrors';

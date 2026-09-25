@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { BarChart } from './BarChart';
-import { ChartExpandedContext } from './ExpandableChart';
+import { ChartExpandedContext } from './chartWidget/contexts';
 
 /**
  * ПОДПИСИ-ЗНАЧЕНИЯ над столбцами (только в развороте) имеют СВОЮ плотность, отдельную от

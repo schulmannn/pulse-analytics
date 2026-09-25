@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { DeltaPill } from '@/components/DeltaPill';
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
-import { ChartExpandedContext } from '@/components/ExpandableChart';
+import { ChartExpandedContext } from '@/components/chartWidget/contexts';
 import type { MetricDelta } from '@/lib/delta';
 import type { DailySeries, DrillKey } from '@/lib/kpiDerive';
 import { REPORT_BLOCKS } from '@/lib/reportBlocks';
