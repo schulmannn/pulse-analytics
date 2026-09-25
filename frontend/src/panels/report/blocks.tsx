@@ -6,7 +6,6 @@ import { BarChart } from '@/components/BarChart';
 import { ChartExpandedContext } from '@/components/ExpandableChart';
 import type { MetricDelta } from '@/lib/delta';
 import type { DailySeries, DrillKey } from '@/lib/kpiDerive';
-import type { PeriodDays } from '@/lib/period';
 import { REPORT_BLOCKS } from '@/lib/reportBlocks';
 import type { ReportBlockKey, ReportBlockType } from '@/lib/reportBlocks';
 import { KpiValue } from '@/components/chartWidget/KpiValue';
@@ -33,13 +32,6 @@ export const TABLE_SOURCES: Array<{ value: string; label: string }> = [
   { value: 'weekly', label: 'По неделям' },
   { value: 'top-posts', label: 'Лучшие публикации' },
   { value: 'kpi-ledger', label: 'Сводка показателей' },
-];
-
-export const PERIOD_CHIPS: Array<{ days: PeriodDays; label: string }> = [
-  { days: 7, label: '7д' },
-  { days: 30, label: '30д' },
-  { days: 90, label: '90д' },
-  { days: 0, label: 'Всё' },
 ];
 
 export const LEDGER: Array<{ key: DrillKey; label: string }> = [

@@ -13,12 +13,12 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { fmt } from '@/lib/format';
 import type { PeriodDays } from '@/lib/period';
+import { PERIOD_PRESETS } from '@/lib/periodWindow';
 import { buildDraft, draftToPutBody, isDraftDirty } from '@/lib/reportDraft';
 import type { ReportDraft, ReportSchedule } from '@/lib/reportDraft';
 import { reportPeriodLabel } from '@/lib/reportListModel';
 import { defaultBlock } from '@/lib/reportBlocks';
 import type { ReportBlockKey, ReportBlockType } from '@/lib/reportBlocks';
-import { PERIOD_CHIPS } from '@/panels/report/blocks';
 import { ReportComposition } from '@/panels/report/ReportComposition';
 import { useReportData } from '@/panels/report/useReportData';
 
@@ -175,7 +175,7 @@ export function ReportDocumentDesktop({
                 ariaLabel="Период отчёта"
                 value={String(draft.periodDays)}
                 onChange={(days) => pickPeriod(Number(days) as PeriodDays)}
-                options={PERIOD_CHIPS.map((chip) => ({ value: String(chip.days), content: chip.label }))}
+                options={PERIOD_PRESETS.map((chip) => ({ value: String(chip.days), content: chip.label }))}
               />
             </div>
 

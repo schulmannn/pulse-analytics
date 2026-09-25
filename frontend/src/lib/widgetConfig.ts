@@ -14,6 +14,7 @@
 // to honour it.
 
 import type { PeriodDays } from '@/lib/period';
+import { PERIOD_DAYS } from '@/lib/periodWindow';
 import type { WidgetSize } from '@/lib/widgetPrefsStore';
 import { getMetric, isMetricId, recommendedSize, type WidgetViz } from '@/lib/widgetMetrics';
 import { genId } from '@/lib/reportBlocks';
@@ -111,7 +112,7 @@ export function configIdFromKey(key: string): string | null {
   return isCustomKey(key) ? key.slice(CUSTOM_PREFIX.length) || null : null;
 }
 
-const PERIODS = new Set<PeriodDays>([7, 30, 90, 0]);
+const PERIODS = new Set<PeriodDays>(PERIOD_DAYS);
 const GRAINS = new Set<WidgetGrain>(['day', 'week', 'month', 'quarter', 'year']);
 const SIZES = new Set<WidgetSize>(['third', 'half', 'full']);
 const CMP_MODES = new Set<ComparisonMode>([

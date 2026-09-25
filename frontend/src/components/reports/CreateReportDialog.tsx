@@ -4,8 +4,8 @@ import { useChannels, useCreateReport } from '@/api/queries';
 import type { ReportSchedule } from '@/api/queries';
 import { useSelectedChannel } from '@/lib/channel-context';
 import type { ReportBlockKey } from '@/lib/reportBlocks';
-import { PERIOD_CHIPS } from '@/panels/report/blocks';
 import type { PeriodDays } from '@/lib/period';
+import { PERIOD_PRESETS } from '@/lib/periodWindow';
 import { PillSelect } from '@/components/PillSelect';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { Button } from '@/components/ui/button';
@@ -208,7 +208,7 @@ export function CreateReportDialog({ onClose }: { onClose: () => void }) {
               segmentClassName="px-2"
               value={String(periodDays)}
               onChange={(days) => setPeriodDays(Number(days) as PeriodDays)}
-              options={PERIOD_CHIPS.map((chip) => ({ value: String(chip.days), content: chip.label }))}
+              options={PERIOD_PRESETS.map((chip) => ({ value: String(chip.days), content: chip.label }))}
             />
           </div>
 

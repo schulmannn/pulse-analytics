@@ -356,7 +356,13 @@ managed-first. Живой поиск упоминаний также работ�
   окно — `{ invalid, code: 'bad_period' }`. Зона «сегодня» пресета и enum пресетов обязательны (умолчание зоны
   выбирает OD-8), потолок ширины и правило grain — параметры источника. СДЭК уже на нём (`cdekPeriod.js` — обёртка с
   прежней зоной UTC); МойСклад, Метрика, Rusender и упоминания пока на своих копиях и переходят отдельными PR —
-  новую копию разбора окна не заводить. Ожидания закреплены в `test/fixtures/period-vectors.json`.
+  новую копию разбора окна не заводить. Клиентский двойник — чистый `frontend/src/lib/periodWindow.ts`
+  (`resolvePeriod`, `baselineWindow`, `splitWindowRows`, правило грануляции, `periodLabel`, `PERIOD_PRESETS` —
+  единственный список пресетов); `includeToday` и зона дня там тоже явные параметры, `lib/period` его
+  реэкспортирует, `lib/msPeriod` — обёртка над `resolvePeriod`/`baselineWindow`. Период ленты у всех сетей меняет
+  один `PagePeriodControl` (`components/PeriodChips`). Оба конца читают одни векторы
+  `test/fixtures/period-vectors.json` (vitest — при TZ=Europe/Moscow и America/New_York); корзин и дня недели в них
+  пока нет (`bucketKey`/`weekdayOf`/`hourOf` — 3.10).
 - Чтение XLSX (`server/lib/sheetReader.js`) линейно и ограничено: колонки дальше 256-й пропускаются (не
   валят файл и не добивают строку), значение длиннее 32 767 символов отвергает файл, а общий дедлайн
   покрывает всю книгу, а не отдельный лист. Ячейка без `r` встаёт следом за самой правой уже

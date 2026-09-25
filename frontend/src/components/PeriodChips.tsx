@@ -9,20 +9,15 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
+import { usePagePeriod } from '@/lib/period';
 import type { DateRange, PeriodDays } from '@/lib/period';
+import { PERIOD_PRESETS } from '@/lib/periodWindow';
 
 const DateRangePicker = lazy(() =>
   import('@/components/DateRangePicker').then((module) => ({
     default: module.DateRangePicker,
   })),
 );
-
-const PRESETS: { days: PeriodDays; label: string }[] = [
-  { days: 7, label: '7д' },
-  { days: 30, label: '30д' },
-  { days: 90, label: '90д' },
-  { days: 0, label: 'Всё' },
-];
 
 /** Date label for the active custom-range chip. */
 // Канон дат приложения — «3 июн.», не «03.06» (регресс закрытого канона, проход №3): один
@@ -65,7 +60,7 @@ export function PeriodChips({
         groupless
         value={range ? '' : String(value)}
         onChange={(days) => onChange(Number(days) as PeriodDays)}
-        options={PRESETS.map((chip) => ({
+        options={PERIOD_PRESETS.map((chip) => ({
           value: String(chip.days),
           content: chip.label,
         }))}
@@ -115,4 +110,15 @@ export function PeriodChips({
       )}
     </fieldset>
   );
+}
+
+/**
+ * Feed-header period chips wired to the page period — re-windows every card of the page. ONE control
+ * for every network's feed (TG, IG, МойСклад, Метрика, СДЭК, Rusender): 7д/30д/90д/Всё plus «Свой
+ * период». Null outside a PagePeriodProvider (defensive; every feed shell provides one).
+ */
+export function PagePeriodControl() {
+  const pp = usePagePeriod();
+  if (!pp) return null;
+  return <PeriodChips value={pp.days} onChange={pp.setDays} range={pp.range} onRangeChange={pp.setRange} />;
 }

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { PagePeriodValue } from './period';
 import { usePagePeriod } from './period';
+import { baselineWindow, dayKeyOf, resolvePeriod, type PeriodWindow, type ResolvePeriodOptions } from './periodWindow';
 
 /**
  * The one place MoySklad requests turn the feed top-bar period into wire parameters. Every MS hook
@@ -23,17 +24,32 @@ export interface MsPeriod {
   custom?: boolean;
 }
 
+/**
+ * How MoySklad and its neighbours (Метрика, СДЭК, Rusender) resolve a window today: the incomplete
+ * today closes the preset, and days are the viewer's local calendar. The window math itself lives in
+ * lib/periodWindow; the defaults are OD-8's to choose, so this family passes its current values
+ * explicitly.
+ */
+const msWindowOptions = (now: number): ResolvePeriodOptions => ({ now, includeToday: true, zone: 'local' });
+
 /** epoch ms → local YYYY-MM-DD (mirror of the sklad panels' localDayKey). */
 export function msDayKey(ms: number): string {
-  const d = new Date(ms);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return dayKeyOf(ms, 'local');
+}
+
+/** A resolved window back in the MS wire shape: bounded → from/to, «Всё» → just `days`. */
+function toMsPeriod(window: PeriodWindow): MsPeriod {
+  if (!window.from || !window.to) return { days: window.days };
+  return window.custom
+    ? { days: window.days, from: window.from, to: window.to, custom: true }
+    : { days: window.days, from: window.from, to: window.to };
 }
 
 /**
  * The authoritative MS window from a page period. `null` (outside a feed) → the 30д default.
  *
  * A custom range resolves to its exact inclusive day keys; a 7/30/90 preset resolves to
- * `today-(days-1)…today` in the user's LOCAL calendar (see {@link presetBounds}) so the wire window
+ * `today-(days-1)…today` in the user's LOCAL calendar (see {@link resolvePeriod}) so the wire window
  * no longer depends on the server's clock; «Всё» (days=0) stays unbounded. `now` is injectable so
  * unit tests don't depend on the runner's timezone/clock.
  */
@@ -41,53 +57,22 @@ export function msPeriod(
   pp: Pick<PagePeriodValue, 'days' | 'range'> | null,
   now: number = Date.now(),
 ): MsPeriod {
-  if (pp?.range) {
-    return { days: pp.days, from: msDayKey(pp.range.from), to: msDayKey(pp.range.to), custom: true };
-  }
-  const days = pp ? pp.days : 30;
-  const bounds = presetBounds(days, now);
-  return bounds ? { days, from: bounds.from, to: bounds.to } : { days };
-}
-
-function shiftDayKey(key: string, offset: number): string {
-  const date = dayToDate(key);
-  date.setDate(date.getDate() + offset);
-  return msDayKey(date.getTime());
-}
-
-/**
- * The one pure helper that owns a preset's inclusive calendar bounds: `today-(days-1)…today` in the
- * local calendar, or `null` for «Всё»/non-positive days. `now` is injectable for deterministic tests.
- */
-function presetBounds(days: number, now: number): { from: string; to: string } | null {
-  if (days <= 0) return null;
-  const today = new Date(now);
-  today.setHours(0, 0, 0, 0);
-  const to = msDayKey(today.getTime());
-  return { from: shiftDayKey(to, -(days - 1)), to };
+  return toMsPeriod(resolvePeriod(pp ?? { days: 30 }, msWindowOptions(now)));
 }
 
 /** Inclusive calendar bounds actually requested by an MS preset/custom period. */
 export function msPeriodBounds(period: MsPeriod, now: number = Date.now()): { from: string; to: string } | null {
   if (period.from && period.to) return { from: period.from, to: period.to };
-  return presetBounds(period.days, now);
+  const { from, to } = resolvePeriod({ days: period.days }, msWindowOptions(now));
+  return from && to ? { from, to } : null;
 }
 
 /** Immediately preceding equal inclusive calendar window. «Всё» has no honest predecessor. */
 export function msPreviousPeriod(period: MsPeriod, now: number = Date.now()): MsPeriod | null {
   const bounds = msPeriodBounds(period, now);
   if (!bounds) return null;
-  const from = dayToDate(bounds.from);
-  const to = dayToDate(bounds.to);
-  const days = Math.round(
-    (Date.UTC(to.getFullYear(), to.getMonth(), to.getDate())
-      - Date.UTC(from.getFullYear(), from.getMonth(), from.getDate())) / 86_400_000,
-  ) + 1;
-  return {
-    days: period.days,
-    from: shiftDayKey(bounds.from, -days),
-    to: shiftDayKey(bounds.from, -1),
-  };
+  const previous = baselineWindow({ days: period.days, all: false, custom: false, ...bounds }, 'prev');
+  return previous?.from && previous.to ? { days: period.days, from: previous.from, to: previous.to } : null;
 }
 
 /**

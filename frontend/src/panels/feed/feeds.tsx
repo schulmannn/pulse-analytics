@@ -5,7 +5,8 @@ import { networkByKey, type Network } from '@/lib/networks';
 import { PagePeriodProvider } from '@/lib/period';
 import { Skeleton } from '@/components/ui/skeleton';
 import { FeedBlock } from '@/panels/feed/useFeed';
-import { TgSectionLayout, TgPagePeriodControl } from '@/panels/TgFeed';
+import { TgSectionLayout } from '@/panels/TgFeed';
+import { PagePeriodControl } from '@/components/PeriodChips';
 import { SourceIdentity } from '@/components/SourceIdentity';
 import { lazyWithReload } from '@/lib/lazyWithReload';
 
@@ -62,7 +63,6 @@ const IgOverviewPage = lazyFrom(igLoad, 'IgOverviewPage');
 const IgAnalyticsPage = lazyFrom(igLoad, 'IgAnalyticsPage');
 const IgContentPage = lazyFrom(igLoad, 'IgContentPage');
 const IgAudiencePage = lazyFrom(igLoad, 'IgAudiencePage');
-const IgPeriodControl = lazyFrom(igLoad, 'IgPeriodControl');
 
 // TG bodies split into their own chunks (bundle-size gate). Even Обзор is async: the protected
 // shell becomes interactive without parsing its chart stack, while FeedSectionPage immediately
@@ -75,8 +75,8 @@ const Mentions = lazyFrom(() => import('@/panels/Mentions'), 'Mentions');
 /** The lazy IG shell still needs a Suspense above it — same content-area scaffold as the other
     lazy routes, drawn here so the registry stays self-contained. PagePeriodProvider sits ABOVE
     the shell (TgSectionLayout parity): IgShell's own useIgData call reads the page period, and
-    the header chips (IgPeriodControl in the section headers) drive the same value — one period
-    system for both networks. */
+    the header chips (PagePeriodControl in the section headers) drive the same value — one period
+    system for every network. */
 function IgShellRoute() {
   return (
     <PagePeriodProvider>
@@ -116,11 +116,11 @@ function SectionSkeleton() {
 // section carries its network's period chips in the sticky header — one placement rule everywhere.
 
 const TG_PARTS: Record<string, SectionParts> = {
-  '': { Body: Overview, HeaderRight: TgPagePeriodControl },
-  analytics: { Body: Analytics, HeaderRight: TgPagePeriodControl },
+  '': { Body: Overview, HeaderRight: PagePeriodControl },
+  analytics: { Body: Analytics, HeaderRight: PagePeriodControl },
   // Контент теперь windowed по авторитетному периоду страницы (URL-воспроизводимый `?period=`) —
   // те же chips, что у Обзора/Аналитики, единый период для всего раздела.
-  posts: { Body: Posts, HeaderRight: TgPagePeriodControl },
+  posts: { Body: Posts, HeaderRight: PagePeriodControl },
   // Упоминания: период авторитетен ТОЛЬКО на desktop-поверхности (плотная таблица/сравнение). На
   // мобильной ветке карточка остаётся прежней и chips в шапке не появляются (hidden < md).
   mentions: { Body: Mentions, HeaderRight: MentionsHeaderControl },
@@ -130,20 +130,20 @@ const TG_PARTS: Record<string, SectionParts> = {
 function MentionsHeaderControl() {
   return (
     <div className="hidden md:block">
-      <TgPagePeriodControl />
+      <PagePeriodControl />
     </div>
   );
 }
 
 const IG_PARTS: Record<string, SectionParts> = {
-  '': { Body: IgOverviewPage, HeaderRight: IgPeriodControl },
-  analytics: { Body: IgAnalyticsPage, HeaderRight: IgPeriodControl },
-  content: { Body: IgContentPage, HeaderRight: IgPeriodControl },
-  audience: { Body: IgAudiencePage, HeaderRight: IgPeriodControl },
+  '': { Body: IgOverviewPage, HeaderRight: PagePeriodControl },
+  analytics: { Body: IgAnalyticsPage, HeaderRight: PagePeriodControl },
+  content: { Body: IgContentPage, HeaderRight: PagePeriodControl },
+  audience: { Body: IgAudiencePage, HeaderRight: PagePeriodControl },
 };
 
 // «МойСклад» — свой lazy-чанк (bundle-гейт: TG/IG-пользователь его не платит). Период —
-// те же page-period чипсы: TgPagePeriodControl сете-агностичен (usePagePeriod + PeriodChips).
+// те же page-period чипсы: PagePeriodControl один на все сети (usePagePeriod + PeriodChips).
 const MsOverview = lazyFrom(() => import('@/panels/sklad/MsOverview'), 'MsOverview');
 const MsClients = lazyFrom(() => import('@/panels/sklad/MsClients'), 'MsClients');
 const MsChannels = lazyFrom(() => import('@/panels/sklad/MsChannels'), 'MsChannels');
@@ -158,9 +158,9 @@ function MsShellRoute() {
 }
 
 const MS_PARTS: Record<string, SectionParts> = {
-  '': { Body: MsOverview, HeaderRight: TgPagePeriodControl },
-  clients: { Body: MsClients, HeaderRight: TgPagePeriodControl },
-  channels: { Body: MsChannels, HeaderRight: TgPagePeriodControl },
+  '': { Body: MsOverview, HeaderRight: PagePeriodControl },
+  clients: { Body: MsClients, HeaderRight: PagePeriodControl },
+  channels: { Body: MsChannels, HeaderRight: PagePeriodControl },
 };
 
 // «Яндекс.Метрика» — свой lazy-чанк (bundle-гейт: TG/IG-пользователь его не платит). Период —
@@ -177,7 +177,7 @@ function YmShellRoute() {
 }
 
 const YM_PARTS: Record<string, SectionParts> = {
-  '': { Body: YmOverview, HeaderRight: TgPagePeriodControl },
+  '': { Body: YmOverview, HeaderRight: PagePeriodControl },
 };
 
 // «СДЭК Fulfillment» — свой lazy-чанк (bundle-гейт: TG/IG-пользователь его не платит).
@@ -199,9 +199,9 @@ function CdekShellRoute() {
 }
 
 const CDEK_PARTS: Record<string, SectionParts> = {
-  '': { Body: CdekOverview, HeaderRight: TgPagePeriodControl },
-  orders: { Body: CdekOrders, HeaderRight: TgPagePeriodControl },
-  products: { Body: CdekProducts, HeaderRight: TgPagePeriodControl },
+  '': { Body: CdekOverview, HeaderRight: PagePeriodControl },
+  orders: { Body: CdekOrders, HeaderRight: PagePeriodControl },
+  products: { Body: CdekProducts, HeaderRight: PagePeriodControl },
   // Период у «Загрузок» не показываем: страница отвечает на вопрос «что вообще залито», и окно
   // 7/30/90 дней это вопрос сузило бы до бессмыслицы.
   imports: { Body: CdekImports },
@@ -223,9 +223,9 @@ const RusenderCampaigns = lazyFrom(() => import('@/panels/rusender/RusenderCampa
 const RusenderAudience = lazyFrom(() => import('@/panels/rusender/RusenderAudience'), 'RusenderAudience');
 
 const RUSENDER_PARTS: Record<string, SectionParts> = {
-  '': { Body: RusenderOverview, HeaderRight: TgPagePeriodControl },
-  campaigns: { Body: RusenderCampaigns, HeaderRight: TgPagePeriodControl },
-  audience: { Body: RusenderAudience, HeaderRight: TgPagePeriodControl },
+  '': { Body: RusenderOverview, HeaderRight: PagePeriodControl },
+  campaigns: { Body: RusenderCampaigns, HeaderRight: PagePeriodControl },
+  audience: { Body: RusenderAudience, HeaderRight: PagePeriodControl },
 };
 
 /** Zip the network's nav (paths + labels — the single source of truth) with the body map. A nav

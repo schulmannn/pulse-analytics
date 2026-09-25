@@ -1,4 +1,5 @@
 import type { DateRange, PeriodDays } from '@/lib/period';
+import { PERIOD_DAYS } from '@/lib/periodWindow';
 
 /**
  * Окно ленты, ОБЩЕЕ для всех сетей и переживающее перемонтирование.
@@ -24,8 +25,6 @@ export interface PagePeriodState {
   range: DateRange | null;
 }
 
-const VALID_DAYS: readonly PeriodDays[] = [7, 30, 90, 0];
-
 /** Разбор сохранённого значения. Любая кривизна → null (нет выбора), а не молчаливый дефолт. */
 export function parsePagePeriod(raw: string | null | undefined): PagePeriodState | null {
   if (!raw) return null;
@@ -33,7 +32,7 @@ export function parsePagePeriod(raw: string | null | undefined): PagePeriodState
     const parsed: unknown = JSON.parse(raw);
     if (typeof parsed !== 'object' || parsed === null) return null;
     const { days, range } = parsed as { days?: unknown; range?: unknown };
-    if (!VALID_DAYS.includes(days as PeriodDays)) return null;
+    if (!PERIOD_DAYS.includes(days as PeriodDays)) return null;
     let parsedRange: DateRange | null = null;
     if (typeof range === 'object' && range !== null) {
       const { from, to } = range as { from?: unknown; to?: unknown };

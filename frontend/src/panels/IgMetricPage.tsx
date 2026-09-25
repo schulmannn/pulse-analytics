@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { useIgData } from '@/lib/useIgData';
 import type { IgData } from '@/lib/useIgData';
 import { usePeriod, type PeriodDays } from '@/lib/period';
+import { PERIOD_PRESETS } from '@/lib/periodWindow';
 import {
   pairDelta,
   igAgeItems,
@@ -170,13 +171,6 @@ const ER_DEF = {
   source: 'Производная от Instagram insights (total_interactions, reach) — агрегаты за период.',
 };
 
-const WINDOW_PILLS = [
-  { days: 7, label: '7д' },
-  { days: 30, label: '30д' },
-  { days: 90, label: '90д' },
-  { days: 0, label: 'Всё' },
-];
-
 /** Тайм-бар окна — presets only. v2: тайм-бар принадлежит графику — рендерится одной строкой
     сразу под графиковым блоком своего варианта, НЕ sticky-панелью у нижнего края экрана
     (плавающая панель у края — тот же паттерн, что уже признавался багом: #109, дизайн-проход №3).
@@ -195,7 +189,7 @@ function WindowBar({ value, onChange, allowAll = true }: { value: number; onChan
         ariaLabel="Окно"
         value={String(value)}
         onChange={(days) => onChange(Number(days) as PeriodDays)}
-        options={WINDOW_PILLS.filter((chip) => allowAll || chip.days !== 0).map((chip) => ({
+        options={PERIOD_PRESETS.filter((chip) => allowAll || chip.days !== 0).map((chip) => ({
           value: String(chip.days),
           content: chip.label,
         }))}

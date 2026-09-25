@@ -22,6 +22,7 @@ import { fmt, timeAxisFromDayKeys } from '@/lib/format';
 import { CHART_MAX_POINTS, lttbDownsample } from '@/lib/downsample';
 import { useExplorerChartHeight } from '@/lib/useExplorerChartHeight';
 import { usePeriod, type DateRange, type PeriodDays } from '@/lib/period';
+import { PERIOD_PRESETS } from '@/lib/periodWindow';
 import { useMsResolvedPeriod, type MsPeriod } from '@/lib/msPeriod';
 import { useYmGoals, useYmHourly, useYmSummary } from '@/api/ym';
 import { YM_BREAKDOWN_BY_KEY, type YmBreakdownDef } from '@/panels/metrika/ymBreakdowns';
@@ -193,13 +194,6 @@ function useYmGoalSelector(period: MsPeriod, enabled = true) {
 // живого окна, иначе baseline занижен и «рост» фальшивый. «Всё» (days:0) без from/to — сервер
 // отдаёт весь архив, который мы режем локально пресетами окна.
 const ALL_TIME: MsPeriod = { days: 0 };
-
-const WINDOW_PILLS: { days: PeriodDays; label: string }[] = [
-  { days: 7, label: '7д' },
-  { days: 30, label: '30д' },
-  { days: 90, label: '90д' },
-  { days: 0, label: 'Всё' },
-];
 
 interface YmSeriesDef {
   block: 'visits' | 'users' | 'pageviews';
@@ -449,7 +443,7 @@ function YmSeriesPage({ def }: { def: YmSeriesDef }) {
           ariaLabel="Окно"
           value={String(days)}
           onChange={(d) => setDays(Number(d) as PeriodDays)}
-          options={WINDOW_PILLS.map((chip) => ({ value: String(chip.days), content: chip.label }))}
+          options={PERIOD_PRESETS.map((chip) => ({ value: String(chip.days), content: chip.label }))}
         />
       </WindowBarShell>
 

@@ -9,6 +9,7 @@ import { qk } from '@/api/queryKeys';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { usePeriod } from '@/lib/period';
 import type { PeriodDays } from '@/lib/period';
+import { PERIOD_PRESETS, grainOptions } from '@/lib/periodWindow';
 import { deriveKpis, isDrillKey } from '@/lib/kpiDerive';
 import type { DailySeries, DrillKey, PostMetricField } from '@/lib/kpiDerive';
 import { getDrillMetric } from '@/lib/widgetMetrics';
@@ -356,11 +357,7 @@ export function MetricPage() {
 
   // Grain availability follows the window size (a 7-day window has no meaningful months).
   const winDays = spanMs != null ? Math.round(spanMs / DAY_MS) + 1 : Infinity;
-  const grainAllowed: Record<Grain, boolean> = {
-    day: true,
-    week: winDays >= 14,
-    month: winDays >= 60,
-  };
+  const grainAllowed: Record<Grain, boolean> = grainOptions(winDays);
   const effGrain: Grain = grainAllowed[grain] ? grain : 'day';
 
   // ── Series (line/bar) + baseline ghost ────────────────────────────────────────────────
@@ -928,12 +925,7 @@ export function MetricPage() {
               ariaLabel="Период"
               value={range ? '' : String(days)}
               onChange={(d) => setDays(Number(d) as PeriodDays)}
-              options={[
-                { value: '7', content: '7д' },
-                { value: '30', content: '30д' },
-                { value: '90', content: '90д' },
-                { value: '0', content: 'Всё' },
-              ]}
+              options={PERIOD_PRESETS.map((preset) => ({ value: String(preset.days), content: preset.label }))}
             />
             {/* «Свой диапазон» — opens the calendar picker; applies to the global period `range`
                 (URL-persisted, used everywhere via inRange). The active range is shown by the chip below. */}
