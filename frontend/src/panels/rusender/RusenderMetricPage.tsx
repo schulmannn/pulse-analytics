@@ -7,7 +7,7 @@ import { BarChart } from '@/components/BarChart';
 import { PeriodChips } from '@/components/PeriodChips';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { SourceIdentity } from '@/components/SourceIdentity';
-import { ErrorState } from '@/components/ErrorState';
+import { RusenderErrorState } from '@/panels/rusender/RusenderErrorState';
 import { ChartSkeleton } from '@/components/ui/dataSkeleton';
 import {
   MetricColumns,
@@ -151,7 +151,33 @@ export function RusenderMetricPage({ metricKey }: { metricKey: RusenderMetricKey
   // бы ТЕКУЩИЙ кэш — дельта вышла бы нулевой. Читаем только когда предыдущее окно существует.
   const prevData = prevWindow != null ? previous.data : undefined;
 
-  if (summary.isError) return <ErrorState onRetry={() => void summary.refetch()} />;
+  // Пикер окна — единственный выход из отказа по окну (явный диапазон шире 400 дней → «Всё»):
+  // окно этой страницы живёт в глобальном PeriodContext, а не в периоде ленты, так что сменить
+  // его больше негде. Поэтому шапка и «Окно» остаются на месте и при ошибке.
+  const windowBar = (
+    <WindowBarShell>
+      <PeriodChips
+        ariaLabel="Окно"
+        value={days}
+        onChange={setDays}
+        range={range}
+        onRangeChange={setRange}
+      />
+    </WindowBarShell>
+  );
+
+  if (summary.isError) {
+    return (
+      <RusenderMetricShell
+        term={def.term}
+        descriptor={def.descriptor}
+        comparison={<p className="text-xs text-muted-foreground">Окно не загрузилось — сравнивать не с чем.</p>}
+      >
+        <RusenderErrorState query={summary} />
+        {windowBar}
+      </RusenderMetricShell>
+    );
+  }
 
   const series: RusenderPoint[] = summary.data?.series ?? [];
   const points = series.map((p) => def.pick(p));
@@ -281,15 +307,7 @@ export function RusenderMetricPage({ metricKey }: { metricKey: RusenderMetricKey
         )}
       </ChartWidget>
 
-      <WindowBarShell>
-        <PeriodChips
-          ariaLabel="Окно"
-          value={days}
-          onChange={setDays}
-          range={range}
-          onRangeChange={setRange}
-        />
-      </WindowBarShell>
+      {windowBar}
     </RusenderMetricShell>
   );
 }

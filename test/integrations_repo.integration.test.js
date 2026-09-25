@@ -82,9 +82,9 @@ test('updateIgToken: ротация токена/expiry БЕЗ смены identi
   const acc = await db.getIgAccount(ch.id);
   assert.strictEqual(acc.access_token_enc, 'enc:b', 'токен ротирован');
   assert.strictEqual(acc.ig_user_id, ig, 'identity не тронута');
-  // Сравниваем МОМЕНТ, не строку: to_char(...OF) рендерит в TZ сервера (CI=UTC, стенд=-03),
-  // а голый часовой оффсет ("-03") JS-Date не парсит → нормализуем до "-03:00".
-  const expiryIso = new Date(acc.token_expires_at.replace(/([+-]\d{2})$/, '$1:00')).toISOString();
+  // Сравниваем МОМЕНТ, не строку: to_char рендерит в TZ сервера (CI=UTC, стенд=-03). Оффсет —
+  // TZH:TZM ("-03:00"), поэтому строку из БД JS-Date разбирает как есть, без нормализации.
+  const expiryIso = new Date(acc.token_expires_at).toISOString();
   assert.strictEqual(expiryIso, '2027-01-01T00:00:00.000Z', 'expiry обновлён');
 
   assert.strictEqual(await db.deleteIgAccount(ch.id), true);

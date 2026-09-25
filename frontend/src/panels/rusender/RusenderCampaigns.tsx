@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { EmptyState } from '@/components/EmptyState';
-import { ErrorState } from '@/components/ErrorState';
+import { RusenderErrorState } from '@/panels/rusender/RusenderErrorState';
 import { TableSkeleton } from '@/components/ui/dataSkeleton';
 import { useRusenderCampaigns, type RusenderCampaign } from '@/api/rusender';
 import { useSelectedChannel } from '@/lib/channel-context';
@@ -54,7 +54,7 @@ export function RusenderCampaigns() {
   }, [query.data, q]);
 
   if (query.isPending) return <TableSkeleton />;
-  if (query.isError) return <ErrorState onRetry={() => void query.refetch()} />;
+  if (query.isError) return <RusenderErrorState query={query} />;
 
   const all = query.data?.campaigns ?? [];
   if (!all.length) {

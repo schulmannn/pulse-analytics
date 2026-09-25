@@ -2,6 +2,7 @@
 
 const crypto = require('crypto');
 const { createVerifyEmail } = require('../lib/verifyEmail');
+const { isPlausibleEmail } = require('../lib/emailAddress');
 
 /* ── Команда: приглашения в воркспейс и участники ────────────────────────────────────────────────
    Раздел «Команда» в /settings до этого был витриной без бэкенда (ростер в localStorage, письма не
@@ -26,7 +27,6 @@ function registerTeamRoutes({
   const verifyEmailHtml = createVerifyEmail({ emailShell, emailBtn });
   // Пароль, который сервер не собирается использовать: для claim по раскрытой ссылке.
   const unusablePassword = () => hashPassword(crypto.randomBytes(32).toString('hex'));
-  const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
   const normalizeEmail = (value) => String(value || '').toLowerCase().trim();
   const dbOff = (res) => res.status(503).json({ error: 'БД не подключена' });
 
@@ -173,7 +173,7 @@ function registerTeamRoutes({
     if (!db.enabled) return dbOff(res);
     const email = normalizeEmail(req.body && req.body.email);
     const role = String((req.body && req.body.role) || 'member');
-    if (!EMAIL_RE.test(email)) return res.status(400).json({ error: 'Некорректный email' });
+    if (!isPlausibleEmail(email)) return res.status(400).json({ error: 'Некорректный email' });   // длина до регулярки — lib/emailAddress
     if (!db.INVITE_ROLES.includes(role)) return res.status(400).json({ error: 'Неизвестная роль' });
     if (email === normalizeEmail(req.user.email)) {
       return res.status(400).json({ error: 'Это ваш собственный email' });
