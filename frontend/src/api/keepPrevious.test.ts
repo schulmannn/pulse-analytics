@@ -36,7 +36,7 @@ describe('keepPreviousForChannel', () => {
       qk.historyChannel.window(7, 30),
       qk.mentionsArchive.window(7, 30, null, 50, null, null),
       qk.ig.insights(7, 30),
-      qk.ig.history(7, 400),
+      qk.ig.history(7, 'all'),
     ];
     for (const key of keys) expect(key[1]).toBe(7);
   });
@@ -49,7 +49,7 @@ describe('фабрика ключей', () => {
     // TanStack матчит ключи поэлементно с начала: каждый ключ семьи обязан начинаться с префикса.
     for (const key of [qk.ig.profile(7), qk.ig.insights(7, 30), qk.ig.posts(7, 24),
                        qk.ig.breakdowns(7, 'last_30_days'), qk.ig.online(7), qk.ig.stories(7),
-                       qk.ig.tags(7), qk.ig.history(7, 400), qk.ig.oauthStatus(7)]) {
+                       qk.ig.tags(7), qk.ig.history(7, 'all'), qk.ig.oauthStatus(7)]) {
       expect(key.slice(0, 2)).toEqual(all);
     }
     // Ключ соседнего канала под этот префикс НЕ подпадает.

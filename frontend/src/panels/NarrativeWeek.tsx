@@ -118,7 +118,7 @@ function useWeekNarrativeInput(): { input: NarrativeInput | null; posts: Normali
 /** Instagram-вход — лёгкая тройка запросов (профиль + insights 14д + архив ig_daily) вместо
  * полного useIgData: рассказу нужны только две дневные серии, а полный бандл тянет ещё посты,
  * брейкдауны, online и stories — лишние вызовы на каждый визит Обзора. Правило слияния
- * live↔архив то же, что у страниц /metrics/ig-* (histSeries/longerSeries) — числа сходятся
+ * live↔архив то же, что у страниц /metrics/ig-* (histSeries/mergeIgDaily) — числа сходятся
  * 1-в-1. Гейт честности как в igHome: mock вне демо (Instagram не подключён) → null, и
  * IG-абзац не рождается. */
 export function useIgWeekInput(): { input: NarrativeIgInput | null; loading: boolean; notConnected: boolean } {
@@ -144,7 +144,7 @@ export function useIgWeekInput(): { input: NarrativeIgInput | null; loading: boo
   const profileQ = useIgProfile(igFetch);
   const insightsQ = useIgInsights(14, igFetch);
   const insights7Q = useIgInsights(7, igFetch);
-  const historyQ = useIgHistory(400, igFetch);
+  const historyQ = useIgHistory(igFetch);
   const postsQ = useIgPosts(24, igFetch);
   const profile = profileQ.data;
   const ins = insightsQ.data;

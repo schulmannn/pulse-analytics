@@ -63,7 +63,7 @@ const CASES: Array<[string, z.ZodTypeAny]> = [
   ['/api/ig/online', IgOnlineSchema],
   ['/api/ig/stories', IgStoriesSchema],
   ['/api/ig/tags', IgTagsSchema],
-  ['/api/ig/history?days=400', IgHistorySchema],
+  ['/api/ig/history?days=0', IgHistorySchema],
   ['/api/ig/oauth/status', IgOauthStatusMirror],
 ];
 
