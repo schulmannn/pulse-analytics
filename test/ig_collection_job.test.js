@@ -260,19 +260,37 @@ test('collectIgDailyForDay: прошлый день — окно [D, D+1), бе�
   assert.equal(fauWide.since, since + SEC - 8 * SEC, 'якорь fau — until − 8 дней, как у крона');
 });
 
-test('collectIgDailyForDay: исход дня — reauth > transient > data > empty; throttle пробрасывается', async () => {
+test('collectIgDailyForDay: исход дня — reauth > transient > data > denied > empty; throttle пробрасывается', async () => {
   const err = (status, extra = {}) => Object.assign(new Error('x'), { status, ...extra });
   const zeros = (path, params) => {
     if (path === '/IG1/insights' && params.metric === 'reach') return { data: [{ name: 'reach', values: [{ value: 0 }] }] };
     if (params.metric_type === 'total_value' && params.breakdown == null) return { data: [{ total_value: { value: 0 } }] };
     return benign(path, params);
   };
-  const empty = recordingJob((path, params) => {
+  const zeroDay = recordingJob((path, params) => {
     if (params.metric === 'follows_and_unfollows') return { data: [] };
     return zeros(path, params);
   });
-  assert.equal((await empty.job.collectIgDailyForDay(ACC, 'T', '2025-01-01', { followerCount: false })).outcome, 'empty',
-    'день из одних нулей/null — пусто, а не выдуманный ноль');
+  const z = await zeroDay.job.collectIgDailyForDay(ACC, 'T', '2025-01-01', { followerCount: false });
+  assert.equal(z.outcome, 'data', 'честные нули Graph — данные, как у записи крона (ноль ≠ дыра)');
+  assert.equal(z.row.reach, 0);
+
+  const allNull = recordingJob((path, params) => {
+    if (path === '/IG1/insights' && params.metric === 'reach') return { data: [] };
+    if (params.metric === 'follows_and_unfollows') return { data: [] };
+    return { data: [] };
+  });
+  assert.equal((await allNull.job.collectIgDailyForDay(ACC, 'T', '2025-01-01', { followerCount: false })).outcome, 'empty',
+    'Graph не отдал ни одного значения — пусто');
+
+  const denied = recordingJob(() => { throw err(502, { igCode: 10 }); });
+  assert.equal((await denied.job.collectIgDailyForDay(ACC, 'T', '2025-01-01', { followerCount: false })).outcome, 'denied',
+    'отказ в правах (#10) — не пустой день и не горизонт');
+  const deniedScope = recordingJob(() => { throw err(502, { graph: { code: 200 } }); });
+  assert.equal((await deniedScope.job.collectIgDailyForDay(ACC, 'T', '2025-01-01', { followerCount: false })).outcome, 'denied');
+  const partlyDenied = recordingJob((path, params) => { if (params.metric === 'likes') throw err(502, { igCode: 10 }); return benign(path, params); });
+  assert.equal((await partlyDenied.job.collectIgDailyForDay(ACC, 'T', '2025-01-01')).outcome, 'data',
+    'отказ одной метрики при остальных данных — день с данными');
 
   const tooOld = recordingJob(() => { throw err(502, { igCode: 100 }); });
   assert.equal((await tooOld.job.collectIgDailyForDay(ACC, 'T', '2020-01-01', { followerCount: false })).outcome, 'empty',

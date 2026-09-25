@@ -137,10 +137,11 @@ test('статус дней и страж идентичности upsert: чу�
   const other = await pool.query(`INSERT INTO external_sources (network, external_id) VALUES ('ig', $1) RETURNING id`, [igId()]);
   await pool.query(`INSERT INTO ig_daily (channel_id, source_id, day, reach) VALUES ($1, $2, $3, NULL)`, [ch.id, other.rows[0].id, d(6)]);
   const st = Object.fromEntries((await db.listIgDayStatus(ch.id, d(7), d(2))).map((r) => [r.day, r]));
-  assert.deepStrictEqual(st[d(3)], { day: d(3), occupied: true, incomplete: false });
-  assert.deepStrictEqual(st[d(4)], { day: d(4), occupied: true, incomplete: true });
-  assert.deepStrictEqual(st[d(5)], { day: d(5), occupied: false, incomplete: true });
-  assert.deepStrictEqual(st[d(6)], { day: d(6), occupied: true, incomplete: false }, 'чужой день занят — вызовы на него не тратим');
+  assert.deepStrictEqual(st[d(3)], { day: d(3), is_foreign: false, occupied: true, incomplete: false });
+  assert.deepStrictEqual(st[d(4)], { day: d(4), is_foreign: false, occupied: true, incomplete: true });
+  assert.deepStrictEqual(st[d(5)], { day: d(5), is_foreign: false, occupied: false, incomplete: true });
+  assert.deepStrictEqual(st[d(6)], { day: d(6), is_foreign: true, occupied: true, incomplete: false },
+    'чужой день занят (вызовы на него не тратим) и помечен чужим — горизонт по нему не двигают');
   assert.strictEqual(st[d(2)], undefined, 'дня без строки в статусе нет');
 
   const n = await db.upsertIgDaily(ch.id, [{ day: d(6), reach: 99 }], undefined, { guardSource: true, igUserId: ig });
@@ -184,6 +185,10 @@ test('архив: «Всё», точный диапазон и legacy days; ст
   const status = await db.getIgArchiveStatusForActor(ch.id, actor(owner));
   assert.deepStrictEqual(status.bounds, { first_day: d(800), last_day: d(3) }, 'границы — по дням с данными');
   assert.strictEqual(status.measured_days, 5);
+  assert.strictEqual(status.hidden_days, 0);
+  for (const n of [36500, 10000000, 3000000000]) {
+    assert.strictEqual((await db.listIgDailyInternal(ch.id, n)).length, 6, `legacy days=${n} не падает «date out of range»`);
+  }
   assert.deepStrictEqual(status.backfill, { status: 'idle', horizon_day: null, cursor_day: null, reason: null },
     'аккаунт подключён, догрузка ещё не бралась — ожидает');
   const stranger = await mkUser('stranger');
@@ -201,6 +206,7 @@ test('архив: «Всё», точный диапазон и legacy days; ст
   assert.deepStrictEqual(await db.listIgDailyInternal(ch.id, { all: true }), [], 'чужая история не выдаётся за новую');
   const st2 = await db.getIgArchiveStatusInternal(ch.id);
   assert.strictEqual(st2.bounds, null);
+  assert.strictEqual(st2.hidden_days, 6, 'скрытые дни прежнего аккаунта посчитаны — клиент скажет о них');
   assert.deepStrictEqual(st2.backfill, { status: 'idle', horizon_day: null, cursor_day: null, reason: null });
 
   // Disconnect: строки ig_accounts нет — архив канала читается целиком.
@@ -208,6 +214,7 @@ test('архив: «Всё», точный диапазон и legacy days; ст
   assert.strictEqual((await db.listIgDailyInternal(ch.id, { all: true })).length, 6);
   const st3 = await db.getIgArchiveStatusInternal(ch.id);
   assert.strictEqual(st3.backfill, null, 'без подключения догрузки нет');
+  assert.strictEqual(await db.getIgBackfillState(ch.id), null, 'отключение стирает операционное состояние с ig_user_id');
   assert.deepStrictEqual(st3.bounds, { first_day: d(800), last_day: d(3) });
 });
 
@@ -225,8 +232,8 @@ test('проход догрузки на реальной БД: пишет то�
   const mine = (list) => list.filter((a) => a.channel_id === ch.id);
   const scoped = new Proxy(db, {
     get(target, prop) {
-      if (prop === 'listIgBackfillCandidates') return async (limit) => mine(await target.listIgBackfillCandidates(1000)).slice(0, limit);
-      if (prop === 'listIgHealCandidates') return async (limit) => mine(await target.listIgHealCandidates(1000)).slice(0, limit);
+      if (prop === 'listIgBackfillCandidates') return async (limit, opts) => mine(await target.listIgBackfillCandidates(1000, opts)).slice(0, limit);
+      if (prop === 'listIgHealCandidates') return async (limit, day) => mine(await target.listIgHealCandidates(1000, day)).slice(0, limit);
       return target[prop];
     },
   });
@@ -256,4 +263,56 @@ test('проход догрузки на реальной БД: пишет то�
   assert.deepStrictEqual(calls.filter((day) => day !== d(2) && day !== d(3)), [], 'повтор: только дневной ремонт вчера−1/−2');
   const after = await db.listIgDailyForActor(ch.id, actor(owner), { all: true });
   assert.deepStrictEqual(after.map((r) => r.day), rows.map((r) => r.day), 'архив не вырос выдуманными днями');
+});
+
+test('чекпойнт условен: чужая идентичность или другая эпоха — строка не тронута', { skip }, async () => {
+  const { ch, ig } = await mkIgChannel('ex');
+  const started = new Date(Date.now() - 5000);
+  await db.setIgBackfillState(ch.id, { ig_user_id: ig, status: 'running', cursor_day: d(2), floor_day: d(732), started_at: started });
+  const read = await db.getIgBackfillState(ch.id);
+  assert.strictEqual(await db.setIgBackfillState(ch.id, { cursor_day: d(3) }, { ig_user_id: ig, started_at: read.started_at }), true,
+    'та же идентичность и эпоха (строкой без долей секунды) — пишется');
+  assert.strictEqual(await db.setIgBackfillState(ch.id, { cursor_day: d(4) }, { ig_user_id: ig, started_at: started }), true,
+    'эпоха как Date с миллисекундами — та же');
+  assert.strictEqual(await db.setIgBackfillState(ch.id, { cursor_day: d(9) }, { ig_user_id: 'other', started_at: started }), false);
+  assert.strictEqual(await db.setIgBackfillState(ch.id, { cursor_day: d(9) }, { ig_user_id: ig, started_at: new Date(started.getTime() - 60000) }), false,
+    'другая эпоха прохода — не пишется');
+  assert.strictEqual((await db.getIgBackfillState(ch.id)).cursor_day, d(4));
+});
+
+test('кандидаты: бюджет дня, перезапуск done без данных после reconnect; ремонт — без вылеченных сегодня', { skip }, async () => {
+  const today = d(0);
+  const spent = await mkIgChannel('bs');
+  const spentOther = await mkIgChannel('bso');
+  const emptyDone = await mkIgChannel('ed');
+  const dataDone = await mkIgChannel('dd');
+  const healed = await mkIgChannel('hd');
+  const failedHeal = await mkIgChannel('fh');
+  await db.setIgBackfillState(spent.ch.id, { ig_user_id: spent.ig, status: 'running', calls_day: today, calls_count: 1495 });
+  await db.setIgBackfillState(spentOther.ch.id, { ig_user_id: spentOther.ig, status: 'running', calls_day: d(1), calls_count: 1495 });
+  await db.setIgBackfillState(emptyDone.ch.id, { ig_user_id: emptyDone.ig, status: 'done', days_with_data: 0, finished_at: new Date(Date.now() - 3600000) });
+  await db.setIgBackfillState(dataDone.ch.id, { ig_user_id: dataDone.ig, status: 'done', horizon_day: d(90), days_with_data: 80, finished_at: new Date(Date.now() - 3600000) });
+  await pool.query(`UPDATE ig_accounts SET updated_at = now() WHERE channel_id = ANY($1)`, [[emptyDone.ch.id, dataDone.ch.id]]);
+  const mine = new Set([spent, spentOther, emptyDone, dataDone].map((x) => x.ch.id));
+  const list = (await db.listIgBackfillCandidates(1000, { day: today, maxCalls: 1500 - CALLS_PER_DAY })).filter((r) => mine.has(r.channel_id));
+  const ids = list.map((r) => r.channel_id);
+  assert.ok(!ids.includes(spent.ch.id), 'бюджет сегодняшнего дня выбран — не кандидат');
+  assert.ok(ids.includes(spentOther.ch.id), 'вчерашний счётчик не мешает');
+  assert.ok(ids.includes(emptyDone.ch.id), 'done без данных после переподключения — проход заново');
+  assert.strictEqual(list.find((r) => r.channel_id === emptyDone.ch.id).restart_done, true);
+  assert.ok(!ids.includes(dataDone.ch.id), 'done с горизонтом — только ремонт');
+  const noOpts = (await db.listIgBackfillCandidates(1000)).map((r) => r.channel_id);
+  assert.ok(noOpts.includes(spent.ch.id), 'без opts — прежний отбор');
+
+  for (const x of [healed, failedHeal]) {
+    await db.setIgBackfillState(x.ch.id, { ig_user_id: x.ig, status: 'done', horizon_day: d(30), days_with_data: 20 });
+  }
+  await pool.query(`INSERT INTO jobs (kind, idempotency_key, status) VALUES ('ig_daily_heal', $1, 'succeeded'), ('ig_daily_heal', $2, 'failed')`,
+    [`${healed.ch.id}:${healed.ig}:${today}`, `${failedHeal.ch.id}:${failedHeal.ig}:${today}`]);
+  const healMine = new Set([healed, failedHeal, dataDone].map((x) => x.ch.id));
+  const heal = (await db.listIgHealCandidates(1000, today)).filter((r) => healMine.has(r.channel_id)).map((r) => r.channel_id);
+  assert.ok(!heal.includes(healed.ch.id), 'вылеченный сегодня не занимает окно');
+  assert.deepStrictEqual(heal, [dataDone.ch.id, failedHeal.ch.id], 'не пробованные сегодня — первыми, упавшие — в конце');
+  await pool.query(`DELETE FROM jobs WHERE kind='ig_daily_heal' AND idempotency_key = ANY($1)`,
+    [[`${healed.ch.id}:${healed.ig}:${today}`, `${failedHeal.ch.id}:${failedHeal.ig}:${today}`]]);
 });

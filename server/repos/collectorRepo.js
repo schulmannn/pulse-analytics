@@ -738,10 +738,14 @@ function createCollectorRepo({ pool, enabled, transaction, setChannelTgId }) {
   // а Postgres проверяет NOT NULL у предлагаемой строки ДО разбора ON CONFLICT, поэтому патч без
   // ig_user_id (чекпойнт прохода) — чистый UPDATE существующей строки; с ig_user_id (сброс прохода,
   // первая запись канала) — INSERT … ON CONFLICT. Возвращает, была ли строка записана.
+  // expect { ig_user_id, started_at } (только UPDATE-патч): запись лишь если строка всё ещё того
+  // прохода, который её читал, — та же идентичность и та же эпоха (started_at с точностью до
+  // секунды: чтение отдаёт его без долей). Чанк, начатый для прежнего аккаунта, после переподключения
+  // другого не затирает состояние нового: rowCount 0 → false, вызывающий прерывает проход.
   const IG_BACKFILL_COLUMNS = ['ig_user_id', 'status', 'cursor_day', 'floor_day', 'horizon_day',
     'empty_streak', 'day_attempts', 'days_fetched', 'days_with_data', 'calls_day', 'calls_count',
     'error', 'started_at', 'finished_at'];
-  async function setIgBackfillState(channelId, patch = {}) {
+  async function setIgBackfillState(channelId, patch = {}, expect = null) {
     if (!enabled || !channelId) return false;
     const cols = ['channel_id'];
     const vals = ['$1'];
@@ -758,8 +762,17 @@ function createCollectorRepo({ pool, enabled, transaction, setChannelTgId }) {
     }
     sets.push('updated_at=now()');
     if (!('ig_user_id' in patch)) {
+      let guard = '';
+      if (expect?.ig_user_id != null) {
+        params.push(String(expect.ig_user_id));
+        guard += ` AND ig_user_id=$${params.length}`;
+        if (expect.started_at != null) {
+          params.push(expect.started_at instanceof Date ? expect.started_at.toISOString() : String(expect.started_at));
+          guard += ` AND date_trunc('second', started_at) = date_trunc('second', $${params.length}::timestamptz)`;
+        }
+      }
       const { rowCount } = await pool.query(
-        `UPDATE ig_backfill_state SET ${sets.join(', ')} WHERE channel_id=$1`, params);
+        `UPDATE ig_backfill_state SET ${sets.join(', ')} WHERE channel_id=$1${guard}`, params);
       return rowCount > 0;
     }
     await pool.query(
@@ -773,41 +786,65 @@ function createCollectorRepo({ pool, enabled, transaction, setChannelTgId }) {
   // Кому нужен шаг догрузки: нет состояния; состояние чужой идентичности (переподключили другой
   // аккаунт — проход начинается заново); idle/running; error — только если ошибке больше суток или
   // аккаунт с тех пор обновлён (переподключение/продление токена штампует ig_accounts.updated_at).
+  // done БЕЗ единого дня с данными (horizon_day NULL / days_with_data 0) той же идентичности, если
+  // аккаунт с тех пор переподключён или продлён (ig_accounts.updated_at > finished_at): такой done —
+  // не горизонт Graph, а обход, упёршийся в сбой; он начинается заново (restart_done).
+  // opts.day/opts.maxCalls: аккаунт той же идентичности, выбравший дневной бюджет вызовов за UTC-день
+  // `day` (calls_count > maxCalls), в кандидаты не попадает — иначе он, не двигая updated_at, занимал
+  // бы все слоты прохода до полуночи.
   // Самые давно не тронутые — первыми (updated_at NULLS FIRST), затем по каналу — детерминированно.
   // Доверенный фоновый путь: без ownership-фильтра, как listIgAccounts; токен дешифрует вызывающий.
-  async function listIgBackfillCandidates(limit = 3) {
+  async function listIgBackfillCandidates(limit = 3, opts = {}) {
     if (!enabled) return [];
     const lim = clampInt(limit, 3, 1, 1000);
+    const params = [lim];
+    let budget = '';
+    if (opts?.day && Number.isFinite(Number(opts.maxCalls))) {
+      params.push(opts.day, Math.trunc(Number(opts.maxCalls)));
+      budget = `
+          AND (s.channel_id IS NULL OR s.ig_user_id <> a.ig_user_id
+               OR s.calls_day IS DISTINCT FROM $2::date OR s.calls_count <= $3)`;
+    }
     const { rows } = await pool.query(
       `SELECT a.channel_id, a.ig_user_id, a.username, a.access_token_enc,
               to_char(a.token_expires_at,'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS token_expires_at,
-              s.status AS state_status, s.ig_user_id AS state_ig_user_id
+              s.status AS state_status, s.ig_user_id AS state_ig_user_id,
+              (s.status = 'done' AND s.ig_user_id = a.ig_user_id) AS restart_done
          FROM ig_accounts a
          LEFT JOIN ig_backfill_state s ON s.channel_id = a.channel_id
-        WHERE s.channel_id IS NULL
+        WHERE (s.channel_id IS NULL
            OR s.ig_user_id <> a.ig_user_id
            OR s.status IN ('idle', 'running')
            OR (s.status = 'error'
                AND (s.updated_at < now() - interval '24 hours' OR a.updated_at > s.updated_at))
+           OR (s.status = 'done' AND (s.horizon_day IS NULL OR s.days_with_data = 0)
+               AND a.updated_at > COALESCE(s.finished_at, s.updated_at)))${budget}
         ORDER BY s.updated_at ASC NULLS FIRST, a.channel_id ASC
-        LIMIT $1`, [lim]);
+        LIMIT $1`, params);
     return rows;
   }
 
   // Аккаунты с завершённой догрузкой той же идентичности — кандидаты на дневной ремонт/доливку
-  // (igBackfillJob, раз в UTC-сутки под durable-ключом). Порядок детерминирован.
-  async function listIgHealCandidates(limit = 25) {
+  // (igBackfillJob, раз в UTC-сутки под durable-ключом 'ig_daily_heal' `${ch}:${ig}:${day}`).
+  // Уже вылеченные за UTC-день `day` не возвращаются — окно LIMIT не забивается ими, и аккаунты за
+  // первыми N по channel_id тоже доходят до ремонта. Не пробованные сегодня — первыми; пробованные и
+  // упавшие (throttle, пауза) — в конец, по давности попытки: один застрявший аккаунт не держит голову.
+  async function listIgHealCandidates(limit = 25, day = null) {
     if (!enabled) return [];
     const lim = clampInt(limit, 25, 1, 1000);
+    const healDay = typeof day === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : new Date().toISOString().slice(0, 10);
     const { rows } = await pool.query(
       `SELECT a.channel_id, a.ig_user_id, a.username, a.access_token_enc,
               to_char(a.token_expires_at,'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS token_expires_at,
               to_char(s.horizon_day,'YYYY-MM-DD') AS horizon_day
          FROM ig_accounts a
          JOIN ig_backfill_state s ON s.channel_id = a.channel_id AND s.ig_user_id = a.ig_user_id
+         LEFT JOIN jobs j ON j.kind = 'ig_daily_heal'
+                         AND j.idempotency_key = a.channel_id::text || ':' || a.ig_user_id || ':' || $2
         WHERE s.status = 'done'
-        ORDER BY a.channel_id ASC
-        LIMIT $1`, [lim]);
+          AND (j.id IS NULL OR j.status <> 'succeeded')
+        ORDER BY (j.id IS NOT NULL) ASC, j.updated_at ASC NULLS FIRST, a.channel_id ASC
+        LIMIT $1`, [lim, healDay]);
     return rows;
   }
 
@@ -815,11 +852,14 @@ function createCollectorRepo({ pool, enabled, transaction, setChannelTgId }) {
   //   occupied   — у дня есть данные (reach/views/total_interactions не null) ЛЮБОЙ идентичности,
   //                либо строка чужой идентичности: guardSource её всё равно не перезапишет, и
   //                тратить на неё вызовы бессмысленно;
-  //   incomplete — строка своей идентичности, где нет ни reach, ни views (ремонт перезапросит день).
+  //   incomplete — строка своей идентичности, где нет ни reach, ни views (ремонт перезапросит день);
+  //   is_foreign — строку записала ДРУГАЯ IG-идентичность: день занят, но это не история текущего
+  //                аккаунта — горизонт по нему не двигают (догрузка только пропускает его).
   async function listIgDayStatus(channelId, from, to) {
     if (!enabled || !channelId || !from || !to) return [];
     const { rows } = await pool.query(
       `SELECT to_char(d.day,'YYYY-MM-DD') AS day,
+              (d.source_id IS NOT NULL AND a.source_id IS NOT NULL AND d.source_id <> a.source_id) AS is_foreign,
               (d.reach IS NOT NULL OR d.views IS NOT NULL OR d.total_interactions IS NOT NULL
                OR (d.source_id IS NOT NULL AND a.source_id IS NOT NULL AND d.source_id <> a.source_id)) AS occupied,
               (d.reach IS NULL AND d.views IS NULL

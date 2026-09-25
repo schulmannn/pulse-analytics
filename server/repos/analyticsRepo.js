@@ -24,6 +24,9 @@ const { toMetricNumber } = require('../lib/metricNumber');
 const { isDayKey } = require('../domain/period');
 const { createMsAnalyticsRepo } = require('./msAnalyticsRepo');
 
+// Числовой legacy-`days` архива IG (listIgDailyInternal): верхняя граница только от переполнения даты.
+const IG_LEGACY_DAYS_MAX = 36500;
+
 // Metric counter columns are BIGINT (migration 023); node-postgres returns BIGINT as a decimal
 // STRING. Convert exactly the widened counters back to JS numbers (safe within MAX_SAFE_METRIC) so
 // the API contract keeps emitting numbers; identifiers (post_id, mention channel_id/msg_id) stay
@@ -367,7 +370,9 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
         if (isDayKey(daysOrOpts.to)) { params.push(daysOrOpts.to); range += ` AND d.day <= $${params.length}::date`; }
       }
     } else {
-      const n = Number.isFinite(Number(daysOrOpts)) ? Math.max(0, Math.trunc(Number(daysOrOpts))) : 400;
+      // Потолок — ради Postgres, а не продукта: CURRENT_DATE − n за пределами ~5.8 млн дней падает
+      // «date out of range». 36 500 дней (100 лет) заведомо шире любого архива.
+      const n = Number.isFinite(Number(daysOrOpts)) ? Math.min(IG_LEGACY_DAYS_MAX, Math.max(0, Math.trunc(Number(daysOrOpts)))) : 400;
       params.push(n);
       range = ` AND d.day >= (CURRENT_DATE - $${params.length}::int)`;
     }
@@ -387,6 +392,9 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
   //   bounds        — первый/последний день, где ЕСТЬ данные (reach/views/total_interactions), тем же
   //                   стражем идентичности, что listIgDailyInternal; пустой архив → null;
   //   measured_days — сколько таких дней;
+  //   hidden_days   — сколько дней архива канала записано ДРУГОЙ IG-идентичностью (прежний аккаунт
+  //                   до переподключения): стражем они скрыты, а догрузка их не перезаписывает — клиент
+  //                   обязан сказать, что история прежнего аккаунта скрыта, а не молча начать архив позже;
   //   backfill      — состояние догрузки текущей идентичности ({status, horizon_day, cursor_day,
   //                   reason}); другой аккаунт в состоянии → 'idle' (проход начнётся заново);
   //                   нет подключения → null.
@@ -395,7 +403,10 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
     const { rows } = await pool.query(
       `SELECT to_char(MIN(d.day),'YYYY-MM-DD') AS first_day,
               to_char(MAX(d.day),'YYYY-MM-DD') AS last_day,
-              COUNT(*)::int AS measured_days
+              COUNT(*)::int AS measured_days,
+              (SELECT COUNT(*)::int FROM ig_daily h JOIN ig_accounts ha ON ha.channel_id = h.channel_id
+                WHERE h.channel_id = $1 AND h.source_id IS NOT NULL AND ha.source_id IS NOT NULL
+                  AND h.source_id <> ha.source_id) AS hidden_days
          FROM ig_daily d
          LEFT JOIN ig_accounts a ON a.channel_id = d.channel_id
         WHERE d.channel_id=$1
@@ -426,6 +437,7 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
     return {
       bounds: agg.first_day && agg.last_day ? { first_day: agg.first_day, last_day: agg.last_day } : null,
       measured_days: Number(agg.measured_days) || 0,
+      hidden_days: Number(agg.hidden_days) || 0,
       backfill,
     };
   }

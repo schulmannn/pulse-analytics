@@ -75,12 +75,16 @@ function createInstagramCollectionJob({ db, log, igCrypto, igFetch, refreshIgIfN
 
   // Класс сбоя отдельного вызова для исхода дня: 409/ig_reauth — токен умер (переподключите);
   // временный сбой Graph (клиент отдаёт его 503 / transient=true после своих ретраев) — день стоит
-  // повторить; остальное (502: #100 «слишком старо», нет метрики, права) — перманентная пустота этой
-  // метрики. Throttle (429) сюда не попадает: он пробрасывается раньше.
+  // повторить; Graph #10 / #200–#299 — нет прав на статистику (scope отозван/не выдан): это НЕ
+  // «пустой день», а состояние аккаунта — горизонтом его считать нельзя; остальное (502: #100
+  // «слишком старо», нет метрики) — перманентная пустота этой метрики. Throttle (429) сюда не
+  // попадает: он пробрасывается раньше.
   const failureKind = (e) => {
     if (!e) return null;
     if (Number(e.status) === 409 || e.code === 'ig_reauth') return 'reauth';
     if (e.transient === true || Number(e.status) === 503 || Number(e.status) === 504) return 'transient';
+    const code = Number(e.igCode ?? e.graph?.code);
+    if (code === 10 || (code >= 200 && code <= 299)) return 'denied';
     return null;
   };
 
@@ -98,9 +102,12 @@ function createInstagramCollectionJob({ db, log, igCrypto, igFetch, refreshIgIfN
   //   opts.write        — upsert строки (крон). Бэкфилл пишет сам, решая по исходу;
   //   opts.guardSource/opts.igUserId — страж идентичности upsertIgDaily (см. collectorRepo);
   //   opts.logPrefix    — префикс событий лога ('ig_cron' у крона).
-  // Возвращает { row, outcome, calls }: outcome ∈ data | empty | transient | reauth (приоритет
-  // reauth > transient > data > empty). data = хотя бы одна дневная метрика > 0: день из одних
-  // нулей/null от Graph (до создания аккаунта, за горизонтом) — «пусто», а не выдуманный ноль.
+  // Возвращает { row, outcome, calls }: outcome ∈ data | denied | empty | transient | reauth
+  // (приоритет reauth > transient > data > denied > empty). data = хотя бы одна дневная метрика НЕ
+  // null — та же граница, что у записи крона: честный ноль от Graph — это ноль, а не дыра, иначе
+  // смысл дня в архиве зависел бы от того, какая джоба его писала. empty = Graph не отдал ни одного
+  // значения (всё null, #100 «слишком старо»); denied = ни одного значения И хотя бы один отказ в
+  // правах (#10/#200) — не горизонт, а состояние аккаунта.
   // Throttle-ошибки пробрасываются как раньше — runJobOnce пометит работу failed/retryable.
   async function collectIgDailyForDay(acc, token, day, opts = {}) {
     const {
@@ -113,11 +120,12 @@ function createInstagramCollectionJob({ db, log, igCrypto, igFetch, refreshIgIfN
     const id = acc.ig_user_id;
     const row = { day };
     let calls = 0;
-    let reauth = false, transient = false;
+    let reauth = false, transient = false, denied = false;
     const note = (e) => {
       const k = failureKind(e);
       if (k === 'reauth') reauth = true;
       else if (k === 'transient') transient = true;
+      else if (k === 'denied') denied = true;
     };
     const fetch = (path, params) => { calls++; return igFetch(path, params, token); };
     // Дневные серии reach (+ follower_count) — одним вызовом (одна точка за сутки).
@@ -169,8 +177,8 @@ function createInstagramCollectionJob({ db, log, igCrypto, igFetch, refreshIgIfN
         row.followers_total = igNum(prof && prof.followers_count);
       } catch (e) { if (isIgThrottleError(e)) throw e; note(e); log('warn', `${logPrefix}_followers_total_failed`, { channelId: acc.channel_id, day, error: e.message }); }
     }
-    const hasData = IG_DAY_METRICS.some((k) => row[k] != null && row[k] > 0);
-    const outcome = reauth ? 'reauth' : transient ? 'transient' : hasData ? 'data' : 'empty';
+    const hasData = IG_DAY_METRICS.some((k) => row[k] != null);
+    const outcome = reauth ? 'reauth' : transient ? 'transient' : hasData ? 'data' : denied ? 'denied' : 'empty';
     if (write) {
       // Строка из одних null выглядит как покрытие и прячет пропуск от ремонта — не пишем её.
       const anyValue = Object.keys(row).some((k) => k !== 'day' && row[k] != null);

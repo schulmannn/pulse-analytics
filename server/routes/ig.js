@@ -457,7 +457,7 @@ function registerIgRoutes({
   // Доступ: только requireAuth + гейт владения внутри ForActor-ридеров (чужой канал → [] / null).
   // Живой токен НЕ нужен — архив переживает истёкший токен, ротацию ключа и отключение. Канала нет
   // (env/superuser-путь) → rows:[]: у env-аккаунта нет per-channel архива, клиент живёт на live-рядах.
-  // Ответ аддитивен: { enabled, rows, bounds, coverage:{measured_days}, window, backfill }; при сбое
+  // Ответ аддитивен: { enabled, rows, bounds, coverage:{measured_days, hidden_days}, window, backfill }; при сбое
   // чтения — прежний «оформленный» 200 с пустыми rows. Серверного кэша нет (дешёвое индексное чтение).
   app.get('/api/ig/history', requireAuth, async (req, res) => {
     const q = req.query || {};
@@ -469,9 +469,12 @@ function registerIgRoutes({
     } else if (String(q.days).trim() === '0') {
       window = { all: true };
     }
-    const legacyDays = Math.max(1, parseInt(q.days, 10) || 400);
+    // Legacy-число без потолка продукта, но с потолком Postgres: CURRENT_DATE − 10⁷ — «date out of
+    // range», и каждый такой запрос давал оформленную ошибку + warn в логе. 36 500 дней (100 лет)
+    // шире любого архива — это то же «всё», что days=0.
+    const legacyDays = Math.min(36500, Math.max(1, parseInt(q.days, 10) || 400));
     const channelId = tenantChannelId(req);
-    const empty = { enabled: db.enabled, rows: [], bounds: null, coverage: { measured_days: 0 }, window: null, backfill: null };
+    const empty = { enabled: db.enabled, rows: [], bounds: null, coverage: { measured_days: 0, hidden_days: 0 }, window: null, backfill: null };
     if (!db.enabled || !channelId) return res.json(empty);
     try {
       const [rows, status] = await Promise.all([
@@ -484,7 +487,7 @@ function registerIgRoutes({
         enabled: db.enabled,
         rows,
         bounds,
-        coverage: { measured_days: status?.measured_days || 0 },
+        coverage: { measured_days: status?.measured_days || 0, hidden_days: status?.hidden_days || 0 },
         window: resolved || null,
         backfill: status?.backfill || null,
       });

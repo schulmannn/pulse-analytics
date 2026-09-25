@@ -87,6 +87,10 @@ function createIntegrationsRepo({ pool, enabled, ensureExternalSource, transacti
   async function deleteIgAccount(channelId) {
     if (!enabled || !channelId) return false;
     const { rowCount } = await pool.query('DELETE FROM ig_accounts WHERE channel_id=$1', [channelId]);
+    // Операционное состояние догрузки истории держит ig_user_id отключённого аккаунта: после
+    // отключения оно не нужно (следующее подключение всё равно начинает проход заново), а хранить
+    // идентификатор, которого нет в GDPR-экспорте, незачем.
+    await pool.query('DELETE FROM ig_backfill_state WHERE channel_id=$1', [channelId]);
     return rowCount > 0;
   }
 

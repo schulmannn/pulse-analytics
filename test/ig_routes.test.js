@@ -33,7 +33,7 @@ function createIgRoutes(over = {}) {
     getIgArchiveStatusForActor: async (channelId, actor) => {
       statusCalls.push({ channelId, actor });
       return owns(channelId, actor)
-        ? { bounds: { first_day: '2024-10-01', last_day: '2026-07-01' }, measured_days: 540,
+        ? { bounds: { first_day: '2024-10-01', last_day: '2026-07-01' }, measured_days: 540, hidden_days: 12,
           backfill: { status: 'running', horizon_day: '2024-10-01', cursor_day: '2024-09-30', reason: null } }
         : null;
     },
@@ -176,7 +176,8 @@ test('ig history: владелец читает архив без живого �
   assert.deepEqual(historyCalls[0].window, { all: true }, '«Всё» — без нижней границы');
   assert.deepEqual(res.body.bounds, { first_day: '2024-10-01', last_day: '2026-07-01' });
   assert.deepEqual(res.body.window, { from: '2024-10-01', to: '2026-07-01' }, '«Всё» материализуется размахом архива');
-  assert.deepEqual(res.body.coverage, { measured_days: 540 });
+  assert.deepEqual(res.body.coverage, { measured_days: 540, hidden_days: 12 },
+    'скрытые дни прежнего аккаунта сообщаются клиенту — «Всё» не начинается молча позже');
   assert.equal(res.body.backfill.status, 'running');
   assert.equal(graphCalls.length, 0);
   assert.equal(decrypts, 0, 'архив переживает протухший токен и ротацию ключа');
@@ -224,6 +225,16 @@ test('ig history: legacy days — число дней без потолка 1000
     await invoke(routes, '/api/ig/history', { user: OWNER, query: { channel: '42', ...(days === undefined ? {} : { days }) } });
   }
   assert.deepEqual(historyCalls.map((c) => c.window), [30, 1500, 1, 400, 400]);
+});
+
+test('ig history: legacy days сверх 36 500 зажат — CURRENT_DATE − n не уходит за диапазон дат Postgres', async () => {
+  const { routes, historyCalls } = createIgRoutes({ owns: ownerOf42 });
+  for (const days of ['36500', '10000000', '3000000000', '1e308']) {
+    const res = await invoke(routes, '/api/ig/history', { user: OWNER, query: { channel: '42', days } });
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.body.error, undefined, days);
+  }
+  assert.deepEqual(historyCalls.map((c) => c.window), [36500, 36500, 36500, 1]);
 });
 
 test('ig history: сбой чтения — оформленный 200 с пустыми rows', async () => {
