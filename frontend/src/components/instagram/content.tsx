@@ -252,7 +252,7 @@ export function HashtagsBlock({ posts }: { posts: IgPost[] }) {
               <td className="p-4 text-right tabular-nums">{s.avgEr.toFixed(2)}%</td>
               <td className="p-4 text-right font-medium tabular-nums">
                 {Math.abs(s.lift) < 0.5 ? (
-                  <span className="text-muted-foreground/60">≈0%</span>
+                  <span className="text-muted-foreground">≈0%</span>
                 ) : (
                   <span className={s.lift > 0 ? 'text-verdant' : 'text-ember'}>
                     {s.lift > 0 ? '+' : ''}{s.lift.toFixed(0)}%

@@ -752,11 +752,11 @@ function MentionsTable({
                         </HoverCardContent>
                       </HoverCard>
                     ) : (
-                      <span className="text-sm italic text-muted-foreground/60">Без текста</span>
+                      <span className="text-sm italic text-muted-foreground">Без текста</span>
                     )}
                   </td>
                   <td className="px-3 py-2.5 text-right align-top font-medium tabular-nums text-foreground">
-                    {r.views != null ? fmt.num(r.views) : <span className="text-muted-foreground/40">—</span>}
+                    {r.views != null ? fmt.num(r.views) : <span className="text-ink3">—</span>}
                   </td>
                   <td className="px-3 py-2.5 text-right align-top text-xs tabular-nums text-muted-foreground">
                     {r.date ? <TwoLineDate iso={r.date} /> : '—'}
