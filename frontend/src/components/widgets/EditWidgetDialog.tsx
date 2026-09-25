@@ -219,13 +219,22 @@ function VariantCarousel({
                     }
                     select(i);
                   }}
-                  className={`w-56 shrink-0 overflow-hidden rounded-lg border text-left transition-[opacity,transform,border-color] dur-reveal ease-house motion-reduce:transition-none ${
-                    active
-                      ? 'border-primary ring-1 ring-primary/40'
-                      : 'scale-[0.96] opacity-60 border-border hover:opacity-90'
+                  // Only the PREVIEW dims on inactive cards. Opacity on the whole button also dimmed the
+                  // type label (the control's text) to 2.4–3.0:1 — an alpha on ink, which the canon
+                  // forbids (DESIGN_TOKENS «Never on ink»). The preview is a scaled-down picture of the
+                  // widget — aria-hidden + inert, its text is incidental (WCAG 1.4.3).
+                  className={`group/variant w-56 shrink-0 overflow-hidden rounded-lg border text-left transition-[transform,border-color] dur-reveal ease-house motion-reduce:transition-none ${
+                    active ? 'border-primary ring-1 ring-primary/40' : 'scale-[0.96] border-border'
                   }`}
                 >
-                  <div aria-hidden="true" className="pointer-events-none h-32 overflow-hidden bg-card" style={previewStyle}>
+                  <div
+                    aria-hidden="true"
+                    inert
+                    className={`pointer-events-none h-32 overflow-hidden bg-card transition-opacity dur-reveal ease-house motion-reduce:transition-none ${
+                      active ? '' : 'opacity-60 group-hover/variant:opacity-90'
+                    }`}
+                    style={previewStyle}
+                  >
                     <div
                       className="p-3"
                       style={
