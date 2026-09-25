@@ -10,7 +10,9 @@ export class ApiError extends Error {
   /** Запрос не дошёл до сервера (обрыв сети/DNS/офлайн) — ретраится как 5xx, см. main.tsx. */
   network?: boolean;
   /** Машинный код ошибки от сервера (snake_case), когда ответ нужно РАЗЛИЧАТЬ, а не просто показать:
-   *  'ig_reauth' = токен Instagram истёк. Текст сообщения для этого негодный ключ. */
+   *  'ig_reauth' = токен Instagram истёк; 'ms_token_revoked'/'ym_token_revoked' = 401 про токен
+   *  источника, а не про сессию (lib/authRedirect); 'ms_forbidden' = сотруднику МойСклада не хватает
+   *  прав. Текст сообщения для этого негодный ключ. */
   code?: string;
   constructor(status: number, message: string, retryAfter?: number) {
     super(message);

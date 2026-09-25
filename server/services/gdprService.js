@@ -30,6 +30,23 @@ function clampPageSize(v, fallback) {
   return Math.min(Math.floor(v), EXPORT_PAGE_SIZE_MAX);
 }
 
+// Экспорт держит ОДИН коннект основного пула на всё время стрима, а server.timeout намеренно 0.
+// Без потолков клиент, который открыл выгрузку и не читает ответ, держал коннект вечно, а десяток
+// таких — весь пул: вставал весь API (аудит, GDPR-2/DB-4). Два потолка (значения — из config):
+//   • сколько ждём, пока клиент заберёт очередной кусок ('drain') или хвост ответа ('finish');
+//     не дождались — рвём ответ, коннект возвращается в пул;
+//   • сколько выгрузок идёт одновременно (и не больше одной на пользователя); сверх — 'busy'
+//     ДО взятия коннекта и первого байта, роут отдаёт 503 + Retry-After.
+const EXPORT_DRAIN_TIMEOUT_DEFAULT_MS = 60000;
+const EXPORT_MAX_CONCURRENT_DEFAULT = 2;
+// Крупный кусок (keyset-страница широких jsonb-строк — это мегабайты) пишем ломтями: таймаут
+// drain тогда меряет «клиент не принял даже ломтя», а не «не успел скачать всю страницу», и
+// медленный, но живой клиент не рвётся. Режем Buffer по байтам, не строку: срез строки мог бы
+// разорвать суррогатную пару (эмодзи), а байты склеиваются на проводе ровно как были.
+const WRITE_SLICE_BYTES = 64 * 1024;
+
+const positiveIntOr = (v, fallback) => (Number.isInteger(v) && v > 0 ? v : fallback);
+
 // Клиент разорвал соединение посреди стрима: не ошибка сервера — прекращаем работу тихо, без
 // повторной попытки ответа и без аудита завершения.
 class ExportAborted extends Error {
@@ -215,9 +232,13 @@ function projectRow(spec, row) {
 
 // Обёртка над res с поддержкой backpressure и обрыва соединения. write() ждёт 'drain', когда
 // буфер полон, и отклоняется ExportAborted при close/error — так стрим не пишет в мёртвый сокет и
-// не зависает в ожидании 'drain', который уже не придёт.
-function createWriter(res) {
-  let closed = false;
+// не зависает в ожидании 'drain', который уже не придёт. drainTimeoutMs > 0 — сторож медленного
+// читателя: 'drain' (или 'finish' финала) не пришёл за это время → ответ рвётся, ожидание
+// отклоняется ExportAborted (штатный путь обрыва: 'aborted', коннект освобождается в finally).
+function createWriter(res, { drainTimeoutMs = 0 } = {}) {
+  // Ответ мог умереть ещё ДО writer'а (клиент ушёл, пока выгрузка ждала коннект пула): 'close' уже
+  // отгремел и повторно не придёт — без этой проверки экспорт писал бы в мёртвый сокет до сторожа.
+  let closed = Boolean(res.destroyed || (res.socket && res.socket.destroyed));
   let drainWaiters = [];
   const flush = (rejectAll) => {
     const waiters = drainWaiters;
@@ -229,33 +250,60 @@ function createWriter(res) {
   res.on('close', onClose);
   res.on('error', onClose);
   res.on('drain', onDrain);
+  const armStallTimer = (onStall) => (drainTimeoutMs > 0 ? setTimeout(() => {
+    console.warn(`[gdpr] export stalled: клиент не забирает ответ ${drainTimeoutMs} мс — соединение разорвано`);
+    try { res.destroy(); } catch { /* already gone */ }
+    onClose(); // не ждём асинхронного 'close' от destroy: ожидающий write отклоняется сразу
+    if (onStall) onStall();
+  }, drainTimeoutMs) : null);
+  const writeChunk = async (chunk) => {
+    if (closed) throw new ExportAborted();
+    if (res.write(chunk)) return;
+    await new Promise((resolve, reject) => {
+      const timer = armStallTimer();
+      drainWaiters.push({
+        resolve() { clearTimeout(timer); resolve(); },
+        reject(e) { clearTimeout(timer); reject(e); },
+      });
+    });
+  };
   return {
     get closed() { return closed; },
     async write(str) {
-      if (closed) throw new ExportAborted();
-      if (res.write(str)) return;
-      await new Promise((resolve, reject) => drainWaiters.push({ resolve, reject }));
+      if (str.length <= WRITE_SLICE_BYTES) return writeChunk(str);
+      const bytes = Buffer.from(str, 'utf8');
+      for (let off = 0; off < bytes.length; off += WRITE_SLICE_BYTES) {
+        await writeChunk(bytes.subarray(off, off + WRITE_SLICE_BYTES));
+      }
     },
-    // Завершение ответа. Резолвится, когда res честно дописан ('finish'-callback res.end), и
-    // отклоняется ExportAborted, если сокет оборвался ('close'/'error') ПОСЛЕ вызова res.end, но до
-    // его callback'а — иначе Promise завис бы навсегда. Локальные слушатели снимаются при первом
-    // исходе, повторный исход невозможен (guard `done`).
+    // Завершение ответа. Резолвится на 'finish' (res честно дописан) и отклоняется ExportAborted,
+    // если сокет оборвался ('close'/'error') ПОСЛЕ вызова res.end, но до 'finish', или клиент не
+    // забрал хвост за drainTimeoutMs — иначе Promise завис бы навсегда. Колбэк в res.end НЕ
+    // передаём: compression() подменяет res.end(chunk, encoding) и принимает функцию за chunk
+    // (Buffer.from(fn) → TypeError) — сжатый (т.е. любой браузерный) экспорт всегда обрывался на
+    // последнем шаге (аудит, GDPR-1). Слушатели снимаются при первом исходе (guard `done`).
     end() {
       return new Promise((resolve, reject) => {
         if (closed) return reject(new ExportAborted());
         if (res.writableEnded) return resolve();
         let done = false;
+        let timer = null;
         const finish = (fn, arg) => {
           if (done) return;
           done = true;
+          clearTimeout(timer);
+          res.off('finish', onFinish);
           res.off('close', onAbort);
           res.off('error', onAbort);
           fn(arg);
         };
+        const onFinish = () => finish(resolve);
         const onAbort = () => finish(reject, new ExportAborted());
+        res.on('finish', onFinish);
         res.on('close', onAbort);
         res.on('error', onAbort);
-        res.end(() => finish(resolve));
+        timer = armStallTimer(onAbort);
+        try { res.end(); } catch (e) { finish(reject, e); }
       });
     },
     cleanup() {
@@ -273,8 +321,15 @@ function objectPrefix(obj) {
   return s === '{}' ? '{' : `${s.slice(0, -1)},`;
 }
 
-function createGdprService({ pool, enabled, transaction, exportPageSize }) {
+function createGdprService({
+  pool, enabled, transaction, exportPageSize, exportDrainTimeoutMs, exportMaxConcurrent,
+}) {
   const defaultPageSize = clampPageSize(exportPageSize, EXPORT_PAGE_SIZE_DEFAULT);
+  const drainTimeoutMs = positiveIntOr(exportDrainTimeoutMs, EXPORT_DRAIN_TIMEOUT_DEFAULT_MS);
+  const maxConcurrentExports = positiveIntOr(exportMaxConcurrent, EXPORT_MAX_CONCURRENT_DEFAULT);
+  // Одна web-реплика (ADR-002) → in-memory счётчик авторитетен, как у admission-контроллеров.
+  let exportsInFlight = 0;
+  const exportingUids = new Set();
   /* Полное стирание аккаунта (GDPR erasure) — один DELETE FROM users: реляционную полноту даёт
      схема. Каскадом умирают user_prefs / tg_sessions / email_tokens / reports / workspaces
      (+members/campaigns/posts) / ai_chats / ai_usage_daily / channels(owner_uid), а от channels —
@@ -612,19 +667,43 @@ function createGdprService({ pool, enabled, transaction, exportPageSize }) {
      шаренные воркспейс-каналы принадлежат другому владельцу (data minimization).
      Один выделенный клиент = ровно один коннект (как раньше): фан-аут через pool.query душил бы
      весь API на время экспорта. Клиент освобождается в finally — на успехе, ошибке И обрыве.
-     Возвращает: 'not_found' (юзера нет — байты НЕ писались, роут отдаёт 404), 'ok' (документ
-     дописан и res закрыт — роут аудитит), 'aborted' (клиент отвалился), 'stream_error' (сбой
-     после начала ответа — res уничтожен, второй JSON-ответ невозможен). Ошибка ДО первого байта
-     (напр. упал account-запрос) — throw, роут уводит в next(err) со штатным 500. */
-  async function streamUserExport(uid, res, { onReady, pageSize } = {}) {
+     Возвращает: 'not_found' (юзера нет — байты НЕ писались, роут отдаёт 404), 'busy' (занят
+     лимит одновременных выгрузок — ни коннекта, ни байта; роут отдаёт 503 + Retry-After), 'ok'
+     (документ дописан и res закрыт — роут аудитит), 'aborted' (клиент отвалился или перестал
+     читать дольше drainTimeoutMs), 'stream_error' (сбой после начала ответа — res уничтожен,
+     второй JSON-ответ невозможен). Ошибка ДО первого байта (напр. упал account-запрос) — throw,
+     роут уводит в next(err) со штатным 500. */
+  async function streamUserExport(uid, res, opts = {}) {
     if (!enabled || uid == null) return 'not_found';
+    // Лимит проверяется ДО pool.connect: выгрузка сверх лимита не занимает ни коннекта, ни слота.
+    // Одна выгрузка на пользователя — иначе один аккаунт один занимал бы все глобальные слоты.
+    if (exportsInFlight >= maxConcurrentExports || exportingUids.has(uid)) return 'busy';
+    exportsInFlight += 1;
+    exportingUids.add(uid);
+    try {
+      return await streamAdmittedExport(uid, res, opts);
+    } finally {
+      exportsInFlight -= 1;
+      exportingUids.delete(uid);
+    }
+  }
+
+  async function streamAdmittedExport(uid, res, { onReady, pageSize }) {
     // Per-call override — тестовый шов для сужения страницы; прод-роут его не передаёт. Гигантский
     // override зажимается к потолку (bounded memory), мусор → defaultPageSize.
     const PAGE = clampPageSize(pageSize, defaultPageSize);
     const client = await pool.connect();
-    const w = createWriter(res);
+    // Пока клиент у нас (в том числе всё ожидание 'drain'), пул снимает с него свой idle-слушатель
+    // 'error': обрыв бэкенда без нашего слушателя = необработанный 'error' и падение процесса.
+    // Запоминаем ошибку и отдаём её в release — пул уничтожит битое соединение, а не выдаст его
+    // следующему запросу.
+    let clientError = null;
+    const onClientError = (err) => { clientError = err; };
+    client.on('error', onClientError);
+    const w = createWriter(res, { drainTimeoutMs });
     let started = false;
     try {
+      if (w.closed) return 'aborted'; // клиент ушёл, пока ждали коннект — в БД не ходим
       const q = (sql, params) => client.query(sql, params);
 
       // ── Заголовок документа: буферизуем только singleton-строки account/prefs/tg-session.
@@ -856,7 +935,8 @@ function createGdprService({ pool, enabled, transaction, exportPageSize }) {
       throw e; // до первого байта — штатный next(err)/500
     } finally {
       w.cleanup();
-      client.release();
+      client.off('error', onClientError);
+      client.release(clientError || undefined);
     }
   }
 
@@ -868,6 +948,6 @@ module.exports = {
   // Экспорт чистых хелперов для юнит-тестов (keyset-предикат, генерация SQL, backpressure-writer).
   _internals: {
     ARCHIVE_SPECS, buildKeysetPredicate, pageQuery, projectRow,
-    objectPrefix, createWriter, ExportAborted,
+    objectPrefix, createWriter, ExportAborted, WRITE_SLICE_BYTES,
   },
 };

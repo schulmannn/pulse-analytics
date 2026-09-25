@@ -125,6 +125,16 @@ export function KpiHero({
 }) {
   const navigate = useNavigate();
   const daily = (series ?? []).filter((p) => p.day !== 'total');
+  // «В СРЕДНЕМ ЗА ДЕНЬ» (R8) — вторая цифра героя и линия-ориентир на столбцах.
+  //
+  // Считается по ТОЧКАМ РЯДА, а не делением заголовка на длину окна: охват окна — это уникальные
+  // аккаунты за ВСЁ окно (агрегат total_value, память #446), а не сумма дней, и «итог ÷ дни» было
+  // бы арифметикой над двумя разными метриками. Среднее дневного ряда отвечает ровно на свой
+  // вопрос — «каким был обычный день», — и в тех же единицах, в которых нарисованы столбцы.
+  //
+  // Делитель — только пришедшие точки: Instagram отдаёт день лишь тогда, когда он измерен, и
+  // добивать окно нулями значило бы занижать среднее на дырах инсайтов.
+  const perDay = daily.length > 1 ? daily.reduce((sum, p) => sum + p.value, 0) / daily.length : null;
   // Кап длинной линии (канон CLAUDE.md): на «Всё» дневной архив уходил в чарт целиком —
   // LTTB прореживает до CHART_MAX_POINTS, labels строятся из тех же выбранных точек.
   const shown = lttbDownsample(daily, CHART_MAX_POINTS, (p) => p.value);
@@ -142,6 +152,10 @@ export function KpiHero({
           axisLabels={axisLabels}
           titles={shown.map((p) => `${fmtDay(p.day)}: ${fmt.num(p.value)}`)}
           formatValue={fmt.num}
+          // Столбец отвечает «сколько в этот день», но не отвечает «это выше или ниже обычного»:
+          // глаз сравнивает соседей, а не всё окно. У линии ориентира нет — форму окна там держит
+          // сама кривая.
+          referenceLine={perDay != null ? { value: perDay, label: 'ср.' } : null}
         />
       </ChartBand>
     ) : (
@@ -159,7 +173,17 @@ export function KpiHero({
     ));
   // Steep anatomy (owner rule): label + number + delta bottom-left, the chart inset to the RIGHT.
   return (
-    <ChartCardBody label={label} value={value} delta={delta} deltaBasis={basis} onValueClick={drillTo ? () => navigate(drillTo) : undefined} drillLabel={label}>
+    <ChartCardBody
+      label={label}
+      value={value}
+      delta={delta}
+      deltaBasis={basis}
+      // Подпись БЕЗ периода (вето владельца на дубль окна в теле карточки): окно уже стоит либо в
+      // подписи героя, либо в шапке страницы.
+      secondary={perDay != null ? { label: 'в среднем за день', value: fmt.short(perDay) } : null}
+      onValueClick={drillTo ? () => navigate(drillTo) : undefined}
+      drillLabel={label}
+    >
       {chart && <div className="h-full">{chart}</div>}
     </ChartCardBody>
   );

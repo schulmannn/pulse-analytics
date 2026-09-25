@@ -12,7 +12,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { registerRusenderRoutes } = require('../server/routes/rusender');
+const { registerRusenderRoutes, RANGE_MAX_DAYS } = require('../server/routes/rusender');
 
 const OK_SCOPES = ['campaigns.read', 'contacts.read', 'senders.read'];
 
@@ -199,4 +199,107 @@ test('чужой канал по явному id → 403 даже там, где
   const res = await call(routes, 'GET /api/rusender/status', { query: { channel: '4242' } });
   assert.equal(res.status, 403);
   assert.match(String(res.body.error), /Нет доступа к этому каналу/);
+});
+
+// ── Окно from/to: потолок ширины и строгие даты (аудит FECOMMERCE-1 / CDEKRS-5) ──────────────────
+// Серии обзора ПЛОТНЫЕ (generate_series на каждый день окна), и неограниченный явный диапазон
+// `from=0001-01-01&to=9999-12-31` материализовал 3,65 млн строк и ~1 ГБ памяти единственной
+// web-реплики на ОДИН запрос. Кривая дата (`2026-02-31`) проходила регэксп и роняла запрос 500-кой
+// на ::date. Теперь окно разбирается ДО резолва канала и честно отвечает 400.
+
+/** db-стабы, которые считают обращения: 400 по периоду обязан случаться ДО любого похода в базу. */
+function countingDb(extra = {}) {
+  const calls = [];
+  const spy = (name, impl) => async (...args) => { calls.push({ name, args }); return impl(...args); };
+  const db = {
+    getChannelOrDefault: spy('getChannelOrDefault', () => ({ id: 9, owner_uid: 7, source: 'rusender', member_role: 'owner' })),
+    getRusenderAccount: spy('getRusenderAccount', () => ({ channel_id: 9, account_id: '18416', scopes: OK_SCOPES, api_key_enc: 'enc' })),
+    getRusenderSummaryForActor: spy('getRusenderSummaryForActor', () => ({ events: { opens: 0, clicks: 0 }, campaigns: {}, contacts: null })),
+    getRusenderSeriesForActor: spy('getRusenderSeriesForActor', () => []),
+    getRusenderCampaignsForActor: spy('getRusenderCampaignsForActor', () => []),
+    getRusenderBoundsForActor: spy('getRusenderBoundsForActor', () => ({ first_day: '2026-06-01', last_day: '2026-08-31', campaigns: 3 })),
+    ...extra,
+  };
+  return { db, calls };
+}
+
+const WINDOW_ROUTES = ['GET /api/rusender/summary', 'GET /api/rusender/campaigns'];
+
+test('явный диапазон шире потолка → 400 ДО базы (summary и campaigns)', async () => {
+  for (const query of [
+    // Форма атаки из аудита (год ≥ 1000 проходит строгий day-ключ — отсекает именно потолок).
+    { days: '30', from: '1000-01-01', to: '9999-12-31' },
+    // На день шире потолка: 2025-01-01…2026-02-05 — 401 день включительно.
+    { days: '30', from: '2025-01-01', to: '2026-02-05' },
+  ]) {
+    for (const key of WINDOW_ROUTES) {
+      const { db, calls } = countingDb();
+      const { routes } = build({ db });
+      // eslint-disable-next-line no-await-in-loop
+      const res = await call(routes, key, { query });
+      assert.equal(res.status, 400, `${key} ${query.from}…${query.to}`);
+      assert.match(String(res.body.error), /Слишком широкий диапазон дат: максимум 400 дней/);
+      assert.match(String(res.body.error), /«Всё»/, 'подсказка, как увидеть всю историю');
+      assert.deepEqual(calls.map((c) => c.name), [], `${key}: ни резолва канала, ни generate_series`);
+    }
+  }
+});
+
+test('кривые даты, перевёрнутый и половинчатый диапазон → 400, а не 500 от ::date и не тихий откат на days', async () => {
+  for (const query of [
+    { days: '30', from: '2026-02-31', to: '2026-03-05' }, // проходил регэксп → 500 на ::date
+    { days: '30', from: '2026-03-10', to: '2026-03-01' }, // from > to
+    { days: '30', from: '2026-03-01' }, // только одна граница
+    { days: '30', from: '0001-01-01', to: '9999-12-31' },
+    { days: '30', from: '2026-3-1', to: '2026-03-05' },
+    { days: '30', from: ['2026-03-01', '2026-03-02'], to: '2026-03-05' }, // ?from=…&from=…
+  ]) {
+    for (const key of WINDOW_ROUTES) {
+      const { db, calls } = countingDb();
+      const { routes } = build({ db });
+      // eslint-disable-next-line no-await-in-loop
+      const res = await call(routes, key, { query });
+      assert.equal(res.status, 400, `${key} ${JSON.stringify(query)}`);
+      assert.match(String(res.body.error), /Некорректный диапазон дат/);
+      assert.deepEqual(calls.map((c) => c.name), [], `${key}: база не тронута`);
+    }
+  }
+});
+
+test('граница: окно ровно RANGE_MAX_DAYS (канон Метрики) принимается и доезжает до серий как есть', async () => {
+  assert.equal(RANGE_MAX_DAYS, 400, 'тот же потолок, что YM_RANGE_MAX_DAYS у Метрики');
+  // 2025-01-01…2026-02-04 — ровно 400 дней включительно; «Этот год» пикера (≤ 366) — внутри.
+  const { db, calls } = countingDb();
+  const { routes } = build({ db });
+  const res = await call(routes, 'GET /api/rusender/summary', {
+    query: { days: '30', from: '2025-01-01', to: '2026-02-04' },
+  });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.from, '2025-01-01');
+  assert.equal(res.body.to, '2026-02-04');
+  const series = calls.find((c) => c.name === 'getRusenderSeriesForActor');
+  assert.ok(series, 'серии запрошены');
+  assert.deepEqual(series.args[2], { from: '2025-01-01', to: '2026-02-04' });
+
+  const camp = await call(routes, 'GET /api/rusender/campaigns', {
+    query: { days: '30', from: '2025-01-01', to: '2026-02-04' },
+  });
+  assert.equal(camp.status, 200);
+  assert.equal(camp.body.from, '2025-01-01');
+});
+
+test('«Всё» (days=0 без from/to) не упирается в потолок: окно от границ архива шире 400 дней', async () => {
+  // Фронт шлёт «Всё» ТОЛЬКО как days=0 (msPeriodQuery) — это не явный диапазон, и потолок
+  // ширины его не касается: история целиком остаётся доступной.
+  const { db, calls } = countingDb({
+    getRusenderBoundsForActor: async () => ({ first_day: '2019-03-01', last_day: '2026-08-31', campaigns: 120 }),
+  });
+  const { routes } = build({ db });
+  const res = await call(routes, 'GET /api/rusender/summary', { query: { days: '0' } });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.days, 0);
+  assert.equal(res.body.from, '2019-03-01');
+  assert.equal(res.body.to, '2026-08-31');
+  const series = calls.find((c) => c.name === 'getRusenderSeriesForActor');
+  assert.deepEqual(series.args[2], { from: '2019-03-01', to: '2026-08-31' });
 });

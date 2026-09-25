@@ -1,12 +1,12 @@
 {
-  "total": 1151,
+  "total": 1148,
   "rules": {
     "lint/complexity/noImportantStyles": 7,
     "lint/complexity/noUselessCatch": 1,
     "lint/complexity/noUselessEscapeInRegex": 1,
     "lint/complexity/noUselessFragments": 3,
     "lint/complexity/noUselessSwitchCase": 3,
-    "lint/complexity/useOptionalChain": 382,
+    "lint/complexity/useOptionalChain": 381,
     "lint/correctness/noUnusedFunctionParameters": 35,
     "lint/correctness/noUnusedVariables": 12,
     "lint/correctness/useExhaustiveDependencies": 32,
@@ -19,7 +19,7 @@
     "lint/style/useNodejsImportProtocol": 33,
     "lint/style/useTemplate": 27,
     "lint/suspicious/noArrayIndexKey": 87,
-    "lint/suspicious/noAssignInExpressions": 10,
+    "lint/suspicious/noAssignInExpressions": 8,
     "lint/suspicious/noConfusingVoidType": 1,
     "lint/suspicious/noControlCharactersInRegex": 11,
     "lint/suspicious/noGlobalIsNan": 14,

@@ -29,6 +29,8 @@ const { createPool } = require('./db/pool');
 const { isDbUnavailable } = require('./db/errors');
 const { createTransaction } = require('./db/transaction');
 const { mergeExports } = require('./db/mergeExports');
+// Чистая деривация из config (без env): эффективный лимит GDPR-выгрузок под размер пула.
+const { gdprExportConcurrencyLimit } = require('./config');
 
 function createDatabase(config, overrides = {}) {
   const core =
@@ -236,6 +238,10 @@ function createDatabase(config, overrides = {}) {
   const gdprService = overrides.createGdprService
     ? overrides.createGdprService({
         pool, enabled, transaction, exportPageSize: config.database.gdprExportPageSize,
+        exportDrainTimeoutMs: config.database.gdprExportDrainTimeoutMs,
+        // Зажат под PGPOOL_MAX ЭТОГО фасада (минимум один коннект пула остаётся API), а не
+        // фатальная ошибка конфига: маленький пул на проде не должен ронять старт.
+        exportMaxConcurrent: gdprExportConcurrencyLimit(config.database),
       })
     : null;
   // Campaign membership performs an atomic lock/count/insert through the shared transaction helper.
