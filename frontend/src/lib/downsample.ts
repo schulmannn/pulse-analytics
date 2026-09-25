@@ -31,6 +31,25 @@ export function lttbDownsample<T>(rows: T[], threshold: number, valueOf: (r: T) 
 }
 
 /**
+ * Индексы прореживания РАВНЫМ ШАГОМ (+ всегда последняя точка). В отличие от LTTB не смотрит на
+ * значения, поэтому годится там, где LTTB врёт: у ряда с пропусками (площадь треугольника с null
+ * не посчитать — разрыв либо исчез бы, либо провалился в ноль) и у пары «ряд + призрак» (LTTB
+ * выбрал бы каждой линии свои индексы и рассинхронизировал их по X).
+ *
+ * Жил в `lib/msSeries` (схема та же, что у его `strideEvery`); переехал к LTTB, потому что его
+ * зовут резолвер виджетов, упоминания, страница метрики TG и `lib/chartSeries`, а модуль МС тянет
+ * за собой `msPeriod` с React.
+ */
+export function pickIndexes(total: number, max: number): number[] {
+  if (total <= max) return Array.from({ length: total }, (_, i) => i);
+  const step = Math.ceil(total / max);
+  const out: number[] = [];
+  for (let i = 0; i < total; i += step) out.push(i);
+  if (out[out.length - 1] !== total - 1) out.push(total - 1);
+  return out;
+}
+
+/**
  * Потолок точек графика — ОБЩИЙ для всех сетей (канон CLAUDE.md: серии длиннее прореживаются до
  * рендера, иначе суб-пиксельная мазня и дорогие кадры морфа).
  *

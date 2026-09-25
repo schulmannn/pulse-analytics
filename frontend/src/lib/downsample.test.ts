@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { lttbDownsample } from '@/lib/downsample';
+import { lttbDownsample, pickIndexes } from '@/lib/downsample';
+import { pickIndexes as msPickIndexes, strideEvery } from '@/lib/msSeries';
 
 interface Point {
   x: number;
@@ -30,5 +31,23 @@ describe('lttbDownsample', () => {
     expect(sampled[0]).toBe(rows[0]);
     expect(sampled.at(-1)).toBe(rows.at(-1));
     sampled.forEach((point) => expect(rows).toContain(point));
+  });
+});
+
+describe('pickIndexes — равный шаг + последняя точка', () => {
+  it('короткий ряд отдаёт все индексы по порядку', () => {
+    expect(pickIndexes(4, 10)).toEqual([0, 1, 2, 3]);
+    expect(pickIndexes(0, 10)).toEqual([]);
+  });
+
+  it('длинный ряд: шаг ceil(n/max), последняя точка всегда в выборке', () => {
+    expect(pickIndexes(10, 4)).toEqual([0, 3, 6, 9]);
+    expect(pickIndexes(11, 4)).toEqual([0, 3, 6, 9, 10]);
+  });
+
+  it('та же схема, что у strideEvery (X линий совпадает), и тот же экспорт из msSeries', () => {
+    const rows = Array.from({ length: 37 }, (_, i) => i * 10);
+    expect(pickIndexes(rows.length, 8).map((i) => rows[i])).toEqual(strideEvery(rows, 8));
+    expect(msPickIndexes).toBe(pickIndexes);
   });
 });
