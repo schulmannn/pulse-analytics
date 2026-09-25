@@ -2,6 +2,7 @@
 
 const { createAdmissionController } = require('../lib/admissionController');
 const { tenantChannelId } = require('../middleware/tenant');
+const { parsePeriod, resolveAll } = require('../domain/period');
 const {
   IG_THUMB_CACHE_TTL_MS,
   verifyIgThumbnailToken,
@@ -446,20 +447,50 @@ function registerIgRoutes({
     }
   });
 
-  // GET /api/ig/history?days=400 — persisted daily IG series (Postgres ig_daily), mirroring
-  // /api/history/channel for TG. This is the DB-first read path: IG's live window is tiny (~30d for
-  // follower_count, nothing for reach beyond the API cap), so the accumulated history lives here.
-  // resolveIg gives us req.ig.channelId ONLY after getChannel() passed (ownership enforced) — so we
-  // serve history for the requester's own connected channel and no one else's. The env/mock fallback
-  // (channelId null) has no per-channel rows → [] → the client transparently keeps its live series.
-  app.get('/api/ig/history', requireAuth, resolveIg, async (req, res) => {
-    const days = Math.min(1000, parseInt(req.query.days, 10) || 400);
-    const channelId = req.ig && req.ig.channelId;
+  // GET /api/ig/history — дневной архив Instagram канала (Postgres ig_daily), зеркало
+  // /api/history/channel у TG. Архив наполняют дневной крон и догрузка истории (jobs/igBackfillJob),
+  // поэтому глубина — сколько лежит в базе, а не живые 90 дней Graph. OD-13: потолка с нашей стороны
+  // нет. Окно — одной из трёх форм:
+  //   • from/to (YYYY-MM-DD, включительно) — точный диапазон; кривой → 400 bad_period;
+  //   • days=0 — «Всё», без границ;
+  //   • иначе числовой days (legacy, по умолчанию 400) — последние N дней, не меньше 1, без потолка.
+  // Доступ: только requireAuth + гейт владения внутри ForActor-ридеров (чужой канал → [] / null).
+  // Живой токен НЕ нужен — архив переживает истёкший токен, ротацию ключа и отключение. Канала нет
+  // (env/superuser-путь) → rows:[]: у env-аккаунта нет per-channel архива, клиент живёт на live-рядах.
+  // Ответ аддитивен: { enabled, rows, bounds, coverage:{measured_days}, window, backfill }; при сбое
+  // чтения — прежний «оформленный» 200 с пустыми rows. Серверного кэша нет (дешёвое индексное чтение).
+  app.get('/api/ig/history', requireAuth, async (req, res) => {
+    const q = req.query || {};
+    let window = null;   // null = legacy days
+    if (q.from != null || q.to != null) {
+      const period = parsePeriod(q, { tz: 'UTC', allowedDays: [0], maxRangeDays: null });
+      if (period.invalid) return res.status(400).json({ error: period.error, code: period.code });
+      window = { from: period.from, to: period.to };
+    } else if (String(q.days).trim() === '0') {
+      window = { all: true };
+    }
+    const legacyDays = Math.max(1, parseInt(q.days, 10) || 400);
+    const channelId = tenantChannelId(req);
+    const empty = { enabled: db.enabled, rows: [], bounds: null, coverage: { measured_days: 0 }, window: null, backfill: null };
+    if (!db.enabled || !channelId) return res.json(empty);
     try {
-      res.json({ enabled: db.enabled, rows: channelId ? await db.listIgDailyForActor(channelId, req.user, days) : [] });
+      const [rows, status] = await Promise.all([
+        db.listIgDailyForActor(channelId, req.user, window || legacyDays),
+        db.getIgArchiveStatusForActor(channelId, req.user),
+      ]);
+      const bounds = status?.bounds || null;
+      const resolved = window?.all ? resolveAll({ from: null, to: null }, bounds) : window;
+      res.json({
+        enabled: db.enabled,
+        rows,
+        bounds,
+        coverage: { measured_days: status?.measured_days || 0 },
+        window: resolved || null,
+        backfill: status?.backfill || null,
+      });
     } catch (e) {
       log('warn', 'ig_history_read_failed', { error: e.message });
-      res.status(200).json({ enabled: db.enabled, rows: [], error: 'История временно недоступна' });
+      res.status(200).json({ ...empty, error: 'История временно недоступна' });
     }
   });
 }

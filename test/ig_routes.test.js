@@ -17,14 +17,25 @@ function createIgRoutes(over = {}) {
   const routes = new Map();
   const graphCalls = [];
   const historyCalls = [];
+  const statusCalls = [];
   const app = { get(path, ...handlers) { routes.set(path, handlers); } };
+  // Гейт владения живёт в ForActor-ридерах (analyticsRepo.gated): фейк повторяет его контракт —
+  // чужой канал → пустое той же формы. owns(channelId, actor) задаёт доступ.
+  const owns = over.owns || (() => false);
   const db = {
     enabled: true,
     getChannel: async () => null,
     getIgAccount: async () => null,
-    listIgDailyForActor: async (channelId, actor, days) => {
-      historyCalls.push({ channelId, actor, days });
-      return [{ day: '2026-07-01' }];
+    listIgDailyForActor: async (channelId, actor, window) => {
+      historyCalls.push({ channelId, actor, window });
+      return owns(channelId, actor) ? [{ day: '2026-07-01', reach: 5 }] : [];
+    },
+    getIgArchiveStatusForActor: async (channelId, actor) => {
+      statusCalls.push({ channelId, actor });
+      return owns(channelId, actor)
+        ? { bounds: { first_day: '2024-10-01', last_day: '2026-07-01' }, measured_days: 540,
+          backfill: { status: 'running', horizon_day: '2024-10-01', cursor_day: '2024-09-30', reason: null } }
+        : null;
     },
     ...over.db,
   };
@@ -49,7 +60,7 @@ function createIgRoutes(over = {}) {
     fetchWithTimeout: async () => { throw new Error('no network in tests'); },
     AUTH_SECRET: 'test-secret',
   });
-  return { routes, graphCalls, historyCalls };
+  return { routes, graphCalls, historyCalls, statusCalls };
 }
 
 async function invoke(routes, path, { user, query = {} } = {}) {
@@ -148,27 +159,80 @@ test('db-less local dev serves the env fallback to any user', async () => {
   assert.equal(graphCalls[0].token, ENV_TOKEN);
 });
 
-test('ig history reads only the resolved own channel and stays empty when denied', async () => {
-  const denied = createIgRoutes();
-  const deniedRes = await invoke(denied.routes, '/api/ig/history', {
-    user: { uid: 7, role: 'user' },
-    query: { channel: '42' },
-  });
-  assert.deepEqual(deniedRes.body.rows, []);
-  assert.equal(denied.historyCalls.length, 0, 'no per-channel read without an authorized channel');
+// ── GET /api/ig/history — архив ig_daily (OD-13: без потолка, без живого токена) ────────────────
 
-  const owner = createIgRoutes({
-    db: {
-      getChannel: async (channelId) => ({ id: channelId }),
-      getIgAccount: async () => ({ ig_user_id: 'own_ig_999', access_token_enc: 'enc-blob' }),
-    },
+const OWNER = { uid: 7, role: 'user' };
+const ownerOf42 = (channelId, actor) => channelId === 42 && actor && actor.uid === 7;
+
+test('ig history: владелец читает архив без живого токена — ни resolveIg, ни Graph, ни дешифровки', async () => {
+  let decrypts = 0;
+  const { routes, historyCalls, graphCalls } = createIgRoutes({
+    owns: ownerOf42,
+    igCrypto: { configured: () => false, decrypt: () => { decrypts++; throw new Error('key rotated'); } },
   });
-  const ownerRes = await invoke(owner.routes, '/api/ig/history', {
-    user: { uid: 7, role: 'user' },
-    query: { channel: '42', days: '30' },
+  const res = await invoke(routes, '/api/ig/history', { user: OWNER, query: { channel: '42', days: '0' } });
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body.rows, [{ day: '2026-07-01', reach: 5 }]);
+  assert.deepEqual(historyCalls[0].window, { all: true }, '«Всё» — без нижней границы');
+  assert.deepEqual(res.body.bounds, { first_day: '2024-10-01', last_day: '2026-07-01' });
+  assert.deepEqual(res.body.window, { from: '2024-10-01', to: '2026-07-01' }, '«Всё» материализуется размахом архива');
+  assert.deepEqual(res.body.coverage, { measured_days: 540 });
+  assert.equal(res.body.backfill.status, 'running');
+  assert.equal(graphCalls.length, 0);
+  assert.equal(decrypts, 0, 'архив переживает протухший токен и ротацию ключа');
+});
+
+test('ig history: чужой канал — пустой архив той же формы', async () => {
+  const { routes, historyCalls } = createIgRoutes({ owns: ownerOf42 });
+  const res = await invoke(routes, '/api/ig/history', { user: { uid: 8, role: 'user' }, query: { channel: '42', days: '0' } });
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body.rows, []);
+  assert.equal(res.body.bounds, null);
+  assert.equal(res.body.backfill, null);
+  assert.deepEqual(historyCalls[0].actor, { uid: 8, role: 'user' }, 'гейт владения получает актора запроса');
+});
+
+test('ig history: без канала (env/superuser-путь) — rows:[] без обращения к архиву', async () => {
+  const { routes, historyCalls } = createIgRoutes({ owns: () => true });
+  const res = await invoke(routes, '/api/ig/history', { user: { uid: 1, role: 'superuser' }, query: { days: '0' } });
+  assert.deepEqual(res.body.rows, []);
+  assert.equal(historyCalls.length, 0);
+});
+
+test('ig history: from/to — точный диапазон любой длины; кривой диапазон — 400 bad_period', async () => {
+  const { routes, historyCalls } = createIgRoutes({ owns: ownerOf42 });
+  const ok = await invoke(routes, '/api/ig/history', { user: OWNER, query: { channel: '42', from: '2023-01-01', to: '2025-12-31' } });
+  assert.equal(ok.statusCode, 200);
+  assert.deepEqual(historyCalls[0].window, { from: '2023-01-01', to: '2025-12-31' }, 'широкий диапазон не обрезается (OD-13)');
+  assert.deepEqual(ok.body.window, { from: '2023-01-01', to: '2025-12-31' });
+  for (const query of [
+    { from: '2025-02-01', to: '2025-01-01' },
+    { from: '2025-02-30', to: '2025-03-01' },
+    { from: '2025-01-01' },
+    { from: ['2025-01-01', '2025-01-02'], to: '2025-02-01' },
+  ]) {
+    const bad = await invoke(routes, '/api/ig/history', { user: OWNER, query: { channel: '42', ...query } });
+    assert.equal(bad.statusCode, 400, JSON.stringify(query));
+    assert.equal(bad.body.code, 'bad_period');
+  }
+  assert.equal(historyCalls.length, 1, 'кривой диапазон не читает архив');
+});
+
+test('ig history: legacy days — число дней без потолка 1000, не меньше 1, по умолчанию 400', async () => {
+  const { routes, historyCalls } = createIgRoutes({ owns: ownerOf42 });
+  for (const days of ['30', '1500', '-3', undefined, 'abc']) {
+    await invoke(routes, '/api/ig/history', { user: OWNER, query: { channel: '42', ...(days === undefined ? {} : { days }) } });
+  }
+  assert.deepEqual(historyCalls.map((c) => c.window), [30, 1500, 1, 400, 400]);
+});
+
+test('ig history: сбой чтения — оформленный 200 с пустыми rows', async () => {
+  const { routes } = createIgRoutes({
+    owns: ownerOf42,
+    db: { listIgDailyForActor: async () => { throw new Error('db down'); } },
   });
-  assert.equal(owner.historyCalls.length, 1);
-  assert.equal(owner.historyCalls[0].channelId, 42);
-  assert.equal(owner.historyCalls[0].days, 30);
-  assert.deepEqual(ownerRes.body.rows, [{ day: '2026-07-01' }]);
+  const res = await invoke(routes, '/api/ig/history', { user: OWNER, query: { channel: '42', days: '0' } });
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body.rows, []);
+  assert.equal(res.body.error, 'История временно недоступна');
 });
