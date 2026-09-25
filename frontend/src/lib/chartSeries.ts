@@ -16,11 +16,17 @@
  *    недели (если и недель больше потолка — в месяцы) ВМЕСТЕ с призраком;
  *  - карта `sampledIdx` (выведенная точка → индекс исходной) — и для линий, и для столбцов.
  *
- * ПОТРЕБИТЕЛЕЙ ПОКА НЕТ. Главная по-прежнему идёт через `capResultSeries`, у которого два известных
- * отличия от этой политики (призрак недельных столбцов отбрасывается с comparisonNote, а `mean` —
- * среднее средних). Оба зафиксированы тестом-снимком в chartSeries.test.ts, чтобы переключение
- * Главной было осознанным видимым шагом, а не побочным эффектом. Политика прореживания — по
- * рекомендации OD-23; переход на неё остальных поверхностей ждёт решения владельца.
+ * ПОТРЕБИТЕЛЕЙ ПОКА НЕТ. Главная по-прежнему идёт через `capResultSeries`, у которого известные
+ * отличия от этой политики: призрак недельных столбцов отбрасывается с comparisonNote; `mean` —
+ * среднее средних (и ряд без числителя и знаменателя у него считается, а здесь — нет, см. ниже);
+ * призрак другой длины он оставляет как есть; недели сверх потолка он в месяцы не сводит. Все они
+ * зафиксированы тестом-снимком в chartSeries.test.ts, чтобы переключение Главной было осознанным
+ * видимым шагом, а не побочным эффектом. Политика прореживания — по рекомендации OD-23; переход на
+ * неё остальных поверхностей ждёт решения владельца.
+ *
+ * Отношение переводится на модуль только ВМЕСТЕ с числителем и знаменателем точек. Сегодняшний ряд
+ * средних (bucketPostMean, средний охват) их не несёт — такая корзина из нескольких наблюдений
+ * честно `null`, и длинные столбцы такого ряда вышли бы почти пустыми.
  *
  * Модуль чистый: без React, без panels/** и api/<source>. Дневные ключи `YYYY-MM-DD` — календарные
  * даты, арифметика по ним идёт в UTC и от зоны читателя не зависит; зону и «сегодня» окна выбирает
@@ -125,9 +131,11 @@ export function densifyWindow(
  * «последним значением». Корзина, где ВСЕ точки — пропуск, сама остаётся пропуском.
  *
  * `ratio`: если у всех наблюдений есть числитель и знаменатель — Σnum/Σden (Σden = 0 → значение не
- * определено, `null`). Одно наблюдение без них — само себе отношение. Несколько наблюдений без
- * числителя и знаменателя честно сложить нельзя (среднее средних — ровно та ошибка, которую модуль
- * убирает), поэтому корзина — `null`, а не выдуманное число.
+ * определено, `null`). Точка без них — отношение с неизвестным весом. Одна такая точка — само себе
+ * отношение, если остальные точки корзины в суммы ничего не вносят: пропуск или честный нулевой
+ * день уплотнения `{num: 0, den: 0}` (иначе ответ зависел бы от того, чем залиты дыры). Несколько
+ * точек без числителя и знаменателя или такая точка рядом с весомой честно сложить нельзя (среднее
+ * средних — ровно та ошибка, которую модуль убирает), поэтому корзина — `null`, а не выдуманное число.
  */
 function aggregateBucket(points: readonly ChartPoint[], kind: SeriesKind): Omit<ChartPoint, 'day'> {
   if (kind === 'flow') {
@@ -140,9 +148,10 @@ function aggregateBucket(points: readonly ChartPoint[], kind: SeriesKind): Omit<
     for (const point of points) if (isNum(point.value)) last = point.value;
     return { value: last };
   }
-  const observed = points.filter((point) => isNum(point.value) || (isNum(point.num) && isNum(point.den)));
+  const hasParts = (point: ChartPoint) => isNum(point.num) && isNum(point.den);
+  const observed = points.filter((point) => isNum(point.value) || hasParts(point));
   if (observed.length === 0) return { value: null };
-  if (observed.every((point) => isNum(point.num) && isNum(point.den))) {
+  if (observed.every(hasParts)) {
     let num = 0;
     let den = 0;
     for (const point of observed) {
@@ -151,7 +160,8 @@ function aggregateBucket(points: readonly ChartPoint[], kind: SeriesKind): Omit<
     }
     return { value: den > 0 ? num / den : null, num, den };
   }
-  if (observed.length === 1) return { value: isNum(observed[0].value) ? observed[0].value : null };
+  const weighed = observed.filter((point) => !(hasParts(point) && point.num === 0 && point.den === 0));
+  if (weighed.length === 1) return { value: isNum(weighed[0].value) ? weighed[0].value : null };
   return { value: null };
 }
 
@@ -159,6 +169,8 @@ function aggregateBucket(points: readonly ChartPoint[], kind: SeriesKind): Omit<
  * Дневной ряд → корзины `grain` по типу метрики. Ключи корзин — те же, что у резолвера виджетов
  * (`bucketKeyOf`: понедельник недели, `YYYY-MM`, `YYYY-Qn`, `YYYY`). С окном возвращается КАЖДАЯ
  * корзина окна (пустая — `null`, то есть пропуск); без окна — только корзины, где есть точки.
+ * Точки вне окна отбрасываются, как у `densifyWindow`: крайняя неполная неделя или месяц окна не
+ * подбирает соседние дни (у `stock` день после `to` стал бы «последним», у `flow` — прибавился бы).
  */
 export function bucketSeries(
   points: readonly ChartPoint[],
@@ -166,18 +178,21 @@ export function bucketSeries(
   grain: SeriesGrain,
   kind: SeriesKind,
 ): ChartPoint[] {
+  const bounds = window && isDayKey(window.from) && isDayKey(window.to) ? window : null;
+  const inWindow = (day: string) => !bounds || (day >= bounds.from && day <= bounds.to);
   const groups = new Map<string, ChartPoint[]>();
-  const sorted = points.filter((point) => isDayKey(point.day)).sort((a, b) => a.day.localeCompare(b.day));
+  const sorted = points
+    .filter((point) => isDayKey(point.day) && inWindow(point.day))
+    .sort((a, b) => a.day.localeCompare(b.day));
   for (const point of sorted) {
     const key = bucketKeyOf(Date.parse(point.day), grain);
     const group = groups.get(key);
     if (group) group.push(point);
     else groups.set(key, [point]);
   }
-  const keys =
-    window && isDayKey(window.from) && isDayKey(window.to)
-      ? bucketKeysInWindow(Date.parse(window.from), Date.parse(window.to), grain)
-      : [...groups.keys()].sort();
+  const keys = bounds
+    ? bucketKeysInWindow(Date.parse(bounds.from), Date.parse(bounds.to), grain)
+    : [...groups.keys()].sort();
   return keys.map((key) => ({ day: key, ...aggregateBucket(groups.get(key) ?? [], kind) }));
 }
 

@@ -6,7 +6,7 @@ import {
   type ChartPoint,
   type SeriesKind,
 } from '@/lib/chartSeries';
-import { CHART_MAX_POINTS } from '@/lib/downsample';
+import { CHART_MAX_POINTS, pickIndexes } from '@/lib/downsample';
 import type { SeriesAggregation } from '@/lib/widgetMetrics';
 import { capResultSeries } from '@/lib/widgetResolver/shared';
 import type { WidgetResult } from '@/lib/widgetResolver/types';
@@ -81,9 +81,14 @@ describe('densifyWindow — пропуск не становится нулём'
     expect(densifyWindow([], { from: '2026-02-31', to: '2026-03-02' }, { missing: 'null' })).toEqual([]);
   });
 
+  // Страж осмыслен только под зоной с переходом: CI фронта идёт в UTC, где арифметика от локальной
+  // полуночи тоже прошла бы. Окна — переходы Европы (29 марта) и США (8 марта) 2026-го, чтобы
+  // регрессию ловил прогон под любой из этих зон (TZ=Europe/Berlin, TZ=America/New_York).
   it('окно через переход на летнее время — ровно по дню на дату', () => {
-    const out = densifyWindow([], { from: '2026-03-27', to: '2026-04-01' }, { missing: 'zero' });
-    expect(out.map((p) => p.day)).toEqual(['2026-03-27', '2026-03-28', '2026-03-29', '2026-03-30', '2026-03-31', '2026-04-01']);
+    const eu = densifyWindow([], { from: '2026-03-27', to: '2026-04-01' }, { missing: 'zero' });
+    expect(eu.map((p) => p.day)).toEqual(['2026-03-27', '2026-03-28', '2026-03-29', '2026-03-30', '2026-03-31', '2026-04-01']);
+    const us = densifyWindow([], { from: '2026-03-06', to: '2026-03-10' }, { missing: 'zero' });
+    expect(us.map((p) => p.day)).toEqual(['2026-03-06', '2026-03-07', '2026-03-08', '2026-03-09', '2026-03-10']);
   });
 });
 
@@ -125,6 +130,34 @@ describe('bucketSeries — корзина по типу метрики', () => {
     expect(bucketSeries(bare, null, 'week', 'ratio')[0]?.value).toBeNull();
     // Одно наблюдение — само себе отношение: усреднять нечего.
     expect(bucketSeries([bare[0]], null, 'week', 'ratio')[0]?.value).toBe(100);
+  });
+
+  it('ratio: честные нулевые дни уплотнения не меняют корзину — важно не то, чем залиты дыры', () => {
+    const window = { from: '2026-01-05', to: '2026-01-11' };
+    const one: ChartPoint[] = [{ day: '2026-01-07', value: 100 }];
+    const zeroFilled = densifyWindow(one, window, { missing: 'zero', kind: 'ratio' });
+    const nullFilled = densifyWindow(one, window, { missing: 'null', kind: 'ratio' });
+    expect(bucketSeries(zeroFilled, window, 'week', 'ratio')).toEqual([{ day: '2026-01-05', value: 100 }]);
+    expect(bucketSeries(nullFilled, window, 'week', 'ratio')).toEqual([{ day: '2026-01-05', value: 100 }]);
+    // Точка без числителя рядом с весомой — вес неизвестен, складывать нельзя.
+    const mixed: ChartPoint[] = [...one, { day: '2026-01-08', value: 200, num: 600, den: 3 }];
+    expect(bucketSeries(mixed, window, 'week', 'ratio')[0]?.value).toBeNull();
+  });
+
+  it('точки вне окна не попадают в крайние неполные корзины', () => {
+    // Окно среда 7 — вторник 13 января: недели 5 и 12 января обе неполные.
+    const window = { from: '2026-01-07', to: '2026-01-13' };
+    const points: ChartPoint[] = [
+      { day: '2026-01-05', value: 1000 }, // понедельник до окна
+      { day: '2026-01-08', value: 3 },
+      { day: '2026-01-12', value: 5 },
+      { day: '2026-01-15', value: 1000 }, // четверг после окна
+    ];
+    expect(bucketSeries(points, window, 'week', 'flow')).toEqual([
+      { day: '2026-01-05', value: 3 },
+      { day: '2026-01-12', value: 5 },
+    ]);
+    expect(bucketSeries(points, window, 'week', 'stock').map((p) => p.value)).toEqual([3, 5]);
   });
 
   it('с окном — каждая корзина окна, пустая — пропуск; ключи месяцев как у резолвера', () => {
@@ -256,7 +289,7 @@ describe('prepareChartSeries — кап одной политикой', () => {
 // СНИМОК РАСХОЖДЕНИЯ С capResultSeries. Главная пока идёт через capResultSeries (widgetResolver/
 // shared) — переключение на prepareChartSeries видимо пользователю и делается отдельным шагом (3.5,
 // 3.9). Здесь зафиксировано, в чём политики СОВПАДАЮТ (переход там ничего не меняет — ни точки, ни
-// подписи тултипа) и ровно в чём РАСХОДЯТСЯ. Падение этого блока значит, что одна из политик
+// подписи тултипа) и КАЖДОЕ известное расхождение. Падение этого блока значит, что одна из политик
 // сдвинулась молча: такой сдвиг должен быть осознанным и попасть в описание PR.
 describe('снимок расхождения с capResultSeries (Главная)', () => {
   const CAP_KIND: Record<SeriesKind, SeriesAggregation> = { flow: 'flow', stock: 'level', ratio: 'mean' };
@@ -306,6 +339,17 @@ describe('снимок расхождения с capResultSeries (Главная
       expect(prepared.ghost).toEqual(capped.ghost);
     });
 
+    it('линия без пропусков, но с призраком — тоже равный шаг, а не LTTB: пара держит одни индексы', () => {
+      const points = daily(LONG, (i) => Math.round(Math.sin(i / 5) * 40 + i));
+      const ghost = daily(LONG, (i) => Math.round(Math.cos(i / 4) * 30 + 500), BASE - LONG * DAY_MS);
+      const prepared = viaPrepare(points, 'line', 'flow', ghost);
+      const capped = viaCap(points, 'line', 'flow', ghost);
+      expect(pick(prepared)).toEqual(pick(capped));
+      expect(prepared.ghost).toEqual(capped.ghost);
+      const { sampledIdx } = prepareChartSeries({ points, ghost, viz: 'line', kind: 'flow', unit: 'number' });
+      expect(sampledIdx).toEqual(pickIndexes(LONG, CHART_MAX_POINTS));
+    });
+
     it('столбцы flow и stock(level) — те же недели, суммы и last-of-bucket, те же тултипы', () => {
       const points = daily(LONG, (i) => (i % 11 === 0 ? null : i));
       expect(pick(viaPrepare(points, 'bar', 'flow'))).toEqual(pick(viaCap(points, 'bar', 'flow')));
@@ -336,6 +380,44 @@ describe('снимок расхождения с capResultSeries (Главная
       // Неделя 0: четыре дня по 100 и три по 200.
       expect(viaCap(points, 'bar', 'ratio').values[0]).toBeCloseTo((4 * 100 + 3 * 200) / 7, 10); // ≈142.9
       expect(viaPrepare(points, 'bar', 'ratio').values[0]).toBeCloseTo((4 * 100 + 3 * 600) / (4 + 3 * 3), 10); // ≈169.2
+    });
+
+    it('отношение без числителя и знаменателя (сегодняшний ряд средних): capResultSeries усредняет, новая политика — пропуск', () => {
+      // Поэтому ряд средних переводится на модуль только вместе с num/den (3.5, 3.9): иначе длинные
+      // столбцы вышли бы пустыми.
+      const points = daily(LONG, (i) => (i % 2 === 0 ? 100 : 200));
+      expect(viaCap(points, 'bar', 'ratio').values[0]).toBeCloseTo((4 * 100 + 3 * 200) / 7, 10);
+      expect(viaPrepare(points, 'bar', 'ratio').values.every((v) => v === null)).toBe(true);
+    });
+
+    it('призрак другой длины: capResultSeries оставляет его как есть, новая политика не рисует вовсе', () => {
+      // Короткий ряд (любой viz) capResultSeries не трогает — вместе с невыровненным призраком;
+      // дальше такой призрак подгоняет alignGhost: хвост отрезается, начало добивается нулями.
+      const short = daily(30, (i) => i);
+      const shortGhost = daily(27, () => 5, BASE - 30 * DAY_MS);
+      expect(viaCap(short, 'line', 'flow', shortGhost).ghost).toHaveLength(27);
+      expect(viaPrepare(short, 'line', 'flow', shortGhost).ghost).toBeNull();
+      // Длинную линию он прореживает, а призрак другой длины оставляет непрореженным.
+      const long = daily(LONG, (i) => Math.round(Math.sin(i / 5) * 40 + i));
+      const longGhost = daily(LONG - 3, () => 5, BASE - LONG * DAY_MS);
+      const capped = viaCap(long, 'line', 'flow', longGhost);
+      expect(capped.values).toHaveLength(CHART_MAX_POINTS);
+      expect(capped.ghost).toHaveLength(LONG - 3);
+      const prepared = viaPrepare(long, 'line', 'flow', longGhost);
+      expect(prepared.values).toEqual(capped.values);
+      expect(prepared.ghost).toBeNull();
+    });
+
+    it('недель больше потолка: capResultSeries остаётся на неделях, новая политика сводит в месяцы', () => {
+      // 1001 день с понедельника — 143 недели > 140. При истории до 730 дней (105 недель) недостижимо.
+      const points = daily(1001, () => 1);
+      const capped = viaCap(points, 'bar', 'flow');
+      expect(capped.values).toHaveLength(143);
+      expect(capped.meta?.seriesGrain).toBe('week');
+      const prepared = prepareChartSeries({ points, viz: 'bar', kind: 'flow', unit: 'number' });
+      expect(prepared.grain).toBe('month');
+      expect(prepared.values.length).toBeLessThanOrEqual(CHART_MAX_POINTS);
+      expect(prepared.values.reduce<number>((sum, v) => sum + (v ?? 0), 0)).toBe(1001);
     });
   });
 });

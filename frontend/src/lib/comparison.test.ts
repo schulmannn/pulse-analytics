@@ -59,7 +59,9 @@ describe('compareWindows — одно правило базы', () => {
     const c = flow(null, 100);
     expect(c).toMatchObject({ delta: null, absolute: null, basis: null, noBasisReason: null });
     expect(formatDelta(c)).toBeNull();
-    expect(flow(Number.NaN, 100).noBasisReason).toBeNull();
+    // NaN — не число: ни дельты NaN в режиме 'abs', ни напечатанного «не числа».
+    expect(flow(Number.NaN, 100)).toMatchObject({ delta: null, absolute: null, basis: null, noBasisReason: null });
+    expect(formatDelta(flow(Number.NaN, 100))).toBeNull();
   });
 
   it('основание, окно и голос — рядом с числом', () => {
@@ -109,6 +111,10 @@ describe('formatDelta — один формат, ноль — «±»', () => {
     expect(formatDelta(flow(100.04, 100))).toBe('±0%');
     expect(deltaParts(flow(100.04, 100))?.dir).toBe('flat');
     expect(formatDelta(flow(0, 0))).toBe('±0');
+    // Абсолютный сдвиг, округлившийся до нуля, — тоже «±», а не «+0»; от половины — уже движение.
+    expect(formatDelta(flow(0.4, 0))).toBe('±0');
+    expect(deltaParts(flow(-0.3, 0))?.dir).toBe('flat');
+    expect(formatDelta(flow(0.6, 0))).toBe('+1');
     expect(formatDelta(compareWindows({ current: 2.13, previous: 2.1, kind: 'ratio', unit: 'percent' }))).toBe('±0 п.п.');
   });
 
