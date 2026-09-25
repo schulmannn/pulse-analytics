@@ -179,6 +179,10 @@ jobs:
       # Design-token canon (motion ladder, type scale, layering). Static and ~instant, so it runs
       # before the suite: a re-typed duration should fail in seconds, not after the e2e leg.
       - run: npm run lint:motion
+      # Единообразие источников (guardrails программы унификации): трещотка долга по паре
+      # (правило, файл) против scripts/consistency-lint-baseline.json — падает только на новом
+      # нарушении. Такая же статика, как lint:motion, поэтому тоже до суиты.
+      - run: npm run lint:consistency
       - run: npm test
       - run: npm run build
       - run: node scripts/check-bundle-size.mjs
