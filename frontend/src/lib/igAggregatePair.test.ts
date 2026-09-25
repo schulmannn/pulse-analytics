@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { aggregatePair, windowPair } from '@/lib/igMetrics';
+import { aggregatePair, pairBasis, windowPair } from '@/lib/igMetrics';
 import { igWindowMetrics } from '@/lib/igWindowMetrics';
 import type { IgInsights } from '@/api/schemas';
 
@@ -131,5 +131,48 @@ describe('igWindowMetrics — охват берётся из дедуплици�
     expect(followerNet.hasCur).toBe(true);
     expect(followerNet.cur).toBe(600);
     expect(followerNet.prev).toBe(550);
+  });
+});
+
+
+/**
+ * R2 — ГРАНИЦЫ ОКНА У АГРЕГАТА. Соблазн подписать основание дельты датами из самого payload'а
+ * («values[0].end_time и длина окна») разбивается о то, ЧЕМ эта точка является: сервер ставит её
+ * в СЕРЕДИНУ прошлого окна (`prevSince + days/2`, server/routes/ig.js) — это якорь для рисования
+ * двухточечного ряда, а не край. Подпись по нему промахнулась бы на пол-окна.
+ *
+ * Поэтому границы приносит вызывающий — и только там, где клиентское окно доказуемо совпадает с
+ * серверным (пресеты 7/30/90; сервер снапит `days` к ним). На своём периоде границ нет, и подписи
+ * не будет тоже: лучше без неё, чем с чужими датами.
+ */
+describe('R2 — откуда у агрегата границы прошлого окна', () => {
+  const DAY = 864e5;
+  const now = Math.floor(Date.now() / 60_000) * 60_000;
+  const mid = new Date(now - 45 * DAY).toISOString(); // СЕРЕДИНА прошлого 30-дневного окна
+
+  it('сам агрегат границ не знает и не выдумывает их из своих точек', () => {
+    const pair = aggregatePair(AGG(26136, 20844, new Date(now).toISOString(), mid), 'reach_window');
+    expect(pair.hasPrev).toBe(true);
+    expect(pair.prevRange ?? null).toBeNull();
+    // Основания без границ не бывает — иначе это прежнее «пред. период» без дат.
+    expect(pairBasis(pair, (n) => String(n))).toBeNull();
+  });
+
+  it('пара по ДНЕВНОМУ ряду границы знает сама — она их и посчитала', () => {
+    const points = [
+      { day: new Date(now - 40 * DAY).toISOString(), value: 10 },
+      { day: new Date(now - 5 * DAY).toISOString(), value: 20 },
+    ];
+    const pair = windowPair(points, now - 30 * DAY, now);
+    expect(pair.prevRange).toEqual({ from: now - 60 * DAY, to: now - 30 * DAY - 1 });
+    expect(pairBasis(pair, (n) => String(n))?.value).toBe('10');
+  });
+
+  it('точка прошлого окна лежит В СЕРЕДИНЕ окна, а не на его краю — подписывать ею нельзя', () => {
+    // Ровно то, что делает сервер: prevSince = now − 2·30 дн., якорь = prevSince + 15 дн.
+    const prevStart = now - 60 * DAY;
+    expect(Date.parse(mid)).toBe(prevStart + 15 * DAY);
+    expect(Date.parse(mid)).not.toBe(prevStart);
+    expect(Date.parse(mid)).not.toBe(now - 30 * DAY);
   });
 });

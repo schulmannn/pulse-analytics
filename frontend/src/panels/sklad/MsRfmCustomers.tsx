@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Check, Download } from 'lucide-react';
-import { fetchMsRfmCustomersPage, useMsRfmSegmentCustomers, type MsRfmCustomers } from '@/api/queries';
+import { fetchMsRfmCustomersPage, useMsRfmSegmentCustomers, type MsRfmCustomers } from '@/api/ms';
 import { IconMorph, useMorphFlash } from '@/components/ui/icon-morph';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';

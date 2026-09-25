@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DAY_MS, alignGhost, baselineCoveredByPosts, bucketKeyOf, bucketKeysInWindow, comparisonWindow, movingAverageGhost, sameWeekdayGhost, weekdayOfKey } from './metricSeries';
+import { DAY_MS, alignGhost, baselineCoveredByPosts, bucketKeyOf, bucketKeysInWindow, comparisonWindow, movingAverageGhost, sameWeekdayGhost, weekdayOfKey, windowRangeLabel } from './metricSeries';
 
 describe('baselineCoveredByPosts — suppress an undercounted comparison', () => {
   it('true when the oldest loaded post is at/before the baseline start', () => {
@@ -165,5 +165,54 @@ describe('sameWeekdayGhost — per-weekday typical value', () => {
     expect(sameWeekdayGhost(['2026-01', '2026-02'], [1, 2])).toBeNull();
     expect(sameWeekdayGhost(['2026-01-01'], [1, 2])).toBeNull();
     expect(sameWeekdayGhost([], [])).toBeNull();
+  });
+});
+
+/**
+ * R3 — легенда рейла называет ДАТЫ обоих окон. Год печатается только там, где без него подпись
+ * врёт: «5 июн.» текущего окна и «5 июн.» прошлогоднего нечем отличить, а год на каждой границе
+ * в рейле шириной 300px вытесняет само число.
+ *
+ * «Сегодня» приходит параметром, а не берётся из Date.now(): тест на «текущий год» иначе протух
+ * бы 1 января (грабля волны графиков — тесты на относительных датах).
+ */
+describe('windowRangeLabel — подпись границ окна', () => {
+  const now = Date.parse('2026-06-15T12:00:00Z');
+
+  it('окно текущего года печатается без года', () => {
+    expect(windowRangeLabel({ from: '2026-06-05', to: '2026-06-11' }, now)).toBe('5 июн. – 11 июн.');
+  });
+
+  it('база «Год назад» несёт год — иначе она неотличима от текущего окна', () => {
+    expect(windowRangeLabel({ from: '2025-06-05', to: '2025-06-11' }, now)).toBe('5 июн. – 11 июн. 2025 г.');
+  });
+
+  it('окно через Новый год печатает год на ОБЕИХ границах', () => {
+    expect(windowRangeLabel({ from: '2025-12-22', to: '2026-01-04' }, now)).toBe(
+      '22 дек. 2025 г. – 4 янв. 2026 г.',
+    );
+  });
+
+  it('границы принимаются и моментом (winFrom/winTo метрик-страницы)', () => {
+    const to = Date.parse('2026-06-11T00:00:00Z');
+    const from = to - 6 * DAY_MS;
+    // Момент читается по зоне читателя, поэтому сверяем с тем же разбором, а не с литералом.
+    expect(windowRangeLabel({ from, to }, now)).toBe(
+      `${new Date(from).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })} – ${new Date(to).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })}`,
+    );
+  });
+
+  it('окно comparisonWindow подписывается тем же хелпером — границы и подпись не расходятся', () => {
+    const winTo = Date.parse('2026-06-11T00:00:00Z');
+    const winFrom = winTo - 6 * DAY_MS;
+    const base = comparisonWindow(winFrom, winTo, 'prev');
+    expect(windowRangeLabel(base, now)).toBe(
+      `${new Date(base.from).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })} – ${new Date(base.to).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })}`,
+    );
+  });
+
+  it('пустая граница не рождает висячее тире', () => {
+    expect(windowRangeLabel({ from: '', to: '2026-06-11' }, now)).toBe('');
+    expect(windowRangeLabel({ from: '2026-06-05', to: 'не дата' }, now)).toBe('');
   });
 });

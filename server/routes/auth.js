@@ -2,13 +2,14 @@
 
 const crypto = require('crypto');
 const { createVerifyEmail } = require('../lib/verifyEmail');
+const { isPlausibleEmail } = require('../lib/emailAddress');
 
 function registerAuthRoutes({
   app, express, db, requireAuth, authLimiter, asyncHandler,
   hashPassword, verifyPassword, DUMMY_HASH, signSession, SESSION_TTL, SESSION_ABSOLUTE_TTL,
   GOOGLE_CLIENT_ID, fetchWithTimeout, log, audit, appBase, sha256, newToken,
   VERIFY_TTL, RESET_TTL, sendEmail, emailShell, emailBtn, escHtml,
-  aiEnabledFor, rusenderSurfaces = false, setSessionCookie, clearSessionCookie,
+  aiEnabledFor, setSessionCookie, clearSessionCookie,
   jobTracker,
 }) {
   // Анти-enumeration роуты (register/forgot/resend) отвечают ДО работы с БД/почтой — это осознанно
@@ -35,7 +36,8 @@ function registerAuthRoutes({
     if (!db.enabled) return res.status(503).json({ error: 'БД не подключена — регистрация недоступна' });
     const email = String((req.body && req.body.email) || '').toLowerCase().trim();
     const password = String((req.body && req.body.password) || '');
-    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return res.status(400).json({ error: 'Некорректный email' });
+    // Длина и форма — lib/emailAddress (прежний паттерн давал ReDoS: ~20 с блокировки на запрос).
+    if (!isPlausibleEmail(email)) return res.status(400).json({ error: 'Некорректный email' });
     if (password.length < 8) return res.status(400).json({ error: 'Пароль минимум 8 символов' });
     const generic = { status: 'check_email', message: 'Проверь почту — если email свободен, мы отправили ссылку для подтверждения.' };
     const base = appBase(req);  // читается из req ДО хвоста (после ответа объект запроса не трогаем)
@@ -193,7 +195,6 @@ function registerAuthRoutes({
       // тянуть ради этого ленивый модуль источника в шелл нельзя (бюджет бандла оболочки).
       // Поле ПЛОСКОЕ, в отличие от `ai`: разбирающая его Zod-схема лежит в общем чанке, и
       // вложенный объект стоил бы полкилобайта каждому маршруту метрик (см. api/schemas.ts).
-      rusender_surfaces: !!rusenderSurfaces,
     });
   }));
 
@@ -256,7 +257,7 @@ function registerAuthRoutes({
     const email = String((req.body && req.body.email) || '').toLowerCase().trim();
     const base = appBase(req);
     res.json({ ok: true, message: 'Если такой аккаунт есть — мы отправили ссылку для сброса.' });   // respond first
-    if (!db.enabled || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return;
+    if (!db.enabled || !isPlausibleEmail(email)) return;
     trackTail('auth_forgot_tail', async () => {
       try {
         const u = await db.getUserByEmail(email);
@@ -297,7 +298,7 @@ function registerAuthRoutes({
     const email = String((req.body && req.body.email) || '').toLowerCase().trim();
     const base = appBase(req);
     res.json({ ok: true, message: 'Если аккаунт ждёт подтверждения — письмо отправлено снова.' });   // respond first
-    if (!db.enabled) return;
+    if (!db.enabled || !isPlausibleEmail(email)) return;   // как forgot: мусор и 100 КБ-строки в БД не идут
     trackTail('auth_resend_tail', async () => {
       try {
         const u = await db.getUserByEmail(email);

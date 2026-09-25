@@ -25,9 +25,12 @@ for (const route of IG_ROUTES) {
   test(`демо ${route} рендерится из клиентских фикстур без сетевых /api/ig запросов`, async ({ page }) => {
     const igHits = collectIgRequests(page);
     await bootDemo(page, route, { theme: 'dark' });
-    // Connect-панель «Демо-режим» рендерится ШЕЛЛОМ только после успешной загрузки IG-кластера —
-    // на любом брейкпоинте это и есть признак «данные пришли» (error-ветка её не содержит).
-    await expect(page.getByRole('heading', { name: 'Демо-режим', exact: true })).toBeVisible();
+    // Connect-панель рендерится ШЕЛЛОМ только после успешной загрузки IG-кластера — на любом
+    // брейкпоинте это и есть признак «данные пришли» (error-ветка её не содержит). Маркер
+    // СОЗНАТЕЛЬНО переехал с «Демо-режим» на «Instagram не подключён»: панель дублировала
+    // глобальный демо-баннер оболочки и врала реальному пользователю без подключения (аудит #554,
+    // D18). Инвариант спека прежний — панель на месте, значит IG-кластер жив.
+    await expect(page.getByRole('heading', { name: 'Instagram не подключён', exact: true })).toBeVisible();
     await expect(page.getByText('Не удалось загрузить данные Instagram')).toHaveCount(0);
     if (route === '/instagram/audience') {
       // Богатая часть фикстур (breakdowns) реально дошла до секций, а не только шелл ожил.

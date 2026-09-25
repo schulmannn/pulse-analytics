@@ -2,7 +2,7 @@ import { useContext, useMemo, useState } from 'react';
 import { ShareTrack } from '@/components/ShareRows';
 import type { ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useMsCohorts, useMsCustomers, useMsRfm, useMsTopCustomers } from '@/api/queries';
+import { useMsCohorts, useMsCustomers, useMsRfm, useMsTopCustomers } from '@/api/ms';
 import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
 import { ChartCardBody } from '@/components/chartWidget/ChartCardBody';
@@ -16,7 +16,7 @@ import { DeltaPill } from '@/components/DeltaPill';
 import { RadialGauge } from '@/components/RadialGauge';
 import { Sparkline } from '@/components/Sparkline';
 import { pctDelta, type MetricDelta } from '@/lib/delta';
-import { lttbDownsample } from '@/lib/downsample';
+import { CHART_MAX_POINTS, lttbDownsample } from '@/lib/downsample';
 import { fmt, pluralRu, timeAxisFromDayKeys } from '@/lib/format';
 import { formatMoney } from '@/lib/metricNumber';
 import { usePagePeriod, usePeriod } from '@/lib/period';
@@ -29,7 +29,7 @@ import {
   densifyCustomerDays,
   type MsCustomerMetric,
 } from '@/lib/msCustomerSeries';
-import { CHART_MAX_POINTS, type Grain } from '@/lib/msSeries';
+import type { Grain } from '@/lib/msSeries';
 import { cohortCellValue, isMoneyCohortMode, type MsCohortCell, type MsCohortMode } from '@/lib/msCohortMode';
 import { WidgetGrid } from '@/components/widgets/WidgetGrid';
 
@@ -65,7 +65,7 @@ export function MsClients() {
   const chart = useMemo(() => {
     if (!series) return null;
     const dense = densifyCustomerDays(series, period);
-    const sampled = lttbDownsample(dense, 140, (r) => r.new_orders + r.repeat_orders);
+    const sampled = lttbDownsample(dense, CHART_MAX_POINTS, (r) => r.new_orders + r.repeat_orders);
     return {
       count: sampled.length,
       labels: sampled.map((r) => fmt.day(r.day)),

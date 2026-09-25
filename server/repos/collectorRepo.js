@@ -561,8 +561,8 @@ function createCollectorRepo({ pool, enabled, transaction, setChannelTgId }) {
     const { rows } = await pool.query(
       `SELECT channel_id, status, to_char(cursor_from,'YYYY-MM-DD') AS cursor_from,
               total_estimate, fetched_count, error,
-              to_char(started_at,'YYYY-MM-DD"T"HH24:MI:SSOF') AS started_at,
-              to_char(updated_at,'YYYY-MM-DD"T"HH24:MI:SSOF') AS updated_at,
+              to_char(started_at,'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS started_at,
+              to_char(updated_at,'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS updated_at,
               EXTRACT(EPOCH FROM (now() - updated_at))::int AS updated_age_seconds
          FROM ms_backfill_state WHERE channel_id=$1`, [channelId]);
     return rows[0] || null;
@@ -661,8 +661,8 @@ function createCollectorRepo({ pool, enabled, transaction, setChannelTgId }) {
     const { rows } = await pool.query(
       `SELECT channel_id, status, to_char(cursor_from,'YYYY-MM-DD') AS cursor_from,
               total_estimate, fetched_count, error,
-              to_char(started_at,'YYYY-MM-DD"T"HH24:MI:SSOF') AS started_at,
-              to_char(updated_at,'YYYY-MM-DD"T"HH24:MI:SSOF') AS updated_at,
+              to_char(started_at,'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS started_at,
+              to_char(updated_at,'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS updated_at,
               EXTRACT(EPOCH FROM (now() - updated_at))::int AS updated_age_seconds
          FROM ms_returns_backfill_state WHERE channel_id=$1`, [channelId]);
     return rows[0] || null;

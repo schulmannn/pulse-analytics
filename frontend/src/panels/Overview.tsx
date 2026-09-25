@@ -1,8 +1,7 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { useChannels, useHistory, useTgFull, useTgQrStatus } from '@/api/queries';
 import { useSelectedChannel } from '@/lib/channel-context';
-import { lttbDownsample } from '@/lib/downsample';
-import { CHART_MAX_POINTS } from '@/lib/msSeries';
+import { CHART_MAX_POINTS, lttbDownsample } from '@/lib/downsample';
 import { useCardShowsPeriod, useWidgetPeriod } from '@/lib/period';
 import { useWidgetInView } from '@/lib/widgetViewport';
 import { pctDelta, subscriberChange } from '@/lib/delta';

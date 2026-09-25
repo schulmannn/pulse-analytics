@@ -7,7 +7,8 @@ import { observeSize } from '@/lib/observeSize';
 import { columnIndex } from '@/lib/chartHover';
 import { axisLabelIndexSet } from '@/lib/chartLabels';
 import { ChartTooltip, type TooltipRow, type TooltipState } from '@/components/ChartTooltip';
-import { axisLabel, niceScale } from '@/components/LineChart';
+import { axisLabel, axisTextWidth, niceScale } from '@/components/LineChart';
+import { SeriesLegend } from '@/components/metric/seriesLegend';
 import { seriesMotionKey } from '@/lib/chartMotion';
 import { useMorphValues } from '@/lib/useMorphValues';
 import {
@@ -67,8 +68,93 @@ interface BarChartProps {
    * сравнения вдобавок делит полосу надвое, и это скачок формы, а не прозрачности).
    */
   ghostVisible?: boolean;
+  /**
+   * ТОН КАЖДОГО СТОЛБЦА по его индексу — для полоски ритма, где один ряд несёт ДВЕ недели
+   * (аудит #554, ТЗ-11). `ghost` — прошлая неделя, `peak` — пик текущей.
+   *
+   * Это НЕ то же, что `ghost`: там две ПАРАЛЛЕЛЬНЫЕ серии на одних датах (сегодня и год
+   * назад), а здесь одна непрерывная серия из 14 дней, у которой первая половина — прошлое. Разбивать
+   * её на две серии значило бы поставить два столбца на одну дату — враньё про сами данные.
+   */
+  barTone?: (index: number) => 'default' | 'ghost' | 'peak';
+  /**
+   * ОРИЕНТИР ОТ ХОСТА — горизонтальный пунктирный штрих на уровне `value` (R8: среднее окна у
+   * hero-карточки, референс Mercury Insights). `label` идёт в `<title>` штриха, а не на полотно:
+   * почему — см. `printed` у RefMarker.
+   *
+   * Третий повод для такой линии и первый, приходящий ПРОПОМ: цель виджета живёт в
+   * `WidgetTargetContext`, «Мин/Макс/Среднее» разворота — в `ChartRefLinesContext`, и оба
+   * контекста ставит оболочка карточки, а не тело. Среднее знает только тело (оно считает его по
+   * тому же окну, из которого взяло столбцы), поэтому ему нужен обычный проп.
+   */
+  referenceLine?: { value: number; label: string } | null;
   /** Compact shadcn-style tooltip and higher-contrast series treatment for the metric explorer. */
   appearance?: 'default' | 'comparison';
+}
+
+/**
+ * Пунктирный ориентир поверх столбцов — ОДИН рецепт на три повода (цель виджета, линии разворота,
+ * среднее окна). Пара `<line>` + `<text>` уже жила в двух копиях, и копии успели разойтись по
+ * непрозрачности (0.8 у цели против 0.7 у линий разворота); третья копия разошлась бы так же.
+ * Непрозрачность осталась параметром, чтобы правка не двигала пиксели существующих двух.
+ */
+function RefMarker({
+  y,
+  text,
+  from,
+  to,
+  opacity,
+  printed = true,
+  slot,
+}: {
+  y: number;
+  text: string;
+  from: number;
+  to: number;
+  opacity: number;
+  /**
+   * Печатать подпись НА полотне.
+   *
+   * Цель и линии разворота печатают: цель обычно стоит ВЫШЕ данных (её ещё не достигли), линии
+   * разворота включаются кнопкой и живут в высоком оверлее, где над крайними столбцами есть воздух.
+   * Среднее окна — другой случай: оно по определению внутри размаха, то есть подпись ВСЕГДА ложится
+   * на столбцы, и серый текст поверх заливки серии не читается (замер на демо). Хосту, который уже
+   * печатает это число на лице карточки, вторая копия не нужна — остаётся штрих и `<title>`.
+   */
+  printed?: boolean;
+  /** Крюк для гейтов; у цели и линий разворота его нет — их видно по тексту подписи. */
+  slot?: string;
+}) {
+  return (
+    <g className="pointer-events-none" data-chart-ref-line={slot}>
+      {/* <title> — имя линии для читалки и подсказка по наведению; краски на полотне не добавляет. */}
+      {!printed && <title>{text}</title>}
+      {/* vector-effect обязателен: viewBox растягивается неравномерно (CLAUDE.md), без него
+          штрих «размазывает». */}
+      <line
+        x1={from}
+        y1={y}
+        x2={to}
+        y2={y}
+        stroke="hsl(var(--chart-role-neutral))"
+        strokeDasharray="6 4"
+        strokeWidth="1.2"
+        opacity={opacity}
+        vectorEffect="non-scaling-stroke"
+      />
+      {/* Подпись уходит ПОД линию, когда та стоит у самой кромки: сверху её обрезал бы viewBox. */}
+      {printed && (
+        <text
+          x={to - 4}
+          y={y - 4 < 10 ? y + 12 : y - 4}
+          textAnchor="end"
+          className="pointer-events-none select-none fill-muted-foreground text-2xs font-medium tabular-nums"
+        >
+          {text}
+        </text>
+      )}
+    </g>
+  );
 }
 
 interface Hover {
@@ -80,7 +166,6 @@ const MAX_BAR_W = 48;
 // Bar takes 70% of its column; the rest is gap.
 const BAR_RATIO = 0.7;
 // Approximate glyph width of the 11px tabular numerals used for tick/value labels.
-const CHAR_W = 6.6;
 // Горизонтальное поле пилюли текущей метки оси X (px с каждой стороны текста).
 const AXIS_PILL_PAD = 6;
 // ОДНА альфа призрачных столбцов на все подачи: grouped-пара, stacked-сегмент, hover-хайлайт,
@@ -141,6 +226,8 @@ export function BarChart({
   pinnedIndex = null,
   comparisonStyle = 'grouped',
   ghostVisible = true,
+  barTone,
+  referenceLine = null,
   appearance = 'default',
 }: BarChartProps) {
   // Геометрия столбцов числовая, а пропуск в ней невыразим — сводим его к нулевой высоте ОДИН
@@ -262,7 +349,12 @@ export function BarChart({
     // уровень сплющил бы столбцы в полоску у самого низа.
     const barVals = [...values, ...(activeGhost ?? []), ...stackedTotals];
     const clamped = clampTargetToDomain(target, 0, Math.max(...barVals, 1));
-    const rawMax = Math.max(...values, 1, clamped.value ?? 0, ...(activeGhost ?? []), ...stackedTotals);
+    // Уровень ориентира входит в домен: среднее считается по ПОЛНОМУ окну, а столбцы могут прийти
+    // прорежёнными (LTTB-кап длинной серии), и уровень способен оказаться выше видимого максимума —
+    // тогда линия ушла бы за верхнюю кромку. Клампа, как у цели, ей не нужно: ориентир приходит из
+    // тех же данных, что и столбцы, и оторваться от них на порядок не может.
+    const refLevel = referenceLine != null && Number.isFinite(referenceLine.value) ? referenceLine.value : null;
+    const rawMax = Math.max(...values, 1, clamped.value ?? 0, refLevel ?? 0, ...(activeGhost ?? []), ...stackedTotals);
     const scale = expanded ? niceScale(0, rawMax) : null;
     const max = scale ? scale.hi : rawMax;
     const n = values.length;
@@ -294,7 +386,7 @@ export function BarChart({
     const yTicks = scaledTicks.map((t) => t.v);
     const tickLabels = scaledTicks.map((t) => t.label);
     const gutterW = expanded
-      ? Math.max(28, Math.round(Math.max(...tickLabels.map((l) => l.length)) * CHAR_W) + 14)
+      ? Math.max(28, Math.round(Math.max(...tickLabels.map(axisTextWidth))) + 14)
       : 0;
 
     // Cap the column width and center the group when there are few bars.
@@ -449,7 +541,7 @@ export function BarChart({
           // отступает от края на поле своей пилюли, чтобы пилюля не клипалась рамкой svg.
           // Канонная ось: центр колонки, но КЛАМП в рамку svg по половине текста — месячный тик
           // первого столбца иначе клипался левым краем («ay» вместо «May»).
-          const axisTextW = String(axisText ?? '').length * CHAR_W;
+          const axisTextW = axisTextWidth(String(axisText ?? ''));
           const labelX = letterAxis
             ? Math.max(axisTextW / 2 + 1, Math.min(barCenterX(i), chartWidth - axisTextW / 2 - 1))
             : isLast
@@ -460,10 +552,10 @@ export function BarChart({
           const anchor = letterAxis ? 'middle' : isLast ? 'end' : i === 0 ? 'start' : 'middle';
           // ПИЛЮЛЯ текущей (последней) метки — «где сейчас» на оси (референс владельца:
           // «Aug» / обведённая «T»). viewBox здесь 1:1 с CSS-px, поэтому скруглённый rect не
-          // искажается. Ширина текста оценивается CHAR_W — тем же приёмом, что y-gutter.
+          // искажается. Ширина текста — общая оценка axisTextWidth, тем же приёмом, что y-gutter.
           const pill = showLabel && isLast
             ? (() => {
-                const textW = String(axisText).length * CHAR_W;
+                const textW = axisTextWidth(String(axisText));
                 const pillH = 15;
                 const pillW = Math.max(textW + AXIS_PILL_PAD * 2, pillH);
                 const x = anchor === 'end' ? labelX - textW - AXIS_PILL_PAD : labelX - pillW / 2;
@@ -514,21 +606,30 @@ export function BarChart({
           );
         })}
 
+        {/* Ориентир хоста (среднее окна у hero-карточки) — под целью владельца: цель важнее,
+            и на пересечении читаться должна она. */}
+        {refLevel != null && (
+          <RefMarker
+            slot="host"
+            printed={false}
+            y={barTop(refLevel)}
+            from={gutterW}
+            to={chartWidth}
+            opacity={0.7}
+            text={`${referenceLine?.label} ${fmt.short(refLevel)}`}
+          />
+        )}
+
         {/* Target level (widget pref) — dashed goal line + right-aligned label, above the bars */}
         {clamped.value != null && (
-          <>
-            {/* Линия — на УРЕЗАННОМ уровне, число в подписи настоящее, стрелка говорит «выше окна». */}
-            <line x1={gutterW} y1={barTop(clamped.value)} x2={chartWidth} y2={barTop(clamped.value)} stroke="hsl(var(--chart-role-neutral))" strokeDasharray="6 4" strokeWidth="1.2" opacity="0.8" vectorEffect="non-scaling-stroke" className="pointer-events-none" />
-            <text
-              x={chartWidth - 4}
-              y={barTop(clamped.value) - 4 < 10 ? barTop(clamped.value) + 12 : barTop(clamped.value) - 4}
-              textAnchor="end"
-              className="pointer-events-none select-none fill-muted-foreground text-2xs font-medium tabular-nums"
-            >
-              цель {fmt.short(target ?? clamped.value)}
-              {clamped.clipped ? ' ↑' : ''}
-            </text>
-          </>
+          // Линия — на УРЕЗАННОМ уровне, число в подписи настоящее, стрелка говорит «выше окна».
+          <RefMarker
+            y={barTop(clamped.value)}
+            from={gutterW}
+            to={chartWidth}
+            opacity={0.8}
+            text={`цель ${fmt.short(target ?? clamped.value)}${clamped.clipped ? ' ↑' : ''}`}
+          />
         )}
 
         {/* Min/Max/Average reference lines (overlay «Линии» toggle) — dashed hairlines at the visible
@@ -536,17 +637,7 @@ export function BarChart({
         {refLines && (
           <>
             {([['макс', refLines.max], ['сред.', refLines.avg], ['мин', refLines.min]] as const).map(([lbl, v]) => (
-              <g key={lbl} className="pointer-events-none">
-                <line x1={gutterW} y1={barTop(v)} x2={chartWidth} y2={barTop(v)} stroke="hsl(var(--chart-role-neutral))" strokeDasharray="6 4" strokeWidth="1.2" opacity="0.7" vectorEffect="non-scaling-stroke" />
-                <text
-                  x={chartWidth - 4}
-                  y={barTop(v) - 4 < 10 ? barTop(v) + 12 : barTop(v) - 4}
-                  textAnchor="end"
-                  className="pointer-events-none select-none fill-muted-foreground text-2xs font-medium tabular-nums"
-                >
-                  {lbl} {fmt.short(v)}
-                </text>
-              </g>
+              <RefMarker key={lbl} y={barTop(v)} from={gutterW} to={chartWidth} opacity={0.7} text={`${lbl} ${fmt.short(v)}`} />
             ))}
           </>
         )}
@@ -554,7 +645,7 @@ export function BarChart({
     );
 
     return { chartWidth, chartHeight, graphHeight, offsetX, itemWidth, bars, ghostBars, stacked, barTop, barCenterX, underLayer, overLayer };
-  }, [values, labels, axisLabels, activeGhost, hasGhost, target, refLines, width, ctxHeight, hostHeight, height, expanded, comparisonStyle, gapIdx, gapPatternId]);
+  }, [values, labels, axisLabels, activeGhost, hasGhost, target, refLines, referenceLine, width, ctxHeight, hostHeight, height, expanded, comparisonStyle, gapIdx, gapPatternId]);
 
   // ── UPDATE morph: the silhouette flows into the new shape on a data change ────────────────
   // Heights (the ONE dimension the data owns — x/width are layout) tween from the previously
@@ -602,7 +693,15 @@ export function BarChart({
           // невидимый элемент, о который спотыкаются селекторы «первой серии» (forced-colors gate).
           (() => {
             const d = stackSegmentPath(b, true, false);
-            return d ? <path key={`b${i}`} data-chart-series="current" d={d} fill="hsl(var(--chart-role-primary))" /> : null;
+            // Тон столбца решает хост (barTone) — полоске ритма нужны три голоса в ОДНОЙ серии.
+            const tone = barTone?.(i) ?? 'default';
+            const fill =
+              tone === 'ghost'
+                ? 'hsl(var(--muted-foreground) / 0.55)'
+                : tone === 'peak'
+                  ? 'hsl(var(--foreground))'
+                  : 'hsl(var(--chart-role-primary))';
+            return d ? <path key={`b${i}`} data-chart-series="current" data-bar-tone={tone} d={d} fill={fill} /> : null;
           })()
         ))}
         {ghostBars.map((b, i) => plot.stacked ? (
@@ -620,7 +719,7 @@ export function BarChart({
         ))}
       </>
     );
-  }, [plot, morphed]);
+  }, [plot, morphed, barTone]);
 
   // Hover-only charts have no activation semantics: the SVG stays one passive named graphic and
   // pointer scrubbing is registered on its DOM node. Drillable charts use the real overlay button
@@ -653,7 +752,7 @@ export function BarChart({
   }, [onPointClick, plot, values.length]);
 
   if (!values || values.length === 0 || !plot || !morphed) {
-    return <EmptyState compact size="chart" title="Нет данных за период" />;
+    return <EmptyState compact size="chart" ghost="bars" title="Нет данных за период" />;
   }
 
   const { chartWidth, chartHeight, graphHeight, offsetX, itemWidth, stacked, barTop, barCenterX } = plot;
@@ -770,34 +869,21 @@ export function BarChart({
           toggle (steep #9): click to hide/show the overlay. Where a page-level compare control already
           owns the on/off (legendToggle=false, the metric page) the chip is a static label instead. */}
       {hasGhost && (
-        <div className="mb-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-2xs font-medium text-muted-foreground">
-          <span className="flex select-none items-center gap-1.5">
-            <span aria-hidden="true" className="h-2 w-3 rounded-sm" style={{ backgroundColor: 'hsl(var(--chart-role-primary))' }} />
-            {primaryLabel === 'Текущий' ? 'Текущий период' : primaryLabel}
-          </span>
-          {legendToggle ? (
-            <button
-              type="button"
-              aria-pressed={!ghostHidden}
-              onClick={() => setGhostHidden((v) => !v)}
-              title={ghostHidden ? 'Показать сравнение' : 'Скрыть сравнение'}
-              className={`flex select-none items-center gap-1.5 rounded transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40 ${ghostHidden ? 'opacity-40 line-through' : ''}`}
-            >
-              {/* Свотч-прямоугольник: сравнение здесь рисуется столбцами, не пунктиром, и свотч
-                  повторяет ровно ту же альфу (GHOST_FILL), что и сами столбцы. */}
-              <span aria-hidden="true" className="h-2 w-3 rounded-sm" style={{ backgroundColor: GHOST_FILL }} />
-              {ghostLabel}
-            </button>
-          ) : (
-            // Место чипа остаётся за ним при выключенном сравнении: иначе строка легенды пропадает
-            // целиком и таймбар под графиком прыгает вверх (замер: 21px). Утверждать «пред. период»
-            // невидимый чип при этом не может.
-            <span className={`flex select-none items-center gap-1.5${ghostVisible ? '' : ' invisible'}`} aria-hidden={!ghostVisible}>
-              <span aria-hidden="true" className="h-2 w-3 rounded-sm" style={{ backgroundColor: GHOST_FILL }} />
-              {ghostLabel}
-            </span>
-          )}
-        </div>
+        // Свотч-прямоугольник вместо пунктира: сравнение здесь рисуется СТОЛБЦАМИ, и свотч
+        // повторяет ровно ту же альфу (GHOST_FILL), что и они. Место чипа остаётся за ним при
+        // выключенном сравнении: иначе строка легенды пропадает целиком и таймбар под графиком
+        // прыгает вверх (замер: 21px).
+        <SeriesLegend
+          layout="chart"
+          marker="bar"
+          comparisonColor={GHOST_FILL}
+          items={[
+            { role: 'primary', label: primaryLabel === 'Текущий' ? 'Текущий период' : primaryLabel },
+            { role: 'comparison', label: ghostLabel, hidden: !ghostVisible },
+          ]}
+          onToggleComparison={legendToggle ? () => setGhostHidden((v) => !v) : undefined}
+          comparisonPressed={!ghostHidden}
+        />
       )}
       <div ref={containerRef} className="relative w-full">
       <svg

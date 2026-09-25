@@ -19,9 +19,8 @@ import {
   normalizeCdekChannels,
   normalizeCdekStatuses,
 } from '@/panels/cdek/cdekStatusFilter';
-import { lttbDownsample } from '@/lib/downsample';
+import { CHART_MAX_POINTS, lttbDownsample } from '@/lib/downsample';
 import { densifyCdekDays } from '@/lib/cdekSeries';
-import { CHART_MAX_POINTS } from '@/lib/msSeries';
 import { fmt, timeAxisFromDayKeys } from '@/lib/format';
 import { formatByRole, formatMoney } from '@/lib/metricNumber';
 import { useCardShowsPeriod, usePagePeriod } from '@/lib/period';
@@ -131,6 +130,8 @@ export function CdekProducts() {
               total={totalRevenue}
               format={rub}
               tailWord="рублей"
+              columns={{ label: 'Товар', value: 'Выручка' }}
+              ranked
               // Накопленный процент — то самое «первые пять дают 78%», ради чего разбор и нужен.
               cumulative
               compactRows={8}

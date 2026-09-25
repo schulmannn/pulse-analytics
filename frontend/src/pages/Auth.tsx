@@ -470,9 +470,9 @@ export function InvitePage() {
 
   const subtitle = (
     <>
-      {invite.invited_by ? <b className="text-foreground">{invite.invited_by}</b> : 'Вас'}
+      {invite.invited_by ? <b className="font-medium text-foreground">{invite.invited_by}</b> : 'Вас'}
       {invite.invited_by ? ' приглашает вас' : ' пригласили'} в пространство{' '}
-      <b className="text-foreground">{invite.workspace}</b> — роль «{roleLabel}».
+      <b className="font-medium text-foreground">{invite.workspace}</b> — роль «{roleLabel}».
     </>
   );
 
@@ -505,8 +505,8 @@ export function InvitePage() {
     return (
       <AuthShell title="Приглашение на другой адрес" subtitle={subtitle}>
         <p className="text-sm text-ink2">
-          Вы вошли как <b className="text-foreground">{signedInAs}</b>, а приглашение выписано на{' '}
-          <b className="text-foreground">{invite.email}</b>. Выйдите и откройте ссылку из письма снова.
+          Вы вошли как <b className="font-medium text-foreground">{signedInAs}</b>, а приглашение выписано на{' '}
+          <b className="font-medium text-foreground">{invite.email}</b>. Выйдите и откройте ссылку из письма снова.
         </p>
         <InviteFooter />
       </AuthShell>
@@ -518,7 +518,7 @@ export function InvitePage() {
     return (
       <AuthShell title="Приглашение в команду" subtitle={subtitle}>
         <p className="text-sm text-ink2">
-          У <b className="text-foreground">{invite.email}</b> уже есть аккаунт Atlavue — войдите и
+          У <b className="font-medium text-foreground">{invite.email}</b> уже есть аккаунт Atlavue — войдите и
           откройте ссылку из письма снова.
         </p>
         <Link to="/login" className="mt-5 block">
@@ -537,11 +537,11 @@ export function InvitePage() {
     return (
       <AuthShell title="Проверьте почту" subtitle={subtitle}>
         <p className="text-sm text-ink2">
-          Мы отправили письмо на <b className="text-foreground">{invite.email}</b>. Откройте его и
+          Мы отправили письмо на <b className="font-medium text-foreground">{invite.email}</b>. Откройте его и
           подтвердите адрес — после этого задайте пароль через «Забыли пароль» на странице входа.
         </p>
         <p className="mt-3 text-sm text-ink2">
-          Доступ к пространству <b className="text-foreground">{invite.workspace}</b> уже закреплён
+          Доступ к пространству <b className="font-medium text-foreground">{invite.workspace}</b> уже закреплён
           за этим адресом и появится сразу после подтверждения.
         </p>
         <InviteFooter />
@@ -573,7 +573,7 @@ export function InvitePage() {
         {verifyRequired ? (
           <p className="mt-4 text-sm text-ink2">
             Эту ссылку мог видеть не только владелец адреса, поэтому аккаунт активируется
-            подтверждением почты: мы отправим письмо на <b className="text-foreground">{invite.email}</b>.
+            подтверждением почты: мы отправим письмо на <b className="font-medium text-foreground">{invite.email}</b>.
           </p>
         ) : (
           <div className="mt-4">

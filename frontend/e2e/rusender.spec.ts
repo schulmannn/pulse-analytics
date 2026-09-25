@@ -7,8 +7,6 @@ import { expect, test, type Page } from '@playwright/test';
  *   • «События окна» и «Итоги рассылок» — ДВЕ независимые группы величин, которые нельзя
  *     складывать: открытия могут прийти на письма, отправленные до окна (тот же канон, что
  *     «Просмотры канала» ≠ «Просмотры публикаций» у Telegram);
- *   • «Рассылки» и «База» живут за фичефлагом RUSENDER_SURFACES — до сверки чисел с живыми
- *     данными их не видит никто, кроме включивших флаг.
  *
  * Boot БЕЗ pulse_demo: демо-фикстуры отдают ответы клиентски, до сети.
  */
@@ -70,10 +68,12 @@ const CAMPAIGNS = {
   ],
 };
 
+const RANGE_TOO_WIDE = 'Слишком широкий диапазон дат: максимум 400 дней. Для всей истории выберите период «Всё»';
+
 async function bootRusender(
   page: Page,
   path: string,
-  { surfaces = true, connected = true, empty = false } = {},
+  { connected = true, empty = false } = {},
 ) {
   await page.route(/^https?:\/\/[^/]+\/api\//, async (route) => {
     const request = route.request();
@@ -81,7 +81,7 @@ async function bootRusender(
     const json = (body: unknown) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
 
     if (url.pathname === '/api/auth/me') {
-      return json({ uid: 42, email: 'owner@pulse.local', role: 'user', avatar: null, rusender_surfaces: surfaces });
+      return json({ uid: 42, email: 'owner@pulse.local', role: 'user', avatar: null });
     }
     if (url.pathname === '/api/channels' && request.method() === 'GET') {
       return json({ enabled: true, channels: [CHANNEL] });
@@ -96,6 +96,17 @@ async function bootRusender(
     }
     if (url.pathname === '/api/rusender/summary') {
       const days = Number(url.searchParams.get('days') ?? 30);
+      // Серверный потолок явного окна (server/routes/rusender.js, parseRange): шире 400 дней — 400
+      // с подсказкой, дословно как отвечает прод.
+      const from = url.searchParams.get('from');
+      const to = url.searchParams.get('to');
+      if (from && to && (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000 + 1 > 400) {
+        return route.fulfill({
+          status: 400,
+          contentType: 'application/json',
+          body: JSON.stringify({ error: RANGE_TOO_WIDE }),
+        });
+      }
       if (empty) {
         return json({
           days, from: null, to: null,
@@ -150,15 +161,15 @@ test('Обзор: пустое окно говорит о пустоте, а н�
   await expect(page.getByText(/Не удалось|Ошибка/)).toHaveCount(0);
 });
 
-test('«Рассылки» и «База» скрыты без фичефлага и появляются с ним', async ({ page }) => {
-  await bootRusender(page, '/rusender', { surfaces: false });
+test('«Рассылки» и «База» стоят в наве источника — фичефлага больше нет', async ({ page }) => {
+  // Раньше здесь проверялись ОБА состояния флага. Флаг снят: сверка чисел закрыта замером (#546),
+  // а оговорку про 11-дневное окно активности экраны говорят сами. Остаётся то, что должно
+  // остаться навсегда: у источника три раздела, и они видны без переменной окружения.
+  await bootRusender(page, '/rusender');
   const nav = page.getByRole('navigation');
   await expect(nav.getByRole('link', { name: 'Обзор' }).first()).toBeVisible({ timeout: 15_000 });
-  await expect(nav.getByRole('link', { name: 'Рассылки' })).toHaveCount(0);
-  await expect(nav.getByRole('link', { name: 'База' })).toHaveCount(0);
-
-  await bootRusender(page, '/rusender', { surfaces: true });
-  await expect(page.getByRole('navigation').getByRole('link', { name: 'Рассылки' })).toBeVisible({ timeout: 15_000 });
+  await expect(nav.getByRole('link', { name: 'Рассылки' })).toBeVisible();
+  await expect(nav.getByRole('link', { name: 'База' })).toBeVisible();
 });
 
 test('«Рассылки»: список несёт имя, доставку и открытия каждой рассылки', async ({ page }) => {
@@ -186,4 +197,21 @@ test('смена окна перезапрашивает обзор с новы�
   await expect(period).toBeVisible();
   await period.getByRole('button', { name: '7д' }).click();
   await expect.poll(() => asked.includes(7), { timeout: 10_000 }).toBe(true);
+});
+
+test('страница метрики: окно шире потолка — причина видна, «Окно» на месте, «Всё» возвращает данные', async ({ page }) => {
+  // Явное окно шире 400 дней сервер отвергает честной 400-кой. Раньше страница метрики теряла при
+  // этом шапку и пикер «Окно» — сменить окно было негде, а «Повторить» возвращал тот же отказ.
+  await bootRusender(page, '/metrics/rusender-opens?from=2024-06-01&to=2026-08-25');
+  const main = page.locator('main');
+  await expect(main).toContainText('максимум 400 дней', { timeout: 20_000 });
+  await expect(main).toContainText('выберите период «Всё»');
+  await expect(main.getByRole('button', { name: 'Повторить' })).toHaveCount(0);
+  await expect(main.getByRole('heading', { level: 1, name: 'Открытия' })).toBeVisible();
+
+  const windowPicker = page.getByRole('group', { name: 'Окно' });
+  await expect(windowPicker).toBeVisible();
+  await windowPicker.getByRole('button', { name: 'Всё' }).click();
+  await expect(main).not.toContainText('максимум 400 дней', { timeout: 10_000 });
+  await expect(main.getByRole('alert')).toHaveCount(0);
 });

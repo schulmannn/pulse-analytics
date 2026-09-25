@@ -1,22 +1,6 @@
 import { useContext } from 'react';
 import type { ReactElement, ReactNode } from 'react';
-import {
-  useYmAge,
-  useYmCities,
-  useYmCountries,
-  useYmDevices,
-  useYmExits,
-  useYmGender,
-  useYmGoals,
-  useYmLandings,
-  useYmMessengers,
-  useYmPages,
-  useYmReferrers,
-  useYmSocial,
-  useYmSources,
-  useYmUtm,
-  type YmBreakdownParams,
-} from '@/api/queries';
+import { useYmAge, useYmCities, useYmCountries, useYmDevices, useYmExits, useYmGender, useYmGoals, useYmLandings, useYmMessengers, useYmPages, useYmReferrers, useYmSocial, useYmSources, useYmUtm, type YmBreakdownParams } from '@/api/ym';
 import { ChartExpandedContext } from '@/components/ExpandableChart';
 import { RadialShare } from '@/components/RadialShare';
 import { ShareRows } from '@/components/ShareRows';
@@ -130,8 +114,14 @@ export function YmBreakdownRows({
   unitTotal = null,
   footnote = null,
   radial = false,
+  columns,
+  ranked = false,
 }: {
   rows: Array<{ key: string; label: string; value: number; note: string | null }>;
+  /** Имена колонок разреза: без них правое число остаётся без единицы измерения. */
+  columns?: { label: string; value: string };
+  /** Номер позиции — у рейтингов, где порядок сам является ответом (домены, страны, страницы). */
+  ranked?: boolean;
   /** Слово хвоста в родительном падеже множественного («визитов», «достижений», «просмотров»). */
   tailWord: string;
   /** Итог ПОЛНОГО отчёта — знаменатель долей. null → падаем на сумму показанных строк. */
@@ -171,6 +161,8 @@ export function YmBreakdownRows({
       expanded={expanded}
       cumulative={expanded}
       footnote={footnote}
+      columns={columns}
+      ranked={ranked}
     />
   );
 }
@@ -213,6 +205,8 @@ export function YmReportBody<T>({
   empty,
   build,
   skeletonRows = 6,
+  columns,
+  ranked = false,
 }: {
   state: YmQueryState<T>;
   errorTitle: string;
@@ -220,6 +214,10 @@ export function YmReportBody<T>({
   build: (data: T) => YmBuiltBreakdown | null;
   /** Высота скелета: доска Обзора показывает 4 строки, полностраничный отчёт — 6. */
   skeletonRows?: number;
+  /** Имена колонок и нумерация — свойство САМОГО разреза, а не ответа сервера, поэтому приходят
+      из дефиниции, а не из build-колбэка. */
+  columns?: { label: string; value: string };
+  ranked?: boolean;
 }) {
   if (state.isPending) return <TableSkeleton rows={skeletonRows} columns={2} className="py-2" />;
   if (state.isError) {
@@ -244,6 +242,8 @@ export function YmReportBody<T>({
       unitTotal={built.unitTotal ?? null}
       footnote={built.footnote ?? null}
       radial={built.radial ?? false}
+      columns={columns}
+      ranked={ranked}
     />
   );
 }
@@ -295,6 +295,10 @@ function defineYmBreakdown<T>(spec: {
   pageLimit?: number;
   empty: (data: T | undefined) => ReactNode;
   build: (data: T) => YmBuiltBreakdown | null;
+  /** Имена колонок списка: «Источник | Визиты». */
+  columns: { label: string; value: string };
+  /** Нумеровать позиции — у рейтингов, где порядок сам является ответом. */
+  ranked?: boolean;
 }): YmBreakdownDef {
   return {
     key: spec.key,
@@ -316,6 +320,8 @@ function defineYmBreakdown<T>(spec: {
           empty={spec.empty(state.data)}
           build={spec.build}
           skeletonRows={surface === 'page' ? 6 : 4}
+          columns={spec.columns}
+          ranked={spec.ranked}
         />
       );
     },
@@ -338,6 +344,8 @@ const demographicsEmpty = (data: { coverage_percent: number | null; contains_sen
 export const YM_BREAKDOWNS: YmBreakdownDef[] = [
   defineYmBreakdown({
     key: 'ym-sources',
+    columns: { label: 'Источник', value: 'Визиты' },
+    ranked: true,
     title: 'Источники трафика',
     descriptor: 'Откуда пришли визиты за выбранное окно',
     pageTitle: 'Все источники',
@@ -360,6 +368,8 @@ export const YM_BREAKDOWNS: YmBreakdownDef[] = [
   // Реферальные сайты: внешние домены (externalRefererDomain) — визиты + отказы по строке.
   defineYmBreakdown({
     key: 'ym-referrers',
+    columns: { label: 'Домен', value: 'Визиты' },
+    ranked: true,
     title: 'Реферальные сайты',
     descriptor: 'Внешние домены, приводящие трафик по ссылкам',
     pageTitle: 'Все домены',
@@ -388,6 +398,8 @@ export const YM_BREAKDOWNS: YmBreakdownDef[] = [
   // Соцсети: конкретные сети (lastsignSocialNetwork) — визиты + отказы по строке.
   defineYmBreakdown({
     key: 'ym-social',
+    columns: { label: 'Соцсеть', value: 'Визиты' },
+    ranked: true,
     title: 'Соцсети',
     descriptor: 'Конкретные соцсети, приводящие трафик',
     pageTitle: 'Все соцсети',
@@ -416,6 +428,8 @@ export const YM_BREAKDOWNS: YmBreakdownDef[] = [
   // Мессенджеры: отдельная размерность Метрики — Telegram не теряется внутри «Соцсетей».
   defineYmBreakdown({
     key: 'ym-messengers',
+    columns: { label: 'Мессенджер', value: 'Визиты' },
+    ranked: true,
     title: 'Мессенджеры',
     descriptor: 'Telegram и другие мессенджеры — отдельная размерность, не внутри «Соцсетей»',
     pageTitle: 'Все мессенджеры',
@@ -444,6 +458,7 @@ export const YM_BREAKDOWNS: YmBreakdownDef[] = [
   // Устройства: тип устройства (deviceCategory) — локализация по стабильному id, имя — фолбэк.
   defineYmBreakdown({
     key: 'ym-devices',
+    columns: { label: 'Устройство', value: 'Визиты' },
     title: 'Устройства',
     descriptor: 'Типы устройств посетителей за выбранное окно',
     pageTitle: 'Все устройства',
@@ -466,6 +481,8 @@ export const YM_BREAKDOWNS: YmBreakdownDef[] = [
   // Страны: география посетителей (regionCountry) — визиты + отказы по строке, имя lang=ru.
   defineYmBreakdown({
     key: 'ym-countries',
+    columns: { label: 'Страна', value: 'Визиты' },
+    ranked: true,
     title: 'Страны',
     descriptor: 'География посетителей по странам за выбранное окно',
     pageTitle: 'Все страны',
@@ -488,6 +505,8 @@ export const YM_BREAKDOWNS: YmBreakdownDef[] = [
   // Города: география посетителей (regionCity) — отдельная от страны размерность.
   defineYmBreakdown({
     key: 'ym-cities',
+    columns: { label: 'Город', value: 'Визиты' },
+    ranked: true,
     title: 'Города',
     descriptor: 'География посетителей по городам за выбранное окно',
     pageTitle: 'Все города',
@@ -509,6 +528,7 @@ export const YM_BREAKDOWNS: YmBreakdownDef[] = [
   // Возраст: демография посетителей (ageInterval) — локализация по стабильному id, имя — фолбэк.
   defineYmBreakdown({
     key: 'ym-age',
+    columns: { label: 'Возраст', value: 'Визиты' },
     title: 'Возраст',
     descriptor: 'Возрастные группы посетителей — оценка Метрики (Crypta)',
     pageTitle: 'Все возрастные группы',
@@ -532,6 +552,7 @@ export const YM_BREAKDOWNS: YmBreakdownDef[] = [
   // Пол: демография посетителей (gender) — локализация по стабильному id male/female.
   defineYmBreakdown({
     key: 'ym-gender',
+    columns: { label: 'Пол', value: 'Визиты' },
     title: 'Пол',
     descriptor: 'Пол посетителей — оценка Метрики (Crypta)',
     pageTitle: 'По полу',
@@ -555,6 +576,8 @@ export const YM_BREAKDOWNS: YmBreakdownDef[] = [
   // Цели: reaches за окно + конверсия отдельной метрикой (CR не выводится из reaches).
   defineYmBreakdown({
     key: 'ym-goals',
+    columns: { label: 'Цель', value: 'Достижения' },
+    ranked: true,
     title: 'Цели',
     descriptor: 'Достижения целей и конверсия за выбранное окно',
     pageTitle: 'Все цели',
@@ -585,6 +608,8 @@ export const YM_BREAKDOWNS: YmBreakdownDef[] = [
   // UTM: только размеченные визиты в строках; неразмеченные — честной сноской, не строкой.
   defineYmBreakdown({
     key: 'ym-utm',
+    columns: { label: 'Метка', value: 'Визиты' },
+    ranked: true,
     title: 'UTM-метки',
     descriptor: 'Размеченные визиты по utm_source за выбранное окно',
     pageTitle: 'Все UTM-источники',
@@ -618,6 +643,8 @@ export const YM_BREAKDOWNS: YmBreakdownDef[] = [
   // Топ-страницы: hits-отчёт (просмотры страниц ≠ визиты — другая единица, чем сверху).
   defineYmBreakdown({
     key: 'ym-pages',
+    columns: { label: 'Страница', value: 'Просмотры' },
+    ranked: true,
     title: 'Топ-страницы',
     descriptor: 'Самые просматриваемые страницы за выбранное окно',
     pageTitle: 'Все страницы',
@@ -639,6 +666,8 @@ export const YM_BREAKDOWNS: YmBreakdownDef[] = [
   // Страницы входа (startURLPath): визиты + отказы, опц. конверсия выбранной цели.
   defineYmBreakdown({
     key: 'ym-landings',
+    columns: { label: 'Страница входа', value: 'Визиты' },
+    ranked: true,
     title: 'Страницы входа',
     descriptor: 'Где визиты начинаются за выбранное окно',
     pageTitle: 'Все страницы входа',
@@ -668,6 +697,8 @@ export const YM_BREAKDOWNS: YmBreakdownDef[] = [
   // Страницы выхода (endURLPath): зеркало входов — где визиты заканчиваются, + отказы по строке.
   defineYmBreakdown({
     key: 'ym-exits',
+    columns: { label: 'Страница выхода', value: 'Визиты' },
+    ranked: true,
     title: 'Страницы выхода',
     descriptor: 'Где визиты заканчиваются за выбранное окно',
     pageTitle: 'Все страницы выхода',

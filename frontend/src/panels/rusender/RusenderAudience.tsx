@@ -5,13 +5,11 @@ import { ChartBand } from '@/components/ChartBand';
 import { BarChart } from '@/components/BarChart';
 import { Sparkline } from '@/components/Sparkline';
 import { EmptyState } from '@/components/EmptyState';
-import { ErrorState } from '@/components/ErrorState';
+import { RusenderErrorState } from '@/panels/rusender/RusenderErrorState';
 import { ChartSkeleton } from '@/components/ui/dataSkeleton';
 import { useRusenderSummary } from '@/api/rusender';
-import { useGatedSurfaces } from '@/components/layout/nav';
 import { useSelectedChannel } from '@/lib/channel-context';
-import { lttbDownsample } from '@/lib/downsample';
-import { CHART_MAX_POINTS } from '@/lib/msSeries';
+import { CHART_MAX_POINTS, lttbDownsample } from '@/lib/downsample';
 import { fmt, timeAxisFromDayKeys } from '@/lib/format';
 import { formatByRole } from '@/lib/metricNumber';
 import { useMsPagePeriod } from '@/lib/msPeriod';
@@ -29,9 +27,8 @@ import { WidgetGrid } from '@/components/widgets/WidgetGrid';
  */
 export function RusenderAudience() {
   const { channelId } = useSelectedChannel();
-  const { rusenderSurfaces } = useGatedSurfaces();
   const period = useMsPagePeriod();
-  const summary = useRusenderSummary(channelId, period, rusenderSurfaces);
+  const summary = useRusenderSummary(channelId, period);
 
   const series = summary.data?.series ?? [];
   const model = useMemo(() => {
@@ -44,17 +41,7 @@ export function RusenderAudience() {
     };
   }, [series]);
 
-  if (!rusenderSurfaces) {
-    return (
-      <EmptyState
-        title="Раздел ещё не включён"
-        reason="База появится, когда числа Rusender сверены с живыми данными. Архив тем временем копится."
-        action={{ to: '/rusender', label: 'К обзору' }}
-      />
-    );
-  }
-
-  if (summary.isError) return <ErrorState onRetry={() => void summary.refetch()} />;
+  if (summary.isError) return <RusenderErrorState query={summary} />;
 
   const contacts = summary.data?.contacts;
   // Снимков может не быть вовсе: джоб ходит раз в сутки, а история короче суток — это норма

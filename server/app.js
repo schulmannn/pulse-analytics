@@ -20,7 +20,7 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const { requestContext } = require('./lib/observability');
-const { setAppHeaders } = require('./lib/securityHeaders');
+const { setApiHeaders, setAppHeaders } = require('./lib/securityHeaders');
 const { assetCacheControl } = require('./lib/staticAssets');
 const { registerCollectorRoutes } = require('./routes/collector');
 const { registerAuthRoutes } = require('./routes/auth');
@@ -59,7 +59,7 @@ function createApp(deps) {
     appBase, sha256, newToken, VERIFY_TTL, RESET_TTL, INVITE_TTL,
     sendEmail, sendEmailDetailed, emailConfigured, emailShell, emailBtn, escHtml,
     igFetch, refreshIgIfNeeded, igConfigured, igCrypto, igMock, msCrypto, msFetch, msBackfill,
-    ymCrypto, ymFetch, rusenderCrypto, rusenderFetch, rusenderSurfaces, cdekImport, nearestOf,
+    ymCrypto, ymFetch, rusenderCrypto, rusenderFetch, cdekImport, nearestOf,
     cacheGet, cacheSet, cache, IG_ACCOUNT, IG_TOKEN, IG_GRAPH, AUTH_SECRET,
     tgCrypto, collectQrChannelsNow, collectManagedPostStatsNow, TG_TOKEN, TG_CHANNEL,
     tgBot, tgBotWebhookSecret, runMentionNotifyTest,
@@ -116,6 +116,10 @@ function createApp(deps) {
     index: false,
   }));
 
+  // Security-заголовки API ставятся ДО лимитера: 429 — тоже ответ API, и он тоже не должен
+  // быть подвержен MIME-sniffing. Раньше их не было ни на одном реальном /api-ответе (I-1).
+  app.use('/api/', (req, res, next) => { setApiHeaders(req, res); next(); });
+
   app.use('/api/', limiter);
 
   // Auth/account entrypoints are isolated in their own route module; session
@@ -149,7 +153,6 @@ function createApp(deps) {
     // /api/auth/me отдаёт ai.enabled — фронт гейтит AI-поверхности одним bootstrap-запросом.
     aiEnabledFor: (user) => aiChatService.enabledFor(user),
     // Тем же ответом едет фичефлаг витрин Rusender (см. комментарий в routes/auth.js).
-    rusenderSurfaces,
     setSessionCookie,
     clearSessionCookie,
     // Анти-enumeration хвосты (register/forgot/resend) регистрируются здесь — shutdown их дожидается.
@@ -244,7 +247,7 @@ function createApp(deps) {
   // API-ключу + status/disconnect): витрины приезжают следующим шагом, когда форма живых
   // ответов Rusender подтверждена ключом владельца, а не одной лишь OpenAPI-спекой.
   registerRusenderRoutes({
-    app, requireAuth, db, audit, rusenderCrypto, rusenderFetch, surfacesEnabled: rusenderSurfaces, log,
+    app, requireAuth, db, audit, rusenderCrypto, rusenderFetch, log,
   });
 
   registerChannelsRoutes({ app, db, requireAuth, audit, getDbReady });
@@ -292,20 +295,19 @@ function createApp(deps) {
   //  ОБЩИЕ ROUTES
   // ════════════════════════════════════════════════════════════════
 
+  // Liveness-проба. Отвечает анониму, поэтому несёт только то, что проба обязана знать: жив ли
+  // процесс и поднялась ли схема. Прежний блок `env` перечислял, какие интеграции настроены
+  // (ig/tg/auth), — это карта поверхности для того, кто ещё не вошёл, и ни один потребитель её
+  // не читал: ни фронт, ни healthcheck (I-1, аудит #554). Заодно ушёл `cache` — размер кэша
+  // говорит о нагрузке, а пробе не нужен. Конфигурация видна в boot-баннере, то есть в логах.
   app.get('/api/health', (req, res) => {
     res.json({
       status: 'ok',
       service: 'pulse-analytics-web',
       uptime: Math.round(process.uptime()),
-      cache:  cache.size,
       sessions: 'signed+versioned',
       database_ready: getDbReady(),
       request_id: req.requestId,
-      env: {
-        ig:  !!IG_TOKEN && !!IG_ACCOUNT,
-        tg:  !!TG_TOKEN && !!TG_CHANNEL,
-        auth: !!config.auth.sessionSecret
-      }
     });
   });
 

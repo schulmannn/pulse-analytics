@@ -8,6 +8,19 @@ const LOCK_ID = 18870625;
 
 async function runMigrations(pool, logger = console) {
   const client = await pool.connect();
+  // Как в db/transaction.js (DB-3): пул снимает свой обработчик 'error' на время выдачи клиента —
+  // обрыв соединения посреди миграции без нашего слушателя = uncaughtException вместо штатного
+  // «migration failed». Битый клиент (и клиент с неудавшимся ROLLBACK/unlock — состояние
+  // соединения неизвестно) отдаём через release(err), чтобы пул его уничтожил. В лог — только message.
+  // Контракт logger'а — только .log (см. ниже); .error берём, если есть (console).
+  const logError = typeof logger.error === 'function' ? logger.error.bind(logger) : logger.log.bind(logger);
+  let broken = null;
+  const onClientError = (error) => {
+    if (broken) return;
+    broken = error || new Error('db client error');
+    logError(`[db] migration client error: ${error?.message}`);
+  };
+  client.on('error', onClientError);
   try {
     await client.query('SELECT pg_advisory_lock($1)', [LOCK_ID]);
     await client.query(`
@@ -49,15 +62,22 @@ async function runMigrations(pool, logger = console) {
         await client.query('COMMIT');
         logger.log(`[db] migration applied: ${file}`);
       } catch (error) {
-        await client.query('ROLLBACK');
+        await client.query('ROLLBACK').catch((rollbackError) => {
+          if (!broken) broken = rollbackError || new Error('ROLLBACK failed');
+        });
         error.message = `migration ${file} failed: ${error.message}`;
         throw error;
       }
     }
     return files;
   } finally {
-    try { await client.query('SELECT pg_advisory_unlock($1)', [LOCK_ID]); } catch (_) {}
-    client.release();
+    try {
+      await client.query('SELECT pg_advisory_unlock($1)', [LOCK_ID]);
+    } catch (unlockError) {
+      if (!broken) broken = unlockError || new Error('advisory unlock failed');
+    }
+    client.removeListener('error', onClientError);
+    client.release(broken || undefined);
   }
 }
 

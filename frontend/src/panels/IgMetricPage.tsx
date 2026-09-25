@@ -13,18 +13,21 @@ import {
   igFormatEngagementItems,
   igReelsWatchTime,
   igStoryNavItems,
+  igDemographicsCoverage,
+  IG_DEMOGRAPHICS_MIN_FOLLOWERS,
 } from '@/lib/igMetrics';
 import type { WindowPair, IgBreakdownItem } from '@/lib/igMetrics';
+import { CHART_MAX_POINTS, lttbDownsample } from '@/lib/downsample';
 import { pctDelta } from '@/lib/delta';
 import { KpiValue } from '@/components/chartWidget/KpiValue';
-import { fmt } from '@/lib/format';
+import { fmt, timeAxisFromDayKeys } from '@/lib/format';
 import { formatByRole } from '@/lib/metricNumber';
 import { windowIgSeries, KpiCard } from '@/components/instagram/shared';
 import { BestTimeHeatmap } from '@/components/instagram/audience';
 import { ChartSection } from '@/components/ChartWidget';
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
-import { Breakdown } from '@/components/Breakdown';
+import { Breakdown, type BreakdownColumns } from '@/components/Breakdown';
 import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
 import { DeltaPill } from '@/components/DeltaPill';
 import { SegmentedControl } from '@/components/SegmentedControl';
@@ -39,7 +42,8 @@ import { useExplorerChartHeight } from '@/lib/useExplorerChartHeight';
 import type { ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 import { useMetricRailHidden } from '@/lib/metricRail';
-import { ComparisonDelta, ComparisonDeltaRow, MetricDescriptor, WindowBarShell, RailSection, RailWindowTotal, MetricPageHeader} from '@/components/metric/shared';
+import { ComparisonDelta, MetricDescriptor, WindowBarShell, RailComparison, RailSection, RailWindowTotal, MetricPageHeader} from '@/components/metric/shared';
+import { dayRangeOf, windowRangeLabel } from '@/lib/metricSeries';
 
 /**
  * Instagram metric pages — the drill target the unified chart contract points IG cards at
@@ -291,19 +295,40 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
   // may have gaps). Either is offered only when the archive fully covers it: a partial baseline
   // would understate the past and fake growth.
   let ghostVals: number[] = [];
+  // Границы базы — РЕАЛЬНЫЕ дни архива, а не арифметика от окна: у IG-серии бывают дыры, и
+  // подписать «29 июл – 4 авг», когда взяты другие дни, значило бы соврать точнее прежнего молчания.
+  let ghostDays: { from: string; to: string } | null = null;
   if (cmp === 'prev' && days > 0 && seriesFull.length >= 2 * n) {
-    ghostVals = seriesFull.slice(-(2 * n), -n).map((p) => p.value);
+    const base = seriesFull.slice(-(2 * n), -n);
+    ghostVals = base.map((p) => p.value);
+    ghostDays = dayRangeOf(base.map((p) => p.day));
   } else if (cmp === 'year' && days > 0) {
     const byDay = new Map(seriesFull.map((p) => [p.day, p.value]));
     const shifted = winPoints.map((p) => byDay.get(shiftYearBack(p.day)));
-    if (shifted.every((v): v is number => v != null)) ghostVals = shifted;
+    if (shifted.every((v): v is number => v != null)) {
+      ghostVals = shifted;
+      ghostDays = dayRangeOf(winPoints.map((p) => shiftYearBack(p.day)));
+    }
   }
   const ghostOk = cmp !== 'off' && days > 0 && n > 1 && ghostVals.length === n;
+  const winDays = dayRangeOf(winPoints.map((p) => p.day));
+
+  // Длинный архив («Всё») даунсэмплим до CHART_MAX_POINTS перед рендером (канон CLAUDE.md: серии
+  // длиннее порога — суб-пиксельная мазня и дорогие кадры морфа; ig-history приходит за 400 дней).
+  // Окна 7/30/90 короче порога и рисуются как есть, поэтому ghost выравнивается с ними по индексу —
+  // а на «Всё» ghost и не строится (он требует days > 0). Ровно так же живёт YmMetricPage.
+  // Числа шапки и stats считаются НИЖЕ от полного окна: кап меняет только плотность точек графика.
+  const rendered = days === 0 ? lttbDownsample(winPoints, CHART_MAX_POINTS, (pt) => pt.value) : winPoints;
+  const values = rendered.map((pt) => pt.value);
+  const labels = rendered.map((pt) => fmt.day(pt.day));
+  const axisLabels = timeAxisFromDayKeys(rendered.map((pt) => pt.day));
+  const titles = rendered.map((pt) => `${fmt.day(pt.day)}: ${fmt.num(pt.value)} ${daily.genitive}`);
+  const m = values.length;
   const cmpLabel = cmp === 'year' ? 'Год назад' : 'Пред. период';
 
   // Pinned point: winPoints carries the calendar day per index, so the day (and its posts —
   // IG posts have timestamps) resolves exactly, at any window.
-  const pinnedValid = pinned != null && pinned >= 0 && pinned < n ? pinned : null;
+  const pinnedValid = pinned != null && pinned >= 0 && pinned < m ? pinned : null;
   const pinnedDay = pinnedValid != null ? winPoints[pinnedValid]?.day : null;
   const pinnedPosts = pinnedDay
     ? ig.posts
@@ -311,13 +336,20 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
         .sort((a, b) => Number(b.reach ?? b.views ?? 0) - Number(a.reach ?? a.views ?? 0))
         .slice(0, 5)
     : [];
-  const pinnedDiff = pinnedValid != null && pinnedValid > 0 ? win.values[pinnedValid] - win.values[pinnedValid - 1] : null;
+  const pinnedDiff = pinnedValid != null && pinnedValid > 0 ? values[pinnedValid] - values[pinnedValid - 1] : null;
 
   // ── «Подписчики» (только ig-follows): абсолютный уровень базы, как ТГ ────────────────────
   // Реальные дневные якоря followers_total + реконструкция от живого значения (см.
   // followerLevelSeries). Гейт ≥2 точек: без уровня страница остаётся прежней (сумма подписок).
   const levelFull = metricKey === 'ig-follows' ? ig.series.followerLevel : [];
   const lvl = levelFull.length > 1 ? windowIgSeries(levelFull, days, 'подписчиков') : null;
+  // Уровень базы рисуется линией и приходит тем же 400-дневным архивом — тот же кап.
+  const lvlPoints = lvl ? levelFull.slice(-lvl.values.length) : [];
+  const lvlShown = days === 0 ? lttbDownsample(lvlPoints, CHART_MAX_POINTS, (pt) => pt.value) : lvlPoints;
+  const lvlValues = lvlShown.map((pt) => pt.value);
+  const lvlLabels = lvlShown.map((pt) => fmt.day(pt.day));
+  const lvlAxisLabels = timeAxisFromDayKeys(lvlShown.map((pt) => pt.day));
+  const lvlTitles = lvlShown.map((pt) => `${fmt.day(pt.day)}: ${fmt.num(pt.value)} подписчиков`);
   const lvlNow = lvl && lvl.values.length > 1 ? lvl.values[lvl.values.length - 1]! : null;
   const lvlStart = lvl && lvl.values.length > 1 ? lvl.values[0]! : null;
   const lvlDiff = lvlNow != null && lvlStart != null ? lvlNow - lvlStart : null;
@@ -395,16 +427,16 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
               <ChartSection id="metric-ig-followers-level" title="Подписчики" defaultSize="full" noExpand>
                 <ChartExpandedContext.Provider value={true}>
                   <LineChart
-                    values={lvl.values}
-                    labels={lvl.labels}
-                    axisLabels={lvl.axisLabels}
-                    titles={lvl.titles}
+                    values={lvlValues}
+                    labels={lvlLabels}
+                    axisLabels={lvlAxisLabels}
+                    titles={lvlTitles}
                     height={chartH}
                     markExtremes
                     showPoints
                     legendToggle={false}
                     onPointClick={(i) => setPinnedLvl((p) => (p === i ? null : i))}
-                    pinnedIndex={pinnedLvl != null && pinnedLvl < lvl.values.length ? pinnedLvl : null}
+                    pinnedIndex={pinnedLvl != null && pinnedLvl < lvlValues.length ? pinnedLvl : null}
                   />
                 </ChartExpandedContext.Provider>
               </ChartSection>
@@ -461,10 +493,10 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
               <ChartExpandedContext.Provider value={true}>
                 {kind === 'line' ? (
                   <LineChart
-                    values={win.values}
-                    labels={win.labels}
-                    axisLabels={win.axisLabels}
-                    titles={win.titles}
+                    values={values}
+                    labels={labels}
+                    axisLabels={axisLabels}
+                    titles={titles}
                     height={chartH}
                     markExtremes
                     markAnomalies
@@ -478,10 +510,10 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
                   />
                 ) : (
                   <BarChart
-                    values={win.values}
-                    labels={win.labels}
-                    axisLabels={win.axisLabels}
-                    titles={win.titles}
+                    values={values}
+                    labels={labels}
+                    axisLabels={axisLabels}
+                    titles={titles}
                     height={chartH}
                     ghost={ghostOk ? ghostVals : undefined}
                     ghostLabel={cmpLabel}
@@ -519,9 +551,9 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
 
           {metricKey !== 'ig-follows' && pinnedValid != null && pinnedDay != null && (
             <PinnedDayPanel
-              dateLabel={win.labels[pinnedValid] ?? pinnedDay}
+              dateLabel={labels[pinnedValid] ?? pinnedDay}
               rows={[
-                { label: 'Значение', value: fmt.num(win.values[pinnedValid]) },
+                { label: 'Значение', value: fmt.num(values[pinnedValid]) },
                 ...(pinnedDiff != null
                   ? [
                       {
@@ -598,14 +630,19 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
                   <p className="text-xs text-muted-foreground">Выберите базу — пунктир прошлого окна ляжет на график.</p>
                 ) : days === 0 ? (
                   <p className="text-xs text-muted-foreground">Для окна «Всё» прошлого периода не существует.</p>
-                ) : ghostOk ? (
-                  <div className="space-y-2 text-sm">
-                    <div className="flex items-baseline justify-between gap-3">
-                      <span className="text-xs text-muted-foreground">{cmpLabel}</span>
-                      <span className="tabular-nums">{sumPrev != null ? fmt.kpi(sumPrev) : '—'}</span>
-                    </div>
-                    {compareDelta != null && <ComparisonDeltaRow delta={compareDelta} />}
-                  </div>
+                ) : ghostOk && winDays && ghostDays ? (
+                  /* Та же легенда, что над полотном: маркер + даты окна + итог. Без дат «Пред.
+                     период» не отвечал, какие именно дни архива легли в базу. */
+                  <RailComparison
+                    marker={kind === 'bar' ? 'bar' : 'line'}
+                    current={{ dates: windowRangeLabel(winDays), value: fmt.kpi(sumCur) }}
+                    comparison={{
+                      label: cmpLabel,
+                      dates: windowRangeLabel(ghostDays),
+                      value: sumPrev != null ? fmt.kpi(sumPrev) : '—',
+                    }}
+                    delta={compareDelta}
+                  />
                 ) : cmp === 'year' ? (
                   <p className="text-xs text-muted-foreground">Архив пока не достаёт до прошлого года — дневная история копится в ig_daily, сравнение включится само.</p>
                 ) : (
@@ -952,6 +989,10 @@ interface IgBreakdownPageDef {
   errorTitle: string;
   empty: string;
   footer?: (ig: IgData, items: IgBreakdownItem[]) => ReactNode;
+  /** Имена колонок: без них правое число остаётся без единицы измерения. */
+  columns: BreakdownColumns;
+  /** Номер позиции — только там, где порядок сам по себе является ответом (гео). */
+  ranked?: boolean;
   /** Content views may be campaign-scoped through the canonical `?campaign=` URL parameter. */
   contentView?: 'formats';
 }
@@ -971,13 +1012,17 @@ const IG_BREAKDOWN_DEFS: Record<string, IgBreakdownPageDef> = {
     query: (ig) => ig.queries.breakdowns,
     derive: (ig) => igAgeItems(ig.breakdowns),
     errorTitle: 'Не удалось загрузить демографию',
-    empty: 'Возрастной демографии для этого аккаунта нет (нужно 100+ подписчиков).',
+    empty: `Возрастной демографии для этого аккаунта нет (нужно ${IG_DEMOGRAPHICS_MIN_FOLLOWERS}+ подписчиков).`,
+    columns: { label: 'Возраст', value: 'Подписчики' },
+    // Порог «когда молчать» и сама дробь — общие с карточкой «Возраст» (igDemographicsCoverage):
+    // страница и карточка обязаны молчать и говорить на одних и тех же числах.
     footer: (ig, items) => {
-      const covered = items.reduce((acc, a) => acc + a.value, 0);
-      const coverage = ig.followers > 0 && covered > 0 ? covered / ig.followers : 1;
-      if (coverage >= 0.98) return null;
+      const coverage = igDemographicsCoverage(items, ig.followers);
+      if (coverage == null) return null;
       return (
-        <p className="mt-3 text-2xs text-muted-foreground/70">
+        // Полный muted (не /70) — по той же причине, что у примечания разбивки: приглушённый
+        // токен даёт 2.96 на светлой карточке и 3.59 на тёмной, обе ниже AA 4.5.
+        <p className="mt-3 text-2xs text-muted-foreground">
           Охвачено ≈{Math.round(coverage * 100)}% аудитории — Instagram показывает только топ-сегменты.
         </p>
       );
@@ -994,7 +1039,8 @@ const IG_BREAKDOWN_DEFS: Record<string, IgBreakdownPageDef> = {
     query: (ig) => ig.queries.breakdowns,
     derive: (ig) => igGenderItems(ig.breakdowns),
     errorTitle: 'Не удалось загрузить демографию',
-    empty: 'Демографии по полу для этого аккаунта нет (нужно 100+ подписчиков).',
+    empty: `Демографии по полу для этого аккаунта нет (нужно ${IG_DEMOGRAPHICS_MIN_FOLLOWERS}+ подписчиков).`,
+    columns: { label: 'Пол', value: 'Подписчики' },
   },
   'ig-countries': {
     cardId: 'ig-page-countries',
@@ -1007,7 +1053,9 @@ const IG_BREAKDOWN_DEFS: Record<string, IgBreakdownPageDef> = {
     query: (ig) => ig.queries.breakdowns,
     derive: (ig) => igCountryItems(ig.breakdowns),
     errorTitle: 'Не удалось загрузить географию',
-    empty: 'Данных по странам для этого аккаунта нет (нужно 100+ подписчиков).',
+    empty: `Данных по странам для этого аккаунта нет (нужно ${IG_DEMOGRAPHICS_MIN_FOLLOWERS}+ подписчиков).`,
+    columns: { label: 'Страна', value: 'Подписчики' },
+    ranked: true,
   },
   'ig-cities': {
     cardId: 'ig-page-cities',
@@ -1020,7 +1068,9 @@ const IG_BREAKDOWN_DEFS: Record<string, IgBreakdownPageDef> = {
     query: (ig) => ig.queries.breakdowns,
     derive: (ig) => igCityItems(ig.breakdowns),
     errorTitle: 'Не удалось загрузить географию',
-    empty: 'Данных по городам для этого аккаунта нет (нужно 100+ подписчиков).',
+    empty: `Данных по городам для этого аккаунта нет (нужно ${IG_DEMOGRAPHICS_MIN_FOLLOWERS}+ подписчиков).`,
+    columns: { label: 'Город', value: 'Подписчики' },
+    ranked: true,
   },
   'ig-format-engagement': {
     cardId: 'ig-page-format-engagement',
@@ -1035,6 +1085,7 @@ const IG_BREAKDOWN_DEFS: Record<string, IgBreakdownPageDef> = {
     derive: (ig) => igFormatEngagementItems(ig.formatItems),
     errorTitle: 'Не удалось загрузить разрез по форматам',
     empty: 'Нет данных о форматах за период.',
+    columns: { label: 'Формат', value: 'Взаимодействия' },
     contentView: 'formats',
   },
   'ig-story-navigation': {
@@ -1050,6 +1101,7 @@ const IG_BREAKDOWN_DEFS: Record<string, IgBreakdownPageDef> = {
     derive: (ig) => igStoryNavItems(ig.stories),
     errorTitle: 'Не удалось загрузить истории',
     empty: 'Нет данных о навигации по историям.',
+    columns: { label: 'Действие', value: 'Переходы' },
   },
 };
 
@@ -1124,7 +1176,7 @@ function IgBreakdownPage({
           <EmptyState compact size="chart" title={def.empty} />
         ) : (
           <>
-            <Breakdown items={items} />
+            <Breakdown items={items} columns={def.columns} ranked={def.ranked} />
             {def.footer?.(ig, items)}
           </>
         )}

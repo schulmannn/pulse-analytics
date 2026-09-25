@@ -1,8 +1,14 @@
 /**
  * Pure daily/weekly/monthly bucketing helpers for the metric page — extracted so the
  * comparison-window invariant is unit-testable (a silent off-by-one there once dropped the
- * on-chart comparison entirely). No React / no fmt: keys only, formatting stays in the panel.
+ * on-chart comparison entirely). No React: keys only, rendering stays in the panel.
+ *
+ * `fmt` появился здесь ради одного хелпера — `windowRangeLabel`. ГРАНИЦЫ ОКНА И ПОДПИСЬ ЭТИХ
+ * ГРАНИЦ ОБЯЗАНЫ ЖИТЬ РЯДОМ: подпись читает ровно тот интервал, который вернул comparisonWindow,
+ * и разъехавшись они солгут читателю (а не упадут). Модуль от этого не тяжелеет — lib/format уже
+ * лежит в каждом чанке.
  */
+import { fmt } from '@/lib/format';
 
 export const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -65,6 +71,56 @@ export function comparisonWindow(
   return mode === 'prev'
     ? { from: winFrom - spanMs - DAY_MS, to: winFrom - DAY_MS }
     : { from: winFrom - 365 * DAY_MS, to: winTo - 365 * DAY_MS };
+}
+
+/** Границы серии по её РЕАЛЬНЫМ крайним дням (архивы IG/Метрики/упоминаний знают свои дни, а не
+    арифметическое окно). `null` на пустой серии — подписывать нечего, и выдумывать границы нельзя. */
+export function dayRangeOf(days: string[]): { from: string; to: string } | null {
+  const from = days[0];
+  const to = days[days.length - 1];
+  return from && to ? { from, to } : null;
+}
+
+/** Календарный год границы окна. Дневной ключ `YYYY-MM-DD` — это КАЛЕНДАРНАЯ дата в любой зоне
+    (тот же разбор, что у `fmt.day`), а не момент; момент читается по локальной зоне читателя. */
+function windowYear(v: number | string): number | null {
+  if (typeof v === 'string') {
+    const key = /^(\d{4})-\d{2}-\d{2}$/.exec(v);
+    if (key) return Number(key[1]);
+  }
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? null : d.getFullYear();
+}
+
+/**
+ * Подпись диапазона окна для легенды сравнения: «29 мая – 4 июн.», «22 дек. 2025 г. – 4 янв. 2026 г.».
+ *
+ * ГОД ПЕЧАТАЕТСЯ ТОЛЬКО ТАМ, ГДЕ БЕЗ НЕГО ПОДПИСЬ ВРЁТ: окно ушло в другой календарный год (база
+ * «Год назад») или само пересекает Новый год. Иначе «5 июн.» текущего окна и «5 июн.» прошлогоднего
+ * нечем отличить — а год на каждой границе в рейле шириной 300px это шум, который вытесняет само
+ * число. Ровно та же развилка уже описана у `fmt.dayYear`.
+ *
+ * Границы принимаются и моментом (winFrom/winTo метрик-страницы), и дневным ключом `YYYY-MM-DD`
+ * (архивные серии IG/Метрики знают СВОИ дни, а не арифметическое окно, и на дырах архива честнее
+ * подписать реальные крайние дни).
+ *
+ * `now` — параметром, а не Date.now() внутри: иначе тест на «текущий год» протухал бы 1 января.
+ */
+export function windowRangeLabel(
+  win: { from: number | string; to: number | string },
+  now: number = Date.now(),
+): string {
+  const from = fmt.day(win.from);
+  const to = fmt.day(win.to);
+  if (!from || !to) return '';
+  const fromYear = windowYear(win.from);
+  const toYear = windowYear(win.to);
+  const thisYear = new Date(now).getFullYear();
+  const straddles = fromYear != null && toYear != null && fromYear !== toYear;
+  const needYear = straddles || fromYear !== thisYear || toYear !== thisYear;
+  // Год на ОБЕИХ границах — только когда окно их пересекает; ушедшему целиком в прошлое хватает
+  // года на конце («5 – 11 июн. 2025 г.»), два одинаковых года подряд читаются как заикание.
+  return `${straddles ? fmt.dayYear(win.from) : from} – ${needYear ? fmt.dayYear(win.to) : to}`;
 }
 
 /** Fit a comparison (previous-period) series to the active series length: on odd windows the

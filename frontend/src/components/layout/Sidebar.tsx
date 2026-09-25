@@ -154,7 +154,10 @@ function SidebarToggle({ rail, onToggle }: { rail: boolean; onToggle: () => void
         id={tipId}
         role="tooltip"
         data-sidebar-tooltip
-        className="sidebar-tooltip rounded-lg border bg-popover px-2.5 py-1.5 text-xs text-popover-foreground"
+        // rounded-xl, а не -lg: радиус тултипов один на всё приложение (аудит #554: три разных
+        // радиуса в одном классе поверхностей). Значение взято от ChartTooltip — решение владельца
+        // 2026-08-14 «острые углы → закруглённое всё».
+        className="sidebar-tooltip rounded-xl border bg-popover px-2.5 py-1.5 text-xs text-popover-foreground"
       >
         <span className="whitespace-nowrap">{label}</span>
         <KbdGroup>

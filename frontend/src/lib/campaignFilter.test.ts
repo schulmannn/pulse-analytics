@@ -80,8 +80,8 @@ describe('campaign zod-схемы (пример реального ответа 
           start_date: '2026-06-10',
           end_date: null,
           created_by: 11,
-          created_at: '2026-06-10T10:00:00+00',
-          updated_at: '2026-06-12T10:00:00+00',
+          created_at: '2026-06-10T10:00:00+00:00',
+          updated_at: '2026-06-12T10:00:00+00:00',
           my_role: 'owner',
           post_count: '4',
         },
@@ -95,7 +95,7 @@ describe('campaign zod-схемы (пример реального ответа 
     const parsed = CampaignPostsResponseSchema.parse({
       posts: [
         {
-          network: 'tg', channel_id: 7, post_ref: '101', published_at: '2026-06-10T10:00:00+00',
+          network: 'tg', channel_id: 7, post_ref: '101', published_at: '2026-06-10T10:00:00+00:00',
           media_type: 'photo', caption: 'x', added_at: null, channel_title: 'TG A',
           channel_username: 'tga', accessible: true, tg_views: '1000', tg_reactions: 10,
         },

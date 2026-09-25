@@ -372,6 +372,26 @@ function demoLocalDay(daysAgo: number): string {
   const pad = (x: number) => String(x).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
+
+/**
+ * Здоровье управляемой QR-сессии для демо. Демо-канал объявлен `source: 'central'`, поэтому
+ * Overview и /connect безусловно спрашивают GET /api/tg/qr/status — а он стоит за requireAuth, и у
+ * публичного демо сессии нет: запрос уходил в сеть и возвращал 401 в консоль (аудит #554, D18;
+ * причина там названа неверно — /api/prefs давно закрыт своим isDemoMode-гейтом). Фикстура
+ * отвечает ДО сети и повторяет прежний экран один в один: `central_owner: false` означает, что
+ * зритель демо не владелец центрального канала, значит `connection_state` игнорируется и баннер
+ * здоровья по-прежнему решается только свежестью архива.
+ */
+const TG_QR_STATUS = {
+  server_ready: true,
+  connected: true,
+  username: 'demo_channel',
+  connected_at: iso(30),
+  connection_state: 'connected',
+  last_success_at: iso(0),
+  central_owner: false,
+};
+
 const ANNOTATIONS = () => ({
   annotations: [
     { id: 1, day: demoLocalDay(12), label: 'Реклама у блогера' },
@@ -418,6 +438,7 @@ export function demoFixture(path: string): unknown | undefined {
   if (p === '/api/history/channel') return HISTORY_RESP;
   if (p === '/api/history/mentions' || p === '/api/tg/mtproto/mentions') return MENTIONS;
   if (p === '/api/tg/mention-settings') return MENTION_SETTINGS;
+  if (p === '/api/tg/qr/status') return TG_QR_STATUS;
   if (p === '/api/tg/mtproto/stats') return TG_STATS;
   if (p === '/api/tg/mtproto/graphs') return TG_GRAPHS;
   if (p === '/api/tg/mtproto/velocity') return TG_VELOCITY;

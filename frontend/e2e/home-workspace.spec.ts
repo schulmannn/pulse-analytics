@@ -377,9 +377,26 @@ test.describe('mobile /home invariant (430)', () => {
     // The desktop-only header «Добавить виджет» is hidden < md — only the empty-card primary remains.
     await expect(page.getByRole('button', { name: 'Добавить виджет', exact: true })).toHaveCount(1);
 
-    // The empty state stays the framed card (its verbatim mobile branch).
-    const card = page.locator('.rounded-xl.border.bg-card').filter({ hasText: 'На Главной пока пусто' });
+    // Пустое состояние остаётся карточкой в рамке (своя мобильная ветка).
+    //
+    // Проверка идёт по РИСОВАННОЙ рамке, а не по классу радиуса. Прежний селектор
+    // `.rounded-xl.border.bg-card` протух молча: карточки переехали на `rounded-2xl` вместе с
+    // каноном скруглений, а тест никогда не выполнялся — гейт mobile-430 гонял два файла из
+    // восьмидесяти шести (аудит #554, проход №2, N8). Радиус — деталь оформления и меняется
+    // решением владельца; «в рамке ли карточка» — контракт, за который тест и отвечает.
+    const card = page.locator('div').filter({ hasText: 'На Главной пока пусто' }).last();
     await expect(card).toBeVisible();
+    const framed = await card.evaluate((el) => {
+      const cs = getComputedStyle(el);
+      return {
+        border: Number.parseFloat(cs.borderTopWidth) > 0,
+        radius: Number.parseFloat(cs.borderTopLeftRadius),
+        filled: cs.backgroundColor !== 'rgba(0, 0, 0, 0)',
+      };
+    });
+    expect(framed.border, 'у пустой карточки есть рамка').toBe(true);
+    expect(framed.radius, 'и скругление').toBeGreaterThan(0);
+    expect(framed.filled, 'и своя подложка').toBe(true);
 
     // The edit chip is still the compact icon control (narrower than its reserved slot).
     const slot = page.locator('.edit-toggle-slot');

@@ -1,6 +1,6 @@
 import { useContext, useState } from 'react';
-import type { MsAssortmentComparison, MsMetricComparison, MsProductSort, MsTopSummary } from '@/api/queries';
-import { useMsAssortmentComparison, useMsTopProducts } from '@/api/queries';
+import type { MsAssortmentComparison, MsMetricComparison, MsProductSort, MsTopSummary } from '@/api/ms';
+import { useMsAssortmentComparison, useMsTopProducts } from '@/api/ms';
 import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
 import { useMediaQuery } from '@/lib/useMediaQuery';
 import { ChartCardBody } from '@/components/chartWidget/ChartCardBody';

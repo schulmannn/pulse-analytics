@@ -42,6 +42,7 @@ export function IgAudience({ ig }: { ig: IgData }) {
             )}
             {contacts.length > 0 && (
               <Breakdown
+                columns={{ label: 'Кнопка', value: 'Клики' }}
                 items={contacts.map((it) => ({
                   label: CONTACT_LABEL[it.label] ?? it.label,
                   value: it.value,

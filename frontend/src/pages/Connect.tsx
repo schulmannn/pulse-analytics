@@ -6,7 +6,9 @@ import { toast } from 'sonner';
 import { z } from 'zod';
 import QRCode from 'qrcode';
 import { useQueryClient } from '@tanstack/react-query';
-import { useChannels, useCollectorStatus, useConnectIg, useCreateKey, useDisconnectIg, useIgOauthStatus, useMsBackfillStatus, useMsStatus, useTgQrStatus, useYmStatus } from '@/api/queries';
+import { useChannels, useCollectorStatus, useConnectIg, useCreateKey, useDisconnectIg, useIgOauthStatus, useTgQrStatus } from '@/api/queries';
+import { useMsStatus } from '@/api/ms';
+import { useMsBackfillStatus, useYmStatus } from '@/api/ym';
 import { useCdekStatus, useCreateCdekSource } from '@/api/cdek';
 import { RusenderConnectSchema, rusenderKeys, useRusenderStatus } from '@/api/rusender';
 import { ApiError, apiSend } from '@/api/client';
@@ -2101,7 +2103,7 @@ function TgScanning({
         {img ? <img src={img} alt="QR-код для входа в Telegram" className="h-52 w-52" /> : <div className="h-52 w-52" />}
       </div>
       <p className="mt-4 max-w-sm text-sm text-muted-foreground">
-        В Telegram: <b className="text-foreground">Настройки → Устройства → Подключить устройство</b> — наведите камеру на код. Он обновляется автоматически.
+        В Telegram: <b className="font-medium text-foreground">Настройки → Устройства → Подключить устройство</b> — наведите камеру на код. Он обновляется автоматически.
       </p>
       {err && <p role="alert" className="mt-2 text-xs font-medium text-destructive">{err}</p>}
     </div>

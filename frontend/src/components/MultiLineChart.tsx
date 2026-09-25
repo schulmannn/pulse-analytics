@@ -47,7 +47,11 @@ export function MultiLineChart({
   // данным, иначе каждый pointermove-рендер пересобирал бы до 6×CHART_MAX_POINTS точек заново.
   const geometry = useMemo(() => {
     const nums = series.flatMap((s) => s.values).filter((v): v is number => v != null);
-    const max = nums.length ? Math.max(...nums, 0) : 1;
+    const peak = nums.length ? Math.max(...nums, 0) : 1;
+    // ДОМЕН С ЗАПАСОМ (аудит #554). Без него пиковая точка встаёт ровно на y=0 — на самый
+    // край вьюпорта, где кружок и штрих линии обрезаются пополам. 6% — тот же порядок
+    // запаса, что у niceScale в LineChart (SCALE_HEADROOM).
+    const max = peak > 0 ? peak * 1.06 : peak;
     const x = (i: number) => (n <= 1 ? 0 : (i / (n - 1)) * 100);
     const y = (v: number) => (max <= 0 ? 100 : 100 - (v / max) * 100);
     // Для среднего чека null означает не пропуск сбора, а отсутствие определённого значения в период
@@ -217,7 +221,7 @@ export function MultiLineChart({
           </svg>
           {hovered != null && (
             <div
-              className={`pointer-events-none absolute top-2 z-tooltip min-w-44 rounded-lg border border-border bg-popover/95 px-2.5 py-2 text-2xs shadow-lg backdrop-blur-xs ${hovered > n * 0.62 ? '-translate-x-full' : ''}`}
+              className={`pointer-events-none absolute top-2 z-tooltip min-w-44 rounded-xl border border-border bg-popover/95 px-2.5 py-2 text-2xs shadow-lg backdrop-blur-xs ${hovered > n * 0.62 ? '-translate-x-full' : ''}`}
               style={{ left: `${hoverX ?? 0}%` }}
             >
               <p className="mb-1 font-medium text-foreground">{labels[hovered]}</p>

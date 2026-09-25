@@ -72,6 +72,12 @@
       }
     }
   },
+  "overrides": [
+    {
+      "includes": ["**/server/**/*.js", "**/test/**/*.js"],
+      "linter": { "rules": { "suspicious": { "noRedundantUseStrict": "off" } } }
+    }
+  ],
   "css": {
     "parser": {
       "tailwindDirectives": true

@@ -14,9 +14,20 @@ import { bootDemo } from './helpers';
  * часть тела, а не его пол.
  */
 
-/** Самый крупный svg внутри карточки — это её график (иконка виджета всегда 16px). */
+/**
+ * Карточки, ЧЬЁ ТЕЛО — ГРАФИК. Инвариант выше — про них, и «нашёлся svg» их не описывает: полоска
+ * ритма внутри прозы («Неделя канала») тоже svg, но тело там ТЕКСТ, а полоска ему подпорка.
+ * Требовать от такой карточки 264px значит требовать пустоты под текстом.
+ *
+ * Разделяет ПРОЗА РЯДОМ С ГРАФИКОМ — текст тела за вычетом подписей внутри самого svg. Замер на
+ * трёх маршрутах демо: у настоящих карточек-графиков это 7–65 символов (число, дельта, подпись),
+ * у «Недели канала» — 276. Порог 120 стоит посередине четырёхкратного разрыва, а не впритык.
+ */
+const PROSE_BESIDE_CHART_MAX = 120;
+
 async function chartCards(page: Page) {
-  return page.evaluate(() => {
+  // Константа живёт в Node, а обход — в браузере: передаём аргументом, иначе её там нет.
+  return page.evaluate((maxProse) => {
     const rows: { title: string; size: string | null; card: number; body: number; chart: number }[] = [];
     for (const section of document.querySelectorAll<HTMLElement>('section[data-widget-size]')) {
       const svgs = [...section.querySelectorAll('svg')]
@@ -27,6 +38,11 @@ async function chartCards(page: Page) {
       if (!chart || chart.h < 40) continue;
       const body = chart.el.closest<HTMLElement>('.widget-tile, .widget-tile-fixed');
       if (!body) continue;
+      // Подписи осей — часть графика, поэтому считаем текст тела БЕЗ svg.
+      const withoutCharts = body.cloneNode(true) as HTMLElement;
+      for (const svg of withoutCharts.querySelectorAll('svg')) svg.remove();
+      const prose = (withoutCharts.textContent ?? '').replace(/\s+/g, ' ').trim().length;
+      if (prose > maxProse) continue;
       rows.push({
         title: section.querySelector('h2, h3')?.textContent?.trim() ?? '?',
         size: section.getAttribute('data-widget-size'),
@@ -36,7 +52,7 @@ async function chartCards(page: Page) {
       });
     }
     return rows;
-  });
+  }, PROSE_BESIDE_CHART_MAX);
 }
 
 /**

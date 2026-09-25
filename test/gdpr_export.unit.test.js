@@ -8,9 +8,12 @@
 //     освобождают клиент и прекращают запросы; аудит-исход возвращается только на 'ok'.
 const test = require('node:test');
 const assert = require('node:assert');
+const EventEmitter = require('node:events');
 const {
   createGdprService,
-  _internals: { ARCHIVE_SPECS, buildKeysetPredicate, pageQuery, createWriter, ExportAborted },
+  _internals: {
+    ARCHIVE_SPECS, buildKeysetPredicate, pageQuery, createWriter, ExportAborted, WRITE_SLICE_BYTES,
+  },
 } = require('../server/services/gdprService');
 
 // ── keyset-предикат ───────────────────────────────────────────────────────────────────────────
@@ -129,25 +132,99 @@ test('writer: обрыв соединения → ожидающий write па�
   w.cleanup();
 });
 
-test('writer: end() → close до finish-callback → отклоняется ExportAborted, не виснет', async () => {
+test('writer: ответ умер до создания writer\'а → closed сразу, write падает ExportAborted', async () => {
+  const gone = fakeSocket();
+  gone.destroyed = true; // 'close' уже отгремел — повторно не придёт
+  const w = createWriter(gone);
+  assert.strictEqual(w.closed, true);
+  await assert.rejects(w.write('x'), (e) => e instanceof ExportAborted);
+  w.cleanup();
+
+  const deadSocket = fakeSocket();
+  deadSocket.socket = { destroyed: true };
+  assert.strictEqual(createWriter(deadSocket).closed, true);
+  assert.strictEqual(createWriter(fakeSocket()).closed, false);
+});
+
+test('writer: end() → close до finish → отклоняется ExportAborted, не виснет', async () => {
   const sock = fakeSocket();
-  // res.end вызван, но сокет рвётся 'close' ДО его callback'а — end() обязан отклониться, а не
+  // res.end вызван, но сокет рвётся 'close' ДО 'finish' — end() обязан отклониться, а не
   // остаться pending навсегда.
-  sock.end = () => { sock.emit('close'); /* callback никогда не зовётся */ };
+  sock.end = () => { sock.emit('close'); /* 'finish' никогда не приходит */ };
   const w = createWriter(sock);
   await assert.rejects(w.end(), (e) => e instanceof ExportAborted);
   w.cleanup();
 });
 
-test('writer: end() дожидается finish-callback и резолвится один раз', async () => {
+test('writer: end() дожидается \'finish\' и резолвится один раз', async () => {
   const sock = fakeSocket();
   let calls = 0;
-  // Нормальное завершение: end зовёт callback (finish), затем эмитит 'close' — двойного исхода быть
-  // не должно (guard). Без ошибки — значит промис зарезолвился ровно раз.
-  sock.end = (cb) => { if (cb) cb(); sock.emit('close'); };
+  let endArgs = null;
+  // Нормальное завершение, как у настоящего ServerResponse: 'finish', затем 'close' — двойного
+  // исхода быть не должно (guard). Без ошибки — значит промис зарезолвился ровно раз.
+  sock.end = (...args) => { endArgs = args; sock.emit('finish'); sock.emit('close'); };
   const w = createWriter(sock);
   await w.end().then(() => { calls += 1; });
   assert.strictEqual(calls, 1);
+  // compression() подменяет res.end(chunk, encoding): любой аргумент (в том числе колбэк) он
+  // принимает за данные и падает на Buffer.from(fn) — финал сжатого ответа обрывался всегда.
+  assert.deepStrictEqual(endArgs, [], 'res.end вызывается без аргументов');
+  w.cleanup();
+});
+
+test('writer: клиент не забирает ответ дольше drainTimeoutMs → ответ разорван, write падает ExportAborted', { timeout: 5000 }, async () => {
+  const sock = fakeSocket([false]); // буфер полон, 'drain' не придёт никогда
+  sock.destroy = () => { sock.destroyed = true; };
+  const w = createWriter(sock, { drainTimeoutMs: 20 });
+  const started = Date.now();
+  await assert.rejects(w.write('x'), (e) => e instanceof ExportAborted);
+  assert.ok(Date.now() - started >= 15, 'рвём только по истечении таймаута');
+  assert.strictEqual(sock.destroyed, true, 'ответ уничтожен — сокет не висит');
+  assert.strictEqual(w.closed, true);
+  await assert.rejects(w.write('y'), (e) => e instanceof ExportAborted);
+  w.cleanup();
+});
+
+test('writer: \'drain\' пришёл вовремя → сторож снят, ответ не рвётся', async () => {
+  const sock = fakeSocket([false]);
+  sock.destroy = () => { sock.destroyed = true; };
+  const w = createWriter(sock, { drainTimeoutMs: 30 });
+  const p = w.write('x');
+  setTimeout(() => sock.emit('drain'), 5);
+  await p;
+  await new Promise((r) => setTimeout(r, 50)); // дольше таймаута — сработавший сторож был бы виден
+  assert.strictEqual(sock.destroyed, false);
+  assert.strictEqual(w.closed, false);
+  w.cleanup();
+});
+
+test('writer: хвост ответа не забран (нет \'finish\') дольше drainTimeoutMs → end() отклоняется', { timeout: 5000 }, async () => {
+  const sock = fakeSocket();
+  sock.destroy = () => { sock.destroyed = true; };
+  sock.end = () => { sock.writableEnded = true; /* ни 'finish', ни 'close' */ };
+  const w = createWriter(sock, { drainTimeoutMs: 20 });
+  await assert.rejects(w.end(), (e) => e instanceof ExportAborted);
+  assert.strictEqual(sock.destroyed, true);
+  w.cleanup();
+});
+
+test('writer: крупный кусок пишется байтовыми ломтями ≤ WRITE_SLICE_BYTES без порчи UTF-8', async () => {
+  const written = [];
+  const sock = fakeSocket();
+  sock.write = (chunk) => { written.push(chunk); return written.length % 2 === 1; };
+  const w = createWriter(sock, { drainTimeoutMs: 1000 });
+  // Кириллица (2 байта) и эмодзи (суррогатная пара, 4 байта) на стыках ломтей.
+  const big = `[${'ж😀'.repeat(WRITE_SLICE_BYTES / 2)}]`;
+  const p = w.write(big);
+  // На каждый false writer ждёт 'drain' — отдаём его, пока запись не закончится.
+  const pump = setInterval(() => sock.emit('drain'), 1);
+  await p;
+  clearInterval(pump);
+  assert.ok(written.length > 1, 'кусок разрезан');
+  for (const c of written) {
+    assert.ok(Buffer.isBuffer(c) && c.length <= WRITE_SLICE_BYTES, 'ломоть — Buffer не длиннее лимита');
+  }
+  assert.strictEqual(Buffer.concat(written).toString('utf8'), big, 'байты склеиваются в исходную строку');
   w.cleanup();
 });
 
@@ -163,7 +240,8 @@ function collectorRes() {
     off(ev, fn) { if (listeners[ev]) listeners[ev] = listeners[ev].filter((f) => f !== fn); return this; },
     emit(ev, ...a) { (listeners[ev] || []).slice().forEach((f) => f(...a)); },
     write(s) { this.chunks.push(s); return true; },
-    end(cb) { this.writableEnded = true; if (cb) cb(); this.emit('close'); },
+    // Как у настоящего ServerResponse: 'finish', затем 'close'. Колбэка нет — writer его не передаёт.
+    end() { this.writableEnded = true; this.emit('finish'); this.emit('close'); },
     destroy() { this.destroyed = true; this.emit('close'); },
     body() { return this.chunks.join(''); },
   };
@@ -176,8 +254,11 @@ function collectorRes() {
 function fakePool(spec) {
   const capture = [];
   let released = 0;
+  let releasedWith;
+  let connects = 0;
   const pages = { ...(spec.pages || {}) };
-  const client = {
+  // Как pg-клиент — EventEmitter: 'error' без слушателя бросает (в проде = падение процесса).
+  const client = Object.assign(new EventEmitter(), {
     async query(text, params) {
       // Workspaces SELECT содержит correlated subquery FROM workspace_members; основная таблица —
       // последний FROM в тексте. На простых запросах это тот же единственный match.
@@ -202,12 +283,15 @@ function fakePool(spec) {
       if (table === 'channels') return { rows: spec.channels || [] };
       return { rows: (spec.singles && spec.singles[table]) || [] };
     },
-    release() { released += 1; },
-  };
+    release(err) { released += 1; releasedWith = err; },
+  });
   return {
-    connect: async () => client,
+    connect: async () => { connects += 1; return client; },
+    client,
     capture,
     get released() { return released; },
+    get releasedWith() { return releasedWith; },
+    get connects() { return connects; },
   };
 }
 
@@ -480,6 +564,16 @@ test('стрим: approved portability matrix использует safe projecti
     ['2024-01-01', '2024-01-02', '2024-01-03']);
   assert.deepStrictEqual(doc.channels[0].snapshot.data, { subscribers: 42 });
   assert.strictEqual(doc.channels[0].moysklad.ms_account_id, 'ms-own');
+  // Экспорт обещает identity ВСЕХ подключений канала, а знал только три источника из пяти: архивы
+  // СДЭКа и Rusender уезжали, а «что именно у вас подключено» — нет (аудит #554, проход №2, N17).
+  // Секции обязаны присутствовать даже при отсутствующем подключении: null — это ответ «не
+  // подключено», а молчание — отсутствие ответа.
+  assert.ok('cdek' in doc.channels[0], 'секция СДЭКа есть всегда');
+  assert.ok('rusender' in doc.channels[0], 'секция Rusender есть всегда');
+  // Ключ Rusender — credential и в выборке отсутствует по построению.
+  const rusenderSql = pool.capture.filter((c) => /rusender_accounts/.test(c.text));
+  assert.ok(rusenderSql.length > 0, 'подключение Rusender запрашивается');
+  assert.ok(rusenderSql.every((c) => !/api_key_enc/.test(c.text)), 'ключ не выгружается никогда');
   assert.deepStrictEqual(doc.channels[0].api_keys.map((k) => k.id), [1, 2, 3]);
 
   const membershipCalls = pool.capture.filter((c) => c.table === 'workspace_members');
@@ -688,6 +782,122 @@ test('стрим: сбой ДО первого байта → throw (роут у
   assert.strictEqual(ready, false, 'заголовки не ставились — 404/500 ещё возможны');
   assert.strictEqual(res.chunks.length, 0);
   assert.strictEqual(pool.released, 1);
+});
+
+test('стрим: клиент ушёл, пока экспорт ждал коннект → aborted без запросов и без заголовков', async () => {
+  const pool = fakePool({ account: { id: 5, email: 'e', role: 'user', status: 'active', avatar_url: null, created_at: 'T' } });
+  const res = collectorRes();
+  const connect = pool.connect;
+  pool.connect = async () => { res.destroy(); return connect(); }; // 'close' раньше writer'а
+  const svc = createGdprService({ pool, enabled: true, transaction: null });
+  let ready = false;
+  const outcome = await svc.streamUserExport(5, res, { onReady() { ready = true; } });
+  assert.strictEqual(outcome, 'aborted');
+  assert.strictEqual(pool.capture.length, 0, 'в БД не ходили');
+  assert.strictEqual(ready, false);
+  assert.strictEqual(res.chunks.length, 0);
+  assert.strictEqual(pool.released, 1);
+});
+
+// ── GDPR-2/DB-4: экспорт не держит коннект основного пула бесконечно ─────────────────────────────
+
+const ACCOUNT = { id: 5, email: 'e', role: 'user', status: 'active', avatar_url: null, created_at: 'T' };
+const CHANNEL = { id: 9, username: 'u', title: 't', source: 'collector', tg_channel_id: null, created_at: 'T' };
+
+test('стрим: клиент перестал читать → через drainTimeoutMs aborted, ответ разорван, коннект возвращён', { timeout: 5000 }, async () => {
+  const pool = fakePool({
+    account: ACCOUNT,
+    channels: [CHANNEL],
+    pages: { channel_daily: [[{ day: '2024-01-01', __c0: '2024-01-01' }]] },
+  });
+  const svc = createGdprService({ pool, enabled: true, transaction: null, exportDrainTimeoutMs: 30 });
+  const res = collectorRes();
+  // Сокет «полон» с первой же страницы архива и 'drain' не шлёт никогда (клиент не читает).
+  res.write = function write(s) { this.chunks.push(s); return !String(s).includes('2024-01-01'); };
+  const outcome = await svc.streamUserExport(5, res, { onReady() {} });
+  assert.strictEqual(outcome, 'aborted');
+  assert.strictEqual(res.destroyed, true, 'ответ разорван — сокет не висит вечно');
+  assert.strictEqual(pool.released, 1, 'коннект основного пула возвращён');
+  assert.ok(!pool.capture.some((c) => c.table === 'posts'), 'после обрыва в БД больше не ходим');
+});
+
+test('стрим: сверх лимита одновременных выгрузок → busy без коннекта и без байта; слот освобождается', { timeout: 5000 }, async () => {
+  let open;
+  const gate = new Promise((r) => { open = r; });
+  const pool = fakePool({ account: ACCOUNT, hooks: { users: () => gate } });
+  const svc = createGdprService({ pool, enabled: true, transaction: null, exportMaxConcurrent: 2 });
+  const a = collectorRes();
+  const b = collectorRes();
+  const pa = svc.streamUserExport(1, a, { onReady() {} });
+  const pb = svc.streamUserExport(2, b, { onReady() {} });
+  await new Promise((r) => setImmediate(r));
+  assert.strictEqual(pool.connects, 2);
+
+  const c = collectorRes();
+  let ready = false;
+  assert.strictEqual(await svc.streamUserExport(3, c, { onReady() { ready = true; } }), 'busy');
+  assert.strictEqual(pool.connects, 2, 'выгрузка сверх лимита коннект не берёт');
+  assert.strictEqual(ready, false, 'заголовки не ставились — роут ещё может ответить 503');
+  assert.strictEqual(c.chunks.length, 0);
+
+  open();
+  assert.deepStrictEqual(await Promise.all([pa, pb]), ['ok', 'ok']);
+  assert.strictEqual(await svc.streamUserExport(3, collectorRes(), { onReady() {} }), 'ok', 'слот освободился');
+});
+
+test('стрим: вторая выгрузка того же пользователя, пока идёт первая → busy', { timeout: 5000 }, async () => {
+  let open;
+  const gate = new Promise((r) => { open = r; });
+  const pool = fakePool({ account: ACCOUNT, hooks: { users: () => gate } });
+  const svc = createGdprService({ pool, enabled: true, transaction: null, exportMaxConcurrent: 2 });
+  const first = svc.streamUserExport(5, collectorRes(), { onReady() {} });
+  await new Promise((r) => setImmediate(r));
+  assert.strictEqual(await svc.streamUserExport(5, collectorRes(), { onReady() {} }), 'busy');
+  assert.strictEqual(pool.connects, 1);
+  open();
+  assert.strictEqual(await first, 'ok');
+  assert.strictEqual(await svc.streamUserExport(5, collectorRes(), { onReady() {} }), 'ok');
+});
+
+test('стрим: сбой ДО первого байта тоже освобождает слот лимита', async () => {
+  let failOnce = true;
+  const pool = fakePool({
+    account: ACCOUNT,
+    hooks: { user_prefs() { if (failOnce) { failOnce = false; throw new Error('early'); } } },
+  });
+  const svc = createGdprService({ pool, enabled: true, transaction: null, exportMaxConcurrent: 1 });
+  await assert.rejects(svc.streamUserExport(5, collectorRes(), { onReady() {} }), /early/);
+  // Тот же пользователь и единственный слот: если бы слот или uid утекли, здесь был бы busy.
+  assert.strictEqual(await svc.streamUserExport(5, collectorRes(), { onReady() {} }), 'ok');
+});
+
+test('стрим: обрыв соединения с БД, пока экспорт держит клиента → без падения процесса, клиент уничтожается', async () => {
+  let pool;
+  const dbGone = new Error('Connection terminated unexpectedly');
+  pool = fakePool({
+    account: ACCOUNT,
+    channels: [CHANNEL],
+    hooks: {
+      // Бэкенд рвёт соединение между запросами: pg эмитит 'error' на клиенте, а последующие
+      // запросы падают. Без слушателя 'error' это необработанное исключение (падение процесса).
+      posts() { pool.client.emit('error', dbGone); throw dbGone; },
+    },
+  });
+  const svc = createGdprService({ pool, enabled: true, transaction: null });
+  const res = collectorRes();
+  const outcome = await svc.streamUserExport(5, res, { onReady() {} });
+  assert.strictEqual(outcome, 'stream_error');
+  assert.strictEqual(pool.released, 1);
+  assert.strictEqual(pool.releasedWith, dbGone, 'битый клиент возвращается с ошибкой — пул его уничтожит');
+  assert.strictEqual(pool.client.listenerCount('error'), 0, 'свой слушатель снят при возврате');
+});
+
+test('стрим: на успехе клиент возвращается в пул без ошибки и без висящего слушателя', async () => {
+  const pool = fakePool({ account: ACCOUNT, channels: [CHANNEL] });
+  const svc = createGdprService({ pool, enabled: true, transaction: null });
+  assert.strictEqual(await svc.streamUserExport(5, collectorRes(), { onReady() {} }), 'ok');
+  assert.strictEqual(pool.releasedWith, undefined);
+  assert.strictEqual(pool.client.listenerCount('error'), 0);
 });
 
 // ── L-5: экспорт знает все шесть источников ───────────────────────────────────────────────────────

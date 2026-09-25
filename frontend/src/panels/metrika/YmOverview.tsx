@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
+import { KpiValue } from '@/components/chartWidget/KpiValue';
 import { useNavigate } from 'react-router-dom';
-import { useYmGoals, useYmHourly, useYmSummary } from '@/api/queries';
+import { useYmGoals, useYmHourly, useYmSummary } from '@/api/ym';
 import { PillSelect } from '@/components/PillSelect';
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
 import { ChartCardBody } from '@/components/chartWidget/ChartCardBody';
@@ -13,7 +14,7 @@ import { ChartSkeleton } from '@/components/ui/dataSkeleton';
 import { DeltaPill } from '@/components/DeltaPill';
 import { InlineSpark } from '@/components/InlineSpark';
 import { pctDelta, type MetricDelta } from '@/lib/delta';
-import { lttbDownsample } from '@/lib/downsample';
+import { CHART_MAX_POINTS, lttbDownsample } from '@/lib/downsample';
 import { fmt, timeAxisFromDayKeys } from '@/lib/format';
 import { formatByRole } from '@/lib/metricNumber';
 import { usePagePeriod, useCardShowsPeriod } from '@/lib/period';
@@ -166,8 +167,10 @@ export function YmOverview() {
   }
 
   if (summary.isError) {
-    const status = (summary.error as { status?: number } | null)?.status;
-    if (status === 401) {
+    const { status, code } = (summary.error as { status?: number; code?: string } | null) ?? {};
+    // Различаем по машинному коду, а не по статусу: 401 без кода — это наша истёкшая сессия (её
+    // уводит на /login lib/authRedirect), а не отзыв токена Яндекса.
+    if (code === 'ym_token_revoked') {
       // Токен отозван на стороне Яндекса — честный reconnect-CTA вместо «недоступна».
       return (
         <EmptyState
@@ -181,6 +184,7 @@ export function YmOverview() {
       // Канал есть, а счётчика Метрики на нём нет — честный onboarding вместо пустых карточек.
       return (
         <EmptyState
+          ghost="bars"
           title="Яндекс.Метрика не подключена"
           reason="Укажите OAuth-токен — и здесь появятся визиты, посетители и источники трафика."
           action={{ to: '/connect?source=metrika', label: 'Подключить Метрику' }}
@@ -216,7 +220,7 @@ export function YmOverview() {
     prevTotal: number | null | undefined,
     caption?: string,
   ) => {
-    const sampled = lttbDownsample(block.series, 140, (p) => p.value);
+    const sampled = lttbDownsample(block.series, CHART_MAX_POINTS, (p) => p.value);
     const delta =
       block.total != null && prevTotal != null && prevTotal > 0
         ? pctDelta(block.total, prevTotal)
@@ -538,7 +542,9 @@ function YmQualityStrip({
             <div key={t.key} className="min-w-0">
               <div className="text-2xs tracking-wide text-muted-foreground">{t.label}</div>
               <div className="mt-0.5 flex items-baseline gap-2">
-                <span className="text-lg font-medium tabular-nums tracking-tight text-foreground">{t.value}</span>
+                {/* Рецепт крупного числа живёт в KpiValue — набирать его классами на месте значит
+                  завести пятую копию, которая разойдётся (аудит #554). */}
+                <KpiValue text={t.value} size="xs" morph={false} />
                 {/* DeltaPill сам скрывается при flat/null — отдельных веток не нужно. */}
                 <DeltaPill delta={t.delta} />
               </div>

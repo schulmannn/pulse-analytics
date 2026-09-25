@@ -22,9 +22,8 @@ import {
   type CdekPoint,
 } from '@/api/cdek';
 import { pctDelta, type MetricDelta } from '@/lib/delta';
-import { lttbDownsample } from '@/lib/downsample';
+import { CHART_MAX_POINTS, lttbDownsample } from '@/lib/downsample';
 import { densifyCdekDays } from '@/lib/cdekSeries';
-import { CHART_MAX_POINTS } from '@/lib/msSeries';
 import { fmt, timeAxisFromDayKeys } from '@/lib/format';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { useSavedFilter } from '@/lib/widgetPrefsStore';
@@ -308,6 +307,7 @@ export function CdekOverview() {
             total={statusMetric === 'orders' ? statuses.data.total.orders : statuses.data.total.revenue}
             format={statusMetric === 'orders' ? fmt.num : rub}
             tailWord={statusMetric === 'orders' ? 'заказов' : 'рублей'}
+            columns={{ label: 'Статус', value: statusMetric === 'orders' ? 'Заказы' : 'Выручка' }}
           />
         )}
           </ChartFill>

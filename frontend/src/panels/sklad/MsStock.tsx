@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { useMsStock, type MsStockRow } from '@/api/queries';
+import { useMsStock, type MsStockRow } from '@/api/ms';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { TableSkeleton } from '@/components/ui/dataSkeleton';

@@ -1,9 +1,8 @@
 import type { CampaignPost, CampaignSummary } from '@/api/schemas';
 import type { TimelineSeries } from '@/lib/campaignSummary';
-import { lttbDownsample } from '@/lib/downsample';
+import { CHART_MAX_POINTS, lttbDownsample } from '@/lib/downsample';
 import { fmt } from '@/lib/format';
 import { bucketKeyOf } from '@/lib/metricSeries';
-import { CHART_MAX_POINTS } from '@/lib/msSeries';
 
 /**
  * Чистые построители представления ДЛЯ desktop-страницы кампании. Здесь только сборка

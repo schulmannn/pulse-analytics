@@ -21,7 +21,7 @@ const FILE = buildXlsx([
 ]);
 
 function fakeDb(overrides = {}) {
-  const calls = { applied: [], finished: [], failed: [], started: [], warehouse: [] };
+  const calls = { applied: [], finished: [], failed: [], started: [], warehouse: [], pruned: [] };
   const db = {
     enabled: true,
     calls,
@@ -38,13 +38,14 @@ function fakeDb(overrides = {}) {
       return { id, ...payload.stats, warnings: payload.warnings };
     },
     failCdekImport: async (channelId, id, message) => { calls.failed.push({ channelId, id, message }); return true; },
+    pruneCdekImportFiles: async (channelId, opts) => { calls.pruned.push({ channelId, opts }); return 0; },
     getCdekImportFile: async () => ({ filename: 'сохранённый.xlsx', file_bytes: FILE }),
     ...overrides,
   };
   return db;
 }
 
-const build = (db) => createCdekImportService({ db, readSheetRows, parseCdekSheet });
+const build = (db, extra = {}) => createCdekImportService({ db, readSheetRows, parseCdekSheet, ...extra });
 
 test('загрузка: файл разобран, архив записан, отчёт собран', async () => {
   const db = fakeDb();
@@ -164,4 +165,100 @@ test('без базы импорт честно отказывает до чте
       return true;
     },
   );
+});
+
+// ── Окно хранения сырых исходников (M-1, аудит #554) ───────────────────────────────────────────
+// Файл кладётся в Postgres целиком и до этого не удалялся ничем: ни квоты, ни ретеншна. При
+// потолке загрузки 2 МБ и лимитере 10 импортов в час это 480 МБ в сутки на канал — и рост не
+// останавливался никогда. Уборка идёт СРАЗУ после успешной записи и только после неё.
+
+test('успешный импорт закрывает окно хранения исходников того же канала', async () => {
+  const db = fakeDb();
+  await build(db).importFile({ channelId: 5, uid: 3, filename: 'выгрузка.xlsx', buffer: FILE });
+
+  assert.deepEqual(db.calls.pruned, [{ channelId: 5, opts: undefined }],
+    'уборка скоупится каналом импорта, потолок берётся из репо');
+  const prunedAfterFinish = db.calls.finished.length === 1 && db.calls.pruned.length === 1;
+  assert.ok(prunedAfterFinish, 'уборка идёт ПОСЛЕ записи отчёта, а не вместо неё');
+});
+
+test('дубль и упавший импорт окно хранения не двигают', async () => {
+  const dup = fakeDb({ findCdekImportByHash: async () => ({ id: 1, status: 'done' }) });
+  await build(dup).importFile({ channelId: 5, filename: 'выгрузка.xlsx', buffer: FILE });
+  assert.deepEqual(dup.calls.pruned, [], 'повторная загрузка ничего не добавила — убирать нечего');
+
+  const broken = fakeDb();
+  await assert.rejects(() => build(broken).importFile({
+    channelId: 5, filename: 'мусор.xlsx', buffer: Buffer.from('это обычный текст, а не выгрузка склада'),
+  }));
+  assert.deepEqual(broken.calls.pruned, [], 'у упавшего импорта file_bytes уже обнулил failCdekImport');
+});
+
+test('сбой уборки не отменяет уже записанный импорт', async () => {
+  // Архив записан, отчёт сохранён — падать из-за служебной уборки было бы враньём пользователю.
+  const logs = [];
+  const db = fakeDb({ pruneCdekImportFiles: async () => { throw new Error('deadlock detected'); } });
+  const result = await build(db, { log: (level, event, meta) => logs.push({ level, event, meta }) })
+    .importFile({ channelId: 5, filename: 'выгрузка.xlsx', buffer: FILE });
+
+  assert.equal(result.duplicate, false);
+  assert.equal(db.calls.finished.length, 1);
+  assert.ok(logs.some((l) => l.event === 'cdek_import_prune_failed'), 'сбой уборки не проглочен молча');
+});
+
+// ── Внутренности не попадают в витрину импортов (I-2, аудит #554) ──────────────────────────────
+// `cdek_imports.error` читает пользователь. Прежний `e.userMessage || e.message` означал, что
+// неожиданное исключение сохраняло туда текст драйвера — и он же уезжал в ответ роута.
+
+test('неожиданное исключение пишет в строку импорта человеческую причину, а не текст драйвера', async () => {
+  const logs = [];
+  const db = fakeDb({ applyCdekImport: async () => { throw new RangeError('Invalid code point 9999999'); } });
+  await assert.rejects(() => build(db, { log: (level, event, meta) => logs.push({ level, event, meta }) })
+    .importFile({ channelId: 5, filename: 'выгрузка.xlsx', buffer: FILE }));
+
+  const stored = db.calls.failed[0].message;
+  assert.doesNotMatch(stored, /Invalid code point/);
+  assert.match(stored, /Импорт не удался/);
+  // Настоящая причина не потеряна — она в логе.
+  const failure = logs.find((l) => l.event === 'cdek_import_failed');
+  assert.match(failure.meta.error, /Invalid code point 9999999/);
+});
+
+test('ошибка разбора по-прежнему доносит до пользователя СВОЮ причину, а не общую', async () => {
+  // Общая фраза — только для непредусмотренного. Там, где ридер знает, что не так, он говорит это.
+  const db = fakeDb();
+  await assert.rejects(
+    () => build(db).importFile({
+      channelId: 5, filename: 'мусор.xlsx', buffer: Buffer.from('это обычный текст, а не выгрузка склада'),
+    }),
+    (e) => {
+      assert.match(e.userMessage, /не \.xlsx/i);
+      return true;
+    },
+  );
+  assert.match(db.calls.failed[0].message, /не \.xlsx/i);
+});
+
+test('файл с непредусмотренным содержимым: пользователь видит «не разобрался», а не пятисотку', async () => {
+  // Полный путь с НАСТОЯЩИМ ридером: ссылка за пределами Unicode раньше давала RangeError,
+  // а теперь либо разбирается, либо честно отвергается — но не текстом драйвера.
+  const db = fakeDb();
+  const { buildZip } = require('./cdekFixtures');
+  const buf = buildZip([
+    { name: 'xl/workbook.xml', data: Buffer.from('<workbook xmlns:r="r"><sheets><sheet name="s" sheetId="1" r:id="rId1"/></sheets></workbook>', 'utf8') },
+    { name: 'xl/_rels/workbook.xml.rels', data: Buffer.from('<Relationships><Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>', 'utf8') },
+    {
+      name: 'xl/worksheets/sheet1.xml',
+      data: Buffer.from('<worksheet><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>&#9999999;</t></is></c></row></sheetData></worksheet>', 'utf8'),
+    },
+  ]);
+  await assert.rejects(
+    () => build(db).importFile({ channelId: 5, filename: 'странный.xlsx', buffer: buf }),
+    (e) => {
+      assert.ok(e.userMessage, 'наружу идёт сообщение для пользователя, а не голое исключение');
+      assert.doesNotMatch(String(e.message), /code point/i);
+      return true;
+    },
+  );
+  assert.doesNotMatch(db.calls.failed[0].message, /code point/i);
 });

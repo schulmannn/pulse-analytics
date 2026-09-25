@@ -59,7 +59,7 @@ export function buildIgInsights(i: IgInsightInput): IgInsight[] {
     if (net < 0) {
       out.push({
         tone: 'down',
-        text: 'Канал теряет подписчиков — отписок больше, чем подписок.',
+        text: 'Аккаунт теряет подписчиков — отписок больше, чем подписок.',
         evidence: [`чистый прирост −${fmtInt(Math.abs(net))} за период`, ev].filter(Boolean).join(' · '),
         confidence: 'high',
         priority: 95,
@@ -67,7 +67,7 @@ export function buildIgInsights(i: IgInsightInput): IgInsight[] {
     } else if (net > 0) {
       out.push({
         tone: 'up',
-        text: 'Канал растёт по подписчикам.',
+        text: 'Аккаунт растёт по подписчикам.',
         evidence: [`чистый прирост +${fmtInt(net)} за период`, ev].filter(Boolean).join(' · '),
         confidence: 'high',
         priority: 90,

@@ -1,8 +1,8 @@
 import { fmt } from '@/lib/format';
 import { parseContentPeriod, serializeContentPeriod } from '@/lib/contentFilters';
-import { lttbDownsample } from '@/lib/downsample';
+import { CHART_MAX_POINTS, lttbDownsample } from '@/lib/downsample';
 import { bucketKeyOf } from '@/lib/metricSeries';
-import { CHART_MAX_POINTS, pickIndexes } from '@/lib/msSeries';
+import { pickIndexes } from '@/lib/msSeries';
 import type { PeriodDays } from '@/lib/period';
 import type { SortOrder } from '@/lib/contentFilters';
 
@@ -121,6 +121,10 @@ export interface MentionsTimeline {
   titles: string[];
   /** ISO-дни точек текущего окна (нужны недельным корзинам capMentionsTimeline). */
   days: string[];
+  /** ISO-дни БАЗОВОГО окна — ровно те, из которых собран ghost. Легенда рейла подписывает
+      сравниваемый диапазон, и вычислять его повторно на странице значило бы завести второе
+      правило выравнивания базы: разъехавшись, они солгут, а не упадут. */
+  ghostDays?: string[];
   /** Потенциальные просмотры по дням — той же длины, что values (кормят недельные тултипы). */
   views: number[];
 }
@@ -180,6 +184,7 @@ export function buildMentionsTimeline(
         return `${fmt.day(d)}: ${fmt.num(c?.mentions ?? 0)} упом · ${fmt.short(c?.views ?? 0)} просм`;
       }),
       days: curDays,
+      ghostDays: prevDays,
       views: curDays.map((d) => curMap.get(d)?.views ?? 0),
     };
   }
@@ -215,6 +220,7 @@ export function buildMentionsTimeline(
       return `${fmt.day(d)}: ${fmt.num(c?.mentions ?? 0)} упом · ${fmt.short(c?.views ?? 0)} просм`;
     }),
     days: curDays,
+    ghostDays: prevDays,
     views: curDays.map((d) => curMap.get(d)?.views ?? 0),
   };
 }

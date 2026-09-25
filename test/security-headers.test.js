@@ -6,6 +6,7 @@ const {
   APP_ALLOWED_DOMAINS,
   appCspHeader,
   permissionsPolicy,
+  setApiHeaders,
   setAppHeaders,
   setHtmlSecurityHeaders,
   shouldSendHsts,
@@ -85,6 +86,19 @@ test('security headers cover CSP, frame denial, referrer policy and permissions 
   assert.match(permissionsPolicy, /geolocation=\(\)/);
   assert.match(permissionsPolicy, /microphone=\(\)/);
   assert.strictEqual(res.get('strict-transport-security'), undefined);
+});
+
+test('JSON-API получает nosniff отдельным скупым набором, без CSP приложения', () => {
+  // Контур API — не HTML: CSP, шрифты и permissions-policy ему нечего описывать, а вот
+  // MIME-sniffing запретить обязательно (I-1). Проверяем и что лишнего не добавили.
+  const res = responseRecorder();
+  setApiHeaders(request(), res);
+
+  assert.strictEqual(res.get('x-content-type-options'), 'nosniff');
+  assert.strictEqual(res.get('x-frame-options'), 'DENY');
+  assert.strictEqual(res.get('referrer-policy'), 'no-referrer');
+  assert.strictEqual(res.get('content-security-policy'), undefined);
+  assert.strictEqual(res.get('permissions-policy'), undefined);
 });
 
 test('HSTS is emitted only when the request is effectively HTTPS', () => {

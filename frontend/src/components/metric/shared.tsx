@@ -14,6 +14,7 @@ import { setMetricRailHidden, useMetricRailHidden } from '@/lib/metricRail';
 // Реэкспорт: правило дельты живёт в своём лёгком модуле (см. comparisonDelta), но все прежние
 // импорты `from '@/components/metric/shared'` продолжают работать.
 import { ComparisonDelta } from '@/components/metric/comparisonDelta';
+import { SeriesLegend } from '@/components/metric/seriesLegend';
 import { isPlainLeftClick, useViewTransitionNavigate } from '@/lib/viewTransitionNavigate';
 
 export { ComparisonDelta };
@@ -200,16 +201,18 @@ export function RailSection({
     return (
       <section
         data-rail-card={mark}
-        className="rounded-2xl border border-border bg-card p-4 shadow-xs dark:border-white/6 sm:p-5"
+        // Тень и трекинг — те же, что у виджет-карточки (ChartSection): две разные карточные
+        // тени на одной странице читаются как две разные системы (аудит #554).
+        className="rounded-2xl border border-border bg-card p-4 shadow-[0_12px_32px_-30px_rgba(0,0,0,0.9)] dark:border-white/6 sm:p-5"
       >
-        <h3 className="text-xs font-medium tracking-wider text-muted-foreground">{title}</h3>
+        <h3 className="text-xs font-medium tracking-wide text-muted-foreground">{title}</h3>
         <div className="mt-3">{children}</div>
       </section>
     );
   }
   return (
     <section data-rail-card={mark} className="space-y-3">
-      <h3 className="flex items-center gap-3 text-xs font-medium tracking-wider text-muted-foreground">
+      <h3 className="flex items-center gap-3 text-xs font-medium tracking-wide text-muted-foreground">
         <span className="whitespace-nowrap">{title}</span>
         <span aria-hidden="true" className="h-px flex-1 bg-border" />
       </h3>
@@ -232,6 +235,56 @@ export function RailWindowTotal({ label, value }: { label: string; value: string
     <div>
       <div className="text-2xs tracking-wide text-muted-foreground">{label}</div>
       <KpiValue size="compact" text={value} className="mt-1 text-foreground" />
+    </div>
+  );
+}
+
+/**
+ * ЛЕГЕНДА СРАВНЕНИЯ В РЕЙЛЕ — «что с чем» одним взглядом (референс Square).
+ *
+ * Рейл печатал только имя базы и её число («прошлый период — 9.9k»): ДАТ обоих окон не было
+ * нигде, кроме тултипа графика, — то есть чтобы узнать, какая неделя сравнивается с какой,
+ * читатель обязан был навести курсор на точку. Границы при этом давно посчитаны (winFrom/winTo и
+ * comparisonWindow), они просто не доезжали до глаз.
+ *
+ * Маркеры берутся из ТОГО ЖЕ компонента, что рисует легенду над полотном: рейл и график не имеют
+ * права разойтись в том, каким штрихом нарисован «прошлый период». Подписи серий поэтому тоже
+ * чиповые («Пред. период»), а не прозаические («прошлый период»), — иначе один смысл звучит в
+ * двух регистрах на расстоянии 200px.
+ */
+export function RailComparison({
+  current,
+  comparison,
+  delta,
+  deltaFormat,
+  evaluative,
+  marker,
+}: {
+  /** Текущее окно: диапазон дат + итог (уже через fmt.*). ПОДПИСИ ЗДЕСЬ НЕТ НАМЕРЕННО — легенда
+      называет СЕРИЮ («Текущий период», дословно как над полотном), а окно называет заголовок
+      рейла выше. Пока подпись приходила от страницы, обе строки говорили одними словами, и в
+      колонке 300px их нечем было различить — strict-mode e2e поймал это дважды (TG и возвраты
+      МойСклада: `getByText(...)` находил два узла). */
+  current: { dates: string; value: string };
+  comparison: { label: string; dates: string; value: string };
+  delta?: number | null;
+  deltaFormat?: (abs: number) => string;
+  evaluative?: boolean;
+  /** Форма маркера = вид полотна страницы (столбцы рисуют свотчи, линия — штрих и пунктир).
+      `none` — где полотно призрак не рисует: маркер обещал бы серию, которой на графике нет. */
+  marker?: 'line' | 'bar' | 'none';
+}) {
+  return (
+    <div className="space-y-3">
+      <SeriesLegend
+        layout="rail"
+        marker={marker}
+        items={[
+          { role: 'primary', label: 'Текущий период', dates: current.dates, value: current.value },
+          { role: 'comparison', label: comparison.label, dates: comparison.dates, value: comparison.value },
+        ]}
+      />
+      {delta != null && <ComparisonDeltaRow delta={delta} format={deltaFormat} evaluative={evaluative} />}
     </div>
   );
 }

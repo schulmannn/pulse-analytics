@@ -1,5 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
+import { ExpandedChartHeightContext } from './ExpandableChart';
 import { RadialShare } from './RadialShare';
 import { ShareRows, ShareTrack } from './ShareRows';
 
@@ -98,6 +99,56 @@ describe('ShareRows — persistent value and percentage', () => {
     expect(html).toContain('aria-label="Доля —"');
     expect(text(html)).not.toContain('NaN');
     expect(html).toContain('width:0%');
+  });
+});
+
+describe('ShareRows — анатомия таблицы: шапка колонок и ранг', () => {
+  const geo = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({ key: `k${i}`, label: `Источник-${i + 1}`, value: 100 - i }));
+  const shownLabels = (html: string, rows: { label: string }[]) =>
+    rows.filter((r) => html.includes(`>${r.label}<`)).length;
+
+  it('называет колонки над списком — иначе правое число остаётся без единицы измерения', () => {
+    const html = markup(
+      <ShareRows
+        rows={geo(2)}
+        total={200}
+        tailWord="визитов"
+        columns={{ label: 'Источник', value: 'Визиты' }}
+      />,
+    );
+
+    expect(html).toContain('data-share-header');
+    expect(html).toContain('>Источник<');
+    expect(html).toContain('>Визиты<');
+  });
+
+  it('нумерует позиции ранжированного разреза', () => {
+    const html = markup(<ShareRows rows={geo(3)} total={300} tailWord="визитов" ranked expanded />);
+
+    // Номер стоит ПЕРВЫМ в колонке подписи: список сканируется сверху вниз, и «третье место»
+    // должно читаться без пересчёта строк глазами.
+    expect(html).toContain('>1<');
+    expect(html).toContain('>3<');
+  });
+
+  it('шапка занимает место в бюджете тайла, но не ценой строки данных', () => {
+    const rows = geo(8);
+    const columns = { label: 'Источник', value: 'Визиты' };
+    const at = (h: number, cols?: typeof columns) =>
+      markup(
+        <ExpandedChartHeightContext.Provider value={h}>
+          <ShareRows rows={rows} total={800} tailWord="визитов" columns={cols} />
+        </ExpandedChartHeightContext.Provider>,
+      );
+
+    // Высота тела тайла обязана вычитаться вместе с шапкой, иначе нижняя строка уезжает под кромку
+    // (N1). Но заголовок — мебель: имя измерения уже стоит в заголовке карточки, и менять восьмой
+    // источник на слово «Источник» — убыточный размен, поэтому в тесном тайле шапки нет.
+    expect(at(240, columns)).toContain('data-share-header');
+    expect(shownLabels(at(240, columns), rows)).toBe(shownLabels(at(240), rows));
+    expect(at(210, columns)).not.toContain('data-share-header');
+    expect(shownLabels(at(210, columns), rows)).toBe(shownLabels(at(210), rows));
   });
 });
 

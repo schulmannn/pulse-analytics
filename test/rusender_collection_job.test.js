@@ -116,6 +116,22 @@ test('campaignRow: без stats счётчики NULL, а не нули («ст�
   assert.equal(row.started_at, null);
 });
 
+test('campaignRow: неправдоподобный год (0001, 9999) → NULL, а не граница архива для окна «Всё»', () => {
+  const [row] = campaignRowsFromLists([baseCampaign({
+    startedAt: '0001-01-01T00:00:00.000Z',
+    finishedAt: '9999-12-31T23:59:59.000Z',
+    scheduledAt: '1970-01-01T00:00:00.000Z',
+    createdAt: '+100000-01-01T00:00:00.000Z',
+  })]);
+  assert.equal(row.started_at, null);
+  assert.equal(row.finished_at, null);
+  assert.equal(row.scheduled_at, null);
+  assert.equal(row.remote_created_at, null);
+  // Обычные даты — как были.
+  const [ok] = campaignRowsFromLists([baseCampaign()]);
+  assert.equal(ok.started_at, '2026-06-01T10:01:00.000Z');
+});
+
 // ── A/B: защита от двойного счёта ─────────────────────────────────────────────────────────────
 
 test('A/B: части семьи получают parent_id, база остаётся базой', () => {
@@ -208,6 +224,10 @@ test('дата активности приходит РУССКИМ формат
   assert.equal(dayOfActivity('32.13.2026'), null);
   assert.equal(dayOfActivity('не дата'), null);
   assert.equal(dayOfActivity(null), null);
+  // ISO тоже проверяется календарно и на правдоподобный год.
+  assert.equal(dayOfActivity('2026-02-30'), null);
+  assert.equal(dayOfActivity('0001-01-01'), null);
+  assert.equal(dayOfActivity('31.12.9999'), null);
 });
 
 test('РЕАЛЬНЫЙ ответ активности (рассылка 108243, прод) разбирается целиком', () => {

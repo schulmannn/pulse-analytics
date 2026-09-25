@@ -1,8 +1,10 @@
 import { useContext, type ReactNode } from 'react';
 import { KpiValue } from '@/components/chartWidget/KpiValue';
 import { DeltaPill } from '@/components/DeltaPill';
+import type { DeltaBasis } from '@/components/DeltaPill';
 import { ChartCardTitleContext, ChartExpandedContext } from '@/components/ExpandableChart';
 import { fmt } from '@/lib/format';
+import { useWidgetSize } from '@/lib/widgetSize';
 import type { MetricDelta } from '@/lib/delta';
 
 /** Мин/макс видимого окна для строки-сводки карточки. По умолчанию — регистр fmt.kpi (тот же,
@@ -28,6 +30,9 @@ export interface ChartCardBodyProps {
   label?: ReactNode;
   value: string;
   delta?: MetricDelta | null;
+  /** С чем сравнена `delta` — даты базы и её число. Герой-карточка — единственное место, где
+      пилюля стоит ОТДЕЛЬНОЙ строкой, а не рядом с числом, поэтому основание идёт своим пропом. */
+  deltaBasis?: DeltaBasis | null;
   /** Мин/макс окна под DeltaPill — вынос леджера разворота на лицо карточки (владелец
       2026-08-18, «hi/lo chrome»). Только ≥ md: структурная строка, мобильную вёрстку не меняем. */
   range?: RangeSummary | null;
@@ -39,6 +44,17 @@ export interface ChartCardBodyProps {
       одна в пустой строке над числом. Сиблинг кнопки, а не её содержимое — клик по ⓘ не должен
       уводить в разбор. */
   valueAdornment?: ReactNode;
+  /**
+   * ВТОРАЯ ВЕЛИЧИНА ГЕРОЯ (R8, референс Mercury Insights / Resend Metrics).
+   *
+   * Герой отвечает «сколько всего», а следующий вопрос читателя — «это много или мало за обычный
+   * день». Ответ жил только в тултипе графика, то есть был недоступен без мыши.
+   *
+   * Место у неё тесное, поэтому она уходит трижды: в S-карточке (`third`) — по выбору владельца,
+   * в узком слоте — по замеру самого слота (`tile-narrow:`), ниже `md` — потому что мобильная
+   * вёрстка этим ТЗ не трогается. Разметку и причину порядка см. в теле компонента.
+   */
+  secondary?: { label: string; value: string } | null;
   children: ReactNode;
 }
 
@@ -54,14 +70,21 @@ export function ChartCardBody({
   label,
   value,
   delta,
+  deltaBasis,
   range,
   caption,
   onValueClick,
   drillLabel,
   valueAdornment,
+  secondary,
   children,
 }: ChartCardBodyProps) {
   const expanded = useContext(ChartExpandedContext);
+  // Размер карточки, а не ширина экрана: `third` выбрал ВЛАДЕЛЕЦ, и тело подчиняется его выбору
+  // (см. lib/widgetSize). Контейнерный запрос `tile-narrow:` ниже — второй, независимый слой: он
+  // ловит узкий слот там, где размер формально half (колонка Главной уже колонки Обзора).
+  const size = useWidgetSize();
+  const showSecondary = secondary != null && size !== 'third';
   /* Подпись НЕ повторяет заголовок карточки. На IG-обзоре карточка называлась «Охват», и над
      числом стояла вторая подпись «Охват» (аудит #554, D8); это вторая серия одного дефекта — до
      неё так же дублировались «Просмотры». Если подпись — заголовок с хвостом окна («Охват · 30
@@ -104,7 +127,26 @@ export function ChartCardBody({
           />
           {valueAdornment}
         </div>
-        <DeltaPill delta={delta} />
+        <DeltaPill delta={delta} basis={deltaBasis} />
+        {showSecondary && (
+          // ПОД дельтой, а не в строке с главным числом (расхождение с буквой ТЗ — замер ниже).
+          //
+          // Референс (Mercury) ставит вторую цифру сбоку от первой, но там график лежит ПОД
+          // числами и во всю ширину карточки. У нас анатомия горизонтальная: колонка чисел
+          // `shrink-0`, график занимает остаток. Замер на демо, 1440, карточка 543px: строка с
+          // добавкой сбоку выросла со 159 до 331px, и полотно упало с 326 до 154px — вдвое, с
+          // потерей подписи оси. Отдельной строкой в той же колонке добавка (149px) уже́е строки
+          // «Мин · Макс» (159px) и не стоит графику ничего.
+          //
+          // Порядок «число → дельта → среднее» тоже не косметика: между числом и его дельтой
+          // нельзя вставлять второе число — «↑4.5%» прочиталось бы как дельта среднего.
+          <div data-chart-card-secondary className="hidden items-baseline gap-1.5 tile-narrow:hidden md:flex">
+            {/* morph={false}: барабан цифр (KpiNumber) — канон ГЕРОЙСКОГО числа (владелец
+                2026-08-18); два барабана в одной шапке дали бы два движения на один взгляд. */}
+            <KpiValue text={secondary.value} size="xs" morph={false} />
+            <span className="text-2xs text-muted-foreground">{secondary.label}</span>
+          </div>
+        )}
         {range != null && (
           <div
             data-chart-card-range

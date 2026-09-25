@@ -102,7 +102,7 @@ export function MentionNotifyDialog({ onClose }: { onClose: () => void }) {
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-lg gap-0 overflow-y-auto rounded-lg p-0 shadow-2xl">
+      <DialogContent className="max-w-lg gap-0 overflow-y-auto p-0">
         <header className="border-b border-border px-6 py-5 pr-12">
           <div>
             <DialogTitle className="pr-0 text-base leading-normal">Уведомления в Telegram</DialogTitle>
@@ -165,9 +165,9 @@ export function MentionNotifyDialog({ onClose }: { onClose: () => void }) {
                   )}
                   <p className="text-xs leading-5 text-muted-foreground">
                     {botUrl ? (
-                      <>Если чат не открылся сам — откройте ссылку выше и нажмите в боте <b>Start</b>. Ссылка действует 15 минут.</>
+                      <>Если чат не открылся сам — откройте ссылку выше и нажмите в боте <b className="font-medium text-foreground">Start</b>. Ссылка действует 15 минут.</>
                     ) : (
-                      <>Откроется чат с ботом — нажмите в нём <b>Start</b>. Ссылка действует 15 минут.</>
+                      <>Откроется чат с ботом — нажмите в нём <b className="font-medium text-foreground">Start</b>. Ссылка действует 15 минут.</>
                     )}
                     {linkOpened && ' Ждём подтверждение из Telegram…'}
                   </p>

@@ -7,24 +7,23 @@ import { BarChart } from '@/components/BarChart';
 import { PeriodChips } from '@/components/PeriodChips';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { SourceIdentity } from '@/components/SourceIdentity';
-import { EmptyState } from '@/components/EmptyState';
-import { ErrorState } from '@/components/ErrorState';
+import { RusenderErrorState } from '@/panels/rusender/RusenderErrorState';
 import { ChartSkeleton } from '@/components/ui/dataSkeleton';
 import {
-  ComparisonDeltaRow,
   MetricColumns,
   MetricDescriptor,
   MetricPageHeader,
+  RailComparison,
   RailSection,
   WindowBarShell,
 } from '@/components/metric/shared';
 import { useRusenderSummary, type RusenderPoint } from '@/api/rusender';
-import { useGatedSurfaces } from '@/components/layout/nav';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { useExplorerChartHeight } from '@/lib/useExplorerChartHeight';
 import { fmt, timeAxisFromDayKeys } from '@/lib/format';
 import { usePeriod } from '@/lib/period';
-import { msPreviousPeriod, useMsResolvedPeriod } from '@/lib/msPeriod';
+import { msPeriodBounds, msPreviousPeriod, useMsResolvedPeriod } from '@/lib/msPeriod';
+import { windowRangeLabel } from '@/lib/metricSeries';
 import { isRusenderMetricKey, type RusenderMetricKey } from '@/panels/rusender/rusenderMetricKeys';
 
 /**
@@ -129,37 +128,56 @@ export { isRusenderMetricKey };
 export function RusenderMetricPage({ metricKey }: { metricKey: RusenderMetricKey }) {
   const def = DEFS[metricKey];
   const { channelId } = useSelectedChannel();
-  const { rusenderSurfaces } = useGatedSurfaces();
   const { days, setDays, range, setRange } = usePeriod();
   const [kind, setKind] = useState<'line' | 'bar'>(def.viz);
   const chartH = useExplorerChartHeight();
 
   // Окно страницы — тот же резолвер, что у `/metrics/ms-*` и `/metrics/ym-*`.
   const period = useMsResolvedPeriod({ days, range });
-  const summary = useRusenderSummary(channelId, period, rusenderSurfaces);
+  const summary = useRusenderSummary(channelId, period);
 
   // Предыдущее РАВНОЕ окно — общий хелпер, а не своя арифметика дат. У «Всё» он честно отдаёт
   // null: у полного диапазона предшественника не существует.
   const prevWindow = useMemo(() => msPreviousPeriod(period), [period]);
+  // Границы окна и подпись этих границ обязаны приходить из ОДНОГО резолвера: посчитать даты
+  // легенды отдельной арифметикой значило бы завести второе правило окна.
+  const curBounds = useMemo(() => msPeriodBounds(period), [period]);
   const previous = useRusenderSummary(
     channelId,
     prevWindow ?? period,
-    rusenderSurfaces && prevWindow != null,
+    prevWindow != null,
   );
   // ГРАБЛИ prev-периода: при выключенном запросе ключ бы совпал с текущим окном и `.data` отдал
   // бы ТЕКУЩИЙ кэш — дельта вышла бы нулевой. Читаем только когда предыдущее окно существует.
   const prevData = prevWindow != null ? previous.data : undefined;
 
-  if (!rusenderSurfaces) {
-    return (
-      <EmptyState
-        title="Раздел ещё не включён"
-        reason="Метрика появится, когда числа Rusender сверены с живыми данными."
-        action={{ to: '/rusender', label: 'К обзору' }}
+  // Пикер окна — единственный выход из отказа по окну (явный диапазон шире 400 дней → «Всё»):
+  // окно этой страницы живёт в глобальном PeriodContext, а не в периоде ленты, так что сменить
+  // его больше негде. Поэтому шапка и «Окно» остаются на месте и при ошибке.
+  const windowBar = (
+    <WindowBarShell>
+      <PeriodChips
+        ariaLabel="Окно"
+        value={days}
+        onChange={setDays}
+        range={range}
+        onRangeChange={setRange}
       />
+    </WindowBarShell>
+  );
+
+  if (summary.isError) {
+    return (
+      <RusenderMetricShell
+        term={def.term}
+        descriptor={def.descriptor}
+        comparison={<p className="text-xs text-muted-foreground">Окно не загрузилось — сравнивать не с чем.</p>}
+      >
+        <RusenderErrorState query={summary} />
+        {windowBar}
+      </RusenderMetricShell>
     );
   }
-  if (summary.isError) return <ErrorState onRetry={() => void summary.refetch()} />;
 
   const series: RusenderPoint[] = summary.data?.series ?? [];
   const points = series.map((p) => def.pick(p));
@@ -203,14 +221,22 @@ export function RusenderMetricPage({ metricKey }: { metricKey: RusenderMetricKey
           </div>
           {days === 0 ? (
             <p className="text-xs text-muted-foreground">Для окна «Всё» прошлого периода не существует.</p>
-          ) : prev != null ? (
-            <div className="space-y-2 text-sm">
-              <div className="flex items-baseline justify-between gap-3">
-                <span className="text-xs text-muted-foreground">Пред. период</span>
-                <span className="tabular-nums">{fmt.kpi(prev)}</span>
-              </div>
-              {delta != null && <ComparisonDeltaRow delta={delta} />}
-            </div>
+          ) : prev != null && curBounds && prevWindow?.from && prevWindow.to ? (
+            /* Та же легенда, что над полотном: маркер + даты окна + итог. Без дат «Пред. период»
+               не отвечал, какое окно сравнивается с каким. */
+            <RailComparison
+              marker={kind === 'bar' ? 'bar' : 'line'}
+              current={{
+                dates: windowRangeLabel(curBounds),
+                value: cur != null ? fmt.kpi(cur) : '—',
+              }}
+              comparison={{
+                label: 'Пред. период',
+                dates: windowRangeLabel({ from: prevWindow.from, to: prevWindow.to }),
+                value: fmt.kpi(prev),
+              }}
+              delta={delta}
+            />
           ) : (
             <p className="text-xs text-muted-foreground">
               За прошлое окно данных нет — сравнивать не с чем. Архив копится с момента подключения.
@@ -281,15 +307,7 @@ export function RusenderMetricPage({ metricKey }: { metricKey: RusenderMetricKey
         )}
       </ChartWidget>
 
-      <WindowBarShell>
-        <PeriodChips
-          ariaLabel="Окно"
-          value={days}
-          onChange={setDays}
-          range={range}
-          onRangeChange={setRange}
-        />
-      </WindowBarShell>
+      {windowBar}
     </RusenderMetricShell>
   );
 }

@@ -1,4 +1,4 @@
-import { lttbDownsample } from '@/lib/downsample';
+import { CHART_MAX_POINTS, lttbDownsample } from '@/lib/downsample';
 import { freshness, latestDataMs } from '@/lib/freshness';
 import {
   DAY_MS,
@@ -7,7 +7,7 @@ import {
   comparisonWindow,
 } from '@/lib/metricSeries';
 import type { SeriesGrain } from '@/lib/metricSeries';
-import { CHART_MAX_POINTS, pickIndexes } from '@/lib/msSeries';
+import { pickIndexes } from '@/lib/msSeries';
 import type { NormalizedPost } from '@/lib/posts';
 import type { PostMetricField } from '@/lib/kpiDerive';
 import type { ComparisonConfig, ComparisonMode, WidgetConfig, WidgetGrain } from '@/lib/widgetConfig';

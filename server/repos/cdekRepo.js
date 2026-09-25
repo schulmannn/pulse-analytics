@@ -34,6 +34,27 @@ const IMPORT_COLS = `id, channel_id, uploaded_by, filename, file_sha256, status,
 // годовая выгрузка склада владельца — 1100 заказов, то есть три чанка.
 const CHUNK_ORDERS = 500;
 
+/**
+ * Сколько СЫРЫХ файлов держать на канал. Всё остальное — только отчёт: строка импорта, её числа
+ * и списки отвергнутого остаются навсегда, обнуляется лишь `file_bytes`.
+ *
+ * ПОЧЕМУ ВООБЩЕ ПОТОЛОК. Исходник кладётся в Postgres целиком, и до этого его ничто не удаляло:
+ * ни квоты, ни ретеншна, только общий лимитер. Считаем худший случай прежней схемы: потолок
+ * загрузки 2 МБ (routes/cdek), лимитер импорта 10 в час на пользователя — это 20 МБ в час,
+ * 480 МБ в сутки, ~14 ГБ в месяц НА ОДИН канал, и рост не останавливался никогда. Railway-план
+ * не даёт ни PITR, ни автоматических бэкапов, а том общий на всех арендаторов: это отказ в
+ * обслуживании соседям, доступный любому подтверждённому аккаунту (M-1, аудит #554).
+ *
+ * ПОЧЕМУ 10. Переигровка нужна, когда уточнились правила классификации строк — тогда архив
+ * пересобирается из исходников последних выгрузок; перевыгрузка с нахлёстом делает старые файлы
+ * избыточными (каждая новая содержит те же заказы). Эталонная ГОДОВАЯ выгрузка склада — 110 КБ,
+ * 1126 строк, так что десять поколений покрывают год ежемесячного цикла с запасом. Потолок
+ * умножается на потолок загрузки: 10 × 2 МБ = 20 МБ на канал в худшем случае вместо бесконечности,
+ * а с учётом MAX_CDEK_SOURCES (20) — 400 МБ на владельца. Число продуктовое: владелец вправе
+ * поставить другое, но оно обязано быть конечным.
+ */
+const IMPORT_FILES_KEPT = 10;
+
 function chunk(list, size) {
   const out = [];
   for (let i = 0; i < list.length; i += size) out.push(list.slice(i, i + size));
@@ -257,13 +278,45 @@ function createCdekRepo({ pool, enabled, transaction, ensureExternalSource, getA
     return rows[0] || null;
   }
 
-  /** Сырой файл для переигровки правил классификации. null = файл не сохранён (упавший импорт). */
+  /**
+   * Сырой файл для переигровки правил классификации. null = файла нет: импорт упал (тогда его
+   * обнулил failCdekImport) либо файл вышел за окно хранения (pruneCdekImportFiles).
+   */
   async function getCdekImportFile(channelId, id) {
     if (!enabled || !channelId || !id) return null;
     const { rows } = await pool.query(
       'SELECT filename, file_bytes FROM cdek_imports WHERE channel_id = $1 AND id = $2',
       [channelId, id]);
     return rows[0] && rows[0].file_bytes ? rows[0] : null;
+  }
+
+  /**
+   * Окно хранения сырых исходников канала: у всех импортов, кроме `keep` последних, `file_bytes`
+   * обнуляется. Отчёт не трогается — уходит только блоб, `has_file` честно становится false, а
+   * переигровка такого импорта отвечает понятным отказом вместо тишины.
+   *
+   * Порядок «последних» — тот же (created_at DESC, id DESC), что у listCdekImports: пользователь
+   * видит витрину в этом порядке, и хранение обязано совпадать с тем, что он считает свежим.
+   * Скоуп по channel_id стоит и в подзапросе, и в UPDATE: инвариант «любой tenant-write несёт
+   * channel_id» не делает исключения для служебной уборки — именно так и появляется первый
+   * межтенантный доступ.
+   *
+   * Зовётся ПОСЛЕ успешного импорта, best-effort: архив уже записан, и неудача уборки не повод
+   * отменять то, что пользователь загрузил.
+   */
+  async function pruneCdekImportFiles(channelId, { keep = IMPORT_FILES_KEPT } = {}) {
+    if (!enabled || !channelId) return 0;
+    const limit = Math.max(1, parseInt(keep, 10) || IMPORT_FILES_KEPT);
+    const { rowCount } = await pool.query(
+      `UPDATE cdek_imports SET file_bytes = NULL
+        WHERE channel_id = $1 AND file_bytes IS NOT NULL
+          AND id NOT IN (
+            SELECT id FROM cdek_imports
+             WHERE channel_id = $1 AND file_bytes IS NOT NULL
+             ORDER BY created_at DESC, id DESC
+             LIMIT $2)`,
+      [channelId, limit]);
+    return rowCount;
   }
 
   // ── Запись содержимого файла ────────────────────────────────────────────────────────────────
@@ -687,6 +740,7 @@ function createCdekRepo({ pool, enabled, transaction, ensureExternalSource, getA
     listCdekImports,
     getCdekImport,
     getCdekImportFile,
+    pruneCdekImportFiles,
     applyCdekImport,
     getCdekWarehouseFromOrders,
     getCdekSummaryForActor,
@@ -697,6 +751,7 @@ function createCdekRepo({ pool, enabled, transaction, ensureExternalSource, getA
     getCdekBoundsForActor,
     getCdekHourlyForActor,
     getCdekOrdersForActor,
+    CDEK_IMPORT_FILES_KEPT: IMPORT_FILES_KEPT,
     CDEK_BREAKDOWN_MAX_GROUPS: BREAKDOWN_MAX_GROUPS,
     CDEK_COVERAGE_MAX_DAYS: COVERAGE_MAX_DAYS,
     CDEK_ORDERS_MAX_ROWS: ORDERS_MAX_ROWS,

@@ -6,7 +6,7 @@ import { ChartBand } from '@/components/ChartBand';
 import { Link, useNavigate } from 'react-router-dom';
 import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
 import { observeSize } from '@/lib/observeSize';
-import { useMsFunnel, useMsReturns, useMsSummary } from '@/api/queries';
+import { useMsFunnel, useMsReturns, useMsSummary } from '@/api/ms';
 import { MsTopProductsCard } from '@/panels/sklad/MsTopProducts';
 import { MsStockCard } from '@/panels/sklad/MsStock';
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
@@ -22,24 +22,12 @@ import { RadialShare } from '@/components/RadialShare';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { Sparkline } from '@/components/Sparkline';
 import { pctDelta, type MetricDelta } from '@/lib/delta';
-import { lttbDownsample } from '@/lib/downsample';
+import { CHART_MAX_POINTS, lttbDownsample } from '@/lib/downsample';
 import { fmt, timeAxisFromDayKeys } from '@/lib/format';
 import { formatByRole, formatMoney } from '@/lib/metricNumber';
 import { usePagePeriod, useCardShowsPeriod } from '@/lib/period';
 import { msPreviousPeriod, useMsPagePeriod, type MsPeriod } from '@/lib/msPeriod';
-import {
-  aggregatePlotPoints,
-  bucketPoints,
-  densifyDayPoints,
-  fmtMetric,
-  metricTotal,
-  metricValue,
-  CHART_MAX_POINTS,
-  GRAIN_BUCKET_WORD,
-  type DayPoint,
-  type Grain,
-  type Metric,
-} from '@/lib/msSeries';
+import { aggregatePlotPoints, bucketPoints, densifyDayPoints, fmtMetric, metricTotal, metricValue, GRAIN_BUCKET_WORD, type DayPoint, type Grain, type Metric } from '@/lib/msSeries';
 
 /**
  * Обзор «МойСклада» — первый не-социальный источник. Все числа приходят СЕРВЕР-АГРЕГИРОВАННЫМИ
@@ -149,14 +137,32 @@ export function MsOverview() {
   }
 
   if (summary.isError) {
-    const status = (summary.error as { status?: number } | null)?.status;
-    if (status === 401) {
-      // Токен отозван на стороне МойСклада — честный reconnect-CTA вместо «недоступен».
+    const { status, code } = (summary.error as { status?: number; code?: string } | null) ?? {};
+    // Различаем по машинному коду, а не по статусу: 401 без кода — это наша истёкшая сессия (её
+    // уводит на /login lib/authRedirect), а не отзыв токена МойСклада.
+    if (code === 'ms_token_revoked') {
+      // Токен отозван на стороне МойСклада — честный reconnect-CTA вместо «недоступен». Замены
+      // токена у подключённого МойСклада на /connect нет (только «Отключить»), поэтому называем
+      // путь целиком; DELETE /api/ms/account сносит только учётку, архив ms_daily остаётся.
       return (
         <EmptyState
           title="Токен МойСклада отозван"
-          reason="Источник перестал принимать наш токен — создайте новый в МойСкладе и переподключите."
-          action={{ to: '/connect', label: 'Переподключить МойСклад' }}
+          reason="Источник перестал принимать наш токен — создайте новый в МойСкладе, затем на странице подключений отключите старый и вставьте новый. История продаж сохранится."
+          action={{ to: '/connect?source=moysklad', label: 'Переподключить МойСклад' }}
+        />
+      );
+    }
+    if (code === 'ms_forbidden') {
+      // 403 от МойСклада: токен жив, но сотруднику, чей он, не выданы права на отчёты. Переподключение
+      // тем же токеном ничего не изменит — называем настоящую причину и то, что дашборд читает
+      // (показатели продаж/заказов, заказы и возвраты покупателей, контрагенты, каналы продаж,
+      // отчёты прибыльности и остатков). Кнопки нет сознательно: у подключённого МойСклада на /connect нет замены токена
+      // (только «Отключить»), а права проверяются МойСкладом на каждом запросе — после их выдачи
+      // хватает обновить страницу.
+      return (
+        <EmptyState
+          title="Не хватает прав в МойСкладе"
+          reason="МойСклад не отдаёт показатели продаж и заказов сотруднику, чей токен подключён. Для дашборда ему нужен просмотр «Показателей», «Заказов покупателей», «Возвратов покупателей», «Контрагентов», «Каналов продаж», отчётов «Прибыльность» и «Остатки», а также право видеть себестоимость и прибыль. Выдайте права в карточке сотрудника в МойСкладе и обновите страницу — переподключать токен не нужно."
         />
       );
     }
@@ -164,9 +170,10 @@ export function MsOverview() {
       // Канал есть, а токена МойСклада на нём нет — честный onboarding вместо пустых карточек.
       return (
         <EmptyState
+          ghost="bars"
           title="МойСклад не подключён"
           reason="Укажите токен API — и здесь появятся выручка, заказы и топ товаров."
-          action={{ to: '/connect', label: 'Подключить МойСклад' }}
+          action={{ to: '/connect?source=moysklad', label: 'Подключить МойСклад' }}
         />
       );
     }
@@ -184,8 +191,8 @@ export function MsOverview() {
   // Канон графиков: длинные серии (окно «Всё» после лет архива ms_daily) даунсэмплятся до ~140
   // точек ПЕРЕД рендером — как в Charts/MsClients; labels/titles строятся из той же выборки,
   // чтобы тултипы совпадали с точками. Оконные 7/30/90 короче порога и проходят как есть.
-  const revSeries = lttbDownsample(revenue.series, 140, (p) => p.value);
-  const ordSeries = lttbDownsample(orders.series, 140, (p) => p.count);
+  const revSeries = lttbDownsample(revenue.series, CHART_MAX_POINTS, (p) => p.value);
+  const ordSeries = lttbDownsample(orders.series, CHART_MAX_POINTS, (p) => p.count);
   const revLabels = revSeries.map((p) => fmt.day(p.day));
   const revValues = revSeries.map((p) => p.value);
   const ordLabels = ordSeries.map((p) => fmt.day(p.day));
@@ -371,7 +378,7 @@ function MsReturnsCardBody({
     data.series.map((r) => ({ day: r.day, orders: r.count, sum: r.sum })),
     period,
   );
-  const sampled = lttbDownsample(dense, 140, (p) => p.orders);
+  const sampled = lttbDownsample(dense, CHART_MAX_POINTS, (p) => p.orders);
   const expanded = useContext(ChartExpandedContext);
   // Высоту svg считаем от ФАКТИЧЕСКОЙ высоты слота (паттерн band-измерения WidgetRenderer), а не
   // от бюджета «тело минус оценка шапки/сносок»: оценка расходилась с фактом на единицы px и

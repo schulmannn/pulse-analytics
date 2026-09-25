@@ -18,14 +18,22 @@ export interface KpiValueProps {
   /** Уже отформатированное значение: морф цифр делает KpiNumber, нечисловые строки снапаются. */
   text: string;
   /** `hero` — герой истории (44px); `compact` — вторая величина (30px); `small` — плотные
-   *  места, где 30px не помещается: центр кольца и ячейки леджера (24px). */
-  size?: 'hero' | 'compact' | 'small';
+   *  места, где 30px не помещается: центр кольца и ячейки леджера (24px); `xs` — полосы
+   *  из шести показателей в одной строке (18px, «Качество трафика» Метрики). */
+  size?: 'hero' | 'compact' | 'small' | 'xs';
   /** Клик по числу — тихий вход в разбор. Без него число остаётся текстом. */
   onDrill?: () => void;
   /** Имя метрики для читалки: «Разбор: …». */
   drillLabel?: string;
   /** Готовое имя кнопки, когда «Разбор: …» не подходит (например «Открыть страницу метрики»). */
   ariaLabel?: string;
+  /**
+   * Цифровой морф (KpiNumber) — канон для ГЕРОЙСКОГО числа карточки (решение владельца
+   * 2026-08-18). В плотной полосе из шести показателей он лишний: шесть барабанов цифр рядом —
+   * это шесть движений на одной строке и вшестеро больше текста в DOM. `morph={false}` оставляет
+   * РЕЦЕПТ в одном месте, но печатает число статично (аудит #554).
+   */
+  morph?: boolean;
   className?: string;
 }
 
@@ -36,15 +44,15 @@ export interface KpiValueProps {
  */
 const RECIPE = 'kpi-accent font-medium leading-[1.15] tabular-nums tracking-tight';
 
-export function KpiValue({ text, size = 'hero', onDrill, drillLabel, ariaLabel, className }: KpiValueProps) {
-  const SIZE = { hero: 'text-hero', compact: 'text-3xl', small: 'text-2xl' } as const;
+export function KpiValue({ text, size = 'hero', onDrill, drillLabel, ariaLabel, morph = true, className }: KpiValueProps) {
+  const SIZE = { hero: 'text-hero', compact: 'text-3xl', small: 'text-2xl', xs: 'text-lg' } as const;
   const classes = cn(RECIPE, SIZE[size], className);
   // Стабильный крюк для гейтов анатомии карточки (аудит #554, D9): по классам рецепта
   // цепляться нельзя — они здесь именно для того, чтобы меняться в одном месте.
   if (!onDrill)
     return (
       <div className={classes} data-kpi-value>
-        <KpiNumber text={text} />
+        {morph ? <KpiNumber text={text} /> : text}
       </div>
     );
   return (
@@ -59,7 +67,7 @@ export function KpiValue({ text, size = 'hero', onDrill, drillLabel, ariaLabel, 
         'rounded text-left transition-colors hover:text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40',
       )}
     >
-      <KpiNumber text={text} />
+      {morph ? <KpiNumber text={text} /> : text}
     </button>
   );
 }

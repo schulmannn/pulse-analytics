@@ -35,17 +35,17 @@ import { PivotTable } from '@/components/PivotTable';
 import { PostDetailModal } from '@/components/PostDetailModal';
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { lttbDownsample } from '@/lib/downsample';
-import { DAY_MS, alignGhost, baselineCoveredByPosts, bucketKeyOf, bucketKeysInWindow, comparisonWindow } from '@/lib/metricSeries';
+import { CHART_MAX_POINTS, lttbDownsample } from '@/lib/downsample';
+import { DAY_MS, alignGhost, baselineCoveredByPosts, bucketKeyOf, bucketKeysInWindow, comparisonWindow, windowRangeLabel } from '@/lib/metricSeries';
 import type { Grain } from '@/lib/metricSeries';
-import { CHART_MAX_POINTS, pickIndexes } from '@/lib/msSeries';
+import { pickIndexes } from '@/lib/msSeries';
 import { useExplorerChartHeight } from '@/lib/useExplorerChartHeight';
 import { splitDailyWindows } from '@/lib/delta';
 import { MediaThumb } from '@/components/MediaThumb';
 
 import { MetricRailToggle } from '@/components/metric/shared';
 import { useMetricRailHidden } from '@/lib/metricRail';
-import { ComparisonDeltaRow, MetricBackLink, MetricDescriptor, RailSection, RailWindowTotal } from '@/components/metric/shared';
+import { MetricBackLink, MetricDescriptor, RailComparison, RailSection, RailWindowTotal } from '@/components/metric/shared';
 
 /** Короткий день недели для тултипов дневной гранулы («чт, 2 июл») — артефакт v2. */
 const WEEKDAY_FMT = new Intl.DateTimeFormat('ru-RU', { weekday: 'short' });
@@ -1108,7 +1108,7 @@ export function MetricPage() {
               <header className="flex items-end justify-between gap-3 border-b border-border px-4 py-4 sm:px-5">
                 <div className="min-w-0">
                   <div className="text-2xs font-medium tracking-wide text-muted-foreground">Публикации</div>
-                  <h3 className="mt-1 truncate text-sm font-semibold tracking-tight text-foreground">
+                  <h3 className="mt-1 truncate text-sm font-medium tracking-tight text-foreground">
                     Топ постов по {CONTRIB_LABEL[metricKey] ?? 'метрике'}
                   </h3>
                 </div>
@@ -1161,7 +1161,7 @@ export function MetricPage() {
                             >
                               <span
                                 className={cn(
-                                  'flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-2xs font-semibold tabular-nums',
+                                  'flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-2xs font-medium tabular-nums',
                                   i === 0
                                     ? 'bg-primary text-primary-foreground'
                                     : i < 3
@@ -1197,7 +1197,7 @@ export function MetricPage() {
                                 </span>
                               </span>
                               <span className="min-w-15 shrink-0 text-right sm:min-w-0">
-                                <span className="block text-sm font-semibold tabular-nums text-foreground">
+                                <span className="block text-sm font-medium tabular-nums text-foreground">
                                   {fmt.short(value)}
                                 </span>
                                 {share > 0 && (
@@ -1241,8 +1241,12 @@ export function MetricPage() {
               подача была только здесь: IG, Метрика, Rusender и упоминания всегда рисовали рейл flat,
               и одна сущность в двух макетах читалась как две разные. */}
           <RailSection title="Сравнение" mark="comparison">
-            {/* Итог окна — доминанта рейла (hero переехал сюда после тихой шапки); разметка общая. */}
-            <RailWindowTotal label="Текущий период" value={meta.total} />
+            {/* Итог окна — доминанта рейла (hero переехал сюда после тихой шапки); разметка общая.
+                «Текущее окно», а не «Текущий период»: ниже стоит легенда, где «Текущий период» —
+                ИМЯ СЕРИИ (дословно как над полотном), и два разных смысла одними словами в 300px
+                колонке нечем различить — strict-mode e2e поймал ровно это. Заодно подпись сошлась
+                с пятью остальными вертикалями, которые всегда писали «Текущее окно». */}
+            <RailWindowTotal label="Текущее окно" value={meta.total} />
             {winFrom == null ? (
               <p className="mt-3 text-xs text-muted-foreground">Для окна «Всё» прошлого периода не существует.</p>
             ) : (
@@ -1259,16 +1263,19 @@ export function MetricPage() {
                 />
                 {cmp === 'off' ? (
                   <p className="text-xs text-muted-foreground">Выберите базу — серия сравнения, пары в рейтинге и Δ появятся автоматически.</p>
-                ) : compare ? (
-                  <div className="space-y-3">
-                    {/* Значение базы — вторичный вес; Δ — общая строка «Изменение» (одна на все
-                        вертикали): цветной ТЕКСТ без заливки, направление в глифе. */}
-                    <div className="flex items-baseline justify-between gap-3">
-                      <span className="text-xs text-muted-foreground">{cmpLabel}</span>
-                      <span className="text-base font-medium tabular-nums text-ink2">{compare.previous}</span>
-                    </div>
-                    {compareDelta != null && <ComparisonDeltaRow delta={compareDelta} />}
-                  </div>
+                ) : compare && baseWin ? (
+                  /* Обе серии названы ОДНОЙ легендой с графиком — с маркером и датами окна:
+                     без дат «Пред. период» не отвечал, какая неделя сравнивается с какой. */
+                  <RailComparison
+                    marker={chartType === 'bar' ? 'bar' : 'line'}
+                    current={{ dates: windowRangeLabel({ from: winFrom, to: winTo }), value: meta.total }}
+                    comparison={{
+                      label: CMP_CHIP[cmp],
+                      dates: windowRangeLabel(baseWin),
+                      value: compare.previous,
+                    }}
+                    delta={compareDelta}
+                  />
                 ) : (
                   <p className="text-xs text-muted-foreground">
                     В загруженных постах недостаточно данных за {cmpLabel} — сравнить не с чем.
@@ -1289,7 +1296,12 @@ export function MetricPage() {
                   { value: 'weekday' as Dim, label: 'День недели' },
                 ]}
               />
-              <Breakdown items={breakdownItems} />
+              {/* Имя левой колонки — выбранное измерение, правой — сама метрика: рейл висит
+                  сбоку от графика, и «Видео 12.4k» без шапки читается как что угодно. */}
+              <Breakdown
+                items={breakdownItems}
+                columns={{ label: dim === 'weekday' ? 'День недели' : 'Формат', value: def.label }}
+              />
             </RailSection>
           )}
 

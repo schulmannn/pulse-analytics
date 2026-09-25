@@ -2,8 +2,11 @@
 // useIgData hook gather raw API payloads and lean on this to shape them. Kept separate so the
 // "what the numbers mean" logic is testable and the panels stay presentational.
 import type { IgBreakdowns, IgHistoryRow, IgInsights, IgOnline, IgPost, IgStory } from '@/api/schemas';
-import { pctDelta, type MetricDelta } from '@/lib/delta';
+import { withShares } from '@/lib/breakdownShare';
+import { pctDelta, type MetricDelta, type WindowRange } from '@/lib/delta';
 import { fmt, timeAxisFromDayKeys } from '@/lib/format';
+import { windowRangeLabel } from '@/lib/metricSeries';
+import type { DeltaBasis } from '@/components/DeltaPill';
 
 export const DAY_MS = 24 * 60 * 60 * 1000;
 export const DAY_NAMES = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
@@ -129,6 +132,9 @@ export interface WindowPair {
   prev: number;
   hasCur: boolean;
   hasPrev: boolean;
+  /** Границы окна, давшего `prev` — для подписи «против 29 июл. – 4 авг.». `null` там, где они
+      НЕИЗВЕСТНЫ (агрегат сервера, см. `aggregatePair`): выдумать их значило бы солгать датами. */
+  prevRange?: WindowRange | null;
 }
 
 /** Sum a daily series over [startMs, endMs] vs the equal-length window right before it. Explicit
@@ -146,7 +152,9 @@ export function windowPair(series: Point[], startMs: number, endMs: number): Win
     if (t >= startMs) { cur += p.value; hasCur = true; }
     else if (t >= prevStart) { prev += p.value; hasPrev = true; }
   }
-  return { cur, prev, hasCur, hasPrev };
+  // Границы прошлого окна — те же, по которым только что просуммировано: подпись под дельтой
+  // обязана называть ровно этот интервал, а не пересчитанный где-то ещё.
+  return { cur, prev, hasCur, hasPrev, prevRange: { from: prevStart, to: startMs - 1 } };
 }
 
 /**
@@ -181,11 +189,25 @@ export function aggregatePair(insights: IgInsights | undefined, name: string): W
     prev: prev ?? 0,
     hasCur: cur != null && Number.isFinite(cur),
     hasPrev: prev != null && Number.isFinite(prev),
+    // ГРАНИЦ ЗДЕСЬ НЕТ, и вытащить их из полезной нагрузки НЕЛЬЗЯ: `end_time` прошлой точки —
+    // это СЕРЕДИНА окна (server/routes/ig.js: `prevSince + days/2`), синтетический якорь для
+    // рисования, а не его край. Подписать им границу значило бы промахнуться на пол-окна —
+    // ровно та ложь, против которой заведено само основание. Окно знает вызывающий (оно же
+    // задано параметром запроса) — он и проставляет `prevRange`.
+    prevRange: null,
   };
 }
 
 export const pairDelta = (p: WindowPair): MetricDelta | null =>
   p.hasCur && p.hasPrev ? pctDelta(p.cur, p.prev) : null;
+
+/** Основание дельты пары окон — даты прошлого окна и его значение тем же форматом, что число
+    карточки. `null`, когда прошлого окна нет ИЛИ его границы неизвестны: подпись без дат — это
+    прежнее «пред. период», от которого читателю не легче. */
+export const pairBasis = (p: WindowPair, format: (n: number) => string): DeltaBasis | null =>
+  p.hasCur && p.hasPrev && p.prevRange
+    ? { label: windowRangeLabel(p.prevRange), value: format(p.prev) }
+    : null;
 
 /** total_value breakdown reader → {label,value}[] for a metric+dimension. */
 export function tvBreakdown(
@@ -303,6 +325,14 @@ export interface OnlineAgg {
   grid: number[][];
   max: number;
   best: { w: number; h: number; v: number };
+  /**
+   * Второй конец шкалы — час, когда аудитории меньше всего. Считается ТОЛЬКО по ненулевым
+   * ячейкам: ноль в этой метрике неотличим от «Instagram не отдал этот час» (ради той же
+   * неотличимости существует `hasSignal` ниже), поэтому назвать нулевую ячейку затишьем — значит
+   * выдать пробел в данных за измерение. `null`, пока ненулевых ячеек меньше двух или минимум
+   * пришёлся на ту же ячейку, что и максимум: тогда шкалы нет и «тише всего» = «пик».
+   */
+  quiet: { w: number; h: number; v: number } | null;
   /** True only when the metric actually returned activity — the new API often returns empty hour
       maps, and without this guard the all-zero grid would still yield a bogus "best slot" (Пн 0:00). */
   hasSignal: boolean;
@@ -328,8 +358,20 @@ export function aggregateOnline(online: IgOnline | undefined): OnlineAgg {
   const grid = sum.map((row, w) => row.map((s, h) => (cnt[w][h] ? s / cnt[w][h] : 0)));
   const max = Math.max(1, ...grid.flat());
   let best = { w: -1, h: -1, v: -1 };
-  grid.forEach((row, w) => row.forEach((v, h) => { if (v > best.v) best = { w, h, v }; }));
-  return { dayValues, grid, max, best, hasSignal: best.v > 0 };
+  let quiet: OnlineAgg['quiet'] = null;
+  let liveCells = 0;
+  for (let w = 0; w < grid.length; w++) {
+    const row = grid[w];
+    for (let h = 0; h < row.length; h++) {
+      const v = row[h];
+      if (v > best.v) best = { w, h, v };
+      if (v <= 0) continue;
+      liveCells++;
+      if (quiet === null || v < quiet.v) quiet = { w, h, v };
+    }
+  }
+  if (quiet !== null && (liveCells < 2 || (quiet.w === best.w && quiet.h === best.h))) quiet = null;
+  return { dayValues, grid, max, best, quiet, hasSignal: best.v > 0 };
 }
 
 // ── hashtags ──
@@ -406,14 +448,92 @@ export interface IgBreakdownItem {
   display: string;
   /** Optional HSL fill (gender/format keep a stable hue across sorts). */
   color?: string;
+  /** Доля от полной суммы разреза — печатается ОТДЕЛЬНОЙ колонкой (см. components/Breakdown). */
+  share?: number;
+}
+
+/**
+ * Порог Instagram для `follower_demographics`: аккаунтам меньше этого размера Graph API
+ * демографию не отдаёт вовсе. Число вынесено константой, потому что его называют СРАЗУ НЕСКОЛЬКО
+ * поверхностей (четыре карточки «Демографии» и четыре страницы разбора /metrics/ig-*), а порог,
+ * разъехавшийся между ними, — это разные ответы на один вопрос «почему здесь пусто».
+ */
+export const IG_DEMOGRAPHICS_MIN_FOLLOWERS = 100;
+
+/**
+ * Пустая демография — это НЕ «нет данных за период».
+ *
+ * Разрез аудитории — снимок базы, окно на него не влияет вовсе, поэтому общий текст пустого
+ * графика отправлял владельца крутить период, который к делу не относится, и умалчивал
+ * единственную настоящую причину. Причина здесь известна заранее — значит, её называют.
+ */
+export const IG_DEMOGRAPHICS_EMPTY = {
+  title: 'Instagram не отдаёт демографию',
+  reason: `Нужно не меньше ${IG_DEMOGRAPHICS_MIN_FOLLOWERS} подписчиков; данные появляются через 1–2 дня после порога.`,
+} as const;
+
+/**
+ * Определения четырёх карточек «Демографии» для ⓘ.
+ *
+ * Через базовый InfoTooltip, а не MetricInfo: MetricInfo требует запись в реестре виджетов
+ * (lib/widgetMetrics), а у разрезов аудитории метрик-записей нет и заводить их ради подсказки
+ * значило бы вписать четыре снимка базы в реестр ПЕРИОДИЧЕСКИХ метрик.
+ *
+ * Каждый текст отвечает на вопрос, который карточка сама задаёт числами: от чего считается доля.
+ * У возраста и стран знаменатели РАЗНЫЕ (подписчики против всех стран рейтинга) — молчание об
+ * этом и есть источник вопроса «почему не сходится в 100%».
+ */
+export const IG_AUDIENCE_INFO = {
+  age: {
+    title: 'Возраст',
+    text: 'Доли возрастных групп среди подписчиков. Instagram отдаёт только крупные сегменты, поэтому сумма меньше 100%.',
+  },
+  gender: {
+    title: 'Пол',
+    text: 'Доли по полу среди подписчиков; «Не указан» — аккаунты без пола в профиле.',
+  },
+  countries: {
+    title: 'Топ стран',
+    text: 'Страны подписчиков по числу аккаунтов; доля — от всех стран, а не от показанных.',
+  },
+  cities: {
+    title: 'Топ городов',
+    text: 'Города подписчиков; доля — от всех городов, а не от показанных.',
+  },
+} as const;
+
+/**
+ * Демография считается ПОЛНОЙ с этого порога: округление и хвост мелких сегментов дают законный
+ * недобор в пару процентов, и оговорка про него была бы шумом.
+ */
+export const IG_COVERAGE_FULL = 0.98;
+
+/**
+ * Какую долю базы Instagram вообще расписал по возрастным группам — или `null`, если говорить не о
+ * чем (база неизвестна, либо демография покрывает её целиком).
+ *
+ * Дробь и порог живут ЗДЕСЬ, а не на двух поверхностях порознь: карточку «Возраст» и страницу
+ * /metrics/ig-age читает один и тот же владелец, и разъехавшийся порог «когда молчать» дал бы
+ * оговорку в одном месте и тишину в другом при одних и тех же числах.
+ */
+export function igDemographicsCoverage(ageItems: IgBreakdownItem[], followers: number): number | null {
+  const covered = ageItems.reduce((acc, item) => acc + item.value, 0);
+  if (followers <= 0 || covered <= 0) return null;
+  const coverage = covered / followers;
+  return coverage < IG_COVERAGE_FULL ? coverage : null;
 }
 
 /** Возраст — buckets in AGE_ORDER (histogram order), dropping segments Instagram didn't return. */
 export function igAgeItems(breakdowns: IgBreakdowns | undefined): IgBreakdownItem[] {
   const raw = tvBreakdown(breakdowns?.data, 'follower_demographics', 'age');
-  return AGE_ORDER.map((bucket) => raw.find((a) => a.label === bucket))
-    .filter((a): a is { label: string; value: number } => !!a)
-    .map((a) => ({ label: a.label, value: a.value, display: fmt.short(a.value) }));
+  // Доля живёт ЗДЕСЬ, а не в карточке: карточка и её страница разбора (/metrics/ig-age) читают
+  // один и тот же список, поэтому один и тот же процент. Пока склейку собирала карточка, она
+  // печатала «71.0%» мимо formatShare, а на странице доли не было вовсе.
+  return withShares(
+    AGE_ORDER.map((bucket) => raw.find((a) => a.label === bucket))
+      .filter((a): a is { label: string; value: number } => !!a)
+      .map((a) => ({ label: a.label, value: a.value, display: fmt.short(a.value) })),
+  );
 }
 
 /** Пол — ranked high→low, each slice keeping its categorical hue. */
@@ -430,16 +550,22 @@ export function igGenderItems(breakdowns: IgBreakdowns | undefined): IgBreakdown
 
 /** Страны — full ranked list, localized country name (card slices a top-N preview). */
 export function igCountryItems(breakdowns: IgBreakdowns | undefined): IgBreakdownItem[] {
-  return tvBreakdown(breakdowns?.data, 'follower_demographics', 'country')
-    .sort((a, b) => b.value - a.value)
-    .map((c) => ({ label: countryName(c.label), value: c.value, display: fmt.short(c.value) }));
+  // withShares — до среза топ-N у карточки: доля считается от ПОЛНОГО рейтинга, иначе показанная
+  // восьмёрка отчиталась бы за 100% аудитории, а хвост исчез бы (см. lib/breakdownShare).
+  return withShares(
+    tvBreakdown(breakdowns?.data, 'follower_demographics', 'country')
+      .sort((a, b) => b.value - a.value)
+      .map((c) => ({ label: countryName(c.label), value: c.value, display: fmt.short(c.value) })),
+  );
 }
 
 /** Города — full ranked list, localized city name (card slices a top-N preview). */
 export function igCityItems(breakdowns: IgBreakdowns | undefined): IgBreakdownItem[] {
-  return tvBreakdown(breakdowns?.data, 'follower_demographics', 'city')
-    .sort((a, b) => b.value - a.value)
-    .map((c) => ({ label: cityName(c.label), value: c.value, display: fmt.short(c.value) }));
+  return withShares(
+    tvBreakdown(breakdowns?.data, 'follower_demographics', 'city')
+      .sort((a, b) => b.value - a.value)
+      .map((c) => ({ label: cityName(c.label), value: c.value, display: fmt.short(c.value) })),
+  );
 }
 
 /** Вовлечённость по форматам — account total_interactions by media_product_type, ranked high→low. */

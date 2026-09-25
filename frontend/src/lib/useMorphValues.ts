@@ -1,7 +1,7 @@
+import { CHART_MAX_POINTS } from '@/lib/downsample';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { easeChartMorph, resampleSeries } from '@/lib/chartMorph';
 import { prefersReducedMotion, readMorphMs } from '@/lib/chartMotionRuntime';
-import { CHART_MAX_POINTS } from '@/lib/msSeries';
 
 /**
  * VALUE-space UPDATE morph for charts whose geometry is a pure function of a numeric series — bar

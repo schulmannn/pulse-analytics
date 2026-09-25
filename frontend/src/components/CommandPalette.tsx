@@ -116,7 +116,7 @@ function PaletteDialog({ close }: { close: () => void }) {
   const routeCommands: PaletteCommand[] = [
     // Фичефлаги разделов — из того же bootstrap-ответа /api/auth/me, что читает нав: иначе
     // палитра предлагала бы переход в раздел, скрытый гейтом.
-    ...buildNetworkRouteCommands(channels, { rusenderSurfaces: !!me.data?.rusender_surfaces }),
+    ...buildNetworkRouteCommands(channels),
     // Подразделы ТГ (Кампании + вкладки аналитики) — сразу за плоскими разделами сети: реестр их
     // не описывает, а без палитры до них добираются только кликом внутри страницы.
     ...buildTgSectionCommands(channels),

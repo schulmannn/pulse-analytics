@@ -172,8 +172,13 @@ export function IgConnectPanel() {
               </svg>
             </span>
             <div>
+              {/* Заголовок называет СВОЮ причину, а не режим: «Демо-режим» уже объявлен глобальным
+                  баннером оболочки (DashboardLayout.DemoBanner) — на IG-страницах два одинаковых
+                  заголовка шли подряд (аудит #554, D18). Панель к тому же поднимается по `isMock`,
+                  то есть и у реального пользователя без подключённого Instagram — для него слово
+                  «демо-режим» было просто неправдой. Честность цифр остаётся на чипе рядом. */}
               <div className="flex items-center gap-2">
-                <h3 className="text-sm font-medium text-foreground">Демо-режим</h3>
+                <h3 className="text-sm font-medium text-foreground">Instagram не подключён</h3>
                 <span className="rounded-full bg-status-warn/15 px-1.5 py-0.5 text-2xs font-medium text-status-warn">
                   примерные данные
                 </span>

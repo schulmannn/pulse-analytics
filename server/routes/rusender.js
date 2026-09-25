@@ -1,6 +1,7 @@
 'use strict';
 
 const { hasWorkspaceRole, tenantChannelId } = require('../middleware/tenant');
+const { makeResolveSourceChannel } = require('./sourceRouteKit');
 
 /**
  * Роуты Rusender (/api/rusender/{connect,status,account}) — серверная половина источника
@@ -33,38 +34,71 @@ const REQUIRED_SCOPES = Object.freeze([
 // записи ценой запросов. 0 = «Всё» (от границ архива). Не-enum → дефолт 30.
 const DAYS_ALLOWED = [0, 7, 30, 90];
 
-/** Строгий day-ключ. Кривая строка иначе уехала бы в SQL как ::date (канон dayOf). */
-const isDayKey = (v) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v);
+// Потолок ШИРИНЫ явного окна from/to. Серии обзора ПЛОТНЫЕ: generate_series материализует строку
+// на КАЖДЫЙ день окна, и без потолка `from=1000-01-01&to=9999-12-31` — это миллионы строк и
+// гигабайт памяти единственной web-реплики на один запрос. 400 дней — тот же потолок, что у
+// Метрики (YM_RANGE_MAX_DAYS в routes/metrika.js, канон дневных окон бэка): год с запасом на
+// сдвиг к прошлому равному окну. Историю целиком показывает «Всё» (days=0 БЕЗ from/to) — оно
+// идёт от границ архива и этим потолком не ограничено.
+const RANGE_MAX_DAYS = 400;
+
+/**
+ * Строгий day-ключ: формат И настоящая дата календаря (зеркало isDayKey Метрики/МС). Одного
+ * регэкспа мало: `2026-02-31` проходил его и ронял запрос 500-кой на `::date`.
+ */
+const isDayKey = (v) => {
+  if (typeof v !== 'string') return false;
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v);
+  if (!match) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  return parsed.getUTCFullYear() === year && parsed.getUTCMonth() === month - 1 && parsed.getUTCDate() === day;
+};
+
+/** Инклюзивная ширина окна в днях. Полдень UTC — DST-безопасно (канон rangeDays Метрики). */
+const rangeDays = (from, to) =>
+  Math.round((Date.parse(`${to}T12:00:00Z`) - Date.parse(`${from}T12:00:00Z`)) / 86400000) + 1;
+
+/**
+ * Явный диапазон ?from&to. Разбирается ДО резолва канала (канон parseMsPeriod/parseYmPeriod).
+ * Возвращает:
+ *   null               — диапазона нет, окно строится из days;
+ *   { invalid, error } — кривой, перевёрнутый или шире потолка: честный 400 (error несёт причину
+ *                        «слишком широкий»), а не тихий откат на days и не 500 от ::date;
+ *   { from, to }       — инклюзивные границы окна.
+ */
+function parseRange(query = {}) {
+  const rawFrom = query.from;
+  const rawTo = query.to;
+  if (rawFrom == null && rawTo == null) return null;
+  if (!isDayKey(rawFrom) || !isDayKey(rawTo) || rawFrom > rawTo) return { invalid: true };
+  if (rangeDays(rawFrom, rawTo) > RANGE_MAX_DAYS) {
+    return {
+      invalid: true,
+      error: `Слишком широкий диапазон дат: максимум ${RANGE_MAX_DAYS} дней. Для всей истории выберите период «Всё»`,
+    };
+  }
+  return { invalid: false, from: rawFrom, to: rawTo };
+}
+
+/** Единый 400 периода — та же форма ({ error }) и те же тексты, что у Метрики. */
+const badRange = (res, range) =>
+  res.status(400).json({
+    error: range?.error || 'Некорректный диапазон дат (ожидается from<=to в формате YYYY-MM-DD)',
+  });
 
 function registerRusenderRoutes({
-  app, requireAuth, db, audit, rusenderCrypto, rusenderFetch, surfacesEnabled = false, log,
+  app, requireAuth, db, audit, rusenderCrypto, rusenderFetch, log,
 }) {
-  /**
-   * Канал + учётка Rusender для запроса. Порядок проверок — канон resolveYm/resolveMs:
-   * БД → ключ шифрования → канал/учётка. `optional` — для status/disconnect, которым 404
-   * на отсутствующей учётке не нужен.
-   */
-  async function resolveRusenderChannel(req, res, { optional = false } = {}) {
-    const wanted = tenantChannelId(req);
-    const channel = await db.getChannelOrDefault(wanted, req.user).catch(() => null);
-    if (!channel) {
-      // Явно запрошенный чужой канал — 403; отсутствие подключения вообще — 404.
-      if (wanted) {
-        res.status(403).json({ error: 'Нет доступа к этому каналу' });
-        return null;
-      }
-      if (optional) return { channel: null, acc: null };
-      res.status(404).json({ error: 'Rusender не подключён к этому каналу' });
-      return null;
-    }
-    const acc = await db.getRusenderAccount(channel.id).catch(() => null);
-    if (!acc || !acc.api_key_enc) {
-      if (optional) return { channel, acc: null };
-      res.status(404).json({ error: 'Rusender не подключён к этому каналу' });
-      return null;
-    }
-    return { channel, acc };
-  }
+  // Канал + учётка Rusender: общий резолв источников (routes/sourceRouteKit).
+  const resolveRusenderChannel = makeResolveSourceChannel({
+    db,
+    getAccount: (id) => db.getRusenderAccount(id),
+    secretField: 'api_key_enc',
+    notConnected: 'Rusender не подключён к этому каналу',
+  });
 
   /** Каких обязательных разрешений не хватает ключу. Пустой массив = всё на месте. */
   function missingScopes(scopes) {
@@ -189,9 +223,6 @@ function registerRusenderRoutes({
         channel_id: resolved.channel ? resolved.channel.id : null,
         account_email: acc ? acc.account_email || null : null,
         account_id: acc ? acc.account_id || null : null,
-        // Фичефлаг витрин эхом: экран источника рисует либо дашборд, либо честное «поверхности
-        // ещё выключены», а не пустые оси, которые читались бы как «рассылок нет».
-        surfaces: !!surfacesEnabled,
         scopes: acc && Array.isArray(acc.scopes) ? acc.scopes : [],
         // Разрешения могли отозвать уже ПОСЛЕ подключения — показываем это на экране источника,
         // а не оставляем пользователя гадать, почему обзор перестал наполняться.
@@ -230,18 +261,8 @@ function registerRusenderRoutes({
     }
   });
 
-  // ── Витрины (за фичефлагом RUSENDER_SURFACES) ─────────────────────────────────────────────
-  // Пока флаг выключен, роутов ДЛЯ КЛИЕНТА не существует: 404, а не 403 и не пустой ответ.
-  // Пустой ответ выключенной поверхности неотличим от «данных нет» и врал бы дважды —
-  // и пользователю, и нам самим при отладке.
-  function surfaceGate(res) {
-    if (surfacesEnabled) return true;
-    res.status(404).json({ error: 'Витрины Rusender ещё не включены' });
-    return false;
-  }
-
   /** Окно периода: days из узкого enum → [from..to] в зоне источника. 0 = «Всё» (из архива). */
-  async function windowOf(req, channelId, actor) {
+  async function windowOf(req, channelId, actor, range) {
     const n = parseInt(req.query.days, 10);
     const days = DAYS_ALLOWED.includes(n) ? n : 30;
     const tz = 'Europe/Moscow';
@@ -249,13 +270,9 @@ function registerRusenderRoutes({
     const fmt = (d) => d.toISOString().slice(0, 10);
     // ЯВНОЕ окно from/to старше days. Нужно странице метрики: сравнение с предыдущим равным
     // окном делается ВТОРЫМ запросом (канон YmOverview/MsOverview — два запроса, а не один
-    // совмещённый ответ), и это окно клиент считает сам. Принимаем только строгие day-ключи и
-    // только from ≤ to: иначе кривой параметр уехал бы в SQL как ::date.
-    const rawFrom = typeof req.query.from === 'string' ? req.query.from : '';
-    const rawTo = typeof req.query.to === 'string' ? req.query.to : '';
-    if (isDayKey(rawFrom) && isDayKey(rawTo) && rawFrom <= rawTo) {
-      return { days, tz, from: rawFrom, to: rawTo };
-    }
+    // совмещённый ответ), и это окно клиент считает сам. Сюда оно приходит уже проверенным
+    // parseRange (строгие day-ключи, from ≤ to, не шире RANGE_MAX_DAYS) ДО резолва канала.
+    if (range) return { days, tz, from: range.from, to: range.to };
     if (days === 0) {
       // «Всё» — от границ архива. Пустой архив (сбор ещё не проходил) честно отдаёт null-окно:
       // витрина покажет «данные собираются», а не диапазон, которого нет.
@@ -276,11 +293,12 @@ function registerRusenderRoutes({
    */
   app.get('/api/rusender/summary', requireAuth, async (req, res, next) => {
     try {
-      if (!surfaceGate(res)) return;
+      const range = parseRange(req.query);
+      if (range?.invalid) return badRange(res, range);
       const resolved = await resolveRusenderChannel(req, res);
       if (!resolved) return;
       const channelId = resolved.channel.id;
-      const win = await windowOf(req, channelId, req.user);
+      const win = await windowOf(req, channelId, req.user, range);
       const [summary, series, bounds] = await Promise.all([
         db.getRusenderSummaryForActor(channelId, req.user, { from: win.from, to: win.to, tz: win.tz }),
         win.from
@@ -297,11 +315,12 @@ function registerRusenderRoutes({
   /** GET /api/rusender/campaigns — лента рассылок окна (по умолчанию только базовые, см. 040). */
   app.get('/api/rusender/campaigns', requireAuth, async (req, res, next) => {
     try {
-      if (!surfaceGate(res)) return;
+      const range = parseRange(req.query);
+      if (range?.invalid) return badRange(res, range);
       const resolved = await resolveRusenderChannel(req, res);
       if (!resolved) return;
       const channelId = resolved.channel.id;
-      const win = await windowOf(req, channelId, req.user);
+      const win = await windowOf(req, channelId, req.user, range);
       const status = typeof req.query.status === 'string' && req.query.status
         ? req.query.status.split(',').map((s) => s.trim()).filter(Boolean).slice(0, 10)
         : null;
@@ -323,7 +342,6 @@ function registerRusenderRoutes({
   /** GET /api/rusender/campaign/:id — одна рассылка: итоги, дневная кривая и части семьи. */
   app.get('/api/rusender/campaign/:id', requireAuth, async (req, res, next) => {
     try {
-      if (!surfaceGate(res)) return;
       const resolved = await resolveRusenderChannel(req, res);
       if (!resolved) return;
       const id = Number.parseInt(req.params.id, 10);
@@ -347,7 +365,12 @@ function registerRusenderRoutes({
    * НЕ за фичефлагом витрин — и это осознанно: именно этим ответом решают, ВКЛЮЧАТЬ ли флаг.
    * Спрятать диагностику за тем самым флагом, который она помогает открыть, значит замкнуть круг.
    * Гейт здесь другой и достаточный: admin воркспейса, потому что это отладочная поверхность,
-   * а не продуктовая. Уедет, когда числа сверены.
+   * а не продуктовая.
+   *
+   * Отладочный `?raw=<campaignId>` — сырое проксирование ответа апстрима — снят: он существовал,
+   * чтобы отличить баг парсинга от ограниченного окна активности Rusender, и вопрос закрыт
+   * замером 3/3 (#546: активность живёт 11 дней от отправки, ряд честно пуст). Сама сводка
+   * остаётся: она считается по АРХИВУ и ключа не трогает.
    */
   app.get('/api/rusender/diagnostics', requireAuth, async (req, res, next) => {
     try {
@@ -358,43 +381,6 @@ function registerRusenderRoutes({
       }
       const out = await db.getRusenderDiagnosticsForActor(resolved.channel.id, req.user);
       if (!out) return res.status(404).json({ error: 'Нет данных' });
-
-      /**
-       * `?raw=<campaignId>` — СЫРОЙ ответ апстрима по дневной активности одной рассылки.
-       *
-       * Понадобилось по факту: первый же прод-проход дал activity_rows=0 при непустых итогах
-       * (134 открытия), и по архиву НЕЛЬЗЯ различить две причины с разными выводами — форма
-       * ответа разошлась со спекой (баг парсинга, чинится) либо у Rusender ограничено окно
-       * активности (ряд честно пуст, и дневной поток наполнится только с новых рассылок).
-       *
-       * Отдаём тело КАК ЕСТЬ и усечённым: это отладка формы, а не витрина. Ключ сюда не
-       * попадает по построению (rusenderClient держит его только в заголовке). Уедет вместе с
-       * остальной диагностикой, когда числа сверены.
-       */
-      const rawId = Number.parseInt(String(req.query.raw || ''), 10);
-      if (Number.isFinite(rawId) && rawId > 0) {
-        let apiKey;
-        try {
-          apiKey = rusenderCrypto.decrypt(resolved.acc.api_key_enc);
-        } catch {
-          return res.json({ ...out, raw: { error: 'Не удалось прочитать сохранённый ключ' } });
-        }
-        const probe = async (path) => {
-          try {
-            const r = await rusenderFetch(apiKey, path);
-            return { path, ok: true, meta: r.meta, data: JSON.stringify(r.data).slice(0, 2000) };
-          } catch (e) {
-            return { path, ok: false, status: (e && e.status) || 0, message: (e && e.message) || '' };
-          }
-        };
-        // Два запроса: сама активность и рассылка по id. Второй нужен, чтобы отличить «эта
-        // рассылка вообще недоступна ключу» от «активности у неё нет».
-        const raw = await Promise.all([
-          probe(`/v1/public/campaigns/${rawId}/activity`),
-          probe(`/v1/public/campaigns/${rawId}?withStats=true`),
-        ]);
-        return res.json({ ...out, raw });
-      }
       res.json(out);
     } catch (e) {
       next(e);
@@ -402,4 +388,4 @@ function registerRusenderRoutes({
   });
 }
 
-module.exports = { registerRusenderRoutes, REQUIRED_SCOPES, DAYS_ALLOWED };
+module.exports = { registerRusenderRoutes, REQUIRED_SCOPES, DAYS_ALLOWED, RANGE_MAX_DAYS };

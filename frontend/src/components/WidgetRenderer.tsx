@@ -13,11 +13,12 @@ import { RadialGauge } from '@/components/RadialGauge';
 import { observeSize } from '@/lib/observeSize';
 import { MetricExplainTooltip } from '@/components/MetricExplain';
 import { EmptyState } from '@/components/EmptyState';
+import type { EmptyGhost } from '@/components/EmptyGhost';
 import { ChartSkeleton } from '@/components/ui/dataSkeleton';
 import { pluralRu } from '@/lib/resolveWidgetMetric';
 import { networkDisplayName } from '@/lib/networks';
 import type { WidgetMeta, WidgetResult } from '@/lib/resolveWidgetMetric';
-import type { WidgetViz } from '@/lib/widgetMetrics';
+import { getMetric, type WidgetViz } from '@/lib/widgetMetrics';
 import { breakdownTitles, effectiveViz, seriesStats, seriesToChart } from '@/lib/widgetRender';
 import { KpiValue } from '@/components/chartWidget/KpiValue';
 
@@ -30,6 +31,24 @@ export function WidgetSkeleton({ viz }: { viz: WidgetViz }) {
   // Value/series vizzes lead with a hero number; breakdowns (donut/list) lead with the chart itself.
   const heroLed = viz === 'kpi' || viz === 'line' || viz === 'bar';
   return <ChartSkeleton headline={heroLed} />;
+}
+
+/**
+ * Силуэт пустой карточки — по ЗАЯВЛЕННОЙ визуализации, а не по `effectiveViz`.
+ *
+ * ГРАБЛЯ: `effectiveViz` подбирает вид по ФОРМЕ ПРИШЕДШИХ ДАННЫХ, а у пустого результата нет ни
+ * серии, ни разбивки — он схлопнул бы КАЖДУЮ пустую карточку в `kpi`, и призрак потерял бы ровно
+ * то, ради чего он есть: обещание конкретной формы. Обещание карточки — это её конфиг.
+ *
+ * `kpi` силуэта не получает осознанно: у числа нет формы, а рисовать под ним чужую — врать.
+ */
+function ghostForViz(viz: WidgetViz): EmptyGhost | undefined {
+  if (viz === 'line') return 'line';
+  if (viz === 'bar' || viz === 'ledger') return 'bars';
+  if (viz === 'donut') return 'ring';
+  if (viz === 'kpi') return undefined;
+  // list / rank / pivot / table — все проекции строками.
+  return 'rows';
 }
 
 /**
@@ -86,6 +105,7 @@ export function WidgetRenderer({
       <div className="flex h-full min-h-24 flex-col items-center justify-center gap-2 px-3 text-center">
         <EmptyState
           compact
+          ghost={ghostForViz(viz)}
           title="Нет данных за период"
           reason="Попробуйте другой период или источник."
           className="h-auto min-h-0 py-0"
@@ -391,7 +411,17 @@ function WidgetChart({ result, eff, onDrill, expanded = false }: { result: Widge
     );
   }
   if (eff === 'list') {
-    return <Breakdown items={result.breakdown ?? []} />;
+    // Имя колонки значения — из определения метрики: конфиг-виджет собирается пользователем, и
+    // единственное, что о числах известно рендеру, — какую метрику он показывает. Измерение
+    // разбивки у таких метрик встроено в саму метрику и отдельного имени не имеет, поэтому левая
+    // колонка называется нейтрально — иначе пришлось бы врать конкретикой.
+    const valueLabel = getMetric(result.metricId)?.label;
+    return (
+      <Breakdown
+        items={result.breakdown ?? []}
+        columns={valueLabel ? { label: 'Категория', value: valueLabel } : undefined}
+      />
+    );
   }
   // KPI cards keep the same quiet, axis-free story language as the curated Overview. The expanded
   // explorer still needs the full report chart (axes + point interaction), so only the card face

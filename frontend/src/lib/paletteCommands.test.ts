@@ -81,14 +81,16 @@ describe('buildNetworkRouteCommands', () => {
     expect(buildNetworkRouteCommands([YM]).map((c) => c.path)).toEqual(['/metrika']);
   });
 
-  it('разделы за фичефлагом не предлагаются, пока флаг выключен', () => {
-    // Гейт, закрытый только в наве, — это спрятанная дверь с работающей ручкой: палитра увела бы
-    // пользователя в раздел, которого для него ещё нет.
+  it('палитра предлагает все разделы источника — гейта разделов больше нет', () => {
+    // Раньше «Рассылки» и «База» стояли за фичефлагом, и палитра обязана была его уважать: гейт,
+    // закрытый только в наве, — спрятанная дверь с работающей ручкой. Флаг снят вместе с
+    // машинерией; пришпилено то, что должно остаться: маршруты источника предлагаются все.
     const RUSENDER = { id: 30, source: 'rusender' } as PaletteChannel;
-    const off = buildNetworkRouteCommands([RUSENDER]).map((c) => c.path);
-    expect(off).toEqual(['/rusender']);
-    const on = buildNetworkRouteCommands([RUSENDER], { rusenderSurfaces: true }).map((c) => c.path);
-    expect(on).toEqual(['/rusender', '/rusender/campaigns', '/rusender/audience']);
+    expect(buildNetworkRouteCommands([RUSENDER]).map((c) => c.path)).toEqual([
+      '/rusender',
+      '/rusender/campaigns',
+      '/rusender/audience',
+    ]);
   });
 
   it('каналы ещё не доехали — показываем все сети, палитра не пустеет', () => {

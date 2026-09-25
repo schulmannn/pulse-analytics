@@ -1,8 +1,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import { useTgFull, useTgGraphs } from '@/api/queries';
 import type { TgFull, TgGraphs } from '@/api/schemas';
-import { lttbDownsample } from '@/lib/downsample';
-import { CHART_MAX_POINTS } from '@/lib/msSeries';
+import { CHART_MAX_POINTS, lttbDownsample } from '@/lib/downsample';
 import { normalizeTgPosts } from '@/lib/posts';
 import { dayKeyToTs, fmt, ruSeriesName, pluralRu, timeAxisFromDayKeys } from '@/lib/format';
 import { withShares } from '@/lib/breakdownShare';
@@ -564,7 +563,7 @@ function WeekdayBestDay({ full }: { full: TgFull | undefined }) {
   if (!bestWdLabel) return null;
   return (
     <div className="mt-3 text-xs font-medium text-muted-foreground">
-      лучший день: <strong className="text-foreground">{bestWdLabel}</strong>
+      лучший день: <strong className="font-medium text-foreground">{bestWdLabel}</strong>
     </div>
   );
 }
@@ -709,6 +708,7 @@ export function TgAnalytics({
     (period: WidgetPeriodValue) =>
       breakdownVariants(
         deriveEmojis(full, period.inRange, keep).map((e) => ({ label: e.label, value: e.value, display: fmt.num(e.value), share: e.share })),
+        { columns: { label: 'Эмодзи', value: 'Реакции' }, ranked: true },
       ),
     [full, keep],
   );
@@ -722,6 +722,7 @@ export function TgAnalytics({
           color: c.color,
           share: c.share,
         })),
+        { columns: { label: 'Вид вовлечённости', value: 'События' } },
       ),
     [full, keep],
   );
@@ -733,6 +734,7 @@ export function TgAnalytics({
           value: t.value,
           display: fmt.num(t.value),
         })),
+        { columns: { label: 'Тип публикации', value: 'Ср. охват' } },
       ),
     [full, keep],
   );
@@ -740,6 +742,7 @@ export function TgAnalytics({
     (period: WidgetPeriodValue) =>
       breakdownVariants(
         deriveFormatPerf(full, period.inRange, keep).map((f) => ({ label: f.label, value: f.avgErv, display: `${f.avgErv.toFixed(1)}% ERV · ${f.n} ${pluralRu(f.n, ['пост', 'поста', 'постов'])}` })),
+        { columns: { label: 'Формат', value: 'Ср. ERV' } },
       ),
     [full, keep],
   );
@@ -953,6 +956,7 @@ export function TgAnalytics({
           label: 'Список',
           render: (
             <Breakdown
+              columns={{ label: 'Событие', value: 'Подписчики' }}
               items={[
                 {
                   label: 'Отписалось',
@@ -1196,14 +1200,27 @@ export function TgAnalytics({
               />
             </div>
             {/* reserve = высота ряда переключателя (28px) + mb-1: столько тела уже занято. */}
-            <Breakdown items={sourceMetric === 'views' ? vbsItems : nfsItems} reserve={36} />
+            <Breakdown
+              items={sourceMetric === 'views' ? vbsItems : nfsItems}
+              reserve={36}
+              columns={{ label: 'Источник', value: sourceMetric === 'views' ? 'Просмотры' : 'Подписчики' }}
+              ranked
+            />
           </ChartSection>
         )}
         {inGroup('audience') && langItems.length > 0 && (
-          <ChartSection title="Языки аудитории" drillTo="/metrics/tg-languages" variants={breakdownVariants(langItems)} />
+          <ChartSection
+            title="Языки аудитории"
+            drillTo="/metrics/tg-languages"
+            variants={breakdownVariants(langItems, { columns: { label: 'Язык', value: 'Подписчики' }, ranked: true })}
+          />
         )}
         {inGroup('audience') && sentItems.length > 0 && (
-          <ChartSection title="Тональность реакций" drillTo="/metrics/tg-sentiment" variants={breakdownVariants(sentItems)} />
+          <ChartSection
+            title="Тональность реакций"
+            drillTo="/metrics/tg-sentiment"
+            variants={breakdownVariants(sentItems, { columns: { label: 'Тональность', value: 'Реакции' } })}
+          />
         )}
 
         {inGroup('audience') && hasHours && thData && (

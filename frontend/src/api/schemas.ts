@@ -89,7 +89,6 @@ export const MeSchema = z
     // ПЛОСКОЕ поле, а не вложенный объект как у `ai`: MeSchema лежит в общем чанке, и вложенный
     // z.object().passthrough() стоил ~полкилобайта КАЖДОМУ маршруту метрик — маршрут МойСклада
     // и так стоял в полукилобайте от потолка. Один булев того не стоит.
-    rusender_surfaces: z.boolean().optional(),
   })
   .passthrough();
 export type Me = z.infer<typeof MeSchema>;

@@ -19,8 +19,9 @@ import { exportFilename } from '@/lib/analyticsExport';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Checkbox } from '@/components/ui/checkbox';
 import { RichText } from '@/components/RichText';
+import { TwoLineDate } from '@/components/TwoLineDate';
 import { PostDetailModal } from '@/components/PostDetailModal';
-import { MEDIAN_MIN_SAMPLE, compareToMedian, medianDeltaLabel, periodMedian } from '@/lib/postMedian';
+import { MEDIAN_MIN_SAMPLE, compareToMedian, medianDeltaLabel, medianDeltaShort, periodMedian } from '@/lib/postMedian';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { membershipKey, useCampaignFilter, useMembershipSet } from '@/lib/campaignFilter';
 import { AddToCampaignDialog } from '@/components/campaigns/AddToCampaignDialog';
@@ -538,11 +539,14 @@ function PostsTable({ allPosts, loadedCount }: { allPosts: NormalizedPost[]; loa
                   <td className="px-3 py-2.5">
                     {isClickable ? (
                       // A real, focusable control in the row — the tr onClick alone is mouse-only,
-                      // leaving keyboard users no desktop path to the post details.
+                      // leaving keyboard users no desktop path to the post details. Кольцо — тот же
+                      // рецепт, что у трёх соседних таблиц (IgContentDesktop, CampaignPostsTable,
+                      // MetricPage): без него фокус рисовала браузерная обводка по умолчанию.
                       <button
                         type="button"
                         onClick={() => setOpenId(post.id)}
-                        className="block w-full space-y-1 text-left"
+                        data-post-open-trigger
+                        className="block w-full space-y-1 rounded text-left focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/45"
                       >
                         <span className={cn('line-clamp-1 font-medium', post.caption ? 'text-foreground' : 'italic text-muted-foreground')}>
                           {post.caption ? markdownToPlainText(post.caption) : 'Без подписи'}
@@ -681,17 +685,6 @@ function SortButton({
   );
 }
 
-/** Дата максимум в две строки («20 июн.» / «06:01»): узкая колонка не должна ломать дату на три. */
-function TwoLineDate({ iso }: { iso: string }) {
-  const [day, time] = fmt.date(iso).split(', ');
-  return (
-    <span className="inline-flex flex-col items-end">
-      <span className="whitespace-nowrap">{day}</span>
-      {time && <span className="whitespace-nowrap">{time}</span>}
-    </span>
-  );
-}
-
 /** Media-format word for the post-caption subline — replaces the ad-hoc date there (date is now its
     own sortable column), so the format bucket the search/filter uses is also legible in the row. */
 function FormatTag({ post }: { post: NormalizedPost }) {
@@ -722,9 +715,7 @@ function MedianCell({
 }) {
   if (value == null) return <span className="text-muted-foreground/40">—</span>;
   const cmp = compareToMedian(value, median);
-  const deltaShort = cmp
-    ? cmp.dir === 'at' ? '±0%' : `${cmp.pct > 0 ? '+' : '−'}${Math.abs(Math.round(cmp.pct))}%`
-    : null;
+  const deltaShort = cmp ? medianDeltaShort(cmp) : null;
   return (
     <>
       <span className={cn('block font-medium tabular-nums', tone === 'signal' ? 'text-foreground' : 'text-muted-foreground')}>

@@ -333,7 +333,10 @@ test.describe('Instagram Контент 2.0 (desktop)', () => {
     expect(searchHeight).toBe(campaignHeight);
     expect(searchHeight).toBe(formatHeight);
 
-    // Заголовки таблицы — белые и semibold, включая активную сортируемую колонку.
+    // Заголовки таблицы — полной яркости и весом 500, включая активную сортируемую колонку.
+    // Было 600: правило `.ig-content-table th` в index.css ставило третий вес мимо канона (и мимо
+    // классового гейта, который читает только разметку). Гейт держит РАВЕНСТВО заголовка и активной
+    // сортировки — оно и есть смысл проверки, — а само число приведено к канону двух начертаний.
     const publicationHeader = page.getByRole('columnheader', { name: 'Публикация' });
     const activeSort = page.getByRole('button', { name: 'Охват' });
     const firstRowTitle = firstRow.locator('[data-ig-content-open-trigger]');
@@ -342,8 +345,8 @@ test.describe('Instagram Контент 2.0 (desktop)', () => {
       activeSort.evaluate((node) => ({ color: getComputedStyle(node).color, weight: getComputedStyle(node).fontWeight, fontSize: getComputedStyle(node).fontSize })),
       firstRowTitle.evaluate((node) => ({ fontSize: getComputedStyle(node).fontSize })),
     ]);
-    expect(publicationStyle.weight).toBe('600');
-    expect(activeSortStyle.weight).toBe('600');
+    expect(publicationStyle.weight).toBe('500');
+    expect(activeSortStyle.weight).toBe('500');
     expect(activeSortStyle.color).toBe(publicationStyle.color);
     expect(publicationStyle.fontSize).toBe(firstRowTitleStyle.fontSize);
     expect(activeSortStyle.fontSize).toBe(firstRowTitleStyle.fontSize);

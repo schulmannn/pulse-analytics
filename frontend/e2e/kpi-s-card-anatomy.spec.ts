@@ -18,32 +18,32 @@ const IG_CARDS = ['Просмотры', 'Взаимодействия', 'Вов�
 /** Левая кромка КРУПНОГО числа относительно левой кромки карточки + текст слота дельты. */
 async function anatomy(page: Page, titles: string[]) {
   return page.evaluate((names) => {
-    const out: { title: string; inset: number | null; delta: string | null }[] = [];
+    const out: { title: string; inset: number | null; delta: string | null; basis: string | null }[] = [];
     for (const name of names) {
       const heading = [...document.querySelectorAll<HTMLElement>('h2, h3')].find(
         (h) => h.textContent?.trim() === name,
       );
       const card = heading?.closest<HTMLElement>('section[data-widget-size]');
       if (!card) {
-        out.push({ title: name, inset: null, delta: null });
+        out.push({ title: name, inset: null, delta: null, basis: null });
         continue;
       }
       const value = card.querySelector<HTMLElement>('[data-kpi-value]');
       const line = value?.parentElement ?? null;
       const cardBox = card.getBoundingClientRect();
+      // Слот дельты — всё, что стоит в одной строке с числом ПОСЛЕ него.
+      const slots = line == null || value == null ? [] : ([...line.children] as HTMLElement[]).filter((el) => el !== value);
       out.push({
         title: name,
         inset: value ? Math.round(value.getBoundingClientRect().left - cardBox.left) : null,
-        // Слот дельты — всё, что стоит в одной строке с числом ПОСЛЕ него.
         delta:
-          line == null || value == null
-            ? null
-            : ([...line.children] as HTMLElement[])
-                .filter((el) => el !== value)
-                .map((el) => (el.textContent ?? '').trim())
-                .join(' ')
-                .replace(/ /g, ' ')
-                .trim() || null,
+          slots
+            .map((el) => (el.textContent ?? '').trim())
+            .join(' ')
+            .replace(/\u00a0/g, ' ')
+            .trim() || null,
+        // ОСНОВАНИЕ (R2): подсказка слота — «против <даты>: <число>» либо причина, почему базы нет.
+        basis: slots.map((el) => el.getAttribute('title') ?? '').find((t) => t.length > 0) ?? null,
       });
     }
     return out;
@@ -78,9 +78,17 @@ test.describe('анатомия S-карточек', () => {
       const spread = Math.max(...insets) - Math.min(...insets);
       expect(spread, `левые кромки чисел: ${JSON.stringify(found)}`).toBeLessThanOrEqual(2);
 
-      // И слот дельты не молчит ни у одной: «— к пред.», «0%» или стрелка с процентом.
+      // И слот дельты не молчит ни у одной: «нет базы», «0%» или стрелка с процентом.
       for (const row of found) {
-        expect(row.delta, `слот дельты у «${row.title}»`).toMatch(/—\s*к\s*пред\.|\d|↑|↓/);
+        expect(row.delta, `слот дельты у «${row.title}»`).toMatch(/нет базы|\d|↑|↓/);
+      }
+
+      // R2: слот НАЗЫВАЕТ основание — даты базы и её число либо причину, почему базы нет.
+      // Без этого «↑4.5%» нечем проверить, не уходя со страницы.
+      for (const row of found) {
+        expect(row.basis, `основание дельты у «${row.title}»`).toMatch(
+          /^против .+: .+$|^окно |^свой период |^архив короче /,
+        );
       }
     });
   }

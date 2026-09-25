@@ -10,6 +10,7 @@ import { detectAnomalies } from '@/lib/anomaly';
 import { nearestPointIndex } from '@/lib/chartHover';
 import { axisLabelIndexes } from '@/lib/chartLabels';
 import { ChartTooltip, type TooltipRow, type TooltipState } from '@/components/ChartTooltip';
+import { SeriesLegend } from '@/components/metric/seriesLegend';
 import { ChartExpandedContext, ChartRefLinesContext, ExpandedChartHeightContext, WidgetTargetContext } from '@/components/ExpandableChart';
 import { clampTargetToDomain, targetTooltipRow } from '@/lib/targetDomain';
 import { observeSize } from '@/lib/observeSize';
@@ -96,6 +97,31 @@ interface Hover {
 
 // Approximate glyph width of the 11px tabular numerals used for axis/value labels.
 const CHAR_W = 6.6;
+// Кириллица шире табулярной цифры, прописная — заметно шире строчной.
+const CHAR_W_LOWER = 6.4;
+const CHAR_W_UPPER = 7.6;
+
+/**
+ * ОЦЕНКА ШИРИНЫ ПОДПИСИ ОСИ — одна на всю семью графиков (аудит #554).
+ *
+ * Было: три копии константы `6.6` (LineChart, BarChart, DivergingBars), и все три считали
+ * любой символ табулярной цифрой. На кириллице это даёт до ±20%: «Сентябрь» шире оценки,
+ * «5 авг.» — у́же. От этого числа зависят ширина y-гаттера, кламп крайних подписей и ширина
+ * пилюли текущей метки — то есть ошибка видна как обрезанный текст или как лишний воздух.
+ *
+ * Здесь нет измерения через getComputedTextLength намеренно: оно потребовало бы второго
+ * прохода раскладки на каждый рендер графика. Трёх классов хватает: оси несут цифры,
+ * точки, пробелы и короткие русские слова.
+ */
+export function axisTextWidth(text: string): number {
+  let w = 0;
+  for (const ch of text) {
+    if (ch >= '0' && ch <= '9') w += CHAR_W;
+    else if (ch.toLowerCase() !== ch.toUpperCase()) w += ch === ch.toLowerCase() ? CHAR_W_LOWER : CHAR_W_UPPER;
+    else w += CHAR_W;
+  }
+  return w;
+}
 // Высота строки подписи-экстремума (2xs, 11px + просвет). По ней решается, слиплись ли две
 // подписи одной серии и надо ли разводить их вверх/вниз — см. `extremes` ниже.
 const EXTREME_LINE_H = 13;
@@ -121,6 +147,9 @@ const EXTREME_LINE_H = 13;
 const RING_MAX_POINTS = 10;
 const RING_MIN_STEP = 14;
 
+/** Запас над максимумом, ниже которого шкала поднимается ещё на шаг (доля высоты плота). */
+const SCALE_HEADROOM = 0.08;
+
 /** Next step up the 1-2-5×10ⁿ ladder (20 → 50 → 100 → 200 …). */
 function nextStep(step: number): number {
   const mag = 10 ** Math.floor(Math.log10(step));
@@ -131,8 +160,26 @@ function nextStep(step: number): number {
 /**
  * Nice y-scale: snap the domain outward to 1/2/5×10ⁿ tick steps so gridlines land on round
  * values and never format into duplicate labels («4.9k / 4.9k / 4.8k»), capped at 5 ticks.
+ *
+ * ПОТОЛОК ДОМЕНА И ВЕРХНЯЯ ЛИНЕЙКА СЕТКИ — РАЗНЫЕ ВЕЛИЧИНЫ. Линейки стоят на круглых значениях;
+ * потолок стоит НАД пиком, и совпадать с линейкой он не обязан.
+ *
+ * Первая попытка (#585) раздувала ВХОД на 8 % до выбора шага — и это ломало круглые максимумы.
+ * Замер: `niceScale(0, 100)` отдавала hi 150 при шаге 50, то есть ряд с максимумом 100 занимал
+ * две трети высоты, а «Доля топ-N» товаров рисовалась на оси 0…150 % с тиком «150.0 %»
+ * (аудит #554, проход №2, N9). Причина механическая: запас переводил домен в следующую скобку
+ * лестницы шагов, и округление вверх добавляло уже не 8 %, а половину шага.
+ *
+ * @param declaredCeiling — потолок ЗАЯВЛЕН вызывающим (`yMax`), а не выведен из данных. Тогда
+ *   запас не нужен вовсе: заявленный максимум — это уже рамка, а не точка ряда, которой нужен
+ *   воздух над головой. Проценты (`yMax={100}`) обязаны рисоваться ровно до 100.
  */
-export function niceScale(minV: number, maxV: number): { lo: number; hi: number; step: number; ticks: number[] } {
+export function niceScale(
+  minV: number,
+  maxV: number,
+  declaredCeiling = false,
+): { lo: number; hi: number; step: number; ticks: number[] } {
+  const peak = maxV;
   let span = maxV - minV;
   if (!Number.isFinite(span) || span <= 0) span = Math.abs(maxV) || 1;
   const mag0 = 10 ** Math.floor(Math.log10(Math.max(span / 2.5, 1e-9)));
@@ -148,6 +195,12 @@ export function niceScale(minV: number, maxV: number): { lo: number; hi: number;
   if (hi === lo) hi = lo + step;
   const ticks: number[] = [];
   for (let t = hi; t >= lo - step / 2; t -= step) ticks.push(t);
+  // Линейки сетки уже посчитаны — запас поднимает ТОЛЬКО потолок домена. Пик остаётся на своей
+  // круглой линейке (она же и подписывает его значение), но между ним и рамкой появляется воздух:
+  // именно его отсутствие и мешало отличить «дошло до максимума окна» от «упёрлось в край».
+  // Число линеек при этом не меняется — их посчитали до подъёма.
+  const clearance = (hi - lo) * SCALE_HEADROOM;
+  if (!declaredCeiling && hi - peak < clearance) hi = peak + clearance;
   return { lo, hi, step, ticks };
 }
 
@@ -346,7 +399,7 @@ export function LineChart({
     const computedMax = Math.max(...scaleVals);
     // The caller's yMin/yMax (e.g. a zero base for volume metrics) defines the domain; the nice
     // scale then only expands it outward to round tick values, never clips.
-    const scale = niceScale(yMin ?? computedMin, yMax ?? computedMax);
+    const scale = niceScale(yMin ?? computedMin, yMax ?? computedMax, yMax != null);
     const min = scale.lo;
     const max = scale.hi;
     const range = max - min || 1;
@@ -365,7 +418,7 @@ export function LineChart({
     // on the line/area and the first label is never clipped by the container edge.
     // Axis-free mode keeps only a sliver so edge markers (rings) don't clip on the viewBox.
     const gutterW = showAxes && !rhea
-      ? Math.max(28, Math.round(Math.max(...yLabels.map((l) => l.length)) * CHAR_W) + 14)
+      ? Math.max(28, Math.round(Math.max(...yLabels.map(axisTextWidth))) + 14)
       : 6;
 
     const n = values.length;
@@ -450,7 +503,7 @@ export function LineChart({
             .map((i) => {
               const text = letterAxis ? letterAxis[i] : labels?.[i] ?? '';
               if (!text) return null;
-              const halfW = (text.length * CHAR_W) / 2;
+              const halfW = axisTextWidth(text) / 2;
               const x = Math.min(Math.max(points[i].x, gutterW + halfW), Math.max(W - padR - halfW, gutterW + halfW));
               return { i, px: points[i].x, x, text, halfW };
             })
@@ -479,13 +532,17 @@ export function LineChart({
       if (!markExtremes) return [];
       // Max и «последнее» — только по реальным точкам: подписывать дыру нечем.
       let maxE = real[0];
-      for (const r of real) if (r.v > maxE.v) maxE = r;
+      // `>=`, а не `>`: при равных максимумах берём ПОСЛЕДНИЙ. Иначе, когда хвост ряда повторяет
+      // ранний пик, рядом печатались две подписи с одним и тем же числом («6.9k 6.9k» на
+      // /metrics/ig-reach) — разведённые по x, а потому не пойманные дедупом ниже. Последняя точка,
+      // делящая максимум, и есть максимум: две подписи об одном значении не несут информации.
+      for (const r of real) if (r.v >= maxE.v) maxE = r;
       const idxs = maxE.i === lastReal.i ? [lastReal] : [maxE, lastReal];
       const laidOut = idxs.map((e) => {
         const px = points[e.i].x;
         const py = yFor(e.v);
         const text = fmt.short(e.v);
-        const halfW = (text.length * CHAR_W) / 2;
+        const halfW = axisTextWidth(text) / 2;
         // +6px воздуха справа: лейбл последней точки не прилипает к краю карточки.
         const x = Math.min(Math.max(px, gutterW + halfW), Math.max(W - padR - halfW - 6, gutterW + halfW));
         const fitsAbove = py - 18 >= 0;
@@ -650,7 +707,7 @@ export function LineChart({
           const isCurrent = t.i === axisCurrentIdx;
           const pill = isCurrent
             ? (() => {
-                const textW = t.text.length * CHAR_W;
+                const textW = axisTextWidth(t.text);
                 const pillH = 15;
                 const pillW = Math.max(textW + 12, pillH);
                 return { x: Math.max(1, Math.min(t.x - pillW / 2, W - pillW - 1)), w: pillW, h: pillH };
@@ -716,7 +773,7 @@ export function LineChart({
   // lone-кружком, не пустым состоянием (паритет со столбцами).
   if (!plot) {
     return (
-      <EmptyState compact size="chart" title="Нет данных за период" />
+      <EmptyState compact size="chart" ghost="line" title="Нет данных за период" />
     );
   }
 
@@ -879,32 +936,15 @@ export function LineChart({
           Чипы одинаковы во ВСЕХ appearance и повторяют язык линий: сплошной штрих — текущий период,
           пунктир — сравнение (квадрат-заливка врал бы про несуществующую area прошлого периода). */}
       {ghost && ghost.length >= 2 && (
-        <div className="mb-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-2xs font-medium text-muted-foreground">
-          <span className="flex select-none items-center gap-1.5">
-            <span aria-hidden="true" className="h-0.5 w-4 rounded-full" style={{ backgroundColor: 'hsl(var(--chart-role-primary))' }} />
-            {primaryLabel ?? 'Текущий период'}
-          </span>
-          {legendToggle ? (
-            <button
-              type="button"
-              aria-pressed={!ghostHidden}
-              onClick={() => setGhostHidden((v) => !v)}
-              title={ghostHidden ? 'Показать сравнение' : 'Скрыть сравнение'}
-              className={`flex select-none items-center gap-1.5 rounded transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40 ${ghostHidden ? 'opacity-40 line-through' : ''}`}
-            >
-              <span aria-hidden="true" className="w-4 border-t-2 border-dashed" style={{ borderColor: 'hsl(var(--chart-role-comparison))' }} />
-              {ghostLabel}
-            </button>
-          ) : (
-            // Выключенное сравнение НЕ уносит чип из потока: место остаётся за ним, иначе строка
-            // легенды пропадает целиком и всё, что под графиком, дёргается вверх. Но и утверждать
-            // «пред. период» он не должен — поэтому становится невидим, а не приглушён.
-            <span className={`flex select-none items-center gap-1.5${ghostVisible ? '' : ' invisible'}`} aria-hidden={!ghostVisible}>
-              <span aria-hidden="true" className="w-4 border-t-2 border-dashed" style={{ borderColor: 'hsl(var(--chart-role-comparison))' }} />
-              {ghostLabel}
-            </span>
-          )}
-        </div>
+        <SeriesLegend
+          layout="chart"
+          items={[
+            { role: 'primary', label: primaryLabel ?? 'Текущий период' },
+            { role: 'comparison', label: ghostLabel, hidden: !ghostVisible },
+          ]}
+          onToggleComparison={legendToggle ? () => setGhostHidden((v) => !v) : undefined}
+          comparisonPressed={!ghostHidden}
+        />
       )}
       <div ref={containerRef} className="relative w-full">
       <svg
@@ -1030,7 +1070,7 @@ export function LineChart({
                 mono = timestamp по канону. Поверх прореженных тиков — как «axis tooltip». */}
             {hasXAxis && activeIdx != null && labels?.[activeIdx] && (() => {
               const text = labels[activeIdx];
-              const halfW = (text.length * CHAR_W) / 2 + 7;
+              const halfW = axisTextWidth(text) / 2 + 7;
               const cx = Math.min(Math.max(hovered.x, gutterW + halfW), W - halfW - 2);
               return (
                 <g data-chart-axis-plate className="pointer-events-none">
