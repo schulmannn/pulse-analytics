@@ -61,6 +61,12 @@ test('кривой диапазон — invalid, а не тихое расшир
     'Date.UTC переварил бы 31 февраля и молча перенёс на март');
 });
 
+test('qs-массив из одного элемента (`?from[]=…`) — окно, как до переезда на общий разбор', () => {
+  const p = parseCdekPeriod({ from: ['2026-03-01'], to: '2026-03-05' });
+  assert.deepEqual([p.invalid, p.days, p.from, p.to, p.custom], [false, 5, '2026-03-01', '2026-03-05', true]);
+  assert.equal(parseCdekPeriod({ from: ['2026-03-01', '2026-03-02'], to: '2026-03-05' }).invalid, true, 'повтор параметра');
+});
+
 test('неизвестный days откатывается к 30, а не падает', () => {
   assert.equal(parseCdekPeriod({ days: '13' }, NOW).days, 30);
   assert.equal(parseCdekPeriod({}, NOW).days, 30);

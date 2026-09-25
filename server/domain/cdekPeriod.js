@@ -23,7 +23,12 @@ const DEFAULT_DAYS = 30;
  * и выдуманная дельта была бы враньём.
  */
 function parseCdekPeriod(query = {}, now = Date.now()) {
-  const p = parsePeriod(query, {
+  const q = query || {};
+  // Прежний разбор приводил from/to к строке, а qs превращает `?from[]=2026-03-01` в массив из одного
+  // элемента — String() делал из него день, и роут отвечал 200. Общий parsePeriod строже (не строка —
+  // не день); до перевода роутов в 2.x обёртка сохраняет прежний ответ, а не 400.
+  const legacy = q.from != null || q.to != null ? { ...q, from: String(q.from || ''), to: String(q.to || '') } : q;
+  const p = parsePeriod(legacy, {
     now,
     tz: 'UTC',
     allowedDays: DAYS_ALLOWED,
