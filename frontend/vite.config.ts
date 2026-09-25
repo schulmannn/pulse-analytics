@@ -27,6 +27,9 @@ export default defineConfig({
         // The public landing uses native CSS/Web APIs for motion; no animation runtime belongs in
         // this framework/data vendor boundary.
         manualChunks(id: string) {
+          // Лёгкий индекс каталога метрик (U05) — свой общий чанк: его вес меряет и держит
+          // scripts/check-bundle-size.mjs, а детали источника грузятся отдельно (loadMetricDetails).
+          if (/[\\/]src[\\/]lib[\\/]metricIndex\.ts$/.test(id)) return 'metric-index';
           if (!id.includes('node_modules')) return undefined;
           if (
             /[\\/]node_modules[\\/](react|react-dom|scheduler|react-router|react-router-dom|@remix-run)[\\/]/.test(

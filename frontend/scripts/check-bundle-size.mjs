@@ -6,7 +6,7 @@
 // Dynamic imports are added only when that route actually crosses the boundary. This catches both
 // size regressions and accidental graph re-merges (for example MetricRoute importing both generic
 // and Instagram explorers again).
-import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, relative, resolve } from 'node:path';
 import { gzipSync } from 'node:zlib';
@@ -59,6 +59,10 @@ const PRODUCT_BUDGETS = {
   metrikaMetricCode: 400 * KB,
   telegramMetricCode: 400 * KB,
   mentionsMetricCode: 400 * KB,
+  // Лёгкий индекс каталога метрик (lib/metricIndex.ts, U05) едет в оболочке каждого защищённого
+  // маршрута, поэтому у него свой потолок: ключи, id и перечисления. Тексты ⓘ, URL-схемы и deps
+  // живут в ленивых деталях источника и сюда не попадают (граф-контракт ниже).
+  metricIndexCode: 6 * KB,
 };
 
 // Допуск роста относительно baseline: шум сборки (перетасовка чанков, gzip на мелких корзинах)
@@ -285,6 +289,11 @@ const entryPath = assetPath(manifest[entryKey].file);
 const entryRaw = statSync(entryPath).size;
 const entryGzip = gzipSync(readFileSync(entryPath)).length;
 
+// Индекс каталога метрик — закреплённый чанк `metric-index` (manualChunks в vite.config.ts): его
+// вес и есть тот рост, который индекс добавляет оболочке и каждому маршруту поверх неё.
+const metricIndexKey = resolveManifestKey('metric-index');
+const metricIndexGzip = gzipSync(readFileSync(assetPath(manifest[metricIndexKey].file))).length;
+
 function printRoute(label, route) {
   console.log(
     `${label.padEnd(19)} ${route.jsRows.length} JS + ${route.cssRows.length} CSS · ` +
@@ -312,6 +321,7 @@ const MEASURED = [
   ['metrikaMetricCode', 'metrika metric code', routes.metrikaMetric.codeGzip, PRODUCT_BUDGETS.metrikaMetricCode],
   ['telegramMetricCode', 'telegram metric code', routes.telegramMetric.codeGzip, PRODUCT_BUDGETS.telegramMetricCode],
   ['mentionsMetricCode', 'mentions metric code', routes.mentionsMetric.codeGzip, PRODUCT_BUDGETS.mentionsMetricCode],
+  ['metricIndexCode', 'metric index', metricIndexGzip, PRODUCT_BUDGETS.metricIndexCode],
 ];
 
 printRoute('public boot', routes.boot);
@@ -415,6 +425,68 @@ for (const [label, key] of metricFamilies) {
   for (const [otherLabel, otherKey] of metricFamilies) {
     if (key !== otherKey && familyStatic.has(otherKey)) {
       problems.push(`${label} statically imports ${otherLabel}`);
+    }
+  }
+}
+
+// Каталог метрик (U05): индекс — лист общего графа, а тексты ⓘ, URL-схемы и deps источника
+// (panels/**/*MetricDetails.ts) грузятся только лениво через loadMetricDetails. Деталь, попавшая в
+// статическое замыкание оболочки, Обзора или диспетчера, раздувает общий чанк у всех маршрутов.
+const metricIndexItem = manifest[metricIndexKey];
+if ((metricIndexItem.imports ?? []).length > 0 || (metricIndexItem.dynamicImports ?? []).length > 0) {
+  problems.push(
+    `metric index imports ${[...(metricIndexItem.imports ?? []), ...(metricIndexItem.dynamicImports ?? [])].join(', ')} — индекс обязан быть без зависимостей`,
+  );
+}
+const sharedClosures = [
+  ['protected shell', staticManifestClosure([resolveManifestKey('src/ProtectedApp.tsx')])],
+  ['tg overview', staticManifestClosure([resolveManifestKey('Overview')])],
+  ['metric dispatcher', metricStatic],
+];
+function sourceFiles(dir) {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const full = join(dir, entry.name);
+    return entry.isDirectory() ? sourceFiles(full) : [full];
+  });
+}
+const detailSources = sourceFiles(join(root, 'src'))
+  .filter((path) => /MetricDetails\.ts$/.test(path))
+  .map((path) => relative(root, path).replace(/\\/g, '/'));
+// Пока loadMetricDetails никто не вызывает, деталей в сборке нет вовсе. Как только хоть одна
+// попала в граф, ленивыми отдельными чанками обязаны быть ВСЕ: деталь, статически втянутая в чужой
+// чанк, теряет свою запись в манифесте — поэтому сверяемся со списком файлов, а не с манифестом.
+const detailsInBuild = Object.values(manifest).some(
+  (item) => detailSources.includes(item.src) || /MetricDetails$/.test(item.name ?? ''),
+);
+if (detailsInBuild) {
+  for (const src of detailSources) {
+    const key = Object.keys(manifest).find((candidate) => manifest[candidate].src === src);
+    if (!key || !manifest[key].isDynamicEntry) {
+      problems.push(`${src} is not a lazy chunk — детали каталога грузятся только через loadMetricDetails`);
+      continue;
+    }
+    for (const [label, closure] of sharedClosures) {
+      if (closure.has(key)) problems.push(`${src} is in the static ${label} closure`);
+    }
+  }
+}
+// Статический импорт детали сборщик молча вклеивает в чанк импортёра, а ленивая запись в манифесте
+// остаётся фасадом. Поэтому проверяем и содержимое: deps деталей — имена хуков СТРОКАМИ, в обычном
+// коде таких литералов нет (минификатор оставляет от хуков только короткие идентификаторы).
+const detailSentinels = new Set(
+  detailSources.flatMap((src) =>
+    [...readFileSync(join(root, src), 'utf8').matchAll(/'(use[A-Z]\w+)'/g)].map((match) => match[1]),
+  ),
+);
+for (const [label, closure] of sharedClosures) {
+  for (const key of closure) {
+    const file = manifest[key].file;
+    if (!file.endsWith('.js')) continue;
+    const text = readFileSync(assetPath(file), 'utf8');
+    // Минификатор печатает строки в любых кавычках, включая обратные.
+    const leaked = [...detailSentinels].filter((name) => ['"', "'", '`'].some((q) => text.includes(`${q}${name}${q}`)));
+    if (leaked.length > 0) {
+      problems.push(`${label}: ${file} carries catalogue details (${leaked.slice(0, 3).join(', ')}…) — детали только через loadMetricDetails`);
     }
   }
 }

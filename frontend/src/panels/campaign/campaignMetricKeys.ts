@@ -1,10 +1,9 @@
 import type { TimelineMode } from '@/lib/campaignPageModel';
+import { CAMPAIGN_METRIC_KEYS } from '@/lib/metricIndex';
 
-export const CAMPAIGN_METRIC_KEYS = [
-  'timeline',
-  'sources',
-  'formats',
-] as const;
+/** Ключи разборов кампании за `/campaigns/:id/metrics/<key>`. Список живёт в лёгком индексе
+ *  каталога (lib/metricIndex.ts, U05); здесь — прежние имена экспорта и сборка путей. */
+export { CAMPAIGN_METRIC_KEYS };
 
 export type CampaignMetricKey = (typeof CAMPAIGN_METRIC_KEYS)[number];
 

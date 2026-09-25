@@ -1,24 +1,15 @@
 /**
- * Ключи полностраничных метрик СДЭКа — семья `cdek-*` за `/metrics/:key`. Отдельный крошечный
- * модуль без зависимостей: диспетчер маршрута (MetricRoute) и `networks.routeNetworkOwner` обязаны
- * узнавать цель разворота, НЕ подтягивая тяжёлый чанк самой страницы — он грузится лениво, только
- * когда открылся `cdek-*`-ключ.
+ * Ключи полностраничных метрик СДЭКа — семья `cdek-*` за `/metrics/:key`. Тонкая обёртка над
+ * lib/metricIndex.ts (U05): список живёт в лёгком индексе каталога без зависимостей, поэтому
+ * диспетчер маршрута (MetricRoute) и `networks.routeNetworkOwner` узнают цель разворота, НЕ
+ * подтягивая тяжёлый чанк самой страницы — он грузится лениво, только когда открылся `cdek-*`-ключ.
  *
  * Набор повторяет карточки «Обзора» и «Товаров» один-в-один: три дневных ряда продаж, два ряда
  * ассортимента и три разреза.
  */
-export const CDEK_METRIC_KEYS = [
-  // Дневные ряды: Линия/Столбцы + сравнение с равным предыдущим окном.
-  'cdek-revenue',
-  'cdek-orders',
-  'cdek-aov',
-  'cdek-units',
-  'cdek-price',
-  // Разрезы: полный список без выдуманного графика.
-  'cdek-channels',
-  'cdek-statuses',
-  'cdek-products',
-] as const;
+import { CDEK_METRIC_KEYS } from '@/lib/metricIndex';
+
+export { CDEK_METRIC_KEYS };
 
 export type CdekMetricKey = (typeof CDEK_METRIC_KEYS)[number];
 

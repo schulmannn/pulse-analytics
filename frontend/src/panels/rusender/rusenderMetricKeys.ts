@@ -1,8 +1,9 @@
 /**
- * Ключи полностраничных метрик Rusender — семья `rusender-*` за `/metrics/:key`. Отдельный
- * крошечный модуль без зависимостей: диспетчер маршрута (MetricRoute) и `networks.routeNetworkOwner`
- * обязаны узнавать цель разворота, НЕ подтягивая тяжёлый чанк самой страницы — он грузится лениво,
- * только когда открылся `rusender-*`-ключ.
+ * Ключи полностраничных метрик Rusender — семья `rusender-*` за `/metrics/:key`. Тонкая обёртка над
+ * lib/metricIndex.ts (U05): список живёт в лёгком индексе каталога без зависимостей, поэтому
+ * диспетчер маршрута (MetricRoute) и `networks.routeNetworkOwner` узнают цель разворота, НЕ
+ * подтягивая тяжёлый чанк самой страницы — он грузится лениво, только когда открылся
+ * `rusender-*`-ключ.
  *
  * Набор — только НАСТОЯЩИЕ дневные ряды, у которых есть что развернуть на полный экран:
  *   • открытия и клики — события дня (единственный подлинный временной ряд источника);
@@ -11,12 +12,9 @@
  * «Рассылок периода» здесь СОЗНАТЕЛЬНО нет: их итоги кумулятивные и по дням не раскладываются,
  * разворачивать нечего — полноэкранный график там пришлось бы выдумать.
  */
-export const RUSENDER_METRIC_KEYS = [
-  'rusender-opens',
-  'rusender-clicks',
-  'rusender-contacts',
-  'rusender-unsubscribed',
-] as const;
+import { RUSENDER_METRIC_KEYS } from '@/lib/metricIndex';
+
+export { RUSENDER_METRIC_KEYS };
 
 export type RusenderMetricKey = (typeof RUSENDER_METRIC_KEYS)[number];
 

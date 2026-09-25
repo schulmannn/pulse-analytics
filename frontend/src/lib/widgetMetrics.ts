@@ -1,22 +1,34 @@
-// The metric catalogue — one canonical `MetricDef[]` describing WHAT every dashboard number is
-// (its label, source, shape, unit, default + allowed visualisations, breakdown dimensions and
-// category). It unifies knowledge that until now lived scattered across three places:
+// Каталог виджетов Главной — `MetricDef[]`: ЧТО такое каждое число доски (подпись, источник,
+// форма, единица, вид по умолчанию и допустимые виды, измерения разбивки, группа).
 //
-//   - the former glossary map → plain-language «что значит» texts (formula / included / source note);
-//   - kpiDerive.ts   → the six KPI DrillKeys (views / subscribers / avgReach / reactions /
-//                      forwards / er) and their per-post attribution fields;
-//   - TgAnalytics.tsx / igMetrics.ts → the derived + breakdown metrics (ERV, virality, net-growth,
-//                      churn, sources, languages, sentiment, formats, IG reach / followers /
-//                      demographics …) that are today hard-wired into individual widgets.
+// С U05 это тонкая обёртка над двумя слоями единого каталога метрик:
+//   - lib/metricIndex.ts — структура (источник, единица, форма, виды, seriesAgg, drillKey/drillTo…);
+//   - panels/**/*MetricInfo.ts — тексты ⓘ (подпись, «как считается», «что входит», «откуда число»).
+// Экспорты, типы и форма объектов прежние: потребители на индекс пока не переведены. Новую метрику
+// виджета добавляют в WIDGET_SPECS индекса и в *MetricInfo.ts своего источника, не сюда.
 //
-// This file is PURE DATA + TYPES — no React, no fetching, no formatting — so it is unit-testable
-// and can be consumed by the resolver (S3), the universal editor (S5) and the catalogue modal
-// (S6) without pulling in the UI. It does NOT compute anything: a MetricDef says what a metric IS,
-// not how to fetch it (that mapping is the resolver's job). Nothing renders off it yet — wiring
-// lands in later sprints; this sprint only establishes the vocabulary.
+// Модуль по-прежнему ЧИСТЫЕ ДАННЫЕ + ТИПЫ — без React, без запросов, без форматирования. Он не
+// считает: MetricDef говорит, что метрика ЕСТЬ, а не как её получить (это работа резолвера).
 
 import type { DrillKey } from '@/lib/kpiDerive';
+import type { MetricInfo } from '@/lib/metricDetails';
+import {
+  METRIC_INDEX,
+  WIDGET_METRIC_IDS,
+  type MetricCategory,
+  type MetricIndexSource,
+  type MetricShape,
+  type MetricUnit,
+  type SeriesAggregation,
+  type WidgetViz,
+} from '@/lib/metricIndex';
 import type { WidgetSize } from '@/lib/widgetPrefsStore';
+import { IG_METRIC_INFO } from '@/panels/igMetricInfo';
+import { YM_METRIC_INFO } from '@/panels/metrika/ymMetricInfo';
+import { MS_METRIC_INFO } from '@/panels/sklad/msMetricInfo';
+import { TG_METRIC_INFO } from '@/panels/tgMetricInfo';
+
+export type { MetricCategory, MetricUnit, SeriesAggregation, WidgetViz } from '@/lib/metricIndex';
 
 /** Where the metric's data comes from. `all` = source-agnostic (rare; reserved). */
 export type MetricSource = 'tg' | 'ig' | 'ms' | 'ym' | 'all';
@@ -25,32 +37,9 @@ export type MetricSource = 'tg' | 'ig' | 'ms' | 'ym' | 'all';
  *   - value      → a scalar (+ optional delta): a KPI headline (ER now, ERV, virality);
  *   - series     → a time series (+ a headline sum/last): views, subscribers, reactions;
  *   - breakdown  → a categorical split: emoji, sources, languages, formats, demographics;
- *   - table      → tabular rows: the weekly table, top posts. */
-export type MetricKind = 'value' | 'series' | 'breakdown' | 'table';
-
-/** Formatting family for a metric's numbers (the plan's number/percent/posts/views set;
- *  `currency` = рубли МойСклада — единственный денежный источник, ₽ на всех подписях). */
-export type MetricUnit = 'number' | 'percent' | 'posts' | 'views' | 'currency';
-
-/** The unified visualisation vocabulary. `donut` = PieChart, `list` = Breakdown rows,
- *  `rank`/`pivot` = the metric-page dimension projections, `ledger` = the wide bar+values row. */
-export type WidgetViz = 'kpi' | 'line' | 'bar' | 'donut' | 'list' | 'rank' | 'pivot' | 'table' | 'ledger';
-
-/** Catalogue grouping (steep sidebar / the add-widget modal). Informed by the existing TG tabs
- *  (Динамика / Контент / Аудитория) but split into the plan's four buckets. */
-export type MetricCategory = 'growth' | 'engagement' | 'content' | 'audience';
-
-/** How a series combines across grain buckets (S10): flow metrics SUM (views, reactions), level
- *  metrics take the LAST value in the bucket (subscribers, followers) — summing a level over a
- *  quarter would be nonsense. Default `flow`. */
-/**
- * Как сворачивать дневную серию в недельную корзину (capResultSeries):
- *  - flow  — сумма (потоки: просмотры, реакции, выручка);
- *  - level — последнее значение корзины (уровни: подписчики, средний чек);
- *  - mean  — среднее наблюдений корзины (метрики-ОТНОШЕНИЯ, у которых точка ряда уже есть
- *            среднее: складывать средние нельзя, а last-of-bucket выбросил бы остальные дни).
- */
-export type SeriesAggregation = 'flow' | 'level' | 'mean';
+ *   - table      → tabular rows: the weekly table, top posts.
+ * (В индексе каталога это `MetricShape`; `kind` индекса — тип ряда flow | stock | ratio.) */
+export type MetricKind = MetricShape;
 
 /** Runtime strategy used by the widget resolver. Keeping the strategy on the metric definition
  * makes catalogue coverage explicit: a new metric is either wired to a resolver family or marked
@@ -107,314 +96,63 @@ export interface MetricDef {
   sourceNote?: string;
 }
 
-/** Default viz set per kind — a metric may override, but this keeps the catalogue consistent and
- *  DRY (same spirit as reportBlocks' defaultBlock switch). A series metric that declares
- *  `dimensions` also gains rank/pivot (the metric-page projections). */
-function vizForKind(kind: MetricKind): { defaultViz: WidgetViz; supportedViz: WidgetViz[] } {
-  switch (kind) {
-    case 'value':
-      return { defaultViz: 'kpi', supportedViz: ['kpi'] };
-    // rank/pivot (dimension projections) are NOT rendered from a WidgetResult — the resolver produces
-    // no rank/pivot shape — so the builder only offers line/bar for series (no dead viz options).
-    case 'series':
-      return { defaultViz: 'line', supportedViz: ['line', 'bar'] };
-    case 'breakdown':
-      return { defaultViz: 'list', supportedViz: ['list', 'bar', 'donut'] };
-    case 'table':
-      return { defaultViz: 'table', supportedViz: ['table'] };
-  }
+const INFO: Readonly<Record<string, MetricInfo>> = {
+  ...TG_METRIC_INFO,
+  ...IG_METRIC_INFO,
+  ...MS_METRIC_INFO,
+  ...YM_METRIC_INFO,
+};
+
+function catalogueSource(source: MetricIndexSource): MetricSource {
+  return source === 'tg' || source === 'ig' || source === 'ms' || source === 'ym' ? source : 'all';
 }
 
-/** Catalogue-entry spec: everything except the viz set, which `vizForKind` fills unless the entry
- *  overrides `defaultViz` / `supportedViz`. */
-type MetricSpec = Omit<MetricDef, 'defaultViz' | 'supportedViz' | 'resolver'> &
-  Partial<Pick<MetricDef, 'defaultViz' | 'supportedViz' | 'resolver'>>;
-
-function resolverFor(spec: MetricSpec): MetricResolver {
-  if (spec.source === 'ig') return 'ig';
-  if (spec.source === 'ms') return 'ms';
-  if (spec.source === 'ym') return 'ym';
-  if (spec.drillKey) return 'tg.core';
-  if (spec.id === 'tg.erv' || spec.id === 'tg.virality') return 'tg.ratio';
-  if (spec.id === 'tg.netGrowth') return 'tg.netGrowth';
-  if (spec.source === 'tg' && spec.kind === 'breakdown') return 'tg.breakdown';
+function resolverFor(def: Pick<MetricDef, 'id' | 'source' | 'kind' | 'drillKey'>): MetricResolver {
+  if (def.source === 'ig') return 'ig';
+  if (def.source === 'ms') return 'ms';
+  if (def.source === 'ym') return 'ym';
+  if (def.drillKey) return 'tg.core';
+  if (def.id === 'tg.erv' || def.id === 'tg.virality') return 'tg.ratio';
+  if (def.id === 'tg.netGrowth') return 'tg.netGrowth';
+  if (def.source === 'tg' && def.kind === 'breakdown') return 'tg.breakdown';
   return 'unavailable';
 }
 
-function define(spec: MetricSpec): MetricDef {
-  const auto = vizForKind(spec.kind);
-  const supportedViz = spec.supportedViz ?? auto.supportedViz;
-  const defaultViz = spec.defaultViz ?? auto.defaultViz;
-  return { ...spec, resolver: spec.resolver ?? resolverFor(spec), defaultViz, supportedViz };
+/** Индекс (структура) + тексты источника → прежний MetricDef. Необязательные поля появляются
+ *  только там, где они заданы, как у прежних литералов каталога. */
+function toMetricDef(id: string): MetricDef | null {
+  const entry = METRIC_INDEX[id];
+  const widget = entry?.widget;
+  const info = INFO[id];
+  if (!entry || !widget || !info) return null;
+  const def: MetricDef = {
+    id,
+    label: info.label,
+    ...(info.glossaryLabel != null ? { glossaryLabel: info.glossaryLabel } : {}),
+    source: catalogueSource(entry.source),
+    kind: widget.shape,
+    unit: entry.unit,
+    category: widget.category,
+    resolver: 'unavailable',
+    defaultViz: widget.defaultViz,
+    supportedViz: [...widget.supportedViz],
+    ...(widget.dimensions ? { dimensions: [...widget.dimensions] } : {}),
+    ...(widget.seriesAgg ? { seriesAgg: widget.seriesAgg } : {}),
+    ...(widget.drillKey ? { drillKey: widget.drillKey } : {}),
+    ...(widget.drillTo ? { drillTo: widget.drillTo } : {}),
+    ...(widget.additive != null ? { additive: widget.additive } : {}),
+    ...(info.formula != null ? { formula: info.formula } : {}),
+    ...(info.included != null ? { included: info.included } : {}),
+    ...(info.sourceNote != null ? { sourceNote: info.sourceNote } : {}),
+  };
+  def.resolver = resolverFor(def);
+  return def;
 }
 
-// Dimensions shared by the post-attributed TG series metrics (format / weekday) — the metric page
-// already breaks these down (RankChart / PivotTable). The dimension catalogue is formalised in S7.
-const POST_DIMS = ['tg.format', 'tg.weekday'];
-
-// ── Telegram ────────────────────────────────────────────────────────────────────────────────
-const TG_METRICS: MetricDef[] = [
-  // Core KPI / DrillKey metrics — series with a reconciled headline (deriveKpis). Texts ported
-  // so the «О метрике» block and metric surfaces read from the same definition.
-  define({
-    id: 'tg.views', label: 'Просмотры', glossaryLabel: 'Просмотры за период', source: 'tg', kind: 'series', unit: 'views',
-    category: 'engagement', dimensions: POST_DIMS, drillKey: 'views',
-    formula: 'Сумма дневных просмотров канала в выбранном окне.', sourceNote: 'Статистика канала (дневной архив). Без архива — сумма по постам окна. При фильтре по формату или дню недели график считается по постам, а число в шапке остаётся канальным.',
-  }),
-  define({
-    id: 'tg.subscribers', label: 'Подписчики', source: 'tg', kind: 'series', unit: 'number',
-    category: 'growth', seriesAgg: 'level', drillKey: 'subscribers',
-    defaultViz: 'line', supportedViz: ['line'],
-    formula: 'Текущее число подписчиков канала.',
-    included: 'Δ — изменение за период (из дневного архива), а не разница «сейчас минус показанное».',
-    sourceNote: 'Дневной архив channel_daily.',
-  }),
-  define({
-    id: 'tg.avgReach', label: 'Средний охват поста', source: 'tg', kind: 'series', unit: 'views',
-    category: 'engagement', dimensions: POST_DIMS, drillKey: 'avgReach', seriesAgg: 'mean',
-    // Среднее существует только в дни с постами — столбцы честнее линии, рисующей
-    // непрерывность между пропусками (решение владельца 2026-08-13, зеркало Home-дефолта).
-    defaultViz: 'bar', supportedViz: ['bar', 'line'],
-    formula: 'Сумма просмотров постов, опубликованных в окне, ÷ число этих постов.',
-    included: 'Это не карточка «Просмотры» — там канальный дневной архив, другая величина. На графике — среднее на пост за корзину; день без публикаций — пропуск, а не ноль.',
-    sourceNote: 'Посты канала.',
-  }),
-  define({
-    id: 'tg.reactions', label: 'Реакции', source: 'tg', kind: 'series', unit: 'number',
-    category: 'engagement', dimensions: POST_DIMS, drillKey: 'reactions',
-    // Дискретные постозависимые суточные суммы → столбцы (решение владельца 2026-08-13).
-    defaultViz: 'bar', supportedViz: ['bar', 'line'],
-    formula: 'Сумма всех реакций-эмодзи под постами окна.', sourceNote: 'Посты канала.',
-  }),
-  define({
-    id: 'tg.forwards', label: 'Репосты', source: 'tg', kind: 'series', unit: 'number',
-    category: 'engagement', dimensions: POST_DIMS, drillKey: 'forwards',
-    // Как «Реакции»: счётный суточный поток → столбцы (решение владельца 2026-08-13).
-    defaultViz: 'bar', supportedViz: ['bar', 'line'],
-    formula: 'Сколько раз посты переслали (forward) за период.', sourceNote: 'Посты канала.',
-  }),
-  define({
-    id: 'tg.er', label: 'Вовлечённость (ER)', glossaryLabel: 'Вовлечённость', source: 'tg', kind: 'value', unit: 'percent',
-    category: 'engagement', drillKey: 'er',
-    formula: 'ER = (реакции + репосты + комментарии) ÷ подписчики × 100%.',
-    included: 'Все реакции, репосты и комментарии к постам периода, отнесённые к текущей базе подписчиков. Считаются действия, а не люди, поэтому значение может превысить 100%.',
-    sourceNote: 'Посты канала + текущее число подписчиков.',
-  }),
-  // Derived post-average KPIs (no clean daily series — shown as headline values).
-  define({
-    id: 'tg.erv', label: 'ERV', source: 'tg', kind: 'value', unit: 'percent', category: 'engagement',
-    formula: 'ERV = среднее по постам окна значение (реакции + репосты + комментарии) ÷ просмотры × 100%.',
-    included: 'Вовлечённость на просмотр (а не на подписчика) — устойчивее к охвату.', sourceNote: 'Посты канала.',
-  }),
-  define({
-    id: 'tg.virality', label: 'Виральность', source: 'tg', kind: 'value', unit: 'percent',
-    category: 'engagement',
-    formula: 'Виральность = среднее по постам окна значение репосты ÷ просмотры × 100%.',
-    included: 'Насколько активно контент разносят дальше.', sourceNote: 'Посты канала.',
-  }),
-  // Growth flows.
-  define({
-    id: 'tg.netGrowth', label: 'Чистый прирост подписчиков', source: 'tg', kind: 'series', unit: 'number',
-    // Столбцы — дефолт (владелец 2026-08-13): дневной ±поток вокруг нуля, день с оттоком виден
-    // сразу. Линия остаётся вариантом и рисует НАКОПЛЕНИЕ за окно — форма ряда следует
-    // представлению, см. resolveNetGrowth.
-    category: 'growth', defaultViz: 'bar', supportedViz: ['bar', 'line'],
-    formula: 'Накопительная сумма подписавшихся − отписавшихся от начала периода.', sourceNote: 'График подписчиков (MTProto).',
-  }),
-  define({
-    id: 'tg.churn', label: 'Динамика оттока', source: 'tg', kind: 'breakdown', unit: 'number',
-    category: 'growth',
-    formula: 'Всего подписавшихся против всего отписавшихся за окно графика подписчиков Telegram — период карточки на разбивку не влияет.',
-  }),
-  define({
-    id: 'tg.newFollowersBySource', label: 'Новые подписчики по источникам', source: 'tg', kind: 'breakdown',
-    unit: 'number', category: 'audience', additive: true,
-    formula: 'Откуда пришли новые подписчики (подписки / ссылки / поиск / …).',
-  }),
-  // Content breakdowns.
-  define({
-    id: 'tg.emoji', label: 'Реакции по эмодзи', source: 'tg', kind: 'breakdown', unit: 'number',
-    category: 'content', dimensions: POST_DIMS, formula: 'Топ эмодзи-реакций под постами окна.',
-  }),
-  define({
-    id: 'tg.engagementComposition', label: 'Состав вовлечённости', source: 'tg', kind: 'breakdown',
-    unit: 'number', category: 'engagement', additive: true,
-    formula: 'Реакции против репостов против комментариев по последним загруженным постам канала (до 100) — период карточки на разбивку не влияет.',
-  }),
-  define({
-    id: 'tg.viewsByType', label: 'Ср. охват по типу', source: 'tg', kind: 'breakdown', unit: 'views',
-    category: 'content', formula: 'Средние просмотры по типу поста (фото / видео / …).',
-  }),
-  define({
-    id: 'tg.formatPerf', label: 'Вовлечённость по формату', source: 'tg', kind: 'breakdown', unit: 'percent',
-    category: 'content', dimensions: ['tg.weekday'],
-    formula: 'Средний ERV по типу поста — какие форматы реально вовлекают.',
-  }),
-  define({
-    id: 'tg.weekdayViews', label: 'По дням недели', source: 'tg', kind: 'breakdown', unit: 'views',
-    category: 'content', defaultViz: 'bar', supportedViz: ['bar', 'line'], dimensions: ['tg.format'],
-    formula: 'Средние просмотры поста по дню недели публикации.',
-  }),
-  define({
-    id: 'tg.postCount', label: 'Количество постов', source: 'tg', kind: 'breakdown', unit: 'posts',
-    category: 'content', defaultViz: 'bar', supportedViz: ['bar', 'line'], dimensions: ['tg.format'],
-    additive: true, formula: 'Сколько постов вышло по дню недели.',
-  }),
-  // Audience breakdowns.
-  define({
-    id: 'tg.viewsBySource', label: 'Просмотры по источникам', source: 'tg', kind: 'breakdown', unit: 'views',
-    category: 'audience', additive: true, formula: 'Откуда пришли просмотры (подписчики / ссылки / поиск / …).',
-  }),
-  define({
-    id: 'tg.languages', label: 'Языки аудитории', source: 'tg', kind: 'breakdown', unit: 'number',
-    category: 'audience',
-    formula: 'Языки аудитории из графика Telegram — топ-6 (больше сервер не отдаёт); значение строки — сумма дневных значений графика.',
-  }),
-  define({
-    id: 'tg.sentiment', label: 'Тональность реакций', source: 'tg', kind: 'breakdown', unit: 'number',
-    category: 'audience', additive: true, formula: 'Положительные / прочие / отрицательные реакции (метки графика Telegram).',
-  }),
-  define({
-    id: 'tg.hours', label: 'Активность по часам', source: 'tg', kind: 'breakdown', unit: 'number',
-    category: 'audience', defaultViz: 'bar', supportedViz: ['bar', 'line'], additive: true,
-    formula: 'Просмотры по часу суток — когда аудитория активнее.',
-  }),
-  // Tables (also the report presets).
-  define({
-    id: 'tg.weeklyTable', label: 'По неделям', source: 'tg', kind: 'table', unit: 'number',
-    category: 'engagement', formula: 'Понедельные суммы просмотров / реакций / репостов.',
-  }),
-  define({
-    id: 'tg.topPosts', label: 'Топ постов', source: 'tg', kind: 'table', unit: 'views',
-    category: 'content', formula: 'Лучшие публикации периода по вовлечённости.',
-  }),
-];
-
-// ── Instagram ───────────────────────────────────────────────────────────────────────────────
-const IG_METRICS: MetricDef[] = [
-  define({
-    id: 'ig.reach', label: 'Охват', source: 'ig', kind: 'series', unit: 'views', category: 'engagement',
-    formula: 'Сумма дневных охватов за окно; дневной охват — уникальные аккаунты за сутки.',
-    included: 'Сумма дневных уникальных ≠ уникальные за период: зритель, вернувшийся в разные дни, посчитан несколько раз.',
-    sourceNote: 'Instagram Graph (insights).',
-  }),
-  define({
-    id: 'ig.followers', label: 'Подписчики', source: 'ig', kind: 'series', unit: 'number', category: 'growth',
-    seriesAgg: 'level', defaultViz: 'line', supportedViz: ['line'],
-    formula: 'Текущее число подписчиков аккаунта.',
-    included: 'История уровня реконструируется по движению follows − unfollows: Instagram не отдаёт дневной ряд самого числа подписчиков.',
-    sourceNote: 'Профиль Instagram Graph (текущее число) + дневной архив для линии.',
-  }),
-  define({
-    id: 'ig.netFollowers', label: 'Прирост подписчиков', source: 'ig', kind: 'series', unit: 'number',
-    // Зеркало tg.netGrowth: столбцы = дневной ±поток, линия = накопление (см. resolveIgMetric).
-    category: 'growth', defaultViz: 'bar', supportedViz: ['bar', 'line'],
-    formula: 'Чистый прирост подписчиков за окно: подписки минус отписки.',
-    included: 'Instagram отдаёт подписки и отписки только агрегатом за окно, дневного ряда нет — на графике величина приходит одной ступенью в конце периода. Честное число — в шапке.',
-  }),
-  define({
-    id: 'ig.erv', label: 'Вовлечённость (ER)', source: 'ig', kind: 'value', unit: 'percent',
-    category: 'engagement',
-    formula: 'ER = взаимодействия ÷ сумма дневных охватов × 100%.',
-    included: 'Вовлечённость на охват устойчивее к размеру аудитории. Знаменатель — сумма дневных охватов, а не дедуплицированный охват периода, поэтому значение ниже ER из раздела Instagram.',
-  }),
-  define({
-    id: 'ig.interactions', label: 'Взаимодействия', source: 'ig', kind: 'series', unit: 'number',
-    category: 'engagement',
-    // Счётный поток → столбцы (решение владельца 2026-08-13); оконный агрегат-одиночка
-    // столбцом виден, точкой линии — нет.
-    defaultViz: 'bar', supportedViz: ['bar', 'line'],
-    formula: 'Лайки + комментарии + сохранения + репосты за период.',
-    included: 'Instagram считает взаимодействия агрегатом за окно, дневного ряда нет — на графике весь период приходит одной точкой в конце. Честное число — в шапке.',
-  }),
-  define({
-    id: 'ig.formats', label: 'Вовлечённость по форматам', source: 'ig', kind: 'breakdown', unit: 'number', category: 'content',
-    formula: 'Сумма взаимодействий по типу публикации — Лента / Reels / Stories / Карусель.',
-    included: 'Считаются взаимодействия, а не число публикаций: формат с одним вирусным постом обгонит формат с десятью тихими.',
-  }),
-  define({
-    id: 'ig.age', label: 'Возраст', source: 'ig', kind: 'breakdown', unit: 'number', category: 'audience',
-    defaultViz: 'bar', supportedViz: ['bar', 'list', 'donut'],
-    formula: 'Распределение подписчиков по возрастным группам.', sourceNote: 'Instagram Graph (demographics).',
-  }),
-  define({
-    id: 'ig.gender', label: 'Пол', source: 'ig', kind: 'breakdown', unit: 'number', category: 'audience',
-    formula: 'Распределение подписчиков по полу.', sourceNote: 'Instagram Graph (demographics).',
-  }),
-  define({
-    id: 'ig.countries', label: 'Страны', source: 'ig', kind: 'breakdown', unit: 'number', category: 'audience',
-    defaultViz: 'donut', supportedViz: ['donut', 'list', 'bar'],
-    formula: 'Топ стран аудитории.', sourceNote: 'Instagram Graph (demographics).',
-  }),
-  define({
-    id: 'ig.cities', label: 'Города', source: 'ig', kind: 'breakdown', unit: 'number', category: 'audience',
-    formula: 'Топ городов аудитории.', sourceNote: 'Instagram Graph (demographics).',
-  }),
-  define({
-    id: 'ig.hours', label: 'Лучшее время', source: 'ig', kind: 'breakdown', unit: 'number', category: 'audience',
-    defaultViz: 'bar', supportedViz: ['bar', 'line'],
-    formula: 'Относительная активность часа: среднее число подписчиков онлайн в этот час по каждому дню недели, затем семь значений складываются.',
-    included: 'Часы сравнимы между собой, но само значение — не число людей онлайн.',
-    sourceNote: 'Instagram Graph (online_followers).',
-  }),
-];
-
-// ── МойСклад ────────────────────────────────────────────────────────────────────────────────
-// Величины склада (рубли/заказы) — СВОИ и никогда не смешиваются с просмотрами/охватом соцсетей
-// (канон TG-views ≠ IG-reach ≠ MS-revenue). Данные — серверные агрегаты /api/ms/summary (окно
-// виджета), поэтому серии приходят уже нарезанными по дням.
-const MS_METRICS: MetricDef[] = [
-  define({
-    id: 'ms.revenue', label: 'Выручка', source: 'ms', kind: 'series', unit: 'currency',
-    category: 'growth', drillTo: '/sklad',
-    // Деньги за день дискретны, провалы выходных столбцами честнее (решение владельца 2026-08-13).
-    defaultViz: 'bar', supportedViz: ['bar', 'line'],
-    formula: 'Сумма продаж по дням за окно.',
-    included: 'Возвраты считаются отдельно и из выручки не вычитаются.',
-    sourceNote: 'МойСклад (серверный отчёт; «Всё» — дневной архив).',
-  }),
-  define({
-    id: 'ms.orders', label: 'Заказы', source: 'ms', kind: 'series', unit: 'number',
-    category: 'growth', drillTo: '/sklad',
-    // Штуки за день → столбцы (решение владельца 2026-08-13).
-    defaultViz: 'bar', supportedViz: ['bar', 'line'],
-    formula: 'Число заказов покупателей по дням за окно.', sourceNote: 'МойСклад.',
-  }),
-  define({
-    id: 'ms.avgCheck', label: 'Средний чек', source: 'ms', kind: 'series', unit: 'currency',
-    category: 'growth', drillTo: '/sklad',
-    formula: 'Сумма заказов дня ÷ число заказов дня; хедлайн — сумма заказов окна ÷ число заказов окна (не среднее дневных чеков).',
-    included: 'Дни без заказов в серию не входят (нет чека — нечего усреднять).', sourceNote: 'МойСклад.',
-  }),
-];
-
-// ── Яндекс.Метрика ──────────────────────────────────────────────────────────────────────────
-// Величины сайта (визиты/посетители/просмотры страниц) — СВОИ, четвёртая независимая семья
-// (канон TG-views ≠ IG-reach ≠ MS-revenue ≠ YM-visits). Данные — серверные агрегаты
-// /api/ym/summary (окно виджета), серии приходят уже нарезанными по дням.
-const YM_METRICS: MetricDef[] = [
-  define({
-    id: 'ym.visits', label: 'Визиты', source: 'ym', kind: 'series', unit: 'number',
-    category: 'growth', drillTo: '/metrika',
-    formula: 'Число визитов сайта по дням за окно; хедлайн — период-точный итог из отчёта Метрики.',
-    sourceNote: 'Яндекс.Метрика (accuracy=full). «Всё»: серия — дневной архив, хедлайн — точный итог за всю историю счётчика; без живого доступа — сумма архива.',
-  }),
-  define({
-    id: 'ym.users', label: 'Посетители', source: 'ym', kind: 'series', unit: 'number',
-    category: 'growth', drillTo: '/metrika',
-    formula: 'Уникальные посетители по дням; хедлайн — период-точный уникум из отчёта Метрики, а не сумма дней.',
-    included: 'Если итоги периода не пришли, показывается сумма дневных уникальных — она выше настоящего уникума, потому что вернувшийся посетитель посчитан в каждый свой день.',
-    sourceNote: 'Яндекс.Метрика.',
-  }),
-  define({
-    id: 'ym.pageviews', label: 'Просмотры страниц', source: 'ym', kind: 'series', unit: 'number',
-    category: 'growth', drillTo: '/metrika',
-    formula: 'Просмотры страниц сайта по дням за окно.', sourceNote: 'Яндекс.Метрика.',
-  }),
-];
-
 /** The full catalogue — TG first, then IG, then МС и Метрика, in a sensible reading order per source. */
-export const WIDGET_METRICS: MetricDef[] = [...TG_METRICS, ...IG_METRICS, ...MS_METRICS, ...YM_METRICS];
+export const WIDGET_METRICS: MetricDef[] = WIDGET_METRIC_IDS.map(toMetricDef).filter(
+  (def): def is MetricDef => def != null,
+);
 
 /** id → MetricDef for O(1) lookup (the WidgetConfig resolves its metric through this). */
 export const METRIC_BY_ID: Record<string, MetricDef> = Object.fromEntries(
