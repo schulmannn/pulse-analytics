@@ -38,6 +38,14 @@ describe('YmOverview error states', () => {
     expect(html).toContain('href="/connect?source=metrika"');
   });
 
+  it('keeps the reconnect CTA when the server moves revocation to the unified 409 source_reauth', () => {
+    const html = renderWithError(409, 'Токен отозван — переподключите источник', 'source_reauth');
+    expect(html).toContain('Токен Яндекса отозван');
+    expect(html).toContain('Переподключить Метрику');
+    expect(html).toContain('href="/connect?source=metrika"');
+    expect(html).not.toContain('Повторить');
+  });
+
   it('does not dress up a code-less 401 (our session expired) as a revoked token', () => {
     const html = renderWithError(401, 'Сессия истекла, войди снова');
     expect(html).not.toContain('Токен Яндекса отозван');
@@ -48,5 +56,7 @@ describe('YmOverview error states', () => {
   it('keeps the onboarding state for a channel without a counter (404)', () => {
     const html = renderWithError(404, 'Метрика не подключена');
     expect(html).toContain('Подключить Метрику');
+    const coded = renderWithError(404, 'Яндекс.Метрика не подключена к этому каналу', 'source_not_connected');
+    expect(coded).toContain('Подключить Метрику');
   });
 });

@@ -7,7 +7,7 @@ import { ChartCardBody } from '@/components/chartWidget/ChartCardBody';
 import { LineChart } from '@/components/LineChart';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { EmptyState } from '@/components/EmptyState';
-import { ErrorState } from '@/components/ErrorState';
+import { SourceErrorState } from '@/components/SourceErrorState';
 import { TableSkeleton } from '@/components/ui/dataSkeleton';
 import { fmt } from '@/lib/format';
 import { formatMoney, formatMoneyDelta } from '@/lib/metricNumber';
@@ -189,7 +189,9 @@ function TopProductsSkeleton() {
 
 function TopProductsError({ state }: { state: ReturnType<typeof useMsTopProducts> }) {
   return (
-    <ErrorState
+    <SourceErrorState
+      source="ms"
+      error={state.error}
       compact
       size="table"
       className="py-4"
@@ -511,7 +513,9 @@ function MsAssortmentDynamics({ period, metric }: { period: MsPeriod; metric: Ch
   if (q.isPending) return <TopProductsSkeleton />;
   if (q.isError) {
     return (
-      <ErrorState
+      <SourceErrorState
+        source="ms"
+        error={q.error}
         compact
         size="table"
         className="py-4"

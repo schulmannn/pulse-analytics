@@ -42,6 +42,18 @@ describe('MsOverview error states', () => {
     expect(html).toContain('История продаж сохранится');
   });
 
+  it('keeps the reconnect CTA when the server moves revocation to the unified 409 source_reauth', () => {
+    // Единый sendSourceError отдаст отзыв 409 + source_reauth. Экран решает по sourceErrorKind, а не по
+    // статусу или легаси-коду, — смена формы на сервере не снимает «Переподключить».
+    const html = renderWithError(409, 'Токен отозван — переподключите источник', 'source_reauth');
+    expect(html).toContain('Токен МойСклада отозван');
+    expect(html).toContain('Переподключить МойСклад');
+    expect(html).toContain('href="/connect?source=moysklad"');
+    // Повтор вернул бы тот же отказ — кнопки нет, путь наружу один.
+    expect(html).not.toContain('Повторить');
+    expect(html).not.toContain('Не удалось получить данные МойСклада');
+  });
+
   it('names missing employee rights on 403 ms_forbidden instead of asking to reconnect', () => {
     const html = renderWithError(
       403,
@@ -82,5 +94,9 @@ describe('MsOverview error states', () => {
     const html = renderWithError(404, 'МойСклад не подключён');
     expect(html).toContain('Подключить МойСклад');
     expect(html).toContain('href="/connect?source=moysklad"');
+    // И в будущей форме с кодом — тот же onboarding.
+    const coded = renderWithError(404, 'МойСклад не подключён к этому каналу', 'source_not_connected');
+    expect(coded).toContain('МойСклад не подключён');
+    expect(coded).toContain('Подключить МойСклад');
   });
 });

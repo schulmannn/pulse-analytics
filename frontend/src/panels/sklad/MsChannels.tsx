@@ -11,7 +11,7 @@ import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { EmptyState } from '@/components/EmptyState';
-import { ErrorState } from '@/components/ErrorState';
+import { SourceErrorState } from '@/components/SourceErrorState';
 import { ChartSkeleton, TableSkeleton } from '@/components/ui/dataSkeleton';
 import { fmt, pluralRu, timeAxisFromDayKeys } from '@/lib/format';
 import { formatMoney } from '@/lib/metricNumber';
@@ -60,7 +60,9 @@ export function MsChannels() {
 
   if (channels.isError) {
     return (
-      <ErrorState
+      <SourceErrorState
+        source="ms"
+        error={channels.error}
         title="Не удалось получить каналы продаж"
         reason={channels.error instanceof Error ? channels.error.message : 'ошибка'}
         onRetry={() => channels.refetch()}
@@ -113,7 +115,9 @@ export function MsChannels() {
         {geo.isPending ? (
           <ListSkeleton rows={5} />
         ) : geo.isError ? (
-          <ErrorState
+          <SourceErrorState
+            source="ms"
+            error={geo.error}
             compact
             size="table"
             title="Не удалось получить географию заказов"
@@ -295,7 +299,9 @@ export function MsChannelChart({
   if (series.isPending) return <ChartSkeleton className="py-2" />;
   if (series.isError) {
     return (
-      <ErrorState
+      <SourceErrorState
+        source="ms"
+        error={series.error}
         compact
         size="chart"
         title="Не удалось получить динамику каналов"

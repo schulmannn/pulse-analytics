@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { useMsStock, type MsStockRow } from '@/api/ms';
 import { EmptyState } from '@/components/EmptyState';
-import { ErrorState } from '@/components/ErrorState';
+import { SourceErrorState } from '@/components/SourceErrorState';
 import { TableSkeleton } from '@/components/ui/dataSkeleton';
 import { fmt } from '@/lib/format';
 import type { MsPeriod } from '@/lib/msPeriod';
@@ -51,7 +51,9 @@ function StockSkeleton({ rows }: { rows: number }) {
 
 function StockError({ state }: { state: ReturnType<typeof useMsStock> }) {
   return (
-    <ErrorState
+    <SourceErrorState
+      source="ms"
+      error={state.error}
       compact
       size="table"
       className="py-4"

@@ -7,6 +7,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
 import { observeSize } from '@/lib/observeSize';
 import { useMsFunnel, useMsReturns, useMsSummary } from '@/api/ms';
+import { sourceErrorKind } from '@/api/sourceErrors';
 import { MsTopProductsCard } from '@/panels/sklad/MsTopProducts';
 import { MsStockCard } from '@/panels/sklad/MsStock';
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
@@ -14,7 +15,7 @@ import { ChartCardBody } from '@/components/chartWidget/ChartCardBody';
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
 import { EmptyState } from '@/components/EmptyState';
-import { ErrorState } from '@/components/ErrorState';
+import { SourceErrorState } from '@/components/SourceErrorState';
 import { ChartSkeleton, TableSkeleton } from '@/components/ui/dataSkeleton';
 import { KpiValue } from '@/components/chartWidget/KpiValue';
 import { DeltaPill } from '@/components/DeltaPill';
@@ -137,36 +138,10 @@ export function MsOverview() {
   }
 
   if (summary.isError) {
-    const { status, code } = (summary.error as { status?: number; code?: string } | null) ?? {};
-    // Различаем по машинному коду, а не по статусу: 401 без кода — это наша истёкшая сессия (её
-    // уводит на /login lib/authRedirect), а не отзыв токена МойСклада.
-    if (code === 'ms_token_revoked') {
-      // Токен отозван на стороне МойСклада — честный reconnect-CTA вместо «недоступен». Замены
-      // токена у подключённого МойСклада на /connect нет (только «Отключить»), поэтому называем
-      // путь целиком; DELETE /api/ms/account сносит только учётку, архив ms_daily остаётся.
-      return (
-        <EmptyState
-          title="Токен МойСклада отозван"
-          reason="Источник перестал принимать наш токен — создайте новый в МойСкладе, затем на странице подключений отключите старый и вставьте новый. История продаж сохранится."
-          action={{ to: '/connect?source=moysklad', label: 'Переподключить МойСклад' }}
-        />
-      );
-    }
-    if (code === 'ms_forbidden') {
-      // 403 от МойСклада: токен жив, но сотруднику, чей он, не выданы права на отчёты. Переподключение
-      // тем же токеном ничего не изменит — называем настоящую причину и то, что дашборд читает
-      // (показатели продаж/заказов, заказы и возвраты покупателей, контрагенты, каналы продаж,
-      // отчёты прибыльности и остатков). Кнопки нет сознательно: у подключённого МойСклада на /connect нет замены токена
-      // (только «Отключить»), а права проверяются МойСкладом на каждом запросе — после их выдачи
-      // хватает обновить страницу.
-      return (
-        <EmptyState
-          title="Не хватает прав в МойСкладе"
-          reason="МойСклад не отдаёт показатели продаж и заказов сотруднику, чей токен подключён. Для дашборда ему нужен просмотр «Показателей», «Заказов покупателей», «Возвратов покупателей», «Контрагентов», «Каналов продаж», отчётов «Прибыльность» и «Остатки», а также право видеть себестоимость и прибыль. Выдайте права в карточке сотрудника в МойСкладе и обновите страницу — переподключать токен не нужно."
-        />
-      );
-    }
-    if (status === 404) {
+    // Состояние доступа решает sourceErrorKind (api/sourceErrors), а не статус: он понимает и
+    // нынешний 401 ms_token_revoked, и будущий 409 source_reauth. 401 без кода — наша истёкшая
+    // сессия (её уводит на /login lib/authRedirect), а не отзыв токена МойСклада.
+    if (sourceErrorKind(summary.error) === 'not_connected') {
       // Канал есть, а токена МойСклада на нём нет — честный onboarding вместо пустых карточек.
       return (
         <EmptyState
@@ -177,8 +152,11 @@ export function MsOverview() {
         />
       );
     }
+    // Отзыв токена → «Переподключить», 403 ms_forbidden → какие права выдать (SourceErrorState).
     return (
-      <ErrorState
+      <SourceErrorState
+        source="ms"
+        error={summary.error}
         title="Не удалось получить данные МойСклада"
         reason={summary.error instanceof Error ? summary.error.message : 'ошибка'}
         onRetry={() => summary.refetch()}
@@ -274,7 +252,9 @@ export function MsOverview() {
         {funnel.isPending ? (
           <TableSkeleton rows={4} columns={3} className="py-2" />
         ) : funnel.isError ? (
-          <ErrorState
+          <SourceErrorState
+            source="ms"
+            error={funnel.error}
             compact
             size="table"
             className="py-4"
@@ -318,7 +298,9 @@ export function MsOverview() {
         {returns.isPending ? (
           <ChartSkeleton />
         ) : returns.isError ? (
-          <ErrorState
+          <SourceErrorState
+            source="ms"
+            error={returns.error}
             compact
             size="chart"
             className="py-4"
@@ -486,7 +468,9 @@ export function MsSummaryExplorer({
   }
   if (summary.isError) {
     return (
-      <ErrorState
+      <SourceErrorState
+        source="ms"
+        error={summary.error}
         compact
         size="chart"
         title="Не удалось получить данные МойСклада"
@@ -741,7 +725,9 @@ export function MsReturnsExplorer({
   }
   if (returns.isError) {
     return (
-      <ErrorState
+      <SourceErrorState
+        source="ms"
+        error={returns.error}
         compact
         size="chart"
         title="Не удалось получить возвраты"

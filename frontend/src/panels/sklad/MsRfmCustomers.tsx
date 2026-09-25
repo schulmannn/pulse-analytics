@@ -4,6 +4,7 @@ import { fetchMsRfmCustomersPage, useMsRfmSegmentCustomers, type MsRfmCustomers 
 import { IconMorph, useMorphFlash } from '@/components/ui/icon-morph';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
+import { SourceErrorState } from '@/components/SourceErrorState';
 import { Button } from '@/components/ui/button';
 import { TableSkeleton } from '@/components/ui/dataSkeleton';
 import { toYmd } from '@/lib/analyticsExport';
@@ -172,7 +173,9 @@ export function MsRfmSegmentCustomers({ period, segment }: { period: MsPeriod; s
   }
   if (rows.length === 0 && page.isError) {
     return (
-      <ErrorState
+      <SourceErrorState
+        source="ms"
+        error={page.error}
         compact
         size="table"
         className="py-4"
@@ -328,7 +331,9 @@ export function MsRfmSegmentCustomers({ period, segment }: { period: MsPeriod; s
         </ul>
       )}
       {page.isError && (
-        <ErrorState
+        <SourceErrorState
+          source="ms"
+          error={page.error}
           compact
           size="table"
           className="mt-2 py-4"

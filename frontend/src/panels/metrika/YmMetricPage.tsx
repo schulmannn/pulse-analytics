@@ -12,7 +12,7 @@ import { PeriodChips } from '@/components/PeriodChips';
 import { PillSelect } from '@/components/PillSelect';
 import { SourceIdentity } from '@/components/SourceIdentity';
 import { EmptyState } from '@/components/EmptyState';
-import { ErrorState } from '@/components/ErrorState';
+import { SourceErrorState } from '@/components/SourceErrorState';
 import { PinnedDayPanel } from '@/components/PinnedDayPanel';
 import { ChartSkeleton } from '@/components/ui/dataSkeleton';
 import { ChartTooltip, useHeatmapTip } from '@/components/ChartTooltip';
@@ -260,7 +260,9 @@ function YmSeriesPage({ def }: { def: YmSeriesDef }) {
   if (summary.isError) {
     return (
       <YmMetricShell term={def.term}>
-        <ErrorState
+        <SourceErrorState
+          source="ym"
+          error={summary.error}
           title="Не удалось получить данные Яндекс.Метрики"
           reason={summary.error instanceof Error ? summary.error.message : 'ошибка'}
           onRetry={() => summary.refetch()}
@@ -555,7 +557,9 @@ function YmHourlyPage() {
         {q.isPending ? (
           <ChartSkeleton />
         ) : q.isError ? (
-          <ErrorState
+          <SourceErrorState
+            source="ym"
+            error={q.error}
             compact
             size="chart"
             className="py-4"
