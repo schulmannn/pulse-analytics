@@ -2,6 +2,9 @@
 
 const rateLimit = require('express-rate-limit');
 
+// Через сколько секунд повторить экспорт, если заняты все слоты одновременных выгрузок.
+const EXPORT_BUSY_RETRY_AFTER_SEC = 60;
+
 /**
  * Account-scoped + admin routes, extracted verbatim from index.js:
  *   • GET  /api/config            — public SPA runtime config (no secrets)
@@ -143,6 +146,15 @@ function registerAccountRoutes({
         },
       });
       if (outcome === 'not_found') return res.status(404).json({ error: 'Пользователь не найден' });
+      // Занят лимит одновременных выгрузок (свой второй экспорт или чужие) — ни байта ещё не
+      // ушло, так что отвечаем честным 503 + Retry-After; фронт покажет текст вместо битого файла.
+      if (outcome === 'busy') {
+        res.setHeader('Retry-After', String(EXPORT_BUSY_RETRY_AFTER_SEC));
+        return res.status(503).json({
+          error: 'Сейчас уже идёт выгрузка данных — попробуйте через минуту',
+          retry_after: EXPORT_BUSY_RETRY_AFTER_SEC,
+        });
+      }
       if (outcome === 'ok') audit(req, 'account.exported', {}).catch(() => {});
       // 'aborted' / 'stream_error': ответ уже завершён/уничтожен — второй раз не отвечаем.
     } catch (e) { next(e); }

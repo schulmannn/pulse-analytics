@@ -9,7 +9,8 @@ const assert = require('node:assert');
 const { createTestDatabase } = require('./testDatabase');
 
 /** Fake res-коллектор: гоняет реальный streamUserExport в память и парсит собранный JSON.
- *  write→true (без эмуляции backpressure — она покрыта юнит-тестом), end/destroy шлют 'close'. */
+ *  write→true (без эмуляции backpressure — она покрыта юнит-тестом); end шлёт 'finish', затем
+ *  'close', как настоящий ServerResponse (колбэка в res.end writer не передаёт); destroy — 'close'. */
 function collectorRes() {
   const listeners = {};
   return {
@@ -19,7 +20,7 @@ function collectorRes() {
     off(ev, fn) { if (listeners[ev]) listeners[ev] = listeners[ev].filter((f) => f !== fn); return this; },
     emit(ev, ...a) { (listeners[ev] || []).slice().forEach((f) => f(...a)); },
     write(s) { this.chunks.push(s); return true; },
-    end(cb) { this.writableEnded = true; if (cb) cb(); this.emit('close'); },
+    end() { this.writableEnded = true; this.emit('finish'); this.emit('close'); },
     destroy() { this.destroyed = true; this.emit('close'); },
     body() { return this.chunks.join(''); },
   };

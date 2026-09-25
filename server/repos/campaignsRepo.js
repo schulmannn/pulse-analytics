@@ -38,7 +38,8 @@ const CAMPAIGN_POSTS_LIMIT = 500;
 const CAMPAIGN_BATCH_LIMIT = 100;
 
 function createCampaignsRepo({ pool, enabled, transaction }) {
-  const ISO = `'YYYY-MM-DD"T"HH24:MI:SSOF'`;
+  // Смещение — TZH:TZM ('+00:00'), не OF: OF при целочасовом поясе даёт '+00', а JS Date такое не парсит.
+  const ISO = `'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM'`;
   const CAMPAIGN_COLS = `c.id, c.workspace_id, c.name, c.description, c.color, c.status,
     to_char(c.start_date,'YYYY-MM-DD') AS start_date,
     to_char(c.end_date,'YYYY-MM-DD') AS end_date,

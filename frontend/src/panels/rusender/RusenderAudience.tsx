@@ -5,7 +5,7 @@ import { ChartBand } from '@/components/ChartBand';
 import { BarChart } from '@/components/BarChart';
 import { Sparkline } from '@/components/Sparkline';
 import { EmptyState } from '@/components/EmptyState';
-import { ErrorState } from '@/components/ErrorState';
+import { RusenderErrorState } from '@/panels/rusender/RusenderErrorState';
 import { ChartSkeleton } from '@/components/ui/dataSkeleton';
 import { useRusenderSummary } from '@/api/rusender';
 import { useSelectedChannel } from '@/lib/channel-context';
@@ -41,7 +41,7 @@ export function RusenderAudience() {
     };
   }, [series]);
 
-  if (summary.isError) return <ErrorState onRetry={() => void summary.refetch()} />;
+  if (summary.isError) return <RusenderErrorState query={summary} />;
 
   const contacts = summary.data?.contacts;
   // Снимков может не быть вовсе: джоб ходит раз в сутки, а история короче суток — это норма

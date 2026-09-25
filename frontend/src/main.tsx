@@ -25,6 +25,8 @@ const queryClient = new QueryClient({
   queryCache: new QueryCache({
     // Central cookie-auth policy: any protected request that returns 401 lands on
     // /login. The HttpOnly session is cleared server-side when invalid/revoked.
+    // Исключение — 401 с кодом отозванного токена МойСклада/Метрики (lib/authRedirect):
+    // сессия жива, экран источника сам покажет «Переподключить».
     onError: handleUnauthorized,
   }),
   // Mutations use a separate TanStack cache; without this mirror, a 401 from settings/connect/
