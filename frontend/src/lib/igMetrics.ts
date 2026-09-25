@@ -99,7 +99,7 @@ export function mergeIgDaily(archive: Point[], live: Point[], lastArchiveDay?: s
     seen.add(key);
     out.push({ key, point: p });
   }
-  const last = lastArchiveDay ?? (out.length ? out.reduce((m, e) => (e.key > m ? e.key : m), out[0]!.key) : null);
+  const last = lastArchiveDay ?? out.reduce<string | null>((m, e) => (m == null || e.key > m ? e.key : m), null);
   for (const p of live) {
     const key = p.day === 'total' ? null : canonicalDayKey(p.day);
     if (!key || seen.has(key) || (last != null && key <= last)) continue;
@@ -276,8 +276,10 @@ export const flag = (iso: string) => {
     null unless the series covers the full previous window too (honest comparison). */
 export function windowIgSeries(series: Point[], days: number, unit: string) {
   const pts = series.filter((p) => p.day !== 'total' && canonicalDayKey(p.day) != null);
-  const keyOf = (p: Point) => canonicalDayKey(p.day)!;
-  const lastKey = pts.length ? keyOf(pts[pts.length - 1]!) : null;
+  // pts уже отфильтрованы по валидному ключу — пустая строка здесь недостижима.
+  const keyOf = (p: Point) => canonicalDayKey(p.day) ?? '';
+  const lastPoint = pts[pts.length - 1];
+  const lastKey = lastPoint ? keyOf(lastPoint) : null;
   const shift = (key: string, offset: number) =>
     new Date(Date.parse(`${key}T00:00:00Z`) + offset * DAY_MS).toISOString().slice(0, 10);
   let w = pts;
@@ -287,7 +289,8 @@ export function windowIgSeries(series: Point[], days: number, unit: string) {
     const prevFrom = shift(from, -days);
     w = pts.filter((p) => keyOf(p) >= from);
     // Прошлое окно честно только при полном покрытии: ряд начинается не позже его первого дня.
-    prevSlice = pts.length && keyOf(pts[0]!) <= prevFrom ? pts.filter((p) => keyOf(p) >= prevFrom && keyOf(p) < from) : null;
+    const firstPoint = pts[0];
+    prevSlice = firstPoint && keyOf(firstPoint) <= prevFrom ? pts.filter((p) => keyOf(p) >= prevFrom && keyOf(p) < from) : null;
   }
   const total = w.reduce((acc, p) => acc + p.value, 0);
   const prevTotal = prevSlice ? prevSlice.reduce((acc, p) => acc + p.value, 0) : null;

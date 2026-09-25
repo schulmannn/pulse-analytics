@@ -489,7 +489,10 @@ export function IgAudienceBody({ ig }: { ig: IgData }) {
   // кап CHART_MAX_POINTS, короткий ряд не трогается.
   const hasChart = level.length >= 2;
   const levelShown = hasChart
-    ? prepareChartSeries({ points: level, viz: 'line', kind: 'stock', unit: 'number' }).sampledIdx.map((i) => level[i]!)
+    ? prepareChartSeries({ points: level, viz: 'line', kind: 'stock', unit: 'number' }).sampledIdx.flatMap((i) => {
+        const point = level[i];
+        return point ? [point] : [];
+      })
     : level;
   return (
     <div className="flex h-full min-h-0 flex-col gap-4">

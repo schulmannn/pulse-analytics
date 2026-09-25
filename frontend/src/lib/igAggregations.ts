@@ -80,10 +80,10 @@ export function bucketIgSeries(
     if (!Number.isFinite(t) || t < since || t > until) continue;
     by.set(bucketKeyOf(t, grain), (by.get(bucketKeyOf(t, grain)) ?? 0) + p.value);
   }
-  return bucketKeysInWindow(since, until, grain).map((k) => ({
-    date: k,
-    value: by.has(k) ? by.get(k)! : missing === 'zero' ? 0 : null,
-  }));
+  return bucketKeysInWindow(since, until, grain).map((k) => {
+    const sum = by.get(k);
+    return { date: k, value: sum != null ? sum : missing === 'zero' ? 0 : null };
+  });
 }
 
 /** Current-window sum + whether the window HAS current data + a delta (windowPair over the points).

@@ -188,7 +188,10 @@ function windowedDaily(series: Point[], win: IgChartWindow): Point[] {
 function toChart(points: Point[], windowDays?: number): IgOverviewChart {
   if (points.length < 2) return EMPTY_CHART;
   const { sampledIdx } = prepareChartSeries({ points, viz: 'line', kind: 'flow', unit: 'number' });
-  const shown = sampledIdx.map((i) => points[i]!);
+  const shown = sampledIdx.flatMap((i) => {
+    const point = points[i];
+    return point ? [point] : [];
+  });
   return {
     labels: shown.map((p) => fmtDay(p.day)),
     values: shown.map((p) => p.value),

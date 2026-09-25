@@ -678,9 +678,9 @@ describe('resolveWidgetMetric — Instagram (S11)', () => {
     expect(r.value).toMatch(/^\+/);
     // Накопление доходит до итога окна на последнем ИЗМЕРЕННОМ дне; дни без измерения — разрыв
     // линии (null), а не выдуманное плато или ноль.
-    const measured = r.series!.filter((p) => p.value != null);
+    const measured = (r.series ?? []).filter((p) => p.value != null);
     expect(measured.at(-1)?.value).toBe(40);
-    expect(r.series!.some((p) => p.value === null)).toBe(true);
+    expect((r.series ?? []).some((p) => p.value === null)).toBe(true);
   });
 
   it('shows a genuine net-zero window (follows == unfollows) as «0», not empty', () => {
@@ -962,7 +962,7 @@ describe('resolveWidgetMetric — Instagram «Всё» читает весь а�
   const history = {
     enabled: true,
     rows,
-    bounds: { first_day: rows[0]!.day, last_day: rows[N - 1]!.day },
+    bounds: { first_day: rows[0]?.day, last_day: rows[N - 1]?.day },
   } as unknown as IgHistoryData;
   const allCtx: DataContext = { ...igCtx, days: 0, ig: { profile: igProfile, history } };
 
@@ -985,7 +985,7 @@ describe('resolveWidgetMetric — Instagram «Всё» читает весь а�
       rows: rows.filter((_, i) => i % 2 === 0),
     } as unknown as IgHistoryData;
     const r = resolveWidgetMetric(cfg('ig.reach', { grain: 'day' }), { ...allCtx, ig: { profile: igProfile, history: gappy } });
-    expect(r.series!.some((p) => p.value === null)).toBe(true);
-    expect(r.series!.every((p) => p.value !== 0)).toBe(true);
+    expect((r.series ?? []).some((p) => p.value === null)).toBe(true);
+    expect((r.series ?? []).every((p) => p.value !== 0)).toBe(true);
   });
 });

@@ -760,7 +760,10 @@ function IgAggregatePage({ def, pair, windowLabel, handle }: { def: IgAggDef; pa
     ПОЛНОГО окна до этого шага — кап меняет только плотность рисуемых точек. */
 function capPoints<T extends { day: string; value: number }>(points: T[], kind: 'flow' | 'stock' = 'flow'): T[] {
   const { sampledIdx } = prepareChartSeries({ points, viz: 'line', kind, unit: 'number' });
-  return sampledIdx.map((i) => points[i]!);
+  return sampledIdx.flatMap((i) => {
+    const point = points[i];
+    return point ? [point] : [];
+  });
 }
 
 /** Calendar-day key of an IG post timestamp in the SAME coordinate as the series days: archive days

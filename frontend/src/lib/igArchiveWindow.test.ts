@@ -56,7 +56,7 @@ describe('igWindowPlan — какое окно живое, какое архив
     expect(plan.days).toBe(201);
     expect(plan.label).toBe('выбранный период');
     expect(plan.noBasisReason).toBe(NO_BASIS_CUSTOM_RANGE);
-    expect(inPlanDays(plan, plan.fromDay!)).toBe(true);
+    expect(inPlanDays(plan, plan.fromDay ?? '')).toBe(true);
     expect(inPlanDays(plan, dayKeyOf(from - DAY_MS, 'local'))).toBe(false);
     expect(inPlanDays(plan, dayKeyOf(to + DAY_MS, 'local'))).toBe(false);
     expect(inPlanDays(plan, 'garbage')).toBe(false);

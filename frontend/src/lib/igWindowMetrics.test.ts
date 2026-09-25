@@ -330,12 +330,12 @@ describe('igWindowMetrics — архивное окно («Всё», свой п
     expect(m.mode).toBe('archive');
     expect(m.reachBasis).toBe('dailySum');
     expect(m.liveFallback).toBe(false);
-    expect(m.pairs.reach.cur).toBe(sum(rows.map((r) => r.reach!)));
-    expect(m.pairs.views.cur).toBe(sum(rows.map((r) => r.views!)));
-    expect(m.pairs.ti.cur).toBe(sum(rows.map((r) => r.total_interactions!)));
+    expect(m.pairs.reach.cur).toBe(sum(rows.map((r) => r.reach ?? 0)));
+    expect(m.pairs.views.cur).toBe(sum(rows.map((r) => r.views ?? 0)));
+    expect(m.pairs.ti.cur).toBe(sum(rows.map((r) => r.total_interactions ?? 0)));
     expect(m.followerNet.cur).toBe(2 * rows.length);
     // ER — на одном основании: Σвзаимодействий ÷ Σохвата по одним и тем же дням.
-    expect(m.erReach).toBeCloseTo((sum(rows.map((r) => r.total_interactions!)) / sum(rows.map((r) => r.reach!))) * 100, 10);
+    expect(m.erReach).toBeCloseTo((sum(rows.map((r) => r.total_interactions ?? 0)) / sum(rows.map((r) => r.reach ?? 0))) * 100, 10);
   });
 
   it('вовлечённые аккаунты не суммируются, прошлого периода нет, дельт нет', () => {
@@ -352,7 +352,7 @@ describe('igWindowMetrics — архивное окно («Всё», свой п
 
   it('свой период — только его календарные дни; окно без архива, но с живым рядом — фолбэк «догружается»', () => {
     const m = all({ fromDay: day(-10), toDay: day(-8) });
-    expect(m.pairs.reach.cur).toBe(sum(rows.filter((r) => r.day >= day(-10) && r.day <= day(-8)).map((r) => r.reach!)));
+    expect(m.pairs.reach.cur).toBe(sum(rows.filter((r) => r.day >= day(-10) && r.day <= day(-8)).map((r) => r.reach ?? 0)));
     const fresh = all({ historyRows: [], fromDay: day(0), toDay: day(2) });
     expect(fresh.liveFallback).toBe(true);
     expect(fresh.pairs.reach.cur).toBe(7 + 8 + 9);
