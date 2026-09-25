@@ -122,6 +122,26 @@ test('worker boots, starts the runner behind a ref keepalive, no HTTP', async ()
   await runtime.stop();
 });
 
+test('production worker boots with a small PGPOOL_MAX (GDPR export limit never fails boot)', async () => {
+  // Worker получает env web-сервиса: дефолтный GDPR_EXPORT_MAX_CONCURRENT=2 при PGPOOL_MAX=2 раньше
+  // был фатальным ConfigError и ронял и worker, хотя экспорта у него нет вовсе.
+  const { composition, events } = makeWorkerComposition();
+  const { setIntervalFn, clearIntervalFn } = makeIntervals(events);
+  const runtime = await runWorker({
+    env: {
+      ...WORKER_ENV, NODE_ENV: 'production', SESSION_SECRET: 's', DATABASE_URL: 'postgres://x',
+      APP_URL: 'https://atlavue.app', PGPOOL_MAX: '2',
+    },
+    compositionFactory: () => composition,
+    installSignalHandlers: false,
+    shutdownTimeoutMs: 1_000,
+    setIntervalFn,
+    clearIntervalFn,
+  });
+  assert.ok(events.includes('runner.start'), 'worker стартовал');
+  await runtime.stop();
+});
+
 test('worker ignores JOBS_MODE (web-only gate): jobs still run with JOBS_MODE=off in env', async () => {
   // Railway-worker получает «те же env», что и web (включая JOBS_MODE=off на split-топологии).
   // Гейт относится ТОЛЬКО к web-планировщикам (server/main.js); worker обязан гонять джобы всегда —

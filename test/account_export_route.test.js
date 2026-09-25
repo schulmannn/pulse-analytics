@@ -6,6 +6,7 @@
 //   • ok → no-store/content-disposition/content-type ставятся onReady ДО первого байта, аудит —
 //     ровно один раз и только после завершения, второго ответа поверх стрима нет;
 //   • aborted / stream_error → ни второго ответа, ни аудита (ответ уже завершён/уничтожен);
+//   • busy (лимит одновременных выгрузок) → 503 + Retry-After до первого байта, без аудита;
 //   • throw ДО стрима → next(error);
 //   • без БД → 503.
 // Лимитер и requireAuth здесь pass-through (берём последний хендлер, как в reports_route).
@@ -94,6 +95,19 @@ for (const outcome of ['aborted', 'stream_error']) {
     assert.equal(audited, 0, `${outcome} не аудитим`);
   });
 }
+
+test('export: busy (лимит одновременных выгрузок) → 503 + Retry-After, без заголовков файла и аудита', async () => {
+  let audited = 0;
+  // Сервис отказал ДО коннекта и первого байта — onReady не звался.
+  const db = { enabled: true, streamUserExport: async () => 'busy' };
+  const { res, nextError } = await invokeExport(db, async () => { audited += 1; });
+  assert.equal(nextError, null);
+  assert.equal(res.statusCode, 503);
+  assert.equal(res.headers['Retry-After'], '60');
+  assert.equal(res.headers['Content-Disposition'], undefined, 'это не файл — фронт покажет текст');
+  assert.deepEqual(res.body, { error: 'Сейчас уже идёт выгрузка данных — попробуйте через минуту', retry_after: 60 });
+  assert.equal(audited, 0);
+});
 
 test('export: throw ДО стрима → next(error)', async () => {
   const boom = new Error('early failure before first byte');

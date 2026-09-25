@@ -17,6 +17,23 @@ function hasStatus(error: unknown, status: number): boolean {
  */
 const PUBLIC_PATHS = new Set(['/login', '/invite']);
 
+/**
+ * 401 с этими машинными кодами — не конец НАШЕЙ сессии, а отказ СТОРОННЕГО токена источника:
+ * data-роуты МойСклада (routes/moysklad.js, sendMsError) и Метрики (routes/metrika.js, sendYmError)
+ * так отвечают, когда провайдер перестал принимать уже сохранённый токен. Сессия Atlavue жива, и
+ * экран источника сам показывает «Переподключить» (MsOverview/YmOverview). Редирект на /login
+ * выдавал отзыв токена за разлогин и прятал эту кнопку — источник становился недоступен совсем.
+ * У Instagram та же ситуация отдаётся 409 `ig_reauth` и сюда не доходит. Список явный: 401 без
+ * кода (или с любым другим) по-прежнему ведёт на /login.
+ */
+const SOURCE_TOKEN_CODES = new Set(['ms_token_revoked', 'ym_token_revoked']);
+
+function hasSourceTokenCode(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null || !('code' in error)) return false;
+  const code = (error as { code?: unknown }).code;
+  return typeof code === 'string' && SOURCE_TOKEN_CODES.has(code);
+}
+
 /** Raw AuthGate owns the public probe, so every TanStack 401 belongs to protected work. */
 export function shouldRedirectOnUnauthorized(
   error: unknown,
@@ -25,6 +42,7 @@ export function shouldRedirectOnUnauthorized(
 ): boolean {
   if (!hasStatus(error, 401) || demoMode) return false;
   if (PUBLIC_PATHS.has(pathname)) return false;
+  if (hasSourceTokenCode(error)) return false;
   return true;
 }
 

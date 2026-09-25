@@ -68,6 +68,8 @@ const CAMPAIGNS = {
   ],
 };
 
+const RANGE_TOO_WIDE = 'Слишком широкий диапазон дат: максимум 400 дней. Для всей истории выберите период «Всё»';
+
 async function bootRusender(
   page: Page,
   path: string,
@@ -94,6 +96,17 @@ async function bootRusender(
     }
     if (url.pathname === '/api/rusender/summary') {
       const days = Number(url.searchParams.get('days') ?? 30);
+      // Серверный потолок явного окна (server/routes/rusender.js, parseRange): шире 400 дней — 400
+      // с подсказкой, дословно как отвечает прод.
+      const from = url.searchParams.get('from');
+      const to = url.searchParams.get('to');
+      if (from && to && (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000 + 1 > 400) {
+        return route.fulfill({
+          status: 400,
+          contentType: 'application/json',
+          body: JSON.stringify({ error: RANGE_TOO_WIDE }),
+        });
+      }
       if (empty) {
         return json({
           days, from: null, to: null,
@@ -184,4 +197,21 @@ test('смена окна перезапрашивает обзор с новы�
   await expect(period).toBeVisible();
   await period.getByRole('button', { name: '7д' }).click();
   await expect.poll(() => asked.includes(7), { timeout: 10_000 }).toBe(true);
+});
+
+test('страница метрики: окно шире потолка — причина видна, «Окно» на месте, «Всё» возвращает данные', async ({ page }) => {
+  // Явное окно шире 400 дней сервер отвергает честной 400-кой. Раньше страница метрики теряла при
+  // этом шапку и пикер «Окно» — сменить окно было негде, а «Повторить» возвращал тот же отказ.
+  await bootRusender(page, '/metrics/rusender-opens?from=2024-06-01&to=2026-08-25');
+  const main = page.locator('main');
+  await expect(main).toContainText('максимум 400 дней', { timeout: 20_000 });
+  await expect(main).toContainText('выберите период «Всё»');
+  await expect(main.getByRole('button', { name: 'Повторить' })).toHaveCount(0);
+  await expect(main.getByRole('heading', { level: 1, name: 'Открытия' })).toBeVisible();
+
+  const windowPicker = page.getByRole('group', { name: 'Окно' });
+  await expect(windowPicker).toBeVisible();
+  await windowPicker.getByRole('button', { name: 'Всё' }).click();
+  await expect(main).not.toContainText('максимум 400 дней', { timeout: 10_000 });
+  await expect(main.getByRole('alert')).toHaveCount(0);
 });

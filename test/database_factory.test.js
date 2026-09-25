@@ -22,3 +22,23 @@ test('createDatabase returns independent facades from independent configs', asyn
   await first.close();
   await second.close();
 });
+
+test('createDatabase: лимит GDPR-выгрузок зажат под PGPOOL_MAX фасада, а не валит старт', async () => {
+  for (const [env, expected] of [
+    [{}, 2], // дефолт: пул 10, лимит 2 — как задан
+    [{ PGPOOL_MAX: '2' }, 1], // маленький прод-пул: одна выгрузка, второй коннект остаётся API
+    [{ PGPOOL_MAX: '1' }, 1], // ниже 1 не опускаемся: 0 = экспорт всегда 503
+    [{ GDPR_EXPORT_MAX_CONCURRENT: '4', PGPOOL_MAX: '4' }, 3],
+    [{ GDPR_EXPORT_MAX_CONCURRENT: '3', PGPOOL_MAX: '4' }, 3],
+  ]) {
+    let received;
+    const db = databaseModule.createDatabase(loadConfig(env), {
+      createGdprService: (deps) => {
+        received = deps;
+        return {};
+      },
+    });
+    assert.equal(received.exportMaxConcurrent, expected, `${JSON.stringify(env)} → ${expected}`);
+    await db.close();
+  }
+});

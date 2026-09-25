@@ -88,8 +88,10 @@ function colName(i) {
  *   { date }        → серийное число под датовым стилем,
  *   { inline }      → inlineStr,
  *   { formulaText } → t="str" (кэшированный результат формулы).
+ * styledTo — колонка («IV»), до которой тянется оформление: в каждую непустую строку дописывается
+ * пустая клетка со стилем `<c r="IV5" s="1"/>` — так Excel сохраняет раскрашенные пустые клетки.
  */
-function buildXlsx(rows, { sheetName = 'Sheet1' } = {}) {
+function buildXlsx(rows, { sheetName = 'Sheet1', styledTo = null } = {}) {
   const shared = [];
   const sharedIndex = new Map();
   const sharedOf = (s) => {
@@ -115,7 +117,8 @@ function buildXlsx(rows, { sheetName = 'Sheet1' } = {}) {
       }
       return '';
     }).join('');
-    return `<row r="${r + 1}">${cells}</row>`;
+    const styled = styledTo ? `<c r="${styledTo}${r + 1}" s="1"/>` : '';
+    return `<row r="${r + 1}">${cells}${styled}</row>`;
   }).join('');
 
   const sheet = `<?xml version="1.0" encoding="UTF-8"?>`
