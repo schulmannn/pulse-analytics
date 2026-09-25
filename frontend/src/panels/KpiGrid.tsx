@@ -256,7 +256,8 @@ export function TgErBody({ state }: { state: TgKpiState }) {
  * (2026-07): these third-width TG cards now carry a publication-date timeline instead of the old
  * current/previous bars — the chart depends ONLY on the active window, never on previous-window
  * coverage. ≥2 publication-day buckets draw it (caption «по датам публикаций»); fewer keep the
- * headline and say so. NOT shared with Instagram — its CompareStat cards are untouched.
+ * headline and say so. NOT shared with Instagram — IG keeps its own twin, IgTrendStat
+ * (components/instagram/shared.tsx).
  */
 /**
  * `viz` — то, что кормит «Линия»/«Столбцы» в редакторе карточки. Переключатель типа графика на

@@ -1,75 +1,8 @@
-import { useState, type ReactNode } from 'react';
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { cn } from '@/lib/utils';
-import { Icon } from '@/components/nav-icons';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { useConnectIg, useIgOauthStatus } from '@/api/queries';
-
-/** Relative "last synced" readout — product language, not a raw timestamp. */
-function ago(ms: number): string {
-  if (!ms) return '—';
-  const s = Math.max(0, Math.floor((Date.now() - ms) / 1000));
-  if (s < 60) return 'только что';
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m} мин назад`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h} ч назад`;
-  return `${Math.floor(h / 24)} дн. назад`;
-}
-
-function Row({ label, value, tone }: { label: string; value: ReactNode; tone?: 'ok' | 'warn' }) {
-  const dot = tone === 'ok' ? 'bg-verdant' : tone === 'warn' ? 'bg-status-warn' : null;
-  return (
-    <div className="flex items-center justify-between gap-3 border-t border-border py-2.5 text-sm first:border-t-0 first:pt-0">
-      <span className="shrink-0 text-xs text-ink2">{label}</span>
-      <span className="flex min-w-0 items-center gap-1.5 truncate font-mono text-sm tabular-nums text-ink3">
-        {dot && <span aria-hidden="true" className={`h-1.5 w-1.5 shrink-0 rounded-full ${dot}`} />}
-        {value}
-      </span>
-    </div>
-  );
-}
-
-/**
- * Instagram "Состояние данных" — the TG data-health pattern, in product language: source, account,
- * last sync, access. No env-variable names. Collapsible on mobile, always open on md+.
- */
-export function IgDataHealth({ accountName, lastSync, isMock }: { accountName?: string | null; lastSync: number; isMock: boolean }) {
-  const [open, setOpen] = useState(false);
-  const synced = ago(lastSync);
-  return (
-    <div>
-      {/* One-line status by default — the full technical detail is one click away, not on the first
-          level. Status reads as a sentence, not a table. */}
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        aria-expanded={open}
-        className="flex w-full items-center gap-2 text-left text-sm"
-      >
-        <span
-          aria-hidden="true"
-          className={`h-1.5 w-1.5 shrink-0 rounded-full ${isMock ? 'bg-status-warn' : 'bg-verdant'}`}
-        />
-        <span className="min-w-0 truncate text-ink2">
-          {isMock ? 'Демо-данные' : 'Данные актуальны'}
-          {accountName ? <span className="font-mono text-ink3"> · @{accountName}</span> : null}
-          {!isMock ? <span className="text-ink3"> · обновлено {synced}</span> : null}
-        </span>
-        <Icon name="chevron" className={cn('ml-auto h-3.5 w-3.5 shrink-0 text-ink3 transition-transform', open && 'rotate-180')} />
-      </button>
-      {open && (
-        <div className="mt-3 max-w-sm">
-          <Row label="Источник" value="Instagram API" />
-          <Row label="Статус" value={isMock ? 'демо-данные' : '200 OK'} tone={isMock ? 'warn' : 'ok'} />
-          <Row label="Доступ" value="аналитика, медиа" />
-          {!isMock && <Row label="Синхронизация" value={synced} />}
-        </div>
-      )}
-    </div>
-  );
-}
 
 /**
  * Токен Instagram истёк — состояние продукта, а не сбой запроса. До этого экрана истёкший токен
