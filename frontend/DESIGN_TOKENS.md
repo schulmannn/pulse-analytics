@@ -231,8 +231,8 @@ Keep ≲4 steps on a single screen.
 
 **The card headline is a component, not a class string.** The whole KPI number family — `text-hero` (44), `text-3xl` (30), `text-2xl` (24) — is rendered by one
 component, and `text-hero` may appear in exactly one
-place — `components/chartWidget/KpiValue`. It was copy-pasted into four (`ChartCardBody`,
-`CompareStat` twice, `ExpandableChart`) and the copies drifted: the canon had long fixed the line box
+place — `components/chartWidget/KpiValue`. It was once copy-pasted into four places across the card
+bodies and the chart overlay, and the copies drifted: the canon had long fixed the line box
 to `leading-[1.15]` (the display face's glyph box is ~4px taller than a `leading-none` box and
 clipped digits inside a fixed tile) while two copies still carried `leading-none`. Same 44px,
 different baseline — the cards stop reading as one system. Gated by `kpi-number-recipe-retyped` in
@@ -246,8 +246,9 @@ not yet gated.
 
 Anatomy is a separate question from the recipe: `ChartCardBody` owns the canonical story face
 (label → value → delta → min/max → caption, plot to the right) and every widget card goes through
-it; `CompareStat` keeps its own centred/stacked arrangements on purpose. Both draw their number
-from `KpiValue`.
+it; the compact S-card head (`CompactStatHeadline`, and `StackedStat` built on it) is the one other
+arrangement — number and delta on one left baseline, no centring (audit #554, D9). Both draw their
+number from `KpiValue`.
 
 `text-2xs` 11 (meta · axis ticks) · `text-xs` 12 (caption) · `text-sm` 14 (body/default) ·
 `text-base` 16 (card titles) · `text-lg` 18 (sub-heading, sparingly) · `text-2xl` 24 (page/modal

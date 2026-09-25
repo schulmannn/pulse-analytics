@@ -9,7 +9,8 @@ export interface PinnedPostRow {
   value: string;
   /** In-app open (TG → PostDetailModal). */
   onOpen?: () => void;
-  /** External permalink (IG — the app has no in-app IG post modal). */
+  /** External permalink (IG metric page: the row opens the post on Instagram; the in-app
+      IgPostDetailModal belongs to the IG content surface and is not wired here). */
   href?: string | null;
 }
 
