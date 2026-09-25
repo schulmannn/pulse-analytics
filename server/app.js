@@ -397,7 +397,10 @@ function createApp(deps) {
     }));
 
   // Pre-catover bookmarks under /app → root equivalent (302; temporary during catover).
-  app.get(['/app', '/app/*'], (req, res) => {
+  // Express 5 (path-to-regexp 8): голая `*` — ошибка разбора при регистрации (createApp падает
+  // целиком, прод не стартует); wildcard обязан быть именованным. Голый '/app/' достаётся записи
+  // '/app' — хвостовой слэш допустим, как и в Express 4.
+  app.get(['/app', '/app/*splat'], (req, res) => {
     const target = req.originalUrl.replace(/^\/app(?=[/?]|$)/, '') || '/';
     const local = target.startsWith('/') ? target : '/' + target;
     // Same-origin only: '//host' (and '/\host') is protocol-relative → open redirect.
@@ -406,14 +409,19 @@ function createApp(deps) {
 
   // Unknown /api/* → JSON 404. Without this the SPA fallback served index.html with a
   // 200 for any mistyped API path — clients parsed HTML, monitoring saw success.
-  app.all('/api/*', (req, res) => {
+  // `{*splat}` — необязательный хвост: '/api/' остаётся JSON-404, как было с '/api/*' в Express 4
+  // (обязательный '*splat' отдал бы голый '/api/' SPA-фолбэку с HTML 200).
+  app.all('/api/{*splat}', (req, res) => {
     res.status(404).json({ error: 'not_found', request_id: req.requestId });
   });
 
   // SPA fallback: every other (non-/api, non-asset) GET serves the new app shell.
-  app.get('*', (req, res) => {
+  // `root`, а не абсолютный путь: send 1.x (Express 5) с dotfiles:'ignore' проверяет КАЖДЫЙ сегмент
+  // переданного пути, и чекаут под точка-каталогом (…/.claude/worktrees/…) получал 404 вместо
+  // оболочки. С `root` проверяется только 'index.html'.
+  app.get('/{*splat}', (req, res) => {
     setAppHeaders(req, res);
-    res.sendFile(path.join(APP_DIST, 'index.html'), (err) => { if (err) res.status(404).end(); });
+    res.sendFile('index.html', { root: APP_DIST }, (err) => { if (err) res.status(404).end(); });
   });
 
   // Terminal error handler — asyncHandler rejections and next(e) land here. Known
