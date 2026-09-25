@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom';
 import { useIgData } from '@/lib/useIgData';
 import type { IgData } from '@/lib/useIgData';
 import { usePeriod, type PeriodDays } from '@/lib/period';
-import { PERIOD_PRESETS } from '@/lib/periodWindow';
+import { PERIOD_PRESETS, periodLabel as periodLabelOf, yearAgoDay } from '@/lib/periodWindow';
 import {
   pairDelta,
   igAgeItems,
@@ -18,7 +18,8 @@ import {
   IG_DEMOGRAPHICS_MIN_FOLLOWERS,
 } from '@/lib/igMetrics';
 import type { WindowPair, IgBreakdownItem } from '@/lib/igMetrics';
-import { CHART_MAX_POINTS, lttbDownsample } from '@/lib/downsample';
+import { prepareChartSeries } from '@/lib/chartSeries';
+import { canonicalDayKey } from '@/lib/igMetrics';
 import { pctDelta } from '@/lib/delta';
 import { KpiValue } from '@/components/chartWidget/KpiValue';
 import { fmt, timeAxisFromDayKeys } from '@/lib/format';
@@ -265,7 +266,7 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
         erReachPrev={ig.erReachPrev}
         interactions={ig.pairs.ti}
         reach={ig.pairs.reach}
-        windowDays={ig.window.days}
+        windowLabel={ig.window.label}
         handle={handle}
       />
     );
@@ -276,7 +277,7 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
   // 2-point line). reach/follows have no gate — their daily series is genuine from day one.
   const gatedToAgg = daily?.promotedGate && !ig[daily.promotedGate];
   if (!daily || gatedToAgg) {
-    return <IgAggregatePage def={AGG_DEFS[metricKey]} pair={ig.pairs[AGG_DEFS[metricKey].pairKey]} windowDays={ig.window.days} handle={handle} />;
+    return <IgAggregatePage def={AGG_DEFS[metricKey]} pair={ig.pairs[AGG_DEFS[metricKey].pairKey]} windowLabel={ig.window.label} handle={handle} />;
   }
 
   // ── Daily explorer (reach / follows / promoted views·взаимодействия) ─────────────────────
@@ -297,7 +298,7 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
     ghostVals = base.map((p) => p.value);
     ghostDays = dayRangeOf(base.map((p) => p.day));
   } else if (cmp === 'year' && days > 0) {
-    const byDay = new Map(seriesFull.map((p) => [p.day, p.value]));
+    const byDay = new Map(seriesFull.map((p) => [canonicalDayKey(p.day) ?? p.day, p.value]));
     const shifted = winPoints.map((p) => byDay.get(shiftYearBack(p.day)));
     if (shifted.every((v): v is number => v != null)) {
       ghostVals = shifted;
@@ -312,7 +313,8 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
   // Окна 7/30/90 короче порога и рисуются как есть, поэтому ghost выравнивается с ними по индексу —
   // а на «Всё» ghost и не строится (он требует days > 0). Ровно так же живёт YmMetricPage.
   // Числа шапки и stats считаются НИЖЕ от полного окна: кап меняет только плотность точек графика.
-  const rendered = days === 0 ? lttbDownsample(winPoints, CHART_MAX_POINTS, (pt) => pt.value) : winPoints;
+  // Кап — всякий раз, когда окно длиннее порога (не только «Всё»), общей политикой prepareChartSeries.
+  const rendered = capPoints(winPoints);
   const values = rendered.map((pt) => pt.value);
   const labels = rendered.map((pt) => fmt.day(pt.day));
   const axisLabels = timeAxisFromDayKeys(rendered.map((pt) => pt.day));
@@ -323,7 +325,8 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
   // Pinned point: winPoints carries the calendar day per index, so the day (and its posts —
   // IG posts have timestamps) resolves exactly, at any window.
   const pinnedValid = pinned != null && pinned >= 0 && pinned < m ? pinned : null;
-  const pinnedDay = pinnedValid != null ? winPoints[pinnedValid]?.day : null;
+  // Индекс пина — индекс ВЫВЕДЕННОЙ точки: на длинном окне ряд прорежен, winPoints[i] был бы чужим днём.
+  const pinnedDay = pinnedValid != null ? canonicalDayKey(rendered[pinnedValid]?.day ?? '') : null;
   const pinnedPosts = pinnedDay
     ? ig.posts
         .filter((p) => p.timestamp && igDayKey(p.timestamp) === pinnedDay)
@@ -339,7 +342,7 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
   const lvl = levelFull.length > 1 ? windowIgSeries(levelFull, days, 'подписчиков') : null;
   // Уровень базы рисуется линией и приходит тем же 400-дневным архивом — тот же кап.
   const lvlPoints = lvl ? levelFull.slice(-lvl.values.length) : [];
-  const lvlShown = days === 0 ? lttbDownsample(lvlPoints, CHART_MAX_POINTS, (pt) => pt.value) : lvlPoints;
+  const lvlShown = capPoints(lvlPoints, 'stock');
   const lvlValues = lvlShown.map((pt) => pt.value);
   const lvlLabels = lvlShown.map((pt) => fmt.day(pt.day));
   const lvlAxisLabels = timeAxisFromDayKeys(lvlShown.map((pt) => pt.day));
@@ -353,7 +356,7 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
   const sumPrev = ghostOk ? ghostVals.reduce((s, v) => s + v, 0) : null;
   const trend = sumPrev != null ? pctDelta(sumCur, sumPrev) : null;
   const compareDelta = sumPrev != null && sumPrev > 0 ? ((sumCur - sumPrev) / sumPrev) * 100 : null;
-  const periodLabel = days === 0 ? 'всё время' : `${days} дн.`;
+  const periodLabel = periodLabelOf({ days, custom: false }, 'bare');
   const stats =
     n > 0
       ? [
@@ -659,7 +662,7 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
 /** Aggregate IG metric (views / interactions / likes / saves): period-vs-period — the API gives
     totals per insights window, so a daily chart would be fabricated. Window = the GLOBAL IG
     period (the layout's 7д/30д/90д pills). */
-function IgAggregatePage({ def, pair, windowDays, handle }: { def: IgAggDef; pair: WindowPair; windowDays: number; handle: string | null }) {
+function IgAggregatePage({ def, pair, windowLabel, handle }: { def: IgAggDef; pair: WindowPair; windowLabel: string; handle: string | null }) {
   // Свёрнутая колонка уходит ИЗ ПОТОКА, и сетка становится одноколоночной. Общий MetricColumns
   // здесь не подходит: у инспектора СВОЯ изменяемая ширина (--inspector-w). Правило при этом одно
   // на все источники — состояние живёт в metricRail, переключатель стоит в шапке страницы.
@@ -683,7 +686,7 @@ function IgAggregatePage({ def, pair, windowDays, handle }: { def: IgAggDef; pai
         <div className="mt-2 flex flex-wrap items-baseline gap-x-2.5 gap-y-1 lg:hidden">
           <KpiValue size="compact" text={pair.hasCur ? fmt.kpi(pair.cur) : '—'} />
           <DeltaPill delta={trend} />
-          <span className="text-xs tracking-wide text-muted-foreground">{windowDays} дн.</span>
+          <span className="text-xs tracking-wide text-muted-foreground">{windowLabel}</span>
         </div>
         {/* «внизу страницы» больше не правда: тайм-бар живёт под блоком периода (v2). */}
         <MetricDescriptor>агрегат за выбранное окно</MetricDescriptor>
@@ -752,19 +755,25 @@ function IgAggregatePage({ def, pair, windowDays, handle }: { def: IgAggDef; pai
   );
 }
 
-/** Local calendar-day key of an IG post timestamp (viewer-local, matching the series days). */
-function igDayKey(iso: string): string {
-  const t = Date.parse(iso);
-  if (!Number.isFinite(t)) return '';
-  const d = new Date(t);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+/** Кап ряда графика общей политикой (lib/chartSeries): короткий ряд — как есть, длиннее
+    CHART_MAX_POINTS — выбранные точки (LTTB у линии без пропусков). Итоги и stats считаются от
+    ПОЛНОГО окна до этого шага — кап меняет только плотность рисуемых точек. */
+function capPoints<T extends { day: string; value: number }>(points: T[], kind: 'flow' | 'stock' = 'flow'): T[] {
+  const { sampledIdx } = prepareChartSeries({ points, viz: 'line', kind, unit: 'number' });
+  return sampledIdx.map((i) => points[i]!);
 }
 
-/** Same calendar date a year earlier; Feb 29 maps to Feb 28 (no leap counterpart). */
+/** Calendar-day key of an IG post timestamp in the SAME coordinate as the series days: archive days
+    are UTC days (как пишет крон, OD-8), live `end_time` normalises to its UTC day (canonicalDayKey). */
+function igDayKey(iso: string): string {
+  return canonicalDayKey(iso) ?? '';
+}
+
+/** Same calendar date a year earlier (29 Feb → 28 Feb). The series day may be a live ISO moment —
+    normalise to the calendar key first; a raw `split('-')` produced «2025-09-24T07:00:00» garbage. */
 function shiftYearBack(day: string): string {
-  const [y, m, d] = day.split('-');
-  if (m === '02' && d === '29') return `${Number(y) - 1}-02-28`;
-  return `${Number(y) - 1}-${m}-${d}`;
+  const key = canonicalDayKey(day);
+  return (key && yearAgoDay(key)) ?? '';
 }
 
 /** ER (derived): period-vs-period in percentage POINTS + the numerator/denominator decomposition —
@@ -774,14 +783,14 @@ function IgErPage({
   erReachPrev,
   interactions,
   reach,
-  windowDays,
+  windowLabel,
   handle,
 }: {
   erReach: number;
   erReachPrev: number;
   interactions: WindowPair;
   reach: WindowPair;
-  windowDays: number;
+  windowLabel: string;
   handle: string | null;
 }) {
   // Свёрнутая колонка уходит ИЗ ПОТОКА, и сетка становится одноколоночной. Общий MetricColumns
@@ -806,7 +815,7 @@ function IgErPage({
         <div className="mt-2 flex flex-wrap items-baseline gap-x-2.5 gap-y-1 lg:hidden">
           <KpiValue size="compact" text={hasCur ? fmt.pctAbs(erReach) : '—'} />
           <DeltaPill delta={trend} />
-          <span className="text-xs tracking-wide text-muted-foreground">{windowDays} дн.</span>
+          <span className="text-xs tracking-wide text-muted-foreground">{windowLabel}</span>
         </div>
         {/* «внизу страницы» больше не правда: тайм-бар живёт под блоком периода (v2). */}
         <MetricDescriptor>агрегат за выбранное окно</MetricDescriptor>

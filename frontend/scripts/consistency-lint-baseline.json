@@ -1,5 +1,5 @@
 {
-  "total": 393,
+  "total": 391,
   "rules": {
     "no-direct-metric-nav": {
       "total": 40,
@@ -33,7 +33,7 @@
       }
     },
     "no-local-downsample": {
-      "total": 50,
+      "total": 48,
       "files": {
         "src/components/instagram/shared.tsx": 2,
         "src/lib/campaignPageModel.ts": 2,
@@ -42,7 +42,6 @@
         "src/lib/msSeries.ts": 1,
         "src/lib/widgetResolver/shared.ts": 3,
         "src/panels/Charts.tsx": 1,
-        "src/panels/IgMetricPage.tsx": 2,
         "src/panels/KpiGrid.tsx": 2,
         "src/panels/MetricPage.tsx": 3,
         "src/panels/Overview.tsx": 1,
