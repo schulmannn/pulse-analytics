@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { ApiError, apiGet } from '@/api/client';
 import {
+  isSourceAccessCode,
   redirectBrowserOnUnauthorized,
   shouldRedirectOnUnauthorized,
 } from './authRedirect';
@@ -66,6 +67,21 @@ describe('shouldRedirectOnUnauthorized', () => {
     ).toBe(false);
   });
 
+  it('does not log out on a 401 carrying a unified source_* code (sendSourceError namespace)', () => {
+    // Единый sendSourceError отдаёт отзыв 409 source_reauth и сюда не доходит, но если код из
+    // пространства source_* всё-таки приедет с 401 — это отказ источника, а не наша сессия.
+    for (const code of ['source_reauth', 'source_unavailable', 'source_not_connected']) {
+      expect(shouldRedirectOnUnauthorized({ status: 401, code }, '/sklad', false), code).toBe(false);
+      expect(shouldRedirectOnUnauthorized({ status: 401, code }, '/home', false), code).toBe(false);
+    }
+    // Будущая форма отзыва — 409: редиректа не было и нет.
+    expect(shouldRedirectOnUnauthorized({ status: 409, code: 'source_reauth' }, '/sklad', false)).toBe(false);
+    // Пространство — точное: обрезки и похожие коды не выключают выход по истёкшей сессии.
+    for (const code of ['source', 'source_', 'sourcereauth', 'Source_reauth', 'x_source_reauth']) {
+      expect(shouldRedirectOnUnauthorized({ status: 401, code }, '/sklad', false), code).toBe(true);
+    }
+  });
+
   it('keeps logging out on a 401 without a source-token code (session expiry)', () => {
     expect(
       shouldRedirectOnUnauthorized({ status: 401, code: undefined }, '/metrika', false),
@@ -107,14 +123,17 @@ describe('shouldRedirectOnUnauthorized', () => {
     };
     const ms = await failWith(401, { error: 'Токен отозван МойСкладом — переподключите источник', code: 'ms_token_revoked' });
     const ym = await failWith(401, { error: 'Токен отозван Яндексом — переподключите источник', code: 'ym_token_revoked' });
+    const unified = await failWith(401, { error: 'Токен отозван — переподключите источник', code: 'source_reauth' });
     const expired = await failWith(401, { error: 'Сессия истекла, войди снова' });
     expect(ms).toBeInstanceOf(ApiError);
     expect((ms as ApiError).code).toBe('ms_token_revoked');
     expect((ym as ApiError).code).toBe('ym_token_revoked');
+    expect((unified as ApiError).code).toBe('source_reauth');
 
     const assign = vi.fn();
     expect(redirectBrowserOnUnauthorized(ms, { pathname: '/sklad', demoMode: false, assign })).toBe(false);
     expect(redirectBrowserOnUnauthorized(ym, { pathname: '/metrika', demoMode: false, assign })).toBe(false);
+    expect(redirectBrowserOnUnauthorized(unified, { pathname: '/sklad', demoMode: false, assign })).toBe(false);
     expect(assign).not.toHaveBeenCalled();
     expect(redirectBrowserOnUnauthorized(expired, { pathname: '/metrika', demoMode: false, assign })).toBe(true);
     expect(assign).toHaveBeenCalledOnce();
@@ -144,5 +163,21 @@ describe('shouldRedirectOnUnauthorized', () => {
       ),
     ).toBe(false);
     expect(assign).toHaveBeenCalledOnce();
+  });
+});
+
+describe('isSourceAccessCode: allow-list глобального 401-редиректа', () => {
+  it('легаси-коды списком и пространство source_*', () => {
+    expect(isSourceAccessCode('ms_token_revoked')).toBe(true);
+    expect(isSourceAccessCode('ym_token_revoked')).toBe(true);
+    expect(isSourceAccessCode('source_reauth')).toBe(true);
+    expect(isSourceAccessCode('source_unavailable')).toBe(true);
+    expect(isSourceAccessCode('source_not_connected')).toBe(true);
+  });
+
+  it('совпадение точное: без кода, чужой код, обрезок и не-snake_case — не источник', () => {
+    for (const code of [undefined, null, 42, '', 'csrf', 'ig_token_revoked', 'ig_reauth', 'source', 'source_', 'sourcereauth', 'Source_reauth', 'source_Reauth', 'source__reauth', 'source_reauth_', ' source_reauth', 'x_source_reauth']) {
+      expect(isSourceAccessCode(code), String(code)).toBe(false);
+    }
   });
 });

@@ -12,7 +12,8 @@ export class ApiError extends Error {
   /** Машинный код ошибки от сервера (snake_case), когда ответ нужно РАЗЛИЧАТЬ, а не просто показать:
    *  'ig_reauth' = токен Instagram истёк; 'ms_token_revoked'/'ym_token_revoked' = 401 про токен
    *  источника, а не про сессию (lib/authRedirect); 'ms_forbidden' = сотруднику МойСклада не хватает
-   *  прав. Текст сообщения для этого негодный ключ. */
+   *  прав. Текст сообщения для этого негодный ключ. Экраны источников читают код не напрямую, а через
+   *  api/sourceErrors.sourceErrorKind — он же понимает будущий 409 'source_reauth'. */
   code?: string;
   constructor(status: number, message: string, retryAfter?: number) {
     super(message);
