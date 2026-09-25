@@ -58,6 +58,8 @@ Telegram поддерживает две модели подключения:
 | `PG_CONNECTION_TIMEOUT_MS` | web | fail-fast на выдачу коннекта из пула, мс, по умолчанию `3000` |
 | `PG_STATEMENT_TIMEOUT_MS` | web | серверный `statement_timeout`, мс, по умолчанию `30000` |
 | `PG_QUERY_TIMEOUT_MS` | web | клиентский `query_timeout` (чуть выше statement), мс, по умолчанию `35000` |
+| `GDPR_EXPORT_DRAIN_TIMEOUT_MS` | web | сколько GDPR-экспорт ждёт, пока клиент заберёт очередной кусок ответа, прежде чем разорвать выгрузку и вернуть коннект в пул, мс, по умолчанию `60000`, диапазон `5000..600000`; диапазон проверяет общий `validateConfig` на старте web, worker и `migrate.js`, так что в production значение вне него валит и их |
+| `GDPR_EXPORT_MAX_CONCURRENT` | web | предел одновременных GDPR-экспортов (и не больше одного на пользователя), по умолчанию `2`, диапазон `1..8` (как и у сторожа выше, в production проверяется на старте web, worker и `migrate.js`); значение не меньше `PGPOOL_MAX` не валит старт, а зажимается до `PGPOOL_MAX − 1` (минимум 1) с предупреждением в логе; сверх лимита — `503` + `Retry-After` |
 | `MTPROTO_URL` | web | внутренний URL Python-сервиса, обычно `http://<service>.railway.internal:8001` |
 | `MTPROTO_TOKEN` | web + mtproto | общий межсервисный секрет; без него доступ fail-closed |
 | `TG_SESSION_KEY` | web | ключ AES-256-GCM для управляемых QR-сессий |

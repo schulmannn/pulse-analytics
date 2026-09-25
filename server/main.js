@@ -1,6 +1,6 @@
 'use strict';
 
-const { loadConfig, validateConfig, ConfigError } = require('./config');
+const { loadConfig, validateConfig, collectConfigWarnings, ConfigError } = require('./config');
 
 function waitForListening(server) {
   return new Promise((resolve, reject) => {
@@ -45,6 +45,15 @@ function reportConfigErrors(config, errors) {
   }
 }
 
+// Предупреждения конфига НЕ фатальны ни в каком окружении: значение применено с поправкой
+// (например, лимит GDPR-выгрузок зажат под PGPOOL_MAX), старт идёт дальше, оператор видит строку в
+// логе. Только web: GDPR-экспорт отдаёт HTTP, у worker/migrate этого пути нет.
+function reportConfigWarnings(warnings) {
+  for (const warning of warnings) {
+    console.warn(`[boot] WARNING: config: ${warning.field}: ${warning.message}`);
+  }
+}
+
 async function main({
   env = process.env,
   port,
@@ -61,6 +70,7 @@ async function main({
   // those modules create DB/network clients at module scope for their default adapters.
   const config = loadConfig(env);
   reportConfigErrors(config, validateConfig(config));
+  reportConfigWarnings(collectConfigWarnings(config));
 
   // `worker` — режим standalone recovery-процесса (server/worker.js), а не web. Web-entrypoint отвергает
   // его до создания composition, чтобы web не мог случайно стартовать как worker (и не поднял HTTP+сбор

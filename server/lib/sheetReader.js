@@ -121,18 +121,61 @@ function inflateEntry(buf, entry, budget, entryLimit = Infinity) {
 
 const ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
 
+/**
+ * Потолок длины ОДНОГО значения после декодирования: текст ячейки (вместе со всеми кусками
+ * rich-text), строка из sharedStrings, formatCode, имя листа. 32 767 символов — предел ячейки
+ * самого Excel: длиннее он не даёт ни ввести, ни сохранить, а поля выгрузки СДЭКа (номера, названия,
+ * адреса, комментарии) — десятки и сотни символов, то есть запас на два порядка. Потолок держит
+ * память, а не красоту: одна ячейка из 11.5 МБ `&#65;` (zip 18 КБ) разворачивалась в строку на
+ * 2.3 млн символов, и куча за 256 МБ роняла процесс фатальным OOM за пару секунд (повторное ревью
+ * CDEKRS-2). С потолком на одно значение приходится не больше 32 тысяч ссылок, и отказ мгновенный.
+ */
+const MAX_VALUE_CHARS = 32767;
+const TOO_LONG = `В файле есть значение длиннее ${MAX_VALUE_CHARS} символов — столько не вмещает даже ячейка Excel`;
+
+// Одна ссылка ровно в позиции lastIndex (флаг y) — та же регулярка, что раньше стояла в replace.
+const ENTITY_AT = /&(#x[0-9a-fA-F]+|#\d+|[a-z]+);/y;
+
+/**
+ * XML-ссылки → символы за один проход: indexOf('&'), разбор одной ссылки, кусок в массив.
+ * Раньше здесь был s.replace(/&(…);/g, fn), а глобальная регулярка с функцией в V8 собирает
+ * совпадения вместе с группами пачкой, а не по одному: 2.3 млн `&#65;` держали в куче миллионы
+ * подстрок разом (замер: за 256 МБ и фатальный OOM). Теперь в памяти только уже декодированное,
+ * а длина выхода проверяется по ходу. `length + amp - last` — нижняя граница итоговой длины
+ * (кусок до '&' уйдёт в выход как есть) и растёт хотя бы на единицу за шаг, так что шагов на одно
+ * значение — порядка MAX_VALUE_CHARS, сколько бы ссылок ни лежало дальше.
+ * Смысл прежний: неизвестная сущность и ссылка за пределами Unicode остаются собой.
+ */
 function decodeXml(s) {
-  if (!s || !s.includes('&')) return s || '';
-  return s.replace(/&(#x[0-9a-fA-F]+|#\d+|[a-z]+);/g, (m, e) => {
+  if (!s) return '';
+  const parts = [];
+  let length = 0;
+  let last = 0;   // начало ещё не скопированного куска
+  for (let amp = s.indexOf('&'); amp >= 0; amp = s.indexOf('&', amp + 1)) {
+    if (length + amp - last > MAX_VALUE_CHARS) throw new SheetReadError(TOO_LONG);
+    ENTITY_AT.lastIndex = amp;
+    const m = ENTITY_AT.exec(s);
+    if (!m) continue;
+    const e = m[1];
+    let ch;
     if (e[0] === '#') {
       const code = e[1] === 'x' ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10);
       // Верхняя граница обязательна: `&#9999999;` — валидный синтаксис, но за пределами Unicode,
       // и String.fromCodePoint на нём бросает RangeError. Неразбираемая ссылка остаётся собой —
       // ровно как неизвестная именованная сущность ниже.
-      return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : m;
+      if (code > 0 && code <= 0x10ffff) ch = String.fromCodePoint(code);
+    } else {
+      ch = ENTITIES[e];
     }
-    return ENTITIES[e] !== undefined ? ENTITIES[e] : m;
-  });
+    if (ch === undefined) continue;
+    parts.push(s.slice(last, amp), ch);
+    length += amp - last + ch.length;
+    last = amp + m[0].length;
+  }
+  if (length + s.length - last > MAX_VALUE_CHARS) throw new SheetReadError(TOO_LONG);
+  if (last === 0) return s;
+  parts.push(s.slice(last));
+  return parts.join('');
 }
 
 // ── Линейный токенизатор вместо ленивых регулярок ──────────────────────────────────────────────
@@ -182,6 +225,23 @@ function readElement(s, name, from) {
   return { attrs, inner: s.slice(gt + 1, close), next: close + closeTag.length };
 }
 
+/**
+ * Атрибуты ОТКРЫВАЮЩЕГО тега `<name …>` начиная с `from` — для служебных частей книги (workbook,
+ * rels, styles), где нужен только сам тег. Возвращает { attrs, next } либо null.
+ * Раньше их читали регулярками вида /<Relationship\b[^>]*Id="…"[^>]*>/: на каждом теге без '>'
+ * `[^>]*` уходил до конца файла и откатывался — квадратично, а с двумя такими звеньями кубически.
+ * Замер аудита: rels из 2000 оборванных `<Relationship` (zip 684 Б) занимал реплику на 26–80 с.
+ * Граница тега — следующий '<': он, в отличие от '>', в значении атрибута запрещён самим XML,
+ * поэтому `formatCode="[>=100]0"` не рвёт тег, а каждый символ читается один раз.
+ */
+function readOpenTag(s, name, from) {
+  const open = findOpenTag(s, name, from);
+  if (open < 0) return null;
+  const lt = s.indexOf('<', open + 1);
+  const end = lt < 0 ? s.length : lt;
+  return { attrs: s.slice(open + name.length + 1, end), next: end };
+}
+
 /** Линейный подсчёт открытий/самозакрытий/закрытий одного тега — один проход, без разбора. */
 function countTag(s, name) {
   const closeTag = `</${name}>`;
@@ -229,17 +289,26 @@ function joinTexts(xml) {
     }
     body = stripped + body.slice(pos);
   }
-  let text = '';
+  // Потолок — на ВСЁ значение, а не на кусок: 600 тысяч run-ов `<r><t>A</t></r>` по одному
+  // символу иначе проходили бы мимо него поштучно. Куски собираются в массив и склеиваются один
+  // раз, а не цепочкой `+=`, которая держала бы в куче узел на каждый run.
+  const parts = [];
+  let length = 0;
   let pos = 0;
   for (;;) {
     const el = readElement(body, 't', pos);
-    if (!el) return text;
-    text += decodeXml(el.inner);
+    if (!el) return parts.join('');
+    const piece = decodeXml(el.inner);
+    if (piece) {
+      length += piece.length;
+      if (length > MAX_VALUE_CHARS) throw new SheetReadError(TOO_LONG);
+      parts.push(piece);
+    }
     pos = el.next;
   }
 }
 
-function parseSharedStrings(xml, { maxCells = 4000000 } = {}) {
+function parseSharedStrings(xml, { maxCells = 4000000, deadline }) {
   const counts = countTag(xml, 'si');
   if (counts.opens - counts.selfClosing !== counts.closes) throw new SheetReadError(BROKEN);
   if (counts.opens > maxCells) throw new SheetReadError('В файле слишком много ячеек');
@@ -248,8 +317,26 @@ function parseSharedStrings(xml, { maxCells = 4000000 } = {}) {
   for (;;) {
     const el = readElement(xml, 'si', pos);
     if (!el) return out;
+    deadline.tick();
     out.push(el.inner ? joinTexts(el.inner) : '');
     pos = el.next;
+  }
+}
+
+/**
+ * `s.replace(/\[[^\]]*\]/g, '')` за один проход. У регулярки каждая «[», за которой нигде нет «]»,
+ * пересканировала хвост до конца: formatCode из 40 тысяч «[» разбирался полсекунды, ×4 на удвоение.
+ * Смысл тот же: скобка без пары дальше по тексту остаётся как есть вместе со всем хвостом.
+ */
+function stripBracketed(s) {
+  let out = '';
+  let pos = 0;
+  for (;;) {
+    const open = s.indexOf('[', pos);
+    const close = open < 0 ? -1 : s.indexOf(']', open + 1);
+    if (close < 0) return out + s.slice(pos);
+    out += s.slice(pos, open);
+    pos = close + 1;
   }
 }
 
@@ -257,25 +344,29 @@ function parseSharedStrings(xml, { maxCells = 4000000 } = {}) {
  * Индексы стилей, означающих дату. Встроенные numFmtId 14–22 и 45–47 — календарные/временные
  * по спецификации; пользовательские определяются по формату: из кода вырезаются литералы
  * (кавычки, экранирование, скобки условий) и проверяется наличие y/m/d/h/s.
+ * Теги читаются линейно (readOpenTag), а не регулярками с `[^>]*`: styles.xml приходит от
+ * пользователя так же, как лист, и оборванный `<numFmt`/`<cellXfs` занимал реплику на секунды.
  */
-function parseDateStyles(xml) {
+function parseDateStyles(xml, deadline) {
   const dateFmts = new Set([14, 15, 16, 17, 18, 19, 20, 21, 22, 45, 46, 47]);
-  const numFmtRe = /<numFmt\b[^>]*numFmtId="(\d+)"[^>]*formatCode="([^"]*)"/g;
-  let m;
-  while ((m = numFmtRe.exec(xml))) {
-    const code = decodeXml(m[2])
-      .replace(/\[[^\]]*\]/g, '')
+  for (let tag = readOpenTag(xml, 'numFmt', 0); tag; tag = readOpenTag(xml, 'numFmt', tag.next)) {
+    deadline.tick();
+    const id = (tag.attrs.match(/\bnumFmtId="(\d+)"/) || [])[1];
+    const format = (tag.attrs.match(/\bformatCode="([^"]*)"/) || [])[1];
+    if (id === undefined || format === undefined) continue;
+    const code = stripBracketed(decodeXml(format))
       .replace(/"[^"]*"/g, '')
       .replace(/\\./g, '');
-    if (/[ymdhs]/i.test(code)) dateFmts.add(Number(m[1]));
+    if (/[ymdhs]/i.test(code)) dateFmts.add(Number(id));
   }
-  const block = xml.match(/<cellXfs\b[\s\S]*?<\/cellXfs>/);
   const isDate = [];
-  if (block) {
-    const xfRe = /<xf\b([^>]*?)\/?>/g;
-    let xf;
-    while ((xf = xfRe.exec(block[0]))) {
-      const id = (xf[1].match(/numFmtId="(\d+)"/) || [])[1];
+  const open = findOpenTag(xml, 'cellXfs', 0);
+  const close = open < 0 ? -1 : xml.indexOf('</cellXfs>', open);
+  if (close >= 0) {
+    const block = xml.slice(open, close);
+    for (let xf = readOpenTag(block, 'xf', 0); xf; xf = readOpenTag(block, 'xf', xf.next)) {
+      deadline.tick();
+      const id = (xf.attrs.match(/numFmtId="(\d+)"/) || [])[1];
       isDate.push(id !== undefined && dateFmts.has(Number(id)));
     }
   }
@@ -293,6 +384,18 @@ function colIndex(ref) {
   }
   return n - 1;
 }
+
+/**
+ * Потолок ширины листа. Индекс колонки берётся из ссылки ячейки (`r="AB12"`), а строка добивается
+ * null-ами до этого индекса: без потолка `r="AAAAAA1"` — 12 млн колонок — стоил 300 МБ кучи от
+ * файла меньше килобайта, а два десятка таких строк роняли процесс фатальным OOM, который не
+ * ловит никакой try/catch (аудит, CDEKRS-2). Выгрузка СДЭКа — 18 колонок (A…R, COLUMN_TITLES в
+ * domain/cdekImport.js); 256 — предел самого Excel до 2007 года (колонка IV), то есть
+ * четырнадцатикратный запас на колонки, которые пользователь допишет к выгрузке сам.
+ * Ячейка дальше потолка ПРОПУСКАЕТСЯ, а не валит файл: домен читает свои 18 колонок по заголовку,
+ * и заметки пользователя где-нибудь в колонке ZZ к импорту отношения не имеют.
+ */
+const MAX_COLUMNS = 256;
 
 /**
  * Серийная дата Excel → наивная строка «YYYY-MM-DD HH:MM:SS».
@@ -314,30 +417,43 @@ function serialToNaive(serial) {
 const PARSE_DEADLINE_MS = 3000;
 const DEADLINE_CHECK_EVERY = 500;
 
-function parseSheet(xml, { shared, dateStyles, maxRows, maxCells, deadlineMs = PARSE_DEADLINE_MS, now = Date.now }) {
+/**
+ * Дедлайн — последний рубеж: даже линейный разбор гигантского законного файла не должен занимать
+ * единственную web-реплику дольше нескольких секунд. Он один на ВСЮ книгу: раньше часы заводились
+ * только в цикле строк листа, а workbook, rels, строковая таблица и стили разбирались до них и
+ * без всякого предела (аудит, CDEKRS-1).
+ * tick() — одна разобранная единица (тег строки, строки таблицы, стиля, связи); часы спрашиваются
+ * раз в DEADLINE_CHECK_EVERY единиц. Считаются именно РАЗОБРАННЫЕ теги, а не `rows.length`: длина
+ * листа прыгает через пропущенные строки, и кратности 500 могла не коснуться ни разу — рубеж
+ * молчал (аудит #554, проход №2, N16).
+ */
+function makeDeadline({ deadlineMs = PARSE_DEADLINE_MS, now = Date.now }) {
+  const until = now() + deadlineMs;
+  let ticks = 0;
+  return {
+    tick() {
+      ticks += 1;
+      if (ticks % DEADLINE_CHECK_EVERY === 0 && now() > until) {
+        throw new SheetReadError('Файл слишком сложный — разбор занял бы слишком много времени');
+      }
+    },
+  };
+}
+
+function parseSheet(xml, { shared, dateStyles, maxRows, maxCells, deadline }) {
   const start = xml.indexOf('<sheetData');
   const body = start < 0 ? '' : xml.slice(start);
   prescanSheet(body, { maxRows, maxCells });
   const rows = [];
+  // Слоты строк в памяти: настоящие ячейки ВМЕСТЕ с добитыми null. Pre-scan и прежний счётчик
+  // видели только теги <c>, и одна ячейка в дальней колонке раздувала строку мимо maxCells.
   let cells = 0;
   let pos = 0;
-  // Счётчик РАЗОБРАННЫХ тегов <row>. Раньше дедлайн проверялся по `rows.length`, а она растёт не
-  // на единицу: Excel не пишет пустые строки, но помнит их номера, и `while (rows.length < target)`
-  // ниже прыгает через пропуски. Кратности 500 массив мог не коснуться НИ РАЗУ — «последний
-  // рубеж» просто не срабатывал (аудит #554, проход №2, N16). DoS этим не открывается: перед
-  // разбором стоит линейный pre-scan, — но рубеж обязан работать так, как о нём написано.
-  let parsedRows = 0;
-  // Дедлайн — последний рубеж: даже линейный разбор гигантского законного листа не должен
-  // занимать единственную web-реплику дольше нескольких секунд.
-  const until = now() + deadlineMs;
   for (;;) {
     const el = readElement(body, 'row', pos);
     if (!el) break;
     pos = el.next;
-    parsedRows += 1;
-    if (parsedRows % DEADLINE_CHECK_EVERY === 0 && now() > until) {
-      throw new SheetReadError('Файл слишком сложный — разбор занял бы слишком много времени');
-    }
+    deadline.tick();
     // Excel не пишет в XML пустые строки, но помнит их номер в атрибуте r. Держим индекс массива
     // равным номеру строки в самом Excel: по этому номеру пользователь ищет отвергнутую строку
     // в своём файле, и «12-я по счёту непустая» ему ничем не поможет.
@@ -346,17 +462,26 @@ function parseSheet(xml, { shared, dateStyles, maxRows, maxCells, deadlineMs = P
     if (target >= maxRows) throw new SheetReadError(`В файле больше ${maxRows} строк`);
     while (rows.length < target) rows.push([]);
     const row = [];
+    // Неявная позиция ячейки без `r` (атрибут в OOXML необязателен) — следующая за самой правой
+    // уже встреченной клеткой, включая пустые. Держим её отдельно от длины массива: пустые
+    // клетки справа строку не добивают, но место своё занимают, иначе писатель без `r`, который
+    // обязан ставить заглушку на каждый пропуск, сдвигал бы следующие значения в чужие колонки.
+    let width = 0;
     let cellPos = 0;
     for (;;) {
       const c = readElement(el.inner, 'c', cellPos);
       if (!c) break;
       cellPos = c.next;
-      if (++cells > maxCells) throw new SheetReadError('В файле слишком много ячеек');
       const attrs = c.attrs;
       const inner = c.inner;
       const ref = attrs.match(/r="([A-Za-z]+)\d+"/);
-      const idx = ref ? colIndex(ref[1]) : row.length;
-      if (idx < 0) continue;
+      const idx = ref ? colIndex(ref[1]) : width;
+      // Позицию двигает и пропущенная ячейка за краем: иначе следующая ячейка без `r` вернулась бы
+      // из колонки ZZ обратно в лист и легла бы на чужое место.
+      if (idx >= width) width = idx + 1;
+      // За краем листа — пропуск ещё до разбора значения: такая ячейка не стоит ни слотов строки,
+      // ни декодирования (раньше ячейка с данными там отвергала весь файл).
+      if (idx < 0 || idx >= MAX_COLUMNS) continue;
       const type = (attrs.match(/\bt="([^"]+)"/) || [])[1] || 'n';
       const style = (attrs.match(/\bs="(\d+)"/) || [])[1];
       let value = null;
@@ -381,8 +506,19 @@ function parseSheet(xml, { shared, dateStyles, maxRows, maxCells, deadlineMs = P
           }
         }
       }
+      const empty = value === null || value === '';
+      if (idx >= row.length) {
+        // Пустая клетка правее последней заполненной — след оформления (Excel пишет
+        // `<c r="IV5" s="1"/>` у раскрашенных, но пустых клеток). Добивать до неё строку null-ами
+        // и списывать эти слоты с бюджета незачем: 20 тысяч строк с заливкой до колонки IV —
+        // законный файл, а по слотам он весил 5 млн ячеек и отвергался «слишком много ячеек».
+        // Домен читает `row[i] ?? null`, так что короткая строка для него та же, что добитая.
+        if (empty) continue;
+        cells += idx + 1 - row.length;
+        if (cells > maxCells) throw new SheetReadError('В файле слишком много ячеек');
+      }
       while (row.length < idx) row.push(null);
-      row[idx] = value === '' ? null : value;
+      row[idx] = empty ? null : value;
     }
     rows.push(row);
   }
@@ -390,13 +526,18 @@ function parseSheet(xml, { shared, dateStyles, maxRows, maxCells, deadlineMs = P
 }
 
 /** Путь первого листа книги: workbook.xml → r:id → rels. Фолбэк — младший sheetN.xml. */
-function firstSheetPath(entries, workbookXml, relsXml) {
-  const decl = workbookXml && workbookXml.match(/<sheet\b[^>]*>/);
-  const name = decl ? decodeXml((decl[0].match(/name="([^"]*)"/) || [])[1] || '') : '';
-  const rid = decl ? (decl[0].match(/r:id="([^"]+)"/) || [])[1] : null;
+function firstSheetPath(entries, workbookXml, relsXml, deadline) {
+  const decl = workbookXml ? readOpenTag(workbookXml, 'sheet', 0) : null;
+  const name = decl ? decodeXml((decl.attrs.match(/name="([^"]*)"/) || [])[1] || '') : '';
+  const rid = decl ? (decl.attrs.match(/r:id="([^"]+)"/) || [])[1] : null;
   if (rid && relsXml) {
-    const rel = relsXml.match(new RegExp(`<Relationship\\b[^>]*Id="${rid.replace(/[^\w.-]/g, '')}"[^>]*>`));
-    const target = rel ? (rel[0].match(/Target="([^"]+)"/) || [])[1] : null;
+    let target = null;
+    for (let rel = readOpenTag(relsXml, 'Relationship', 0); rel; rel = readOpenTag(relsXml, 'Relationship', rel.next)) {
+      deadline.tick();
+      if ((rel.attrs.match(/\bId="([^"]*)"/) || [])[1] !== rid) continue;
+      target = (rel.attrs.match(/Target="([^"]+)"/) || [])[1] || null;
+      break;
+    }
     if (target) {
       const path = target.startsWith('/') ? target.slice(1) : `xl/${target.replace(/^\.\//, '')}`;
       if (entries.has(path)) return { path, name };
@@ -428,18 +569,17 @@ function readXlsxRows(buffer, {
   deadlineMs,
   now,
 } = {}) {
+  const deadline = makeDeadline({ deadlineMs, now });
   const entries = readZipEntries(buffer);
   const budget = { left: maxInflatedBytes };
   const get = (name, limit) => (entries.has(name) ? inflateEntry(buffer, entries.get(name), budget, limit) : '');
-  const sheet = firstSheetPath(entries, get('xl/workbook.xml'), get('xl/_rels/workbook.xml.rels'));
+  const sheet = firstSheetPath(entries, get('xl/workbook.xml'), get('xl/_rels/workbook.xml.rels'), deadline);
   const shared = entries.has('xl/sharedStrings.xml')
-    ? parseSharedStrings(get('xl/sharedStrings.xml', maxSharedStringsBytes), { maxCells })
+    ? parseSharedStrings(get('xl/sharedStrings.xml', maxSharedStringsBytes), { maxCells, deadline })
     : [];
-  const dateStyles = entries.has('xl/styles.xml') ? parseDateStyles(get('xl/styles.xml')) : [];
+  const dateStyles = entries.has('xl/styles.xml') ? parseDateStyles(get('xl/styles.xml'), deadline) : [];
   const rows = parseSheet(inflateEntry(buffer, entries.get(sheet.path), budget, maxSheetBytes), {
-    shared, dateStyles, maxRows, maxCells,
-    ...(deadlineMs !== undefined ? { deadlineMs } : {}),
-    ...(now !== undefined ? { now } : {}),
+    shared, dateStyles, maxRows, maxCells, deadline,
   });
   return { rows, sheetName: sheet.name || '' };
 }

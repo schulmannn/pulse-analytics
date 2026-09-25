@@ -63,11 +63,13 @@ function createIntegrationsRepo({ pool, enabled, ensureExternalSource, transacti
   }
 
   // Full row incl. the encrypted token (callers decrypt). Returns null when not connected.
+  // token_expires_at — с оффсетом TZH:TZM ('+00:00'): igTokenState/refreshIgIfNeeded парсят его
+  // через new Date(), а голый 'OF' ('+00') даёт NaN → продление токена молча не срабатывает.
   async function getIgAccount(channelId) {
     if (!enabled || !channelId) return null;
     const { rows } = await pool.query(
       `SELECT channel_id, ig_user_id, username, access_token_enc, scopes,
-              to_char(token_expires_at,'YYYY-MM-DD"T"HH24:MI:SSOF') AS token_expires_at,
+              to_char(token_expires_at,'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS token_expires_at,
               to_char(connected_at,'YYYY-MM-DD"T"HH24:MI:SS') AS connected_at
          FROM ig_accounts WHERE channel_id=$1`, [channelId]);
     return rows[0] || null;
@@ -95,7 +97,7 @@ function createIntegrationsRepo({ pool, enabled, ensureExternalSource, transacti
     if (!enabled) return [];
     const { rows } = await pool.query(
       `SELECT channel_id, ig_user_id, username, access_token_enc, scopes,
-              to_char(token_expires_at,'YYYY-MM-DD"T"HH24:MI:SSOF') AS token_expires_at
+              to_char(token_expires_at,'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS token_expires_at
          FROM ig_accounts ORDER BY channel_id ASC`);
     return rows;
   }
@@ -289,10 +291,10 @@ function createIntegrationsRepo({ pool, enabled, ensureExternalSource, transacti
     const { rows } = await pool.query(
       `SELECT uid, tg_user_id, username, session_enc, connection_state, session_version,
               to_char(connected_at,'YYYY-MM-DD"T"HH24:MI:SS') AS connected_at,
-              to_char(last_attempt_at,'YYYY-MM-DD"T"HH24:MI:SSOF') AS last_attempt_at,
-              to_char(last_success_at,'YYYY-MM-DD"T"HH24:MI:SSOF') AS last_success_at,
+              to_char(last_attempt_at,'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS last_attempt_at,
+              to_char(last_success_at,'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS last_success_at,
               last_error_code,
-              to_char(last_error_at,'YYYY-MM-DD"T"HH24:MI:SSOF') AS last_error_at
+              to_char(last_error_at,'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS last_error_at
          FROM tg_sessions WHERE uid=$1`, [uid]);
     return rows[0] || null;
   }
@@ -310,10 +312,10 @@ function createIntegrationsRepo({ pool, enabled, ensureExternalSource, transacti
     if (!enabled) return [];
     const { rows } = await pool.query(
       `SELECT uid, tg_user_id, username, session_enc, connection_state, session_version,
-              to_char(last_attempt_at,'YYYY-MM-DD"T"HH24:MI:SSOF') AS last_attempt_at,
-              to_char(last_success_at,'YYYY-MM-DD"T"HH24:MI:SSOF') AS last_success_at,
+              to_char(last_attempt_at,'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS last_attempt_at,
+              to_char(last_success_at,'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS last_success_at,
               last_error_code,
-              to_char(last_error_at,'YYYY-MM-DD"T"HH24:MI:SSOF') AS last_error_at
+              to_char(last_error_at,'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS last_error_at
          FROM tg_sessions ORDER BY uid ASC`);
     return rows;
   }

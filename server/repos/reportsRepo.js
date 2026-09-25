@@ -11,9 +11,10 @@
 function createReportsRepo({ pool, enabled }) {
   // ── Named reports (per-user composition of dashboard blocks + email schedule) ──
   const REPORT_SCHEDULES = ['none', 'weekly', 'monthly'];
+  // Смещение — TZH:TZM ('+00:00'), не OF: OF при целочасовом поясе даёт '+00', а JS Date такое не парсит.
   const REPORT_COLS = `id, name, config, schedule,
-    to_char(created_at,'YYYY-MM-DD"T"HH24:MI:SSOF') AS created_at,
-    to_char(updated_at,'YYYY-MM-DD"T"HH24:MI:SSOF') AS updated_at`;
+    to_char(created_at,'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS created_at,
+    to_char(updated_at,'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS updated_at`;
 
   // Compact index rows: the list never needs the full config, only a few summary facts pulled
   // safely out of the JSONB (jsonb_typeof guards so a legacy/garbage config never breaks the
