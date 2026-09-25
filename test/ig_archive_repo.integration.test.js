@@ -12,6 +12,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { createTestDatabase } = require('./testDatabase');
 const { anchor, dayKey } = require('./helpers/dates');
+const { createIgBackfillJob, CALLS_PER_DAY } = require('../server/jobs/igBackfillJob');
 
 const TEST_DB = process.env.TEST_DATABASE_URL;
 const skip = TEST_DB ? false : 'TEST_DATABASE_URL not set (integration suite runs on the local stand)';
@@ -208,4 +209,51 @@ test('архив: «Всё», точный диапазон и legacy days; ст
   const st3 = await db.getIgArchiveStatusInternal(ch.id);
   assert.strictEqual(st3.backfill, null, 'без подключения догрузки нет');
   assert.deepStrictEqual(st3.bounds, { first_day: d(800), last_day: d(3) });
+});
+
+test('проход догрузки на реальной БД: пишет только дни с данными, чанки в jobs, done; повтор — ноль вызовов', { skip }, async () => {
+  const { owner, ch, ig } = await mkIgChannel('bf');
+  await db.upsertIgDaily(ch.id, [{ day: d(4), reach: 1000, views: 2000 }]);   // день крона — не трогаем
+  const calls = [];
+  const collectIgDailyForDay = async (_acc, _token, day) => {
+    calls.push(day);
+    // d(2..6) — данные, d(3) пустой, старше d(6) — горизонт Graph.
+    const n = Math.round((Date.parse(`${d(0)}T00:00:00Z`) - Date.parse(`${day}T00:00:00Z`)) / 86400000);
+    if (n <= 6 && n !== 3) return { row: { day, reach: n * 10, views: n * 20, followers_total: 1 }, outcome: 'data', calls: CALLS_PER_DAY };
+    return { row: { day }, outcome: 'empty', calls: CALLS_PER_DAY };
+  };
+  const mine = (list) => list.filter((a) => a.channel_id === ch.id);
+  const scoped = new Proxy(db, {
+    get(target, prop) {
+      if (prop === 'listIgBackfillCandidates') return async (limit) => mine(await target.listIgBackfillCandidates(1000)).slice(0, limit);
+      if (prop === 'listIgHealCandidates') return async (limit) => mine(await target.listIgHealCandidates(1000)).slice(0, limit);
+      return target[prop];
+    },
+  });
+  const job = createIgBackfillJob({
+    db: scoped, log: () => {}, igCrypto: { configured: () => true, decrypt: () => 'TOKEN' },
+    refreshIgIfNeeded: async (_c, t) => t, collectIgDailyForDay,
+    usageGate: { shouldStopPass: () => false, lastBucUsagePct: () => 0 },
+    limits: { daysPerPass: 50 },
+  });
+  const stats = await job.runIgBackfillPass();
+  assert.strictEqual(stats.failed, 0);
+  assert.ok(!calls.includes(d(4)), 'день из архива не запрашивался');
+  const s = await db.getIgBackfillState(ch.id);
+  assert.strictEqual(s.status, 'done');
+  assert.strictEqual(s.ig_user_id, ig);
+  assert.strictEqual(s.horizon_day, d(6));
+  const rows = await db.listIgDailyForActor(ch.id, actor(owner), { all: true });
+  assert.deepStrictEqual(rows.map((r) => r.day), [d(6), d(5), d(4), d(2)], 'пустой d(3) остался дырой');
+  assert.strictEqual(rows.find((r) => r.day === d(4)).reach, 1000, 'день крона не перезаписан');
+  assert.ok(rows.every((r) => r.followers_total == null), 'уровень базы бэкфилл не пишет');
+  const jobs = await pool.query(`SELECT status FROM jobs WHERE kind='ig_backfill_chunk' AND idempotency_key LIKE $1`, [`${ch.id}:${ig}:%`]);
+  assert.deepStrictEqual(jobs.rows.map((r) => r.status), ['succeeded']);
+
+  calls.length = 0;
+  const again = await job.runIgBackfillPass();
+  assert.strictEqual(again.failed, 0);
+  assert.deepStrictEqual(calls.filter((day) => day !== d(2) && day !== d(3)), [], 'повтор: только дневной ремонт вчера−1/−2');
+  const after = await db.listIgDailyForActor(ch.id, actor(owner), { all: true });
+  assert.deepStrictEqual(after.map((r) => r.day), rows.map((r) => r.day), 'архив не вырос выдуманными днями');
 });
