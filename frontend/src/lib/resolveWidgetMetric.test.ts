@@ -676,7 +676,11 @@ describe('resolveWidgetMetric — Instagram (S11)', () => {
     const r = resolveWidgetMetric(cfg('ig.netFollowers'), igCtx);
     expect(r.valueRaw).toBe(40); // 50 − 10
     expect(r.value).toMatch(/^\+/);
-    expect(r.series?.at(-1)?.value).toBe(40);
+    // Накопление доходит до итога окна на последнем ИЗМЕРЕННОМ дне; дни без измерения — разрыв
+    // линии (null), а не выдуманное плато или ноль.
+    const measured = r.series!.filter((p) => p.value != null);
+    expect(measured.at(-1)?.value).toBe(40);
+    expect(r.series!.some((p) => p.value === null)).toBe(true);
   });
 
   it('shows a genuine net-zero window (follows == unfollows) as «0», not empty', () => {
@@ -942,5 +946,46 @@ describe('resolveWidgetMetric — YM series', () => {
   it('без summary (запрос ещё не пришёл / канал не выбран) — честная пустота, не краш', () => {
     const r = resolveWidgetMetric(cfg('ym.visits'), { now: NOW, days: 30, range: null, inRange, ym: {} });
     expect(r.empty).toBe(true);
+  });
+});
+
+// ── Instagram «Всё» за пределами 90 дней: архив ig_daily (OD-13) ─────────────────────────────────
+describe('resolveWidgetMetric — Instagram «Всё» читает весь архив', () => {
+  const N = 540;
+  const rows = Array.from({ length: N }, (_, i) => ({
+    day: iso(N - i).slice(0, 10),
+    reach: 100,
+    total_interactions: 10,
+    follows: 2,
+    unfollows: 1,
+  }));
+  const history = {
+    enabled: true,
+    rows,
+    bounds: { first_day: rows[0]!.day, last_day: rows[N - 1]!.day },
+  } as unknown as IgHistoryData;
+  const allCtx: DataContext = { ...igCtx, days: 0, ig: { profile: igProfile, history } };
+
+  it('ig.reach на «Всё» — сумма всех 540 дней архива, без подписи «за 90 дн.» и без дельты', () => {
+    const r = resolveWidgetMetric(cfg('ig.reach'), allCtx);
+    expect(r.empty).toBeFalsy();
+    expect(r.valueRaw).toBe(100 * N);
+    expect(r.meta?.periodLabel).not.toBe('за 90 дн.');
+    expect(r.delta).toBeNull();
+  });
+
+  it('ig.interactions и ig.netFollowers берутся из архива', () => {
+    expect(resolveWidgetMetric(cfg('ig.interactions'), allCtx).valueRaw).toBe(10 * N);
+    expect(resolveWidgetMetric(cfg('ig.netFollowers'), allCtx).valueRaw).toBe(N);
+  });
+
+  it('пустая корзина ряда — пропуск (null), а не ноль', () => {
+    const gappy = {
+      ...history,
+      rows: rows.filter((_, i) => i % 2 === 0),
+    } as unknown as IgHistoryData;
+    const r = resolveWidgetMetric(cfg('ig.reach', { grain: 'day' }), { ...allCtx, ig: { profile: igProfile, history: gappy } });
+    expect(r.series!.some((p) => p.value === null)).toBe(true);
+    expect(r.series!.every((p) => p.value !== 0)).toBe(true);
   });
 });

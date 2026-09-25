@@ -1,12 +1,16 @@
 import type { IgHistoryRow, IgInsights, IgProfile } from '@/api/schemas';
+import { prepareChartSeries } from '@/lib/chartSeries';
 import { pctDelta, type MetricDelta, type WindowRange } from '@/lib/delta';
 import { timeAxisLabels } from '@/lib/format';
+import type { IgWindowMode } from '@/lib/igArchiveWindow';
 import {
+  canonicalDayKey,
   fmtDay,
   followerLevelSeries,
   hasDailySeries,
   histSeries,
-  longerSeries,
+  liveDailySeries,
+  mergeIgDaily,
   metricSeries,
   netFollowerDaily,
   pairDelta,
@@ -30,6 +34,17 @@ export interface IgWindowRaw {
    * границы только там, где они доказуемо те же, иначе `null` — и подписи не будет вовсе.
    */
   aggPrevRange?: WindowRange | null;
+  /**
+   * Режим окна (lib/igArchiveWindow): `live` — пресет 7/30/90, числа из серверных агрегатов, как
+   * было; `archive` — «Всё» и свой период, числа — суммы строк архива ig_daily по календарным дням
+   * [fromDay..toDay]. По умолчанию live.
+   */
+  mode?: IgWindowMode;
+  /** Календарные границы архивного окна `YYYY-MM-DD` (включительно; `fromDay: null` — без начала). */
+  fromDay?: string | null;
+  toDay?: string | null;
+  /** Последний день архива с данными (bounds.last_day): живые точки добирают только дни после него. */
+  lastArchiveDay?: string | null;
 }
 
 export interface IgWindowSeries {
@@ -103,7 +118,15 @@ export interface IgOverviewCharts {
   engagement: IgOverviewChart;
 }
 
+/** Как посчитан охват окна: дедуплицированный агрегат Graph или сумма дневных (архивное окно,
+    фолбэк без агрегата) — последнюю честно подписывают «сумма по дням». */
+export type IgReachBasis = 'window' | 'dailySum';
+
 export interface IgWindowMetrics {
+  mode: IgWindowMode;
+  reachBasis: IgReachBasis;
+  /** Архивное окно без единой точки архива — числа от живых дневных рядов (свежее подключение). */
+  liveFallback: boolean;
   series: IgWindowSeries;
   pairs: IgWindowPairs;
   daily: IgWindowDaily;
@@ -138,24 +161,20 @@ const dated = (series: Point[]): Point[] =>
 const CHART_CANON_MIN = 3;
 const EMPTY_CHART: IgOverviewChart = { labels: [], values: [] };
 
-/** Normalize a dated Graph point and a bare DB archive day to the same UTC calendar key. The live
-    reach series uses full ISO `end_time` values, while persisted additive metrics use YYYY-MM-DD;
-    comparing the raw strings leaves an otherwise valid daily ER series with no matching dates. */
-function canonicalDayKey(value: string): string | null {
-  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
-  const timestamp = Date.parse(value);
-  return Number.isFinite(timestamp) ? new Date(timestamp).toISOString().slice(0, 10) : null;
-}
-
 /** Windowed, ascending daily points: drop the synthetic `total`/non-finite dates, keep only days
     inside [since, until], normalize to a shared calendar key, then sort oldest→newest. */
-function windowedDaily(series: Point[], since: number, until: number): Point[] {
+/** Окно графика: по моменту [since, until] (пресет) либо по календарному ключу (архивное окно). */
+export type IgChartWindow = { since: number; until: number; inDay?: (day: string) => boolean };
+
+function windowedDaily(series: Point[], win: IgChartWindow): Point[] {
   return series
     .flatMap((p) => {
       if (p.day === 'total') return [];
       const t = Date.parse(p.day);
       const day = canonicalDayKey(p.day);
-      return Number.isFinite(t) && t >= since && t <= until && day ? [{ day, value: p.value }] : [];
+      if (!day || !Number.isFinite(t)) return [];
+      const inside = win.inDay ? win.inDay(day) : t >= win.since && t <= win.until;
+      return inside ? [{ day, value: p.value }] : [];
     })
     .sort((a, b) => a.day.localeCompare(b.day));
 }
@@ -163,14 +182,19 @@ function windowedDaily(series: Point[], since: number, until: number): Point[] {
 // A sparkline needs ≥2 points; fewer → empty (the card says «Недостаточно дневных данных…»).
 // Короткое окно (≤ 8 дней) несёт ось буквами дней недели (канон timeAxisLabels) — буквы
 // только на оси, тултип держит полные даты из `labels`.
-const toChart = (points: Point[], windowDays?: number): IgOverviewChart =>
-  points.length >= 2
-    ? {
-        labels: points.map((p) => fmtDay(p.day)),
-        values: points.map((p) => p.value),
-        axisLabels: timeAxisLabels(points.map((p) => p.day), windowDays),
-      }
-    : EMPTY_CHART;
+// Длинное окно (архив «Всё», свой период на годы) — через общую политику прореживания
+// prepareChartSeries (кап CHART_MAX_POINTS, LTTB у линии без пропусков): иначе сотни точек в
+// карточке — суб-пиксельная мазня. Короткий ряд она не трогает, подписи остаются нашими.
+function toChart(points: Point[], windowDays?: number): IgOverviewChart {
+  if (points.length < 2) return EMPTY_CHART;
+  const { sampledIdx } = prepareChartSeries({ points, viz: 'line', kind: 'flow', unit: 'number' });
+  const shown = sampledIdx.map((i) => points[i]!);
+  return {
+    labels: shown.map((p) => fmtDay(p.day)),
+    values: shown.map((p) => p.value),
+    axisLabels: timeAxisLabels(shown.map((p) => p.day), windowDays),
+  };
+}
 
 /**
  * The three compact IG Overview sparklines, all from the canonical account daily series already in
@@ -180,10 +204,16 @@ const toChart = (points: Point[], windowDays?: number): IgOverviewChart =>
  * empty chart. The graph depends only on the active window, never on previous-window coverage. Not
  * shared with Telegram (its cards carry a separate publication-date series).
  */
-export function igOverviewCharts(series: IgWindowSeries, since: number, until: number): IgOverviewCharts {
+export function igOverviewCharts(
+  series: IgWindowSeries,
+  since: number,
+  until: number,
+  inDay?: (day: string) => boolean,
+): IgOverviewCharts {
+  const win: IgChartWindow = { since, until, inDay };
   const viewsCanon = hasDailySeries(series.views, CHART_CANON_MIN);
   const tiCanon = hasDailySeries(series.ti, CHART_CANON_MIN);
-  const tiDaily = tiCanon ? windowedDaily(series.ti, since, until) : [];
+  const tiDaily = tiCanon ? windowedDaily(series.ti, win) : [];
   // Длина активного окна в днях — включительные границы [since, until] (см. useIgData).
   const windowDays = Math.round((until - since) / 86_400_000) + 1;
 
@@ -194,7 +224,7 @@ export function igOverviewCharts(series: IgWindowSeries, since: number, until: n
   let engagement = EMPTY_CHART;
   if (tiCanon && hasDailySeries(series.reach, 2)) {
     const reachByDay = new Map<string, number>();
-    for (const p of windowedDaily(series.reach, since, until)) reachByDay.set(p.day, p.value);
+    for (const p of windowedDaily(series.reach, win)) reachByDay.set(p.day, p.value);
     const erPoints: Point[] = [];
     for (const p of tiDaily) {
       const reach = reachByDay.get(p.day);
@@ -204,7 +234,7 @@ export function igOverviewCharts(series: IgWindowSeries, since: number, until: n
   }
 
   return {
-    views: viewsCanon ? toChart(windowedDaily(series.views, since, until), windowDays) : EMPTY_CHART,
+    views: viewsCanon ? toChart(windowedDaily(series.views, win), windowDays) : EMPTY_CHART,
     interactions: toChart(tiDaily, windowDays),
     engagement,
   };
@@ -219,34 +249,42 @@ const scalarFromPair = (pair: WindowPair): IgWindowScalar => ({
 });
 
 export function igWindowMetrics(raw: IgWindowRaw): IgWindowMetrics {
-  const { profile, insights, historyRows, since, until, aggPrevRange = null } = raw;
+  const { profile, insights, historyRows, since, until, aggPrevRange = null, mode = 'live' } = raw;
   const canonicalFollowerLevel = followerLevelSeries(historyRows, profile?.followers_count ?? null);
   // Demo mode intentionally disables DB history queries. Its fixture exposes an explicit mock
   // follower_count level series so the sample UI can still demonstrate the audience chart; real
   // accounts never take this fallback and remain anchored/reconstructed from ig_daily.
   const mockFollowerLevel = profile?.mock || insights?.mock ? metricSeries(insights, 'follower_count') : [];
+  // Ряды = АРХИВ ig_daily + живой хвост. Архивный день всегда побеждает; живые точки добирают только
+  // дни после последнего дня архива и только у НАСТОЯЩИХ дневных рядов Graph (reach, follower_count,
+  // демо-фикстуры). Синтетический агрегат окна (prev/cur-точки) в ряды не попадает никогда.
+  const lastArchiveDay = raw.lastArchiveDay ?? null;
+  const merged = (col: keyof IgHistoryRow, live: string): Point[] =>
+    mergeIgDaily(histSeries(historyRows, col), liveDailySeries(insights, live), lastArchiveDay);
   const series: IgWindowSeries = {
-    reach: longerSeries(metricSeries(insights, 'reach'), histSeries(historyRows, 'reach')),
+    reach: merged('reach', 'reach'),
     // Deduplicated windowed reach (prev+cur synthetic points from the backend total_value call).
     // Used for headline reach / ER denominator, with daily reach below kept for charts/narrative.
     reachWindow: metricSeries(insights, 'reach_window'),
-    // Additive metrics: prefer the longer DB archive over the live synthetic aggregate when present.
-    views: longerSeries(metricSeries(insights, 'views'), histSeries(historyRows, 'views')),
-    ti: longerSeries(metricSeries(insights, 'total_interactions'), histSeries(historyRows, 'total_interactions')),
-    engaged: metricSeries(insights, 'accounts_engaged'),
+    views: merged('views', 'views'),
+    ti: merged('total_interactions', 'total_interactions'),
+    // Уникальные вовлечённые аккаунты по дням не складываются — архивного ряда у них нет.
+    engaged: liveDailySeries(insights, 'accounts_engaged'),
     // Level series, not gross follows. Kept for existing daily follower charts.
-    follower: longerSeries(metricSeries(insights, 'follower_count'), histSeries(historyRows, 'followers')),
+    follower: merged('followers', 'follower_count'),
     // Настоящий уровень базы (как ТГ «Подписчики»): реальные якоря + реконструкция по net.
     followerLevel: canonicalFollowerLevel.length >= 2 ? canonicalFollowerLevel : mockFollowerLevel,
-    saves: longerSeries(metricSeries(insights, 'saves'), histSeries(historyRows, 'saves')),
-    likes: longerSeries(metricSeries(insights, 'likes'), histSeries(historyRows, 'likes')),
-    comments: longerSeries(metricSeries(insights, 'comments'), histSeries(historyRows, 'comments')),
-    shares: longerSeries(metricSeries(insights, 'shares'), histSeries(historyRows, 'shares')),
-    profileViews: metricSeries(insights, 'profile_views'),
+    saves: merged('saves', 'saves'),
+    likes: merged('likes', 'likes'),
+    comments: merged('comments', 'comments'),
+    shares: merged('shares', 'shares'),
+    profileViews: merged('profile_views', 'profile_views'),
     // Gross movement endpoints. Window net = follows - unfollows.
-    follows: metricSeries(insights, 'follows'),
-    unfollows: metricSeries(insights, 'unfollows'),
+    follows: merged('follows', 'follows'),
+    unfollows: merged('unfollows', 'unfollows'),
   };
+
+  if (mode === 'archive') return archiveWindowMetrics(raw, series);
 
   // Синтетические агрегаты читаются ПОЗИЦИОННО, а не фильтром по дате: их точки штампуются
   // временем серверного окна и всегда оказываются позже клиентской границы `until` (она округлена
@@ -300,6 +338,9 @@ export function igWindowMetrics(raw: IgWindowRaw): IgWindowMetrics {
   const erReachPrev = pairs.reach.prev > 0 ? (pairs.ti.prev / pairs.reach.prev) * 100 : 0;
 
   return {
+    mode: 'live',
+    reachBasis: reachWin.hasCur ? 'window' : 'dailySum',
+    liveFallback: false,
     series,
     pairs,
     overviewCharts: igOverviewCharts(series, since, until),
@@ -339,5 +380,114 @@ export function igWindowMetrics(raw: IgWindowRaw): IgWindowMetrics {
     followersLevel,
     erReach,
     erReachPrev,
+  };
+}
+
+// ── Архивное окно: «Всё» и свой период (OD-13) ────────────────────────────────────────────────────
+
+const NO_PAIR: WindowPair = { cur: 0, prev: 0, hasCur: false, hasPrev: false, prevRange: null };
+
+/** Сумма окна без прошлого периода: у «Всё» его нет, у своего периода парного окна нет. */
+function sumPair(points: Point[]): WindowPair {
+  let cur = 0;
+  for (const p of points) cur += p.value;
+  return { cur, prev: 0, hasCur: points.length > 0, hasPrev: false, prevRange: null };
+}
+
+/**
+ * Числа архивного окна — суммы строк АРХИВА по календарным дням [fromDay..toDay], как у TG
+ * (useHistory/inRange). Живой хвост в суммы не добавляется: смысл дня у живого ряда и у архива
+ * ещё не сведён (OD-8), и граничный день мог бы посчитаться дважды. Пропуск — пропуск: день без
+ * строки в сумму не входит и нулём не становится.
+ *   • охват — СУММА дневных (reachBasis 'dailySum'): уникального охвата за произвольный период
+ *     Instagram не отдаёт; подпись обязана это сказать;
+ *   • вовлечённые аккаунты — уникальная величина, не складывается: hasCur=false;
+ *   • ER = Σвзаимодействий ÷ Σохвата по дням, где есть ОБЕ величины — одно основание;
+ *   • движение базы = Σfollows − Σunfollows; прошлого периода нет.
+ * В окне нет ни одной точки архива (свежее подключение, догрузка ещё идёт) — числа от живых
+ * дневных рядов (`liveFallback`), подпись говорит «догружается».
+ */
+function archiveWindowMetrics(raw: IgWindowRaw, series: IgWindowSeries): IgWindowMetrics {
+  const { profile, historyRows, since, until } = raw;
+  const fromDay = raw.fromDay ?? null;
+  const toDay = raw.toDay ?? null;
+  const inDay = (day: string) => (fromDay == null || day >= fromDay) && (toDay == null || day <= toDay);
+  const rows = (historyRows ?? []).filter((r) => inDay(r.day));
+  const hasArchive = rows.some((r) => r.reach != null || r.views != null || r.total_interactions != null);
+  const pick = (col: keyof IgHistoryRow, s: Point[]): Point[] =>
+    hasArchive ? histSeries(rows, col) : s.filter((p) => { const k = canonicalDayKey(p.day); return k != null && inDay(k); });
+  const pairs: IgWindowPairs = {
+    reach: sumPair(pick('reach', series.reach)),
+    views: sumPair(pick('views', series.views)),
+    ti: sumPair(pick('total_interactions', series.ti)),
+    engaged: NO_PAIR,
+    follower: sumPair(pick('followers', series.follower)),
+    saves: sumPair(pick('saves', series.saves)),
+    likes: sumPair(pick('likes', series.likes)),
+    comments: sumPair(pick('comments', series.comments)),
+    shares: sumPair(pick('shares', series.shares)),
+    profileViews: sumPair(pick('profile_views', series.profileViews)),
+    follows: sumPair(pick('follows', series.follows)),
+    unfollows: sumPair(pick('unfollows', series.unfollows)),
+  };
+  const followerNet: WindowPair = {
+    cur: pairs.follows.cur - pairs.unfollows.cur,
+    prev: 0,
+    hasCur: pairs.follows.hasCur || pairs.unfollows.hasCur,
+    hasPrev: false,
+    prevRange: null,
+  };
+  // ER на одном основании: только дни, где есть и взаимодействия, и охват.
+  const reachByDay = new Map(pick('reach', series.reach).map((p) => [canonicalDayKey(p.day), p.value]));
+  let erTi = 0;
+  let erReachSum = 0;
+  for (const p of pick('total_interactions', series.ti)) {
+    const r = reachByDay.get(canonicalDayKey(p.day));
+    if (r == null) continue;
+    erTi += p.value;
+    erReachSum += r;
+  }
+  const erReach = erReachSum > 0 ? (erTi / erReachSum) * 100 : 0;
+  const followersLevel = profile?.followers_count ?? 0;
+  const noPrev = (pair: WindowPair): IgWindowScalar => ({
+    value: pair.cur, previous: null, delta: null, hasValue: pair.hasCur, hasPrevious: false,
+  });
+  return {
+    mode: 'archive',
+    reachBasis: 'dailySum',
+    liveFallback: !hasArchive,
+    series,
+    pairs,
+    overviewCharts: igOverviewCharts(series, since, until, inDay),
+    daily: {
+      reach: dated(series.reach),
+      followerNet: dated(netFollowerDaily(historyRows)),
+      views: dated(series.views),
+      totalInteractions: dated(series.ti),
+      likes: dated(series.likes),
+      saves: dated(series.saves),
+    },
+    values: {
+      reach: noPrev(pairs.reach),
+      views: noPrev(pairs.views),
+      totalInteractions: noPrev(pairs.ti),
+      likes: noPrev(pairs.likes),
+      saves: noPrev(pairs.saves),
+      comments: noPrev(pairs.comments),
+      shares: noPrev(pairs.shares),
+      followerNet: noPrev(followerNet),
+      followersLevel: {
+        value: followersLevel,
+        previous: null,
+        delta: null,
+        hasValue: profile?.followers_count != null,
+        hasPrevious: false,
+      },
+      erReach: { value: erReach, previous: null, delta: null, hasValue: erReach > 0, hasPrevious: false },
+    },
+    followerNet,
+    followersLevel,
+    erReach,
+    erReachPrev: 0,
   };
 }

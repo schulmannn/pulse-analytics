@@ -19,6 +19,9 @@ import {
   aggregateOnline,
   cityName,
   countryName,
+  histSeries,
+  liveDailySeries,
+  mergeIgDaily,
   metricSeries,
   tvBreakdown,
   windowPair,
@@ -28,49 +31,59 @@ import type { BreakdownItem } from '@/lib/tgAggregations';
 
 export interface SeriesPoint {
   date: string;
-  value: number;
+  /** `null` — пропуск (корзина без измерения), не ноль. */
+  value: number | null;
 }
 
-/** Persisted ig_daily rows → {day,value}[] for one column (port of useIgData.histSeries). */
-function histSeries(rows: IgHistoryRow[] | undefined, col: keyof IgHistoryRow): Point[] {
-  return (rows ?? [])
-    .filter((r) => r.day && r[col] != null)
-    .map((r) => ({ day: r.day, value: Number(r[col]) }));
-}
+// Колонка архива ig_daily для имени живой метрики (follower_count в архиве — `followers`).
+const ARCHIVE_COLUMN: Record<string, keyof IgHistoryRow> = {
+  reach: 'reach',
+  total_interactions: 'total_interactions',
+  views: 'views',
+  follower_count: 'followers',
+  follows: 'follows',
+  unfollows: 'unfollows',
+};
 
-/** Prefer whichever series carries MORE real dated points (DB-first: the cron accumulates a longer
- *  ig_daily series than the live API window; on day 1 the live series wins). Port of useIgData. */
-function longerSeries(live: Point[], persisted: Point[]): Point[] {
-  const dated = (s: Point[]) => s.filter((p) => p.day !== 'total' && Number.isFinite(Date.parse(p.day))).length;
-  return dated(persisted) > dated(live) ? persisted : live;
-}
-
-/** The daily Point[] for a named IG insight series, lengthened by the persisted history for the two
- *  DB-backed columns (reach, follower_count) exactly as the IG panels do. */
+/** Дневной ряд метрики для виджета: АРХИВ ig_daily + живой дневной хвост после его последнего дня
+ *  (mergeIgDaily — то же правило, что у панелей). Пока в архиве нет ни одной точки (свежее
+ *  подключение) — прежний живой ряд как есть, чтобы карточка не пустела до первой догрузки. */
 export function igSeriesPoints(ins: IgInsights | undefined, history: IgHistoryData | undefined, name: string): Point[] {
-  const live = metricSeries(ins, name);
-  if (name === 'reach') return longerSeries(live, histSeries(history?.rows, 'reach'));
-  if (name === 'follower_count') return longerSeries(live, histSeries(history?.rows, 'followers'));
-  return live;
+  const col = ARCHIVE_COLUMN[name];
+  const archive = col ? histSeries(history?.rows, col) : [];
+  if (!archive.length) return metricSeries(ins, name);
+  return mergeIgDaily(archive, liveDailySeries(ins, name), history?.bounds?.last_day ?? null);
 }
 
-/** Net daily follower movement = gross follows − gross unfollows, aligned by day. */
-export function igNetFollowerPoints(ins: IgInsights | undefined): Point[] {
+/** Net daily follower movement = gross follows − gross unfollows, aligned by day (архив + живой хвост). */
+export function igNetFollowerPoints(ins: IgInsights | undefined, history?: IgHistoryData): Point[] {
   const byDay = new Map<string, number>();
-  for (const p of metricSeries(ins, 'follows')) byDay.set(p.day, (byDay.get(p.day) ?? 0) + p.value);
-  for (const p of metricSeries(ins, 'unfollows')) byDay.set(p.day, (byDay.get(p.day) ?? 0) - p.value);
+  for (const p of igSeriesPoints(ins, history, 'follows')) byDay.set(p.day, (byDay.get(p.day) ?? 0) + p.value);
+  for (const p of igSeriesPoints(ins, history, 'unfollows')) byDay.set(p.day, (byDay.get(p.day) ?? 0) - p.value);
   return [...byDay.entries()].map(([day, value]) => ({ day, value }));
 }
 
-/** Bucket a daily Point[] over [since..until] by grain — flow (SUM per bucket), like the TG flows. */
-export function bucketIgSeries(points: Point[], since: number, until: number, grain: SeriesGrain): SeriesPoint[] {
+/** Bucket a daily Point[] over [since..until] by grain — flow (SUM per bucket), like the TG flows.
+ *  Корзина без единой точки — ПРОПУСК (`null`: линия рвётся, столбец не рисуется), а не ноль: в
+ *  архиве IG это день без сбора. `missing: 'zero'` — только для рядов, где пустой день честно
+ *  ноль (TG net-рост из графа Telegram — прежнее поведение). */
+export function bucketIgSeries(
+  points: Point[],
+  since: number,
+  until: number,
+  grain: SeriesGrain,
+  missing: 'null' | 'zero' = 'null',
+): SeriesPoint[] {
   const by = new Map<string, number>();
   for (const p of points) {
     const t = Date.parse(p.day);
     if (!Number.isFinite(t) || t < since || t > until) continue;
     by.set(bucketKeyOf(t, grain), (by.get(bucketKeyOf(t, grain)) ?? 0) + p.value);
   }
-  return bucketKeysInWindow(since, until, grain).map((k) => ({ date: k, value: by.get(k) ?? 0 }));
+  return bucketKeysInWindow(since, until, grain).map((k) => ({
+    date: k,
+    value: by.has(k) ? by.get(k)! : missing === 'zero' ? 0 : null,
+  }));
 }
 
 /** Current-window sum + whether the window HAS current data + a delta (windowPair over the points).

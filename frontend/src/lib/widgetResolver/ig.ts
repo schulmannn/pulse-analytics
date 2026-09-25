@@ -11,6 +11,7 @@ import {
   igSeriesPoints,
   igWindowValue,
 } from '@/lib/igAggregations';
+import { igWindowPlan } from '@/lib/igArchiveWindow';
 import { followerLevelSeries } from '@/lib/igMetrics';
 import { DAY_MS, alignGhost } from '@/lib/metricSeries';
 import {
@@ -45,15 +46,22 @@ export const resolveIgMetric: WidgetMetricResolver = (metric, config, ctx, out) 
   const ig = ctx.ig;
   if (!ig) return { ...out, empty: true };
 
-  const until = ctx.range ? ctx.range.to : ctx.now;
-  const windowDays = ctx.range
-    ? Math.min(90, Math.max(1, Math.ceil((ctx.range.to - ctx.range.from) / DAY_MS)))
-    : ctx.days > 0
-      ? Math.min(ctx.days, 90)
-      : 90;
-  const since = ctx.range ? ctx.range.from : until - windowDays * DAY_MS;
+  // Окно — общим планом IG (lib/igArchiveWindow): пресеты 7/30/90 как были, «Всё» — от первого дня
+  // архива (как tg.netGrowth: без архива — от первой точки ряда), свой период — ровно его дни.
+  // 90-дневного потолка больше нет (OD-13): архив ig_daily хранит историю, подпись периода — общая.
+  const firstRowDay = ig.history?.rows?.find((r) => r.reach != null || r.views != null || r.total_interactions != null)?.day ?? null;
+  const firstLive = igSeriesPoints(ig.insights, undefined, 'reach').find((p) => p.day !== 'total');
+  const plan = igWindowPlan({
+    days: ctx.days,
+    range: ctx.range,
+    now: ctx.now,
+    bounds: ig.history?.bounds ?? null,
+    firstRowDay,
+    firstLiveMs: firstLive ? Date.parse(firstLive.day) : null,
+  });
+  const until = plan.until;
+  const since = plan.mode === 'live' ? until - plan.days * DAY_MS : plan.since;
   const grain = effectiveGrain(config.grain);
-  if (ctx.days === 0 && !ctx.range) out.meta = { ...out.meta, periodLabel: 'за 90 дн.' };
 
   const applyGhost = (
     points: { day: string; value: number }[],
@@ -65,13 +73,14 @@ export const resolveIgMetric: WidgetMetricResolver = (metric, config, ctx, out) 
     if (!baseline) return;
     let running = 0;
     const values = bucketIgSeries(points, baseline.from, baseline.to, grain).map((point) => {
+      if (point.value == null) return null;   // пропуск остаётся пропуском и в призраке
       running += point.value;
       return accumulate ? running : point.value;
     });
     const ghost = alignGhost(values, out.series.length);
     const show = allowZero
       ? igWindowValue(points, baseline.from, baseline.to).hasCur
-      : ghost.some((value) => value !== 0);
+      : ghost.some((value) => value != null && value !== 0);
     if (show) {
       out.ghost = ghost;
       out.ghostLabel = config.comparison ? COMPARISON_LABEL[config.comparison.mode] : undefined;
@@ -87,13 +96,14 @@ export const resolveIgMetric: WidgetMetricResolver = (metric, config, ctx, out) 
     out.series = bucketIgSeries(points, since, until, grain);
     out.valueRaw = cur;
     out.value = fmt.short(cur);
-    out.delta = delta;
+    // Архивное окно («Всё», свой период) сравнивать не с чем — дельты нет.
+    out.delta = plan.mode === 'live' ? delta : null;
     applyGhost(points);
-    return out.series.every((point) => point.value === 0) && cur === 0 ? { ...out, empty: true } : out;
+    return out.series.every((point) => (point.value ?? 0) === 0) && cur === 0 ? { ...out, empty: true } : out;
   }
 
   if (metric.id === 'ig.netFollowers') {
-    const points = igNetFollowerPoints(ig.insights);
+    const points = igNetFollowerPoints(ig.insights, ig.history);
     const { cur, hasCur } = igWindowValue(points, since, until);
     if (!hasCur) return { ...out, empty: true };
     const bucketed = bucketIgSeries(points, since, until, grain);
@@ -103,6 +113,7 @@ export const resolveIgMetric: WidgetMetricResolver = (metric, config, ctx, out) 
     } else {
       let running = 0;
       out.series = bucketed.map((point) => {
+        if (point.value == null) return point;   // день без измерения — разрыв линии, а не плато
         running += point.value;
         return { ...point, value: running };
       });

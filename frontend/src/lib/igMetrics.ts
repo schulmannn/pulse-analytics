@@ -68,13 +68,45 @@ export function histSeries(rows: IgHistoryRow[] | undefined, col: keyof IgHistor
     .map((r) => ({ day: r.day, value: Number(r[col]) }));
 }
 
-/** Prefer whichever series carries MORE real dated points. The persisted history (accumulated by
- *  the cron) usually outruns the tiny live API window, but on day 1 the DB is empty — then the live
- *  series wins and the chart is never blank. Ties keep live (fresher within the shared window). */
-export function longerSeries(live: Point[], persisted: Point[]): Point[] {
-  const datedCount = (s: Point[]) =>
-    s.filter((p) => p.day !== 'total' && Number.isFinite(Date.parse(p.day))).length;
-  return datedCount(persisted) > datedCount(live) ? persisted : live;
+/** Общий календарный ключ точки: голый день архива `YYYY-MM-DD` как есть, ISO-момент живого Graph
+    (`end_time`) → его UTC-день. Сравнивать сырые строки нельзя: день архива и момент живого ряда
+    за одни сутки иначе считались бы разными днями (и ER, и слияние рядов теряли совпадения). */
+export function canonicalDayKey(value: string): string | null {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? new Date(timestamp).toISOString().slice(0, 10) : null;
+}
+
+/** НАСТОЯЩИЙ дневной ряд живого Graph (reach, follower_count; в демо — все фикстуры дневные).
+    Синтетический агрегат окна (prev/cur-точки pushAgg с заполненным `total_value`) дневным рядом
+    не является и в ряды не попадает никогда — иначе сумма по дням читала бы итог окна как день. */
+export function liveDailySeries(insights: IgInsights | undefined, name: string): Point[] {
+  const metric = insights?.data?.find((m) => m.name === name);
+  if (!metric || metric.total_value?.value != null) return [];
+  return metricSeries(insights, name).filter((p) => p.day !== 'total' && canonicalDayKey(p.day) != null);
+}
+
+/** Слияние дневного АРХИВА (ig_daily) с живым дневным рядом по календарному ключу. Архивный день
+    всегда побеждает; живые точки добирают только дни ПОСЛЕ последнего дня архива (`lastArchiveDay`,
+    по умолчанию — самый новый день архива): свежий хвост, которого крон ещё не снял. Пустой архив
+    (первые часы после подключения) — живой ряд как есть. Порядок — старые → новые. */
+export function mergeIgDaily(archive: Point[], live: Point[], lastArchiveDay?: string | null): Point[] {
+  const out: Array<{ key: string; point: Point }> = [];
+  const seen = new Set<string>();
+  for (const p of archive) {
+    const key = canonicalDayKey(p.day);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push({ key, point: p });
+  }
+  const last = lastArchiveDay ?? (out.length ? out.reduce((m, e) => (e.key > m ? e.key : m), out[0]!.key) : null);
+  for (const p of live) {
+    const key = p.day === 'total' ? null : canonicalDayKey(p.day);
+    if (!key || seen.has(key) || (last != null && key <= last)) continue;
+    seen.add(key);
+    out.push({ key, point: p });
+  }
+  return out.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0)).map((e) => e.point);
 }
 
 /** Дневное ЧИСТОЕ движение базы из АРХИВА: ig_daily.follows − ig_daily.unfollows подневно (крон
@@ -235,17 +267,29 @@ export const flag = (iso: string) => {
   return String.fromCodePoint(...[...cc].map((c) => 127397 + c.charCodeAt(0)));
 };
 
-/** Window an IG daily-Point series to the last `days` points (0 = «Всё»). Steep headline math:
-    the metric page (/metrics/ig-*), the Home cards, and the narrative widget must all derive their
-    IG numbers from THIS one function so they can never silently diverge — the contract test in
-    igMetrics.test.ts pins narrative == this. Drops any 'total' marker; a shorter series returns all
-    it has (never fabricates); prevTotal is null unless two full windows fit (honest comparison). */
+/** Window an IG daily-Point series to the last `days` CALENDAR days ending at its newest point
+    (0 = «Всё»). Steep headline math: the metric page (/metrics/ig-*), the Home cards, and the
+    narrative widget must all derive their IG numbers from THIS one function so they can never
+    silently diverge — the contract test in igMetrics.test.ts pins narrative == this. Calendar, not
+    index: the archive may have gaps, and «7 дн.» over a gap must not reach back into the 8th day.
+    Drops any 'total' marker; a shorter series returns all it has (never fabricates); prevTotal is
+    null unless the series covers the full previous window too (honest comparison). */
 export function windowIgSeries(series: Point[], days: number, unit: string) {
-  const pts = series.filter((p) => p.day !== 'total');
-  const n = days === 0 ? pts.length : Math.min(days, pts.length);
-  const w = pts.slice(-n);
+  const pts = series.filter((p) => p.day !== 'total' && canonicalDayKey(p.day) != null);
+  const keyOf = (p: Point) => canonicalDayKey(p.day)!;
+  const lastKey = pts.length ? keyOf(pts[pts.length - 1]!) : null;
+  const shift = (key: string, offset: number) =>
+    new Date(Date.parse(`${key}T00:00:00Z`) + offset * DAY_MS).toISOString().slice(0, 10);
+  let w = pts;
+  let prevSlice: Point[] | null = null;
+  if (days > 0 && lastKey) {
+    const from = shift(lastKey, -(days - 1));
+    const prevFrom = shift(from, -days);
+    w = pts.filter((p) => keyOf(p) >= from);
+    // Прошлое окно честно только при полном покрытии: ряд начинается не позже его первого дня.
+    prevSlice = pts.length && keyOf(pts[0]!) <= prevFrom ? pts.filter((p) => keyOf(p) >= prevFrom && keyOf(p) < from) : null;
+  }
   const total = w.reduce((acc, p) => acc + p.value, 0);
-  const prevSlice = days === 0 || pts.length < 2 * n ? null : pts.slice(-2 * n, -n);
   const prevTotal = prevSlice ? prevSlice.reduce((acc, p) => acc + p.value, 0) : null;
   return {
     values: w.map((p) => p.value),
