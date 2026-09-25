@@ -4,6 +4,7 @@ import type { CSSProperties } from 'react';
 import { observeSize } from '@/lib/observeSize';
 import { DEFAULT_WIDGET_DAYS, usePagePeriod } from '@/lib/period';
 import type { PeriodDays } from '@/lib/period';
+import { PERIOD_PRESETS } from '@/lib/periodWindow';
 import { useChannels } from '@/api/queries';
 import { PillSelect } from '@/components/PillSelect';
 import { SegmentedControl } from '@/components/SegmentedControl';
@@ -13,7 +14,6 @@ import { Switch } from '@/components/ui/switch';
 import { SwatchButton } from '@/components/ui/swatch-button';
 import type { SeriesGrain, WidgetPrefs, WidgetSize } from '@/lib/widgetPrefsStore';
 import { SIZE_RANK, type WidgetVariant } from '@/components/widgets/variants';
-import { WIDGET_PERIODS } from '@/components/chartWidget/constants';
 
 const SWATCHES = [1, 2, 3, 4, 5, 6] as const;
 
@@ -37,7 +37,7 @@ function DialogPeriodSegment({
     ...(pagePeriod != null
       ? ([{ value: 'follow', content: 'Стр.', title: 'Следовать периоду страницы' }] as const)
       : []),
-    ...WIDGET_PERIODS.map((p) => ({ value: String(p.days), content: p.label })),
+    ...PERIOD_PRESETS.map((p) => ({ value: String(p.days), content: p.label })),
   ];
   return (
     <SegmentedControl

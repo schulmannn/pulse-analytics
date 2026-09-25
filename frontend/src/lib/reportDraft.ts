@@ -3,11 +3,11 @@
 // build / serialize / dirty logic here — React-free — makes the save/cancel contract testable.
 import type { Report, ReportConfig } from '@/api/schemas';
 import type { PeriodDays } from '@/lib/period';
+import { PERIOD_DAYS } from '@/lib/periodWindow';
 import { normalizeBlocks, type ReportBlock } from '@/lib/reportBlocks';
 
 export type ReportSchedule = 'none' | 'weekly' | 'monthly';
 const SCHEDULES: readonly ReportSchedule[] = ['none', 'weekly', 'monthly'];
-const PERIODS: readonly PeriodDays[] = [0, 7, 30, 90];
 
 // The document's own default period when a report has no persisted periodDays (matches the index).
 export const DRAFT_DEFAULT_PERIOD_DAYS: PeriodDays = 30;
@@ -23,7 +23,7 @@ export interface ReportDraft {
 }
 
 function coercePeriod(raw: unknown): PeriodDays {
-  return PERIODS.includes(raw as PeriodDays) ? (raw as PeriodDays) : DRAFT_DEFAULT_PERIOD_DAYS;
+  return PERIOD_DAYS.includes(raw as PeriodDays) ? (raw as PeriodDays) : DRAFT_DEFAULT_PERIOD_DAYS;
 }
 
 function coerceSchedule(raw: unknown): ReportSchedule {

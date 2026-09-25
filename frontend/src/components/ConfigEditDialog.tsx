@@ -11,6 +11,7 @@ import { ChannelScope } from '@/lib/channel-context';
 import { ExpandedChartHeightContext } from '@/components/ExpandableChart';
 import { DEFAULT_WIDGET_DAYS } from '@/lib/period';
 import type { PeriodDays } from '@/lib/period';
+import { PERIOD_PRESETS } from '@/lib/periodWindow';
 import { VIZ_LABEL } from '@/lib/widgetRender';
 import { getMetric, metricsForSource, recommendedSize } from '@/lib/widgetMetrics';
 import { channelsForSource } from '@/lib/channelSource';
@@ -32,13 +33,6 @@ import type { ComparisonDisplay, ComparisonMode, FilterOp, TargetType, WidgetCon
  * dialog always reflects the stored truth. Filters (S7) and dynamic/forecast targets (S9) get their
  * own controls in those sprints; here target is a fixed goal line.
  */
-
-const PERIODS: Array<{ days: PeriodDays; label: string }> = [
-  { days: 7, label: '7д' },
-  { days: 30, label: '30д' },
-  { days: 90, label: '90д' },
-  { days: 0, label: 'Всё' },
-];
 
 const GRAINS: Array<{ value: WidgetGrain; label: string }> = [
   { value: 'day', label: 'День' },
@@ -204,7 +198,7 @@ export function WidgetConfigControls({
       <Field label="Период">
         <Segmented
           ariaLabel="Период"
-          options={PERIODS.map((p) => ({ value: String(p.days), label: p.label }))}
+          options={PERIOD_PRESETS.map((p) => ({ value: String(p.days), label: p.label }))}
           value={String(config.period ?? DEFAULT_WIDGET_DAYS)}
           onChange={(v) => onChange({ period: Number(v) as PeriodDays })}
         />

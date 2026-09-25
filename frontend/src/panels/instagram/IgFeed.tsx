@@ -6,8 +6,6 @@ import { useIgData } from '@/lib/useIgData';
 import type { IgData } from '@/lib/useIgData';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { useMediaQuery } from '@/lib/useMediaQuery';
-import { usePagePeriod } from '@/lib/period';
-import { PeriodChips } from '@/components/PeriodChips';
 import { IgConnectPanel, IgReauthState } from '@/components/instagram/health';
 import { ErrorState } from '@/components/ErrorState';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -82,15 +80,6 @@ function useIgConnectNotice() {
     setParams(next, { replace: true });
   }, [params, qc, setParams, setChannelId]);
   return { notice, dismiss: () => setNotice(null) };
-}
-
-/** IG period chips — the PAGE period (same follow/«Стр.» contract as the TG feed), plus the
-    «Свой период» calendar the IG bodies honour (useIgData windows by the page range). One shared
-    PeriodChips component for both networks; the control sits in each section's sticky header. */
-export function IgPeriodControl() {
-  const pp = usePagePeriod();
-  if (!pp) return null;
-  return <PeriodChips value={pp.days} onChange={pp.setDays} range={pp.range} onRangeChange={pp.setRange} />;
 }
 
 export function IgShell() {

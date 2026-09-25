@@ -131,7 +131,7 @@ function PostsContent() {
 /**
  * The dense, reproducible Content work surface (Steep-flavoured): a compact toolbar + a full-width
  * table rendered directly on the section's FeedBlock — no nested decorative card. The window is the
- * authoritative page period (the header's TgPagePeriodControl), and text search / media format /
+ * authoritative page period (the header's PagePeriodControl), and text search / media format /
  * sort column+direction all live in the URL (lib/contentFilters), so the whole view is a shareable,
  * reload-stable link that composes with the pre-existing `?campaign=`/`?view=` params.
  */

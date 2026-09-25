@@ -10,6 +10,7 @@ import { ChannelScope, useSelectedChannel } from '@/lib/channel-context';
 import { useDemo } from '@/lib/demo-context';
 import { usePeriod } from '@/lib/period';
 import type { PeriodDays } from '@/lib/period';
+import { PERIOD_PRESETS } from '@/lib/periodWindow';
 import { deriveKpis, filledDailySeries, sparseDailySeries, isDrillKey } from '@/lib/kpiDerive';
 import type { DailySeries, DrillKey, PostMetricField } from '@/lib/kpiDerive';
 import { DAY_MS, buildWeeklyTable, cellTint } from '@/lib/reportTables';
@@ -29,7 +30,7 @@ import { NarrativeWeekBody } from '@/panels/NarrativeWeek';
 import { Insights } from '@/panels/Insights';
 import { TopPosts } from '@/panels/TopPosts';
 import { BlockControls, BlockFrame, MiniSelect, PencilGlyph, Segmented } from '@/panels/report/blockChrome';
-import { CHART_METRICS, InlineAdd, LEDGER, MapBlock, NotEnough, PERIOD_CHIPS, ReportChart, ReportMetricCard, TABLE_SOURCES, TextBlock } from '@/panels/report/blocks';
+import { CHART_METRICS, InlineAdd, LEDGER, MapBlock, NotEnough, ReportChart, ReportMetricCard, TABLE_SOURCES, TextBlock } from '@/panels/report/blocks';
 
 /**
  * Shared reports empty/error surface (list + document): demo / 401 → a quiet "log in" hint,
@@ -556,7 +557,7 @@ function ReportDocumentBody({
 
         {/* Global filter bar (steep Reports): period / channel / platform pills + print. */}
         <div className="mt-4 flex flex-wrap items-center gap-2 border-y border-border py-3 print:hidden">
-          {PERIOD_CHIPS.map((chip) => (
+          {PERIOD_PRESETS.map((chip) => (
             <button
               key={chip.days}
               type="button"

@@ -1,7 +1,7 @@
-import { WIDGET_PERIODS } from '@/components/chartWidget/constants';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { usePagePeriod } from '@/lib/period';
 import type { PeriodDays } from '@/lib/period';
+import { PERIOD_PRESETS } from '@/lib/periodWindow';
 
 interface WidgetPeriodPillsProps {
   days: PeriodDays;
@@ -47,7 +47,7 @@ export function WidgetPeriodPills({ days, onChange, hidden }: WidgetPeriodPillsP
         segmentClassName={touch}
         value={customRange ? '' : String(activeDays)}
         onChange={(next) => changePeriod(Number(next) as PeriodDays)}
-        options={WIDGET_PERIODS.map((period) => ({ value: String(period.days), content: period.label }))}
+        options={PERIOD_PRESETS.map((period) => ({ value: String(period.days), content: period.label }))}
       />
     </fieldset>
   );

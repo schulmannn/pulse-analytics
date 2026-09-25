@@ -2,8 +2,7 @@ import { Suspense, lazy, useMemo } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { useChannels, useHistory, useTgFull } from '@/api/queries';
 import { latestDataMs } from '@/lib/freshness';
-import { ChannelRecencyProvider, PagePeriodProvider, usePagePeriod } from '@/lib/period';
-import { PeriodChips } from '@/components/PeriodChips';
+import { ChannelRecencyProvider, PagePeriodProvider } from '@/lib/period';
 import { parseContentPeriod } from '@/lib/contentFilters';
 import { lazyWithReload } from '@/lib/lazyWithReload';
 
@@ -61,14 +60,4 @@ export function TgSectionLayout() {
       </ChannelRecencyProvider>
     </PagePeriodProvider>
   );
-}
-
-/** Feed-header period chips wired to the page period — re-windows every card on the page. Now at
-    full IG parity: 7д/30д/90д/Всё + a «Свой период» custom range (the TG card bodies read the page
-    range through widgetPeriodValue). Null outside the provider (defensive; TG pages always have one).
-    Exported as the TG sections' HeaderRight in the feed registry. */
-export function TgPagePeriodControl() {
-  const pp = usePagePeriod();
-  if (!pp) return null;
-  return <PeriodChips value={pp.days} onChange={pp.setDays} range={pp.range} onRangeChange={pp.setRange} />;
 }
