@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
-import { ChartExpandedContext } from '@/components/ExpandableChart';
+import { ChartExpandedContext } from '@/components/chartWidget/contexts';
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
 import { PeriodChips } from '@/components/PeriodChips';

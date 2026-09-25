@@ -16,7 +16,8 @@ import {
   chartControlAriaLabel,
   nextChartControlIndex,
 } from '@/lib/chartOverlayControl';
-import { ChartExpandedContext, ChartRefLinesContext, ExpandedChartHeightContext, WidgetTargetContext } from '@/components/ExpandableChart';
+import { ChartExpandedContext, ExpandedChartHeightContext, WidgetTargetContext } from '@/components/chartWidget/contexts';
+import { ChartRefLinesContext } from '@/components/ExpandableChart';
 import { clampTargetToDomain, targetTooltipRow } from '@/lib/targetDomain';
 
 interface BarChartProps {

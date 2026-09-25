@@ -8,7 +8,7 @@ import { observeSize } from '@/lib/observeSize';
 import { ChartTooltip } from '@/components/ChartTooltip';
 import { stackSegmentPath } from '@/components/BarChart';
 import { EmptyState } from '@/components/EmptyState';
-import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
+import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/chartWidget/contexts';
 
 interface DivergingBarsProps {
   values: number[];

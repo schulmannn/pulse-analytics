@@ -29,7 +29,7 @@ import { SegmentedControl } from '@/components/SegmentedControl';
 import { SegSelect } from '@/components/metric/SegSelect';
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
-import { ChartExpandedContext } from '@/components/ExpandableChart';
+import { ChartExpandedContext } from '@/components/chartWidget/contexts';
 import { Breakdown } from '@/components/Breakdown';
 import { RankChart } from '@/components/RankChart';
 import { PivotTable } from '@/components/PivotTable';

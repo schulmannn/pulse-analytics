@@ -6,7 +6,7 @@ import { SparklineSeries } from '@/components/SparklineSeries';
 import { cn } from '@/lib/utils';
 import { sparkDomain } from '@/lib/robustDomain';
 import { clampTargetToDomain } from '@/lib/targetDomain';
-import { WidgetTargetContext } from '@/components/ExpandableChart';
+import { WidgetTargetContext } from '@/components/chartWidget/contexts';
 
 interface SparklineProps {
   /**

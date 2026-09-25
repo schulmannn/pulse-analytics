@@ -11,7 +11,8 @@ import { nearestPointIndex } from '@/lib/chartHover';
 import { axisLabelIndexes } from '@/lib/chartLabels';
 import { ChartTooltip, type TooltipRow, type TooltipState } from '@/components/ChartTooltip';
 import { SeriesLegend } from '@/components/metric/seriesLegend';
-import { ChartExpandedContext, ChartRefLinesContext, ExpandedChartHeightContext, WidgetTargetContext } from '@/components/ExpandableChart';
+import { ChartExpandedContext, ExpandedChartHeightContext, WidgetTargetContext } from '@/components/chartWidget/contexts';
+import { ChartRefLinesContext } from '@/components/ExpandableChart';
 import { clampTargetToDomain, targetTooltipRow } from '@/lib/targetDomain';
 import { observeSize } from '@/lib/observeSize';
 import {

@@ -1,5 +1,5 @@
 import { useContext, useMemo, useRef, useState } from 'react';
-import { ChartExpandedContext } from '@/components/ExpandableChart';
+import { ChartExpandedContext } from '@/components/chartWidget/contexts';
 import { smoothSvgPath } from '@/lib/format';
 
 /**

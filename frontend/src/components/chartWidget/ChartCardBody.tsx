@@ -2,7 +2,7 @@ import { useContext, type ReactNode } from 'react';
 import { KpiValue } from '@/components/chartWidget/KpiValue';
 import { DeltaPill } from '@/components/DeltaPill';
 import type { DeltaBasis } from '@/components/DeltaPill';
-import { ChartCardTitleContext, ChartExpandedContext } from '@/components/ExpandableChart';
+import { ChartCardTitleContext, ChartExpandedContext } from './contexts';
 import { fmt } from '@/lib/format';
 import { useWidgetSize } from '@/lib/widgetSize';
 import type { MetricDelta } from '@/lib/delta';

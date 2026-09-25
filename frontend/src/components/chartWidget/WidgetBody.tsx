@@ -1,9 +1,5 @@
 import type { ReactNode, RefObject } from 'react';
-import {
-  ChartCardTitleContext,
-  ExpandedChartHeightContext,
-  WidgetTargetContext,
-} from '@/components/ExpandableChart';
+import { ChartCardTitleContext, ExpandedChartHeightContext, WidgetTargetContext } from './contexts';
 import { WidgetErrorBoundary } from '@/components/WidgetErrorBoundary';
 import { WidgetPeriodProvider } from '@/lib/period';
 import type { WidgetPeriodValue } from '@/lib/period';

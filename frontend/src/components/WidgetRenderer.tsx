@@ -7,7 +7,7 @@ import { DivergingBars } from '@/components/DivergingBars';
 import { Sparkline } from '@/components/Sparkline';
 import { PieChart } from '@/components/PieChart';
 import { Breakdown } from '@/components/Breakdown';
-import { ChartExpandedContext, ExpandedChartHeightContext, WidgetTargetContext } from '@/components/ExpandableChart';
+import { ChartExpandedContext, ExpandedChartHeightContext, WidgetTargetContext } from '@/components/chartWidget/contexts';
 import { ChartCardBody } from '@/components/chartWidget/ChartCardBody';
 import { RadialGauge } from '@/components/RadialGauge';
 import { observeSize } from '@/lib/observeSize';

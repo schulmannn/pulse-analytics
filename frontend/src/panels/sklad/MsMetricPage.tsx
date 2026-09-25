@@ -5,7 +5,7 @@ import { ChevronDown, ListFilter } from 'lucide-react';
 import { toast } from 'sonner';
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
 
-import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
+import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/chartWidget/contexts';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { PeriodChips } from '@/components/PeriodChips';
 import { SearchField } from '@/components/SearchField';

@@ -1,5 +1,5 @@
 import { useContext } from 'react';
-import { ExpandedChartHeightContext } from '@/components/ExpandableChart';
+import { ExpandedChartHeightContext } from '@/components/chartWidget/contexts';
 import { useMediaQuery } from '@/lib/useMediaQuery';
 import { useCallback, useRef, useState } from 'react';
 import { fmt } from '@/lib/format';

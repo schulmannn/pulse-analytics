@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { useContext, useRef, useState } from 'react';
-import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
+import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/chartWidget/contexts';
 import { observeSize } from '@/lib/observeSize';
 import { useIsoLayoutEffect, useMeasuredBox } from '@/lib/useMeasuredBox';
 import { useMediaQuery } from '@/lib/useMediaQuery';

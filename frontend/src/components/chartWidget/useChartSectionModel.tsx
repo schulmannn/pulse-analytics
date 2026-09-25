@@ -2,7 +2,7 @@ import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, u
 import type { CSSProperties } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useViewTransitionNavigate } from '@/lib/viewTransitionNavigate';
-import { WidgetTargetContext, ChartCardTitleContext } from '@/components/ExpandableChart';
+import { WidgetTargetContext, ChartCardTitleContext } from './contexts';
 import { ThrowInRender } from '@/components/WidgetErrorBoundary';
 import { GroupCtx, prefersReducedMotion } from '@/components/widgets/WidgetGroup';
 import { maxSize } from '@/components/widgets/variants';

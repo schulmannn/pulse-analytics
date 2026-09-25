@@ -5,7 +5,7 @@ import { ShareTrack } from '@/components/ShareRows';
 import { useMsChannelSeries, useMsGeography, useMsSalesByChannel } from '@/api/ms';
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
 import { ChartCardBody } from '@/components/chartWidget/ChartCardBody';
-import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
+import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/chartWidget/contexts';
 import { MultiLineChart } from '@/components/MultiLineChart';
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';

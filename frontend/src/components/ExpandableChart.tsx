@@ -8,30 +8,7 @@ import { pctDelta } from '@/lib/delta';
 import { KpiValue } from '@/components/chartWidget/KpiValue';
 import { DeltaPill } from '@/components/DeltaPill';
 import { observeSize } from '@/lib/observeSize';
-
-/** True while rendering inside the expanded (modal) chart view. Charts opt into richer
-    annotations there (full y-axis, value labels) without prop plumbing through the panels. */
-export const ChartExpandedContext = createContext(false);
-
-/** Chart height (px) requested by the expanded overlay; null = the caller's own height.
-    Overrides the chart's `height` prop, so callers keep their compact inline sizing while
-    the same element renders explorer-sized in the modal. */
-export const ExpandedChartHeightContext = createContext<number | null>(null);
-
-/** Per-widget target level («Целевой уровень» in the edit dialog). ChartSection provides it
-    around the widget body (and, via portal context flow, the expanded overlay); LineChart
-    draws a dashed goal line at the value. null = no target — the default everywhere else. */
-export const WidgetTargetContext = createContext<number | null>(null);
-
-/**
- * Заголовок карточки, внутри которой рисуется тело.
- *
- * Нужен ровно затем, чтобы тело не печатало подпись-ДУБЛЬ: на IG-обзоре карточка называлась
- * «Охват», и над числом стояла вторая подпись «Охват» (аудит #554, D8). Это уже вторая серия
- * одного дефекта — до неё так же дублировались «Просмотры» (аудит 11 августа), — поэтому чинится
- * структурно: хост объявляет своё имя, тело сравнивает и не повторяет.
- */
-export const ChartCardTitleContext = createContext<string | null>(null);
+import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/chartWidget/contexts';
 
 /** Min/Max/Average reference lines for the expanded explorer. The overlay computes them from the
     visible `statsFor` values when the «Линии» toggle is on and provides them here; LineChart /

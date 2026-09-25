@@ -3,7 +3,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it } from 'vitest';
 import { ChartCardBody } from './ChartCardBody';
 import { ChartSection } from './ChartSection';
-import { ChartCardTitleContext } from '@/components/ExpandableChart';
+import { ChartCardTitleContext } from './contexts';
 import { PeriodProvider } from '@/lib/period';
 
 /**
