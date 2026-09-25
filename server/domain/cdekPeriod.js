@@ -24,9 +24,10 @@ const DEFAULT_DAYS = 30;
  */
 function parseCdekPeriod(query = {}, now = Date.now()) {
   const q = query || {};
-  // Прежний разбор приводил from/to к строке, а qs превращает `?from[]=2026-03-01` в массив из одного
-  // элемента — String() делал из него день, и роут отвечал 200. Общий parsePeriod строже (не строка —
-  // не день); до перевода роутов в 2.x обёртка сохраняет прежний ответ, а не 400.
+  // Прежний разбор приводил from/to к строке. Под Express 5 (simple-парсер) массив приходит только из
+  // повтора параметра (`?from=a&from=b`), а `?from[]=…` — отдельным ключом `from[]`; но parseCdekPeriod
+  // зовут и напрямую, и массив из одного элемента String() делал днём. Общий parsePeriod строже (не
+  // строка — не день); до перевода роутов в 2.x обёртка сохраняет прежний ответ, а не 400.
   const legacy = q.from != null || q.to != null ? { ...q, from: String(q.from || ''), to: String(q.to || '') } : q;
   const p = parsePeriod(legacy, {
     now,
