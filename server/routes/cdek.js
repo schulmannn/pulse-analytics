@@ -3,6 +3,7 @@
 const rateLimit = require('express-rate-limit');
 const { hasWorkspaceRole, tenantChannelId } = require('../middleware/tenant');
 const { parseCdekPeriod } = require('../domain/cdekPeriod');
+const { resolveAll } = require('../domain/period');
 // Из домена, а не из repos: роут не имеет права тянуть слой доступа к данным (гвард границ).
 const {
   normalizeCdekInclude,
@@ -519,9 +520,9 @@ function registerCdekRoutes({ app, express, requireAuth, db, audit, cdekImport }
       if (!ctx) return;
       const bounds = await db.getCdekBoundsForActor(ctx.channel.id, req.user);
       // «Всё» у календаря — это размах архива: без него нечего рисовать, а придумывать окно нельзя.
-      const from = ctx.period.from || (bounds && bounds.first_day);
-      const to = ctx.period.to || (bounds && bounds.last_day);
-      if (!from || !to) return res.json({ from: null, to: null, days: [], bounds: null });
+      const span = resolveAll(ctx.period, bounds);
+      if (!span) return res.json({ from: null, to: null, days: [], bounds: null });
+      const { from, to } = span;
       const days = await db.getCdekCoverageForActor(ctx.channel.id, req.user, {
         from, to, tz: ctx.tz, include: ctx.include,
       });
