@@ -412,12 +412,6 @@ export function MentionsDesktop() {
             // высоты, чем треть-карточка, но не должен выталкивать таблицу за первый экран.
             chartHeight={320}
             drillTo={`/metrics/mentions-timeline${metricQuery}`}
-            expand={{
-              renderExpandedBar: () => (
-                <BarChart values={timeline.values} labels={timeline.labels} axisLabels={timeAxisFromDayKeys(timeline.days)} titles={timeline.titles} ghost={timeline.ghost} ghostLabel="Предыдущий период" />
-              ),
-              statsFor: () => timeline.values,
-            }}
           >
             {timeline.values.length > 0 ? (
               <BarChart values={timeline.values} labels={timeline.labels} axisLabels={timeAxisFromDayKeys(timeline.days)} titles={timeline.titles} ghost={timeline.ghost} ghostLabel="Предыдущий период" />

@@ -24,12 +24,12 @@ interface SubscriberRow {
 }
 
 /**
- * `expanded` — та же развилка, что у WidgetRenderer: числовые подписи максимума и последней точки
- * это мебель ПОВЕРХНОСТИ ДОКАЗАТЕЛЬСТВА. На лице карточки они налезают на кривую и дублируют
- * хедлайн (владелец: «показываются числа на графиках, убрать»); в развороте, где есть место и оси,
- * они полезны. Один и тот же компонент рисует оба вида, поэтому это проп, а не удаление.
+ * Без `markExtremes`: числовые подписи максимума и последней точки — мебель ПОВЕРХНОСТИ
+ * ДОКАЗАТЕЛЬСТВА. На лице карточки они налезают на кривую и дублируют хедлайн (владелец:
+ * «показываются числа на графиках, убрать»). Включал их только проп `expanded` мёртвого
+ * rich-разворота; разбор истории живёт на /metrics/subscribers.
  */
-export function SubscriberHistoryChart({ rows, expanded = false }: { rows: SubscriberRow[]; expanded?: boolean }) {
+export function SubscriberHistoryChart({ rows }: { rows: SubscriberRow[] }) {
   const sampled = lttbDownsample(rows, CHART_MAX_POINTS, (row) => Number(row.subscribers));
   const values = sampled.map((row) => Number(row.subscribers));
   const titles = sampled.map((row) => `${fmt.day(row.day)}: ${fmt.num(row.subscribers)} ${pluralRu(Number(row.subscribers), ['подписчик', 'подписчика', 'подписчиков'])}`);
@@ -48,7 +48,6 @@ export function SubscriberHistoryChart({ rows, expanded = false }: { rows: Subsc
       labels={labels}
       axisLabels={timeAxisFromDayKeys(sampled.map((row) => row.day))}
       markAnomalies
-      markExtremes={expanded}
     />
   );
 }
@@ -121,15 +120,6 @@ export function HistoryChartBlock({ id, homeKey }: HomeBlockProps = {}) {
       homeKey={homeKey}
       drillTo="/metrics/subscribers"
       periodControl
-      expand={{
-        renderExpanded: (days) => {
-          const windowRows = days === 0 ? archiveRows : archiveRows.slice(-days);
-          return <SubscriberHistoryChart rows={windowRows} expanded />;
-        },
-        statsFor: (days) =>
-          (days === 0 ? archiveRows : archiveRows.slice(-days)).map((row) => Number(row.subscribers)),
-        statsSum: false, // сумма УРОВНЕЙ подписчиков по дням не имеет смысла
-      }}
       variants={(period) => {
         const rows = archiveRows.filter((row) => period.inRange(row.day));
         if (rows.length < 2) {

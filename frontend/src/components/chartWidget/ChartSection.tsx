@@ -344,10 +344,6 @@ export function ChartSection(props: ChartSectionProps) {
         widgetId={widgetId}
         label={label}
         accentStyle={model.expansion.accentStyle}
-        periodControl={!!props.periodControl}
-        days={model.period.widgetDays}
-        expand={props.expand}
-        richExpand={model.expansion.richExpand}
         resetKeys={model.bodyResetKeys}
         body={model.expansion.overlayBody}
       />

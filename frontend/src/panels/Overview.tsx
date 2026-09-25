@@ -15,7 +15,6 @@ import { useDemo } from '@/lib/demo-context';
 import { Sparkline } from '@/components/Sparkline';
 import { ChartCardBody, ChartSection } from '@/components/ChartWidget';
 import { WidgetGroup } from '@/components/widgets/WidgetGroup';
-import { SubscriberHistoryChart } from '@/panels/Charts';
 import { TgViewsBody, TgAvgReachBody, TgReactionsBody, TgErBody, useTgKpis } from '@/panels/KpiGrid';
 import { NarrativeWeekBlock } from '@/panels/NarrativeWeek';
 import { TopPosts } from '@/panels/TopPosts';
@@ -193,12 +192,9 @@ function HealthBanner({ source }: { source?: string | null }) {
 
 /** Subscriber base over the resolved period — page-controlled in the feed, independently saved on
     Home. Exported bare so both hosts use the same calculation. */
-/** «Рост подписчиков» wrapper: the compact SubscriberGrowth card body, but «Развернуть» opens the
-    same full subscriber curve the history widget does (full-height axes + Мин/Макс/Среднее stats strip
-    + period pills + reference lines) instead of a tiny sparkline over an empty fullscreen. */
+/** «Рост подписчиков» wrapper: the compact SubscriberGrowth card body; «Развернуть» drills to the
+    full subscriber curve at /metrics/subscribers. */
 export function GrowthChartBlock({ id, homeKey }: { id?: string; homeKey?: string } = {}) {
-  const { data } = useHistory(730);
-  const rows = (data?.rows ?? []).filter((r) => r.subscribers != null);
   return (
     <ChartSection
       id={id}
@@ -207,15 +203,6 @@ export function GrowthChartBlock({ id, homeKey }: { id?: string; homeKey?: strin
       drillTo="/metrics/subscribers"
       defaultSize="half"
       periodControl
-      expand={
-        rows.length >= 2
-          ? {
-              renderExpanded: (days) => <SubscriberHistoryChart rows={days === 0 ? rows : rows.slice(-days)} />,
-              statsFor: (days) => (days === 0 ? rows : rows.slice(-days)).map((r) => Number(r.subscribers)),
-              statsSum: false, // сумма УРОВНЕЙ подписчиков по дням не имеет смысла
-            }
-          : undefined
-      }
     >
       <SubscriberGrowth />
     </ChartSection>

@@ -1,5 +1,4 @@
 import type { ReactNode } from 'react';
-import type { ChartExpandConfig } from '@/components/ExpandableChart';
 import type { WidgetPeriodValue } from '@/lib/period';
 import type { WidgetSeriesOpts, WidgetSize } from '@/lib/widgetPrefsStore';
 import type { WidgetVariant } from '@/components/widgets/variants';
@@ -42,8 +41,6 @@ export interface ChartSectionProps {
    * (пол), тогда как любая фикс-карточка рядом отдаёт графику 161–181px.
    */
   chartHeight?: number;
-  /** Rich fullscreen explorer configuration. */
-  expand?: ChartExpandConfig;
   /** Dedicated metric route used by every expand affordance when present. */
   drillTo?: string;
   /** Removes every expand affordance for views that are already expanded. */

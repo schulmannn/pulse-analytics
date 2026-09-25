@@ -260,17 +260,6 @@ export function MentionsByDayWidget({ byDay, id, homeKey }: { byDay: Record<stri
           },
         ];
       }}
-      expand={{
-        renderExpanded: (days) => {
-          const w = mentionsWindow(byDay, days);
-          return <LineChart values={w.values} labels={w.compactLabels} axisLabels={w.weekAxis} titles={w.titles} yMin={0} markAnomalies markExtremes />;
-        },
-        renderExpandedBar: (days) => {
-          const w = mentionsWindow(byDay, days);
-          return <BarChart values={w.values} labels={w.labels} axisLabels={w.weekAxis} titles={w.titles} />;
-        },
-        statsFor: (days) => mentionsWindow(byDay, days).values,
-      }}
     />
   );
 }
