@@ -9,6 +9,7 @@ import { qk } from '@/api/queryKeys';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { usePeriod } from '@/lib/period';
 import type { PeriodDays } from '@/lib/period';
+import { grainOptions } from '@/lib/periodWindow';
 import { deriveKpis, isDrillKey } from '@/lib/kpiDerive';
 import type { DailySeries, DrillKey, PostMetricField } from '@/lib/kpiDerive';
 import { getDrillMetric } from '@/lib/widgetMetrics';
@@ -356,11 +357,7 @@ export function MetricPage() {
 
   // Grain availability follows the window size (a 7-day window has no meaningful months).
   const winDays = spanMs != null ? Math.round(spanMs / DAY_MS) + 1 : Infinity;
-  const grainAllowed: Record<Grain, boolean> = {
-    day: true,
-    week: winDays >= 14,
-    month: winDays >= 60,
-  };
+  const grainAllowed: Record<Grain, boolean> = grainOptions(winDays);
   const effGrain: Grain = grainAllowed[grain] ? grain : 'day';
 
   // ── Series (line/bar) + baseline ghost ────────────────────────────────────────────────
