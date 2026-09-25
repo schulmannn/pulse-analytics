@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const { hasWorkspaceRole, tenantChannelId } = require('../middleware/tenant');
 const { createAdmissionController } = require('../lib/admissionController');
 const { igTokenState } = require('../domain/igToken');
+const { runDetached } = require('../lib/requestContext');
 
 // "Business Login for Instagram" (Instagram API with Instagram Login, no Facebook Page). These app
 // credentials + scopes are read once at load, exactly as index.js did.
@@ -33,6 +34,9 @@ function registerIgOauthRoutes({
   appBase, cache, igConfigured, igCrypto, AUTH_SECRET, IG_GRAPH,
   IG_CLIENT_ID, IG_CLIENT_SECRET, oauthMaxInFlight, oauthAcquireTimeoutMs,
   oauthStateStore = new Map(),
+  // Шаг догрузки истории IG (jobs/igBackfillJob) сразу после connect/reconnect. Optional: без него
+  // (тесты, composition без IG) история подтянется ближайшим проходом recovery-бегунка.
+  kickIgBackfill = null,
 }) {
   // Bounded admission for the OAuth callback: it fans out three DEPENDENT external exchanges
   // (code→short→long→/me), each with a multi-second timeout, so an onboarding peak could otherwise
@@ -309,6 +313,14 @@ function registerIgOauthRoutes({
           scopes: IG_OAUTH_SCOPES,
         });
         igCachePurge(igUserId);   // clear any stale cached payloads for this account id
+        // История начинает догружаться сразу, а не с ближайшего прохода бегунка. runDetached: шаг
+        // длится минуты и идёт уже после редиректа — вне request-store (см. lib/requestContext);
+        // сбой только логируется — connect от него не зависит, проход бегунка повторит.
+        if (typeof kickIgBackfill === 'function') {
+          runDetached(() => Promise.resolve()
+            .then(() => kickIgBackfill(targetChannelId))
+            .catch((e) => log('warn', 'ig_backfill_kick_failed', { channelId: targetChannelId, error: e.message })));
+        }
         req.user = user; req.channel = { id: targetChannelId };
         await audit(req, 'ig_oauth_connected', { channelId: targetChannelId, username: me.username || null, newSource: !!st.ns });
         // ch= lets the SPA switch straight to the (possibly fresh) source after the bounce.

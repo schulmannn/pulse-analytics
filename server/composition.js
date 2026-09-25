@@ -41,6 +41,7 @@ const {
 } = require('./jobs/instagramCollectionJob');
 const { createMsCollectionJob } = require('./jobs/msCollectionJob');
 const { createMsBackfillEngine } = require('./jobs/msBackfillJob');
+const { createIgBackfillJob } = require('./jobs/igBackfillJob');
 const { createYmCollectionJob } = require('./jobs/ymCollectionJob');
 const { createRusenderCollectionJob } = require('./jobs/rusenderCollectionJob');
 const { createMemoryCache } = require('./infrastructure/memoryCache');
@@ -312,6 +313,20 @@ function createComposition(config, overrides = {}) {
   });
   const collectIgForAccount = igCollectionJob.collectIgForAccount;
 
+  // Догрузка истории Instagram в архив ig_daily (OD-13) — jobs/igBackfillJob. Тот же paced
+  // collection-клиент (общий singleflight + usage-gate: при открытом gate новый полёт реджектится до
+  // Graph), тот же backgroundDb и те же однодневные запросы, что у крона (collectIgDailyForDay).
+  // Проход едет в IG-lane recovery-бегунка после дневного сбора; kick — из OAuth callback.
+  const igBackfillJob = createIgBackfillJob({
+    db: backgroundDb,
+    log,
+    igCrypto,
+    refreshIgIfNeeded: collectionIgClient.refreshIgIfNeeded,
+    collectIgDailyForDay: igCollectionJob.collectIgDailyForDay,
+    usageGate: igUsageGate,
+    limits: config.instagram.backfill,
+  });
+
   // Проактивное продление токенов IG — jobs/igTokenRefreshJob. До него продление жило только в
   // хвосте чтения: аккаунт, который перестали открывать, молча доезжал до истечения (@bynotem,
   // 1 сентября 2026). Полоса идёт в operational-бегунке и использует фоновый paced-клиент —
@@ -582,6 +597,7 @@ function createComposition(config, overrides = {}) {
       igConfigured,
       igCrypto,
       igMock,
+      kickIgBackfill: igBackfillJob.kickIgBackfill,
       msCrypto,
       msFetch,
       msBackfill: msBackfillEngine,
@@ -630,6 +646,7 @@ function createComposition(config, overrides = {}) {
       log,
       jobTracker,
       runIgCollectionPass,
+      runIgBackfillPass: igBackfillJob.runIgBackfillPass,
       processTgQrCollection,
       repairCentralMedia,
       runMsCollectionPass: msCollectionJob.runMsCollectionPass,

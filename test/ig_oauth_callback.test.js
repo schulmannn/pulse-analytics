@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const { registerIgOauthRoutes } = require('../server/routes/ig-oauth');
 const { createMemoryCache } = require('../server/infrastructure/memoryCache');
+const { runWithRequestId, getRequestId } = require('../server/lib/requestContext');
 
 const AUTH_SECRET = 'test-auth-secret';
 const IG_GRAPH = 'https://graph.instagram.com/v20.0';
@@ -89,6 +90,7 @@ function makeHarness(over = {}) {
     oauthMaxInFlight: over.maxInFlight ?? 8,
     oauthAcquireTimeoutMs: over.acquireTimeoutMs ?? 2000,
     oauthStateStore,
+    ...(over.kickIgBackfill ? { kickIgBackfill: over.kickIgBackfill } : {}),
   });
   const start = handlers.get('POST /api/ig/oauth/start');
   const callback = handlers.get('GET /api/ig/oauth/callback');
@@ -379,4 +381,35 @@ test('cache invalidation failure never turns a durable OAuth connect into a fals
   assert.equal(h.saved.length, 1);
   assert.ok(h.audits.some((a) => a.action === 'ig_oauth_connected'));
   assert.ok(h.logs.some((entry) => entry.event === 'ig_cache_purge_failed'));
+});
+
+// Догрузка истории стартует сразу после connect — detached, вне request-store, и не держит редирект.
+test('connect запускает шаг догрузки истории detached: после сохранения, вне request-store, не блокируя редирект', async () => {
+  let release;
+  const hold = new Promise((r) => { release = r; });
+  const kicks = [];
+  const h = makeHarness({
+    kickIgBackfill: async (channelId) => {
+      kicks.push({ channelId, requestId: getRequestId(), savedBefore: h.saved.length });
+      await hold;
+      return { kicked: 'walk' };
+    },
+  });
+  const res = await runWithRequestId('req-abcdef-123', () => run(h.callback, { state: validState(), code: AUTH_CODE }));
+  assert.match(res.last.url, /ig=connected&ch=42$/, 'редирект не ждёт догрузки');
+  await new Promise((r) => setImmediate(r));
+  assert.equal(kicks.length, 1);
+  assert.equal(kicks[0].channelId, 42);
+  assert.equal(kicks[0].savedBefore, 1, 'kick — после сохранения токена');
+  assert.equal(kicks[0].requestId, undefined, 'минуты работы не приписаны закрытому запросу');
+  release();
+});
+
+test('сбой шага догрузки только логируется — connect остаётся успешным', async () => {
+  const h = makeHarness({ kickIgBackfill: async () => { throw new Error('graph down'); } });
+  const res = await run(h.callback, { state: validState(), code: AUTH_CODE });
+  assert.match(res.last.url, /ig=connected&ch=42$/);
+  await new Promise((r) => setImmediate(r));
+  await new Promise((r) => setImmediate(r));
+  assert.ok(h.logs.some((l) => l.event === 'ig_backfill_kick_failed' && l.meta.channelId === 42));
 });

@@ -114,6 +114,15 @@ function createIgUsageGate({ now, probeIntervalMs } = {}) {
     return remainingMs() > 0;
   }
 
+  // Последний наблюдённый BUC-максимум (%) — мягкий тормоз догрузки истории (igBackfillJob): она
+  // уступает квоту раньше жёсткого стопа. Только число, без business id. Протухает через
+  // probe-интервал, как и сам gate: иначе остановившаяся догрузка сама никогда не обновила бы
+  // показание и стояла бы вечно на последнем высоком значении.
+  function lastBucUsage() {
+    if (!lastObservedMs || clock() - lastObservedMs >= probeMs) return 0;
+    return lastBucUsagePct;
+  }
+
   // Оставшиеся секунды паузы (для bounded retryAfter синтетической throttle-ошибки клиента).
   function remainingSeconds() {
     return Math.ceil(remainingMs() / 1000);
@@ -131,7 +140,7 @@ function createIgUsageGate({ now, probeIntervalMs } = {}) {
     };
   }
 
-  return { observe, shouldStopPass, remainingSeconds, _snapshot };
+  return { observe, shouldStopPass, remainingSeconds, lastBucUsagePct: lastBucUsage, _snapshot };
 }
 
 module.exports = { createIgUsageGate };

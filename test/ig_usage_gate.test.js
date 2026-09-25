@@ -118,3 +118,19 @@ test('самое позднее восстановление выигрывае�
   gate.observe({ appUsage: { call_count: 100 }, status: 200 });          // probe 60с < остатка
   assert.equal(gate.remainingSeconds(), 200, 'короткая пауза не укорачивает уже установленную длинную');
 });
+
+test('lastBucUsagePct: числовой BUC-максимум последнего ответа, протухает через probe-интервал', () => {
+  const { now, box } = fixedClock();
+  const gate = createIgUsageGate({ now, probeIntervalMs: 60_000 });
+  assert.equal(gate.lastBucUsagePct(), 0, 'ещё ничего не наблюдали');
+  gate.observe({ businessUseCaseUsage: { 17841: [{ type: 'instagram', call_count: 81, total_time: 12 }] }, status: 200 });
+  assert.equal(gate.lastBucUsagePct(), 81);
+  assert.equal(gate.shouldStopPass(), false, 'BUC ниже 100 глобальный gate не открывает');
+  box.t += 59_999;
+  assert.equal(gate.lastBucUsagePct(), 81);
+  box.t += 1;
+  assert.equal(gate.lastBucUsagePct(), 0, 'старое показание не держит догрузку вечно');
+  gate.observe({ appUsage: { call_count: 5 }, status: 200 });
+  assert.equal(gate.lastBucUsagePct(), 0, 'ответ без BUC-заголовка обнуляет показание');
+  assert.equal(typeof gate.lastBucUsagePct(), 'number');
+});
