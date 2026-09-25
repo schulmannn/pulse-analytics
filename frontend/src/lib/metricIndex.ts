@@ -15,9 +15,21 @@
 //
 // Потребители на индекс пока не переведены: старые экспорты (widgetMetrics.ts и восемь
 // panels/**/*MetricKeys.ts) стали тонкими обёртками над ним и отдают ровно то же, что раньше.
-// Поля, которые описывают разбор (supportedViz, capabilities, zeroBased), записаны по канону
-// (PROJECT_MEMORY, DESIGN_TOKENS): где страница сегодня расходится с каноном, у записи стоит
-// комментарий с id расхождения. Страницы начнут читать индекс в своих PR и тем самым сойдутся.
+//
+// Поля записаны в одном из двух смыслов — у каждого поля типа он назван явно:
+//   - КАНОН (куда страница сойдётся, когда начнёт читать индекс): kind, supportedViz, zeroBased —
+//     там, где канон записан (PROJECT_MEMORY «Подписчики — stock», DESIGN_TOKENS, U05);
+//   - СЕГОДНЯ (как ведёт себя код сейчас): capabilities, evaluative и widget-фасет.
+// Там, где выбор вида пишется в URL, supportedViz совпадает с сегодняшним (это держит тест деталей).
+// Известные расхождения канона и сегодняшних страниц — PR, который переводит страницу на индекс,
+// обязан назвать это видимое изменение и его класс для телефона (OD-16):
+//   - rusender.contacts, rusender.unsubscribed: supportedViz ['line'] и zeroBased=false, а страница
+//     предлагает «Столбцы» и рисует от нуля (CHARTS-13, SHELL-18);
+//   - ряды СДЭКа: zeroBased=true, а страница не передаёт графику yMin (база оси Y, U09);
+//   - дневные разборы IG и Метрики: capabilities.window = 'local' — записано как сегодня, канон —
+//     окно разбора (PERIOD-1, SHELL-4);
+//   - rusender.unsubscribed: evaluative=true — как сегодня (рост отписавшихся окрашен как хороший);
+//     канона нет, вопрос владельцу.
 //
 // Вид «Чистого прироста» (tg.netGrowth, ig.netFollowers) зависит от OD-4 и до решения записан
 // как есть: столбцы по умолчанию, линия — вариант.
@@ -82,7 +94,18 @@ export type MetricGrain = 'day' | 'week' | 'month';
  *   - none     — окна нет (вся история: когорты, скорость набора). */
 export type MetricWindowMode = 'explorer' | 'local' | 'fixed' | 'none';
 
-/** Что умеет полный разбор метрики сегодня. У метрики без маршрута — всё выключено. */
+/** Ряд, разложенный по разрезу: несколько рядов столбцами за окно нечитаемы — только линия
+ *  (канон U05 «разбивка каналов МС — только линия»; МС и СДЭК сегодня приводят `bar` к линии). */
+export interface MetricSplitView {
+  /** Виды разложенного ряда; ⊆ supportedViz. */
+  viz: readonly MetricViz[];
+  /** База сравнения остаётся под разбивкой (у МС — итог окна в рейле; СДЭК её гасит). */
+  compare: boolean;
+  /** Линия цели остаётся под разбивкой. */
+  target: boolean;
+}
+
+/** СЕГОДНЯ: что умеет полный разбор метрики сейчас. У метрики без маршрута — всё выключено. */
 export interface MetricCapabilities {
   /** Базы сравнения, которые предлагает рейл, в каноническом порядке; [] — сравнения нет.
    *  Без 'off' — база включена всегда и переключателя нет. */
@@ -97,6 +120,8 @@ export interface MetricCapabilities {
   goal: boolean;
   /** Разрезы, на которые раскладывается ряд; [] — разбивки нет. */
   split: readonly string[];
+  /** Что остаётся от разбора под разбивкой; null — ровно тогда, когда split пуст. */
+  splitView: MetricSplitView | null;
   window: MetricWindowMode;
   /** Пресет «Всё». */
   allowAll: boolean;
@@ -114,7 +139,7 @@ export interface MetricRouteRef {
   key: string;
 }
 
-/** Структура метрики в каталоге виджетов Главной — всё, кроме текстов (они в деталях). */
+/** СЕГОДНЯ: структура метрики в каталоге виджетов Главной — всё, кроме текстов (они в деталях). */
 export interface WidgetFacet {
   shape: MetricShape;
   category: MetricCategory;
@@ -123,7 +148,12 @@ export interface WidgetFacet {
   supportedViz: readonly WidgetViz[];
   /** Измерения разбивки (ids каталога измерений). */
   dimensions?: readonly string[];
+  /** Агрегация корзин из каталога виджетов (MetricDef.seriesAgg). */
   seriesAgg?: SeriesAggregation;
+  /** Агрегация корзин, которую виджет берёт ВНЕ каталога — докласификация
+   *  resolveWidgetMetric.SERIES_AGG_OVERRIDES (средний чек: последний день корзины, PERIOD-6). В
+   *  MetricDef не выносится. Корзины виджета сегодня: seriesAgg ?? bucketAggOverride ?? 'flow'. */
+  bucketAggOverride?: SeriesAggregation;
   /** Одна из шести KPI-метрик TG (kpiDerive.DrillKey). */
   drillKey?: DrillKey;
   /** Текущая цель клика по числу виджета там, где drillKey нет (МС → /sklad, Метрика → /metrika).
@@ -137,17 +167,19 @@ export interface MetricIndexEntry {
   id: MetricId;
   route: MetricRouteRef | null;
   source: MetricIndexSource;
+  /** КАНОН. Агрегатор корзин по kind у виджета ещё не работает — см. widget.bucketAggOverride. */
   kind: MetricValueKind;
   /** Есть только у kind = 'ratio'. */
   ratio?: RatioParts;
   unit: MetricUnit;
-  /** Виды полного разбора (первый — по умолчанию); у метрики без маршрута — виды её виджета. */
+  /** КАНОН. Виды полного разбора (первый — по умолчанию); у метрики без маршрута — виды её виджета. */
   supportedViz: readonly MetricViz[];
+  /** СЕГОДНЯ. */
   capabilities: MetricCapabilities;
-  /** База оси Y линий и столбцов — ноль. Канон: у уровня (stock) ось подогнана под диапазон, у
+  /** КАНОН. База оси Y линий и столбцов — ноль: у уровня (stock) ось подогнана под диапазон, у
    *  потоков и отношений — от нуля. Для списков и сеток без оси значение не влияет. */
   zeroBased: boolean;
-  /** Δ окрашивается оценочно (рост — хорошо) в рейле полного разбора; false — нейтральная метрика. */
+  /** СЕГОДНЯ. Δ окрашивается оценочно (рост — хорошо) в рейле полного разбора; false — нейтральная. */
   evaluative: boolean;
   /** Есть у метрик каталога виджетов; совпадает с id. */
   widgetId?: MetricId;
@@ -305,6 +337,7 @@ const NO_CAPABILITIES: MetricCapabilities = {
   target: false,
   goal: false,
   split: [],
+  splitView: null,
   window: 'none',
   allowAll: false,
   customRange: false,
@@ -325,6 +358,8 @@ const LINE: readonly MetricViz[] = ['line'];
 const LIST: readonly MetricViz[] = ['list'];
 const TABLE: readonly MetricViz[] = ['table'];
 const HEATMAP: readonly MetricViz[] = ['heatmap'];
+/** Под разбивкой — только линия; сравнения и цели на полотне разбивки нет. */
+const SPLIT_LINE_ONLY: MetricSplitView = { viz: LINE, compare: false, target: false };
 
 /** Окно = глобальный период разбора с пресетами, «Всё» и «Своим периодом» (PeriodChips). */
 const EXPLORER_WINDOW = { window: 'explorer', allowAll: true, customRange: true } as const;
@@ -569,13 +604,15 @@ const MS: RouteFamily<MsKey> = {
       caps: MS_SERIES,
     },
     'ms-rfm': { id: 'ms.rfm', kind: 'stock', unit: 'number', viz: LIST, caps: MS_REPORT },
-    // Разбивка по каналам рисуется только линией (канон «разбивка каналов МС — только линия»).
+    // Агрегат — линия или столбцы; разбивка по каналам — только линия (канон U05: MsMetricPage
+    // приводит chart=bar к line и прячет переключатель). База сравнения остаётся в рейле: она
+    // сравнивает итог окна, а не ряды.
     'ms-channels': {
       id: 'ms.channels',
       kind: 'flow',
       unit: 'currency',
       viz: LINE_BAR,
-      caps: { ...MS_SERIES, split: ['channel'] },
+      caps: { ...MS_SERIES, split: ['channel'], splitView: { ...SPLIT_LINE_ONLY, compare: true } },
     },
     'ms-funnel': { id: 'ms.funnel', kind: 'flow', unit: 'number', viz: ['funnel'], caps: MS_REPORT },
     'ms-products': { id: 'ms.products', kind: 'flow', unit: 'currency', viz: TABLE, caps: WINDOW_REPORT },
@@ -637,9 +674,16 @@ const YM: RouteFamily<YmKey> = {
 };
 
 // СДЭК. Грануляцию выбирает сервер (auto), клиентского переключателя нет. Страница сегодня не
-// передаёт графику yMin — по канону ряды от нуля (расхождение «база оси Y», U09).
+// передаёт графику yMin — по канону ряды от нуля (расхождение «база оси Y», U09). Под разбивкой
+// страница рисует только линии и гасит «Пред. период» и цель (CdekMetricPage).
 const CDEK_ALL_DIMS: readonly string[] = ['channel', 'status', 'product', 'carrier'];
-const CDEK_SERIES = caps({ ...EXPLORER_WINDOW, compare: OFF_PREV, target: true, split: CDEK_ALL_DIMS });
+const CDEK_SERIES = caps({
+  ...EXPLORER_WINDOW,
+  compare: OFF_PREV,
+  target: true,
+  split: CDEK_ALL_DIMS,
+  splitView: SPLIT_LINE_ONLY,
+});
 const CDEK: RouteFamily<CdekKey> = {
   source: 'cdek',
   scope: 'metrics',
@@ -875,7 +919,8 @@ const WIDGET_SPECS: readonly WidgetSpec[] = [
   // ── МойСклад (деньги за день дискретны — столбцы, владелец 2026-08-13)
   { id: 'ms.revenue', shape: 'series', category: 'growth', drillTo: '/sklad', defaultViz: 'bar', supportedViz: ['bar', 'line'] },
   { id: 'ms.orders', shape: 'series', category: 'growth', drillTo: '/sklad', defaultViz: 'bar', supportedViz: ['bar', 'line'] },
-  { id: 'ms.avgCheck', shape: 'series', category: 'growth', drillTo: '/sklad' },
+  // Средний чек — ratio, но корзины виджета сегодня берут последний день (PERIOD-6).
+  { id: 'ms.avgCheck', shape: 'series', category: 'growth', drillTo: '/sklad', bucketAggOverride: 'level' },
   // ── Яндекс.Метрика
   { id: 'ym.visits', shape: 'series', category: 'growth', drillTo: '/metrika' },
   { id: 'ym.users', shape: 'series', category: 'growth', drillTo: '/metrika' },

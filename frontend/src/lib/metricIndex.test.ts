@@ -50,6 +50,48 @@ const COMPARE_ORDER = ['off', 'prev', 'year'];
 
 const routed = METRIC_INDEX_ENTRIES.filter((entry) => entry.route != null);
 
+/** Литерал `const <name> = { ключ: строка | boolean, … }` из исходника. Так индекс сверяется с
+ *  константами страниц и резолвера, не импортируя сами React-модули в node-окружение тестов:
+ *  поменяли константу там — тест здесь краснеет. */
+function readConstObject(relPath: string, name: string): Record<string, string | boolean> {
+  const file = fileURLToPath(new URL(relPath, import.meta.url));
+  const sourceFile = ts.createSourceFile(file, readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true);
+  const hits: Array<Record<string, string | boolean>> = [];
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      node.name.text === name &&
+      node.initializer &&
+      ts.isObjectLiteralExpression(node.initializer)
+    ) {
+      const out: Record<string, string | boolean> = {};
+      for (const prop of node.initializer.properties) {
+        const init = ts.isPropertyAssignment(prop) ? prop.initializer : null;
+        const key = ts.isPropertyAssignment(prop) && (ts.isIdentifier(prop.name) || ts.isStringLiteral(prop.name))
+          ? prop.name.text
+          : null;
+        const value = init == null
+          ? undefined
+          : ts.isStringLiteral(init)
+            ? init.text
+            : init.kind === ts.SyntaxKind.TrueKeyword
+              ? true
+              : init.kind === ts.SyntaxKind.FalseKeyword
+                ? false
+                : undefined;
+        if (key == null || value === undefined) throw new Error(`${relPath} ${name}: не литерал — ${prop.getText()}`);
+        out[key] = value;
+      }
+      hits.push(out);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  if (hits.length !== 1) throw new Error(`${relPath}: ${name} найден ${hits.length} раз`);
+  return hits[0];
+}
+
 describe('metricIndex — полнота', () => {
   it('у каждого ключа маршрута /metrics/* есть запись, и других /metrics-записей нет', () => {
     for (const key of METRICS_ROUTE_KEYS) {
@@ -162,14 +204,33 @@ describe('metricIndex — форма записей', () => {
     // Средний чек — отношение, хотя виджет пока берёт последний день корзины (PERIOD-6).
     expect(kindOf('ms.avgCheck')).toBe('ratio');
     expect(METRIC_INDEX['ms.avgCheck'].ratio).toEqual({ num: 'revenue', den: 'orders' });
+    expect(METRIC_INDEX['ms.avgCheck'].widget?.bucketAggOverride).toBe('level');
+  });
+
+  it('корзины виджета — ровно сегодняшние: seriesAgg каталога плюс докласификация резолвера', () => {
+    // resolveWidgetMetric: getMetric(id)?.seriesAgg ?? SERIES_AGG_OVERRIDES[id] ?? 'flow'.
+    const overrides = readConstObject('./resolveWidgetMetric.ts', 'SERIES_AGG_OVERRIDES');
+    const recorded = Object.fromEntries(
+      METRIC_INDEX_ENTRIES.flatMap((entry) =>
+        entry.widget?.bucketAggOverride ? [[entry.id, entry.widget.bucketAggOverride] as const] : [],
+      ),
+    );
+    expect(recorded).toEqual(overrides);
+    for (const id of Object.keys(recorded)) {
+      // Override работает только там, где каталог молчит, и в MetricDef не выносится.
+      expect(METRIC_INDEX[id].widget?.seriesAgg, id).toBeUndefined();
+      expect(WIDGET_METRICS.find((metric) => metric.id === id)?.seriesAgg, id).toBeUndefined();
+    }
   });
 
   it('база оси Y — канон: уровни подогнаны под диапазон, потоки и отношения от нуля', () => {
     for (const entry of METRIC_INDEX_ENTRIES) {
       expect(entry.zeroBased, entry.id).toBe(entry.kind !== 'stock');
     }
-    // Зеркало MetricPage.ZERO_BASED для шести KPI TG.
-    expect(TG_CORE_METRIC_KEYS.filter((key) => !metricByRoute(key)?.zeroBased)).toEqual(['subscribers']);
+    // Шесть KPI TG — то же, что MetricPage.ZERO_BASED (читается из самой страницы).
+    const zeroBased = readConstObject('../panels/MetricPage.tsx', 'ZERO_BASED');
+    expect(Object.keys(zeroBased).sort()).toEqual([...TG_CORE_METRIC_KEYS].sort());
+    for (const key of TG_CORE_METRIC_KEYS) expect(metricByRoute(key)?.zeroBased, key).toBe(zeroBased[key]);
   });
 
   it('нейтральна только метрика упоминаний', () => {
@@ -255,6 +316,24 @@ describe('metricIndex — возможности разбора', () => {
     expect(capabilitiesOf('ms.channels')?.split).toEqual(['channel']);
     expect(capabilitiesOf('cdek.revenue')?.split).toEqual(['channel', 'status', 'product', 'carrier']);
     expect(capabilitiesOf('cdek.avgCheck')?.split).not.toContain('product');
+  });
+
+  it('под разбивкой — только линия (канон U05); сравнение и цель — как страница рисует их сегодня', () => {
+    for (const entry of METRIC_INDEX_ENTRIES) {
+      const { split, splitView, compare, target } = entry.capabilities;
+      expect(splitView != null, entry.id).toBe(split.length > 0);
+      if (!splitView) continue;
+      expect(splitView.viz, entry.id).toEqual(['line']);
+      for (const viz of splitView.viz) expect(entry.supportedViz, entry.id).toContain(viz);
+      if (splitView.compare) expect(compare.length, entry.id).toBeGreaterThan(0);
+      if (splitView.target) expect(target, entry.id).toBe(true);
+    }
+    // МС: chart=bar в разбивке приводится к line; итог окна в рейле сравнивается и дальше.
+    expect(capabilitiesOf('ms.channels')?.splitView).toEqual({ viz: ['line'], compare: true, target: false });
+    // СДЭК: под разбивкой «Пред. период» и линия цели гаснут.
+    for (const id of ['cdek.revenue', 'cdek.orders', 'cdek.avgCheck', 'cdek.units', 'cdek.price']) {
+      expect(capabilitiesOf(id)?.splitView, id).toEqual({ viz: ['line'], compare: false, target: false });
+    }
   });
 });
 

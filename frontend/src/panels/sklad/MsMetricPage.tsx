@@ -31,7 +31,7 @@ import { windowRangeLabel } from '@/lib/metricSeries';
 import { metricTotal, type Grain, type Metric } from '@/lib/msSeries';
 import { customerMetricTotal, type MsCustomerMetric } from '@/lib/msCustomerSeries';
 import type { MsChannelContributionMetric } from '@/lib/msChannelContribution';
-import { MS_COHORT_MODES, type MsCohortMode } from '@/lib/msCohortMode';
+import type { MsCohortMode } from '@/lib/msCohortMode';
 import {
   MS_CHANNEL_SELECTION_LIMIT,
   applyMsMetricChannels,
@@ -39,6 +39,19 @@ import {
   parseMsMetricUrl,
   type MsMetricUrlSchema,
 } from '@/lib/msMetricUrlState';
+import {
+  CHANNELS_URL,
+  COHORTS_URL,
+  COMPARE_URL,
+  CONTRIBUTION_URL,
+  FUNNEL_URL,
+  PRODUCTS_URL,
+  RETURNS_URL,
+  RFM_URL,
+  STOCK_URL,
+  SUMMARY_URL,
+  customersUrl,
+} from '@/panels/sklad/msMetricUrlSchemas';
 import { setSavedFilter, useSavedFilter } from '@/lib/widgetPrefsStore';
 import { useMsChannelSeries, useMsCustomers, useMsFunnel, useMsGeography, useMsReturns, useMsRfm, useMsSalesByChannel, useMsSummary, useMsTopCustomers, useMsCohorts, type MsProductSort } from '@/api/ms';
 import {
@@ -157,65 +170,8 @@ export function MsMetricPage({ metricKey }: { metricKey: string }) {
 export { isMsMetricKey };
 
 // ── URL-owned explorer controls ─────────────────────────────────────────────────────────────
-
-const GRAIN = { values: ['day', 'week', 'month'], defaultValue: 'day' } as const;
-const CHART = { values: ['line', 'bar'], defaultValue: 'line' } as const;
-const COMPARE = { values: ['prev', 'off'], defaultValue: 'prev' } as const;
-const SUMMARY_URL: MsMetricUrlSchema = { enums: { grain: GRAIN, chart: CHART, compare: COMPARE } };
-const CHANNELS_URL: MsMetricUrlSchema = {
-  enums: {
-    grain: GRAIN,
-    chart: CHART,
-    metric: { values: ['revenue', 'orders', 'aov'], defaultValue: 'revenue' },
-    view: { values: ['aggregate', 'breakdown'], defaultValue: 'aggregate' },
-    compare: COMPARE,
-  },
-  channels: true,
-};
-const FUNNEL_URL: MsMetricUrlSchema = {
-  enums: { metric: { values: ['orders', 'revenue'], defaultValue: 'orders' }, compare: COMPARE },
-};
-const PRODUCTS_URL: MsMetricUrlSchema = {
-  enums: {
-    view: { values: ['concentration', 'ranking', 'dynamics'], defaultValue: 'concentration' },
-    sort: { values: ['revenue', 'profit', 'margin'], defaultValue: 'revenue' },
-    concentration: { values: ['revenue', 'profit'], defaultValue: 'revenue' },
-    // Метрика изменения на вкладке «Динамика»; сервер отдаёт все три сразу, поэтому это чистый
-    // клиентский переключатель, не влияющий на запрос/кэш.
-    change: { values: ['revenue', 'profit', 'units'], defaultValue: 'revenue' },
-  },
-};
-const STOCK_URL: MsMetricUrlSchema = {
-  // Только клиентская сортировка таблицы: запрос/кэш от неё не зависят (сервер всегда отдаёт
-  // порядок по срочности), поэтому compare/grain здесь нет.
-  enums: { sort: { values: ['days', 'stock', 'sold'], defaultValue: 'days' } },
-};
-const RETURNS_URL: MsMetricUrlSchema = {
-  enums: {
-    grain: GRAIN,
-    chart: CHART,
-    metric: { values: ['count', 'sum'], defaultValue: 'count' },
-    compare: COMPARE,
-  },
-};
-const CONTRIBUTION_URL: MsMetricUrlSchema = {
-  enums: { metric: { values: ['revenue', 'orders'], defaultValue: 'revenue' }, compare: COMPARE },
-};
-const COMPARE_URL: MsMetricUrlSchema = { enums: { compare: COMPARE } };
-// Когорты — только режим клетки (mode); окна нет (вся история), поэтому ни period, ни compare.
-const COHORTS_URL: MsMetricUrlSchema = {
-  enums: { mode: { values: [...MS_COHORT_MODES], defaultValue: 'retention' } },
-};
-const RFM_URL: MsMetricUrlSchema = {
-  enums: {
-    // 'none' = сегмент не выбран (дефолт — из URL убирается); остальные ключи — канон RFM_SEGMENTS.
-    segment: {
-      values: ['none', 'champions', 'loyal', 'potential', 'new', 'at_risk', 'hibernating'],
-      defaultValue: 'none',
-    },
-    compare: COMPARE,
-  },
-};
+// Схемы (SUMMARY_URL, CHANNELS_URL, …) — panels/sklad/msMetricUrlSchemas.ts: их же читают детали
+// каталога метрик (msMetricDetails), поэтому копии, которая разошлась бы со страницей, нет.
 
 /** One merge-and-replace URL owner per metric page: no competing effects or history spam. */
 function useMsMetricUrlControls(schema: MsMetricUrlSchema) {
@@ -570,14 +526,7 @@ function MsCustomerPage({
   defaultMetric: MsCustomerMetric;
 }) {
   const window = useMsMetricWindow();
-  const urlSchema = useMemo<MsMetricUrlSchema>(() => ({
-    enums: {
-      grain: GRAIN,
-      chart: CHART,
-      metric: { values: ['orders', 'revenue', 'repeatShare'], defaultValue: defaultMetric },
-      compare: COMPARE,
-    },
-  }), [defaultMetric]);
+  const urlSchema = useMemo<MsMetricUrlSchema>(() => customersUrl(defaultMetric), [defaultMetric]);
   const controls = useMsMetricUrlControls(urlSchema);
   const grain = controls.values.grain as Grain;
   const kind = controls.values.chart as 'line' | 'bar';
