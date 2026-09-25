@@ -10,7 +10,7 @@ import { BarChart } from '@/components/BarChart';
 import { LineChart } from '@/components/LineChart';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { EmptyState } from '@/components/EmptyState';
-import { ErrorState } from '@/components/ErrorState';
+import { SourceErrorState } from '@/components/SourceErrorState';
 import { ChartSkeleton, TableSkeleton } from '@/components/ui/dataSkeleton';
 import { DeltaPill } from '@/components/DeltaPill';
 import { RadialGauge } from '@/components/RadialGauge';
@@ -90,7 +90,9 @@ export function MsClients() {
 
   if (customers.isError) {
     return (
-      <ErrorState
+      <SourceErrorState
+        source="ms"
+        error={customers.error}
         title="Не удалось получить данные о покупателях"
         reason={customers.error instanceof Error ? customers.error.message : 'ошибка'}
         onRetry={() => customers.refetch()}
@@ -259,7 +261,9 @@ export function MsCustomerExplorer({
   }
   if (customers.isError) {
     return (
-      <ErrorState
+      <SourceErrorState
+        source="ms"
+        error={customers.error}
         compact
         size="chart"
         title="Не удалось получить динамику покупателей"
@@ -343,7 +347,9 @@ export function MsTopCustomersBody({ state }: { state: ReturnType<typeof useMsTo
   }
   if (state.isError) {
     return (
-      <ErrorState
+      <SourceErrorState
+        source="ms"
+        error={state.error}
         compact
         size="table"
         className="py-4"
@@ -415,7 +421,9 @@ export function MsRfmBody({
   }
   if (state.isError) {
     return (
-      <ErrorState
+      <SourceErrorState
+        source="ms"
+        error={state.error}
         compact
         size="table"
         className="py-4"
@@ -600,7 +608,9 @@ function MsCohortsCard({ state }: { state: ReturnType<typeof useMsCohorts> }) {
       {state.isPending ? (
         <TableSkeleton rows={4} columns={4} className="py-2" />
       ) : state.isError ? (
-        <ErrorState
+        <SourceErrorState
+          source="ms"
+          error={state.error}
           compact
           size="table"
           className="py-4"

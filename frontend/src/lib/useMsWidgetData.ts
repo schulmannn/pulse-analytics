@@ -49,5 +49,7 @@ export function useMsWidgetData(config: WidgetConfig): WidgetDataState {
   const retry = () => {
     void summaryQ.refetch();
   };
-  return { result, ...state, retry };
+  // Ошибку отдаём как есть: отзыв токена (401 с кодом сегодня, 409 source_reauth после единого
+  // sendSourceError) тело виджета различает через sourceErrorKind и зовёт переподключить.
+  return { result, ...state, retry, error: summaryQ.error };
 }

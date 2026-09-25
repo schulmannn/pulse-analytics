@@ -3,7 +3,7 @@ import { Check, Download } from 'lucide-react';
 import { fetchMsRfmCustomersPage, useMsRfmSegmentCustomers, type MsRfmCustomers } from '@/api/ms';
 import { IconMorph, useMorphFlash } from '@/components/ui/icon-morph';
 import { EmptyState } from '@/components/EmptyState';
-import { ErrorState } from '@/components/ErrorState';
+import { SourceErrorState } from '@/components/SourceErrorState';
 import { Button } from '@/components/ui/button';
 import { TableSkeleton } from '@/components/ui/dataSkeleton';
 import { toYmd } from '@/lib/analyticsExport';
@@ -127,7 +127,7 @@ export function MsRfmSegmentCustomers({ period, segment }: { period: MsPeriod; s
   const [exporting, setExporting] = useState(false);
   // Морф Download→Check после успешной выгрузки (кнопочная моторика 2026-08-18).
   const [exported, flashExported] = useMorphFlash();
-  const [exportError, setExportError] = useState<string | null>(null);
+  const [exportError, setExportError] = useState<Error | null>(null);
   // «Телефоны»/«Почты»: какое поле сейчас собирается (disabled на время сборки) и 2-секундный
   // фидбек на самой кнопке («Скопировано N» / «Нет данных»).
   const [copying, setCopying] = useState<ContactField | null>(null);
@@ -172,7 +172,9 @@ export function MsRfmSegmentCustomers({ period, segment }: { period: MsPeriod; s
   }
   if (rows.length === 0 && page.isError) {
     return (
-      <ErrorState
+      <SourceErrorState
+        source="ms"
+        error={page.error}
         compact
         size="table"
         className="py-4"
@@ -200,9 +202,10 @@ export function MsRfmSegmentCustomers({ period, segment }: { period: MsPeriod; s
         fetchMsRfmCustomersPage(channelId, period, segment, MS_RFM_EXPORT_PAGE, exportOffset),
       );
       downloadCsv(rfmExportFilename(segment), rfmCustomersCsvRows(all));
-      flashExported(); // морф Download→Check — только на УСПЕХЕ (ошибка уходит в ErrorState ниже)
+      flashExported(); // морф Download→Check — только на УСПЕХЕ (ошибка уходит в SourceErrorState ниже)
     } catch (error) {
-      setExportError(error instanceof Error ? error.message : 'ошибка');
+      // Саму ошибку, а не текст: отзыв токена посреди выгрузки — «Переподключить», а не «Повторить».
+      setExportError(error instanceof Error ? error : new Error('ошибка'));
     } finally {
       setExporting(false);
     }
@@ -282,12 +285,14 @@ export function MsRfmSegmentCustomers({ period, segment }: { period: MsPeriod; s
         </div>
       )}
       {exportError != null && (
-        <ErrorState
+        <SourceErrorState
+          source="ms"
+          error={exportError}
           compact
           size="table"
           className="mt-2 py-4"
           title="Не удалось выгрузить CSV"
-          reason={exportError}
+          reason={exportError.message}
           onRetry={handleExport}
           retrying={exporting}
         />
@@ -328,7 +333,9 @@ export function MsRfmSegmentCustomers({ period, segment }: { period: MsPeriod; s
         </ul>
       )}
       {page.isError && (
-        <ErrorState
+        <SourceErrorState
+          source="ms"
+          error={page.error}
           compact
           size="table"
           className="mt-2 py-4"

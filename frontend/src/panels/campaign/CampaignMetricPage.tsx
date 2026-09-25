@@ -109,6 +109,9 @@ export function CampaignMetricPage() {
       ? scopedSummaryQ.error
       : null;
   if (error) {
+    // 404 здесь — «кампании нет» (удалена или чужая), а не «источник не подключён»: сводка кампании
+    // читает TG/IG из нашей БД и ошибок МойСклада/Метрики не отдаёт. Через sourceErrorKind её не
+    // водить — он прочтёт 404 как not_connected (сознательно вне PR 1.1; заметка для U04/4.3).
     const notFound = error instanceof ApiError && error.status === 404;
     return (
       <ErrorState

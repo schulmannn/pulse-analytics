@@ -11,7 +11,7 @@ import { PeriodChips } from '@/components/PeriodChips';
 import { SearchField } from '@/components/SearchField';
 import { SourceIdentity } from '@/components/SourceIdentity';
 import { EmptyState } from '@/components/EmptyState';
-import { ErrorState } from '@/components/ErrorState';
+import { SourceErrorState } from '@/components/SourceErrorState';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { TableSkeleton } from '@/components/ui/dataSkeleton';
@@ -984,7 +984,9 @@ function MsFunnelPage() {
         {funnel.isPending ? (
           <ListSkeleton rows={6} />
         ) : funnel.isError ? (
-          <ErrorState
+          <SourceErrorState
+            source="ms"
+            error={funnel.error}
             compact
             size="table"
             className="py-4"
@@ -1196,7 +1198,9 @@ function MsSalesChannelsPage() {
         {channels.isPending ? (
           <ListSkeleton rows={6} />
         ) : channels.isError ? (
-          <ErrorState
+          <SourceErrorState
+            source="ms"
+            error={channels.error}
             compact
             size="table"
             className="py-4"
@@ -1225,7 +1229,9 @@ function MsSalesChannelsPage() {
         {channels.isPending ? (
           <ListSkeleton rows={6} />
         ) : channels.isError ? (
-          <ErrorState
+          <SourceErrorState
+            source="ms"
+            error={channels.error}
             compact
             size="table"
             className="py-4"
@@ -1281,7 +1287,9 @@ function MsGeographyPage() {
         {geo.isPending ? (
           <ListSkeleton rows={6} />
         ) : geo.isError ? (
-          <ErrorState
+          <SourceErrorState
+            source="ms"
+            error={geo.error}
             compact
             size="table"
             className="py-4"
@@ -1436,7 +1444,9 @@ function MsCohortsPage() {
         {cohorts.isPending ? (
           <ListSkeleton rows={6} />
         ) : cohorts.isError ? (
-          <ErrorState
+          <SourceErrorState
+            source="ms"
+            error={cohorts.error}
             compact
             size="table"
             className="py-4"

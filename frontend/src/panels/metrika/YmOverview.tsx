@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { KpiValue } from '@/components/chartWidget/KpiValue';
 import { useNavigate } from 'react-router-dom';
 import { useYmGoals, useYmHourly, useYmSummary } from '@/api/ym';
+import { sourceErrorKind } from '@/api/sourceErrors';
 import { PillSelect } from '@/components/PillSelect';
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
 import { ChartCardBody } from '@/components/chartWidget/ChartCardBody';
@@ -9,7 +10,7 @@ import { ChartTooltip, useHeatmapTip } from '@/components/ChartTooltip';
 import { Sparkline } from '@/components/Sparkline';
 import { BarChart } from '@/components/BarChart';
 import { EmptyState } from '@/components/EmptyState';
-import { ErrorState } from '@/components/ErrorState';
+import { SourceErrorState } from '@/components/SourceErrorState';
 import { ChartSkeleton } from '@/components/ui/dataSkeleton';
 import { DeltaPill } from '@/components/DeltaPill';
 import { InlineSpark } from '@/components/InlineSpark';
@@ -167,20 +168,10 @@ export function YmOverview() {
   }
 
   if (summary.isError) {
-    const { status, code } = (summary.error as { status?: number; code?: string } | null) ?? {};
-    // Различаем по машинному коду, а не по статусу: 401 без кода — это наша истёкшая сессия (её
-    // уводит на /login lib/authRedirect), а не отзыв токена Яндекса.
-    if (code === 'ym_token_revoked') {
-      // Токен отозван на стороне Яндекса — честный reconnect-CTA вместо «недоступна».
-      return (
-        <EmptyState
-          title="Токен Яндекса отозван"
-          reason="Счётчик перестал принимать наш токен — выпустите новый OAuth-токен и переподключите."
-          action={{ to: '/connect?source=metrika', label: 'Переподключить Метрику' }}
-        />
-      );
-    }
-    if (status === 404) {
+    // Состояние доступа решает sourceErrorKind (api/sourceErrors), а не статус: он понимает и
+    // нынешний 401 ym_token_revoked, и будущий 409 source_reauth. 401 без кода — наша истёкшая
+    // сессия (её уводит на /login lib/authRedirect), а не отзыв токена Яндекса.
+    if (sourceErrorKind(summary.error) === 'not_connected') {
       // Канал есть, а счётчика Метрики на нём нет — честный onboarding вместо пустых карточек.
       return (
         <EmptyState
@@ -191,8 +182,11 @@ export function YmOverview() {
         />
       );
     }
+    // Отзыв токена Яндекса → «Переподключить Метрику» вместо «недоступна» (SourceErrorState).
     return (
-      <ErrorState
+      <SourceErrorState
+        source="ym"
+        error={summary.error}
         title="Не удалось получить данные Яндекс.Метрики"
         reason={summary.error instanceof Error ? summary.error.message : 'ошибка'}
         onRetry={() => summary.refetch()}
@@ -323,7 +317,9 @@ function YmHourlyCard({
       {hourly.isPending ? (
         <ChartSkeleton />
       ) : hourly.isError ? (
-        <ErrorState
+        <SourceErrorState
+          source="ym"
+          error={hourly.error}
           compact
           size="chart"
           className="py-4"
