@@ -278,7 +278,10 @@ function createIgBackfillJob({
     try {
       const r = await db.runJobOnce('ig_backfill_chunk', key, async () => {
         const out = await walk(acc, token, st, stopReason);
-        if (!out.progressed) throw new BackfillPause(out.stopped || 'no_progress');
+        // Чанк без продвижения и чанк, упёршийся в умерший токен, остаются повторяемыми (failed):
+        // иначе после переподключения тот же ключ (тот же cursor_day) числился бы выполненным и
+        // догрузка стояла бы до ретеншна jobs.
+        if (!out.progressed || out.stopped === 'reauth') throw new BackfillPause(out.stopped || 'no_progress');
         return { fetched: out.fetched, skipped: out.skipped, calls: out.calls, stopped: out.stopped, done: out.done };
       });
       if (r.skipped) return { stopped: null, claimSkipped: true };

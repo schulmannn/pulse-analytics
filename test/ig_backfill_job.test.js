@@ -312,6 +312,18 @@ test('умерший токен (reauth): error ig_reauth, дальше не х�
   assert.equal(db.st.get(7).error, null);
 });
 
+test('reauth на первом дне чанка: чанк остаётся повторяемым — после переподключения тот же день', async () => {
+  const collect = fakeCollect((day, _o, n) => (day === d(2) && n === 1 ? 'reauth' : 'data'));
+  const { job, db } = makeJob({ collect });
+  await job.runIgBackfillPass();
+  assert.equal(db.st.get(7).error, 'ig_reauth');
+  assert.equal(db.jobs.get(`ig_backfill_chunk|7:IG7:${T0}:${d(2)}:a0`).status, 'failed', 'ключ того же курсора не «выполнен»');
+  db.st.get(7).retry = true;   // переподключение
+  await job.runIgBackfillPass();
+  assert.deepEqual(collect.calls.map((c) => c.day), [d(2), d(2), d(3), d(4)], 'догрузка продолжилась с того же дня');
+  assert.equal(db.st.get(7).status, 'running');
+});
+
 test('временный сбой: два раза — стоп и повтор того же дня, третий — день пропущен, идём дальше', async () => {
   const collect = fakeCollect((day) => (day === d(2) ? 'transient' : 'data'));
   const { job, db, logs } = makeJob({ collect });
