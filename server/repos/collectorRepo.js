@@ -405,8 +405,24 @@ function createCollectorRepo({ pool, enabled, transaction, setChannelTgId }) {
 
   // Дневные метрики IG-аккаунта. rows: [{ day, followers, reach, views, profile_views,
   // accounts_engaged, total_interactions, likes, comments, saves, shares, follows, unfollows }].
-  async function upsertIgDaily(channelId, rows, executor = pool) {
+  // Семантика COALESCE: новое НЕ-null значение перезаписывает, null никогда не стирает — поэтому
+  // бэкфилл шлёт followers_total=null (якорь крона сохраняется), а доливка лага (igBackfillJob)
+  // сознательно перезаписывает финализированными Meta значениями.
+  // opts.guardSource (только бэкфилл/ремонт): день, уже записанный ДРУГОЙ IG-идентичностью
+  // (source_id), не перезаписывается — переподключённый другой аккаунт не затирает чужую историю;
+  // opts.igUserId дополнительно требует, чтобы канал всё ещё держал ту идентичность, чьим токеном
+  // данные сняты (reconnect посреди прохода не припишет строки новому аккаунту). Крон зовёт без opts —
+  // его SQL не меняется. С guardSource возвращается число реально записанных строк (rowCount).
+  async function upsertIgDaily(channelId, rows, executor = pool, opts = {}) {
     if (!enabled || !channelId || !rows || !rows.length) return 0;
+    const guard = !!opts?.guardSource;
+    const igUserId = guard && opts.igUserId != null ? String(opts.igUserId) : null;
+    const identityFilter = igUserId
+      ? `\n       WHERE EXISTS (SELECT 1 FROM ig_accounts a WHERE a.channel_id = $1 AND a.ig_user_id = $3)`
+      : '';
+    const guardWhere = guard
+      ? `\n      WHERE ig_daily.source_id IS NULL OR ig_daily.source_id = EXCLUDED.source_id`
+      : '';
     const sql = `INSERT INTO ig_daily
         (channel_id, source_id, day, followers, followers_total, reach, views, profile_views, accounts_engaged,
          total_interactions, likes, comments, saves, shares, follows, unfollows, captured_at)
@@ -417,7 +433,7 @@ function createCollectorRepo({ pool, enabled, transaction, setChannelTgId }) {
           day text, followers bigint, followers_total bigint, reach bigint, views bigint, profile_views bigint,
           accounts_engaged bigint, total_interactions bigint, likes bigint, comments bigint,
           saves bigint, shares bigint, follows bigint, unfollows bigint
-        )
+        )${identityFilter}
       ON CONFLICT (channel_id, day) DO UPDATE SET
         source_id=COALESCE(EXCLUDED.source_id, ig_daily.source_id),
         followers=COALESCE(EXCLUDED.followers, ig_daily.followers),
@@ -433,9 +449,11 @@ function createCollectorRepo({ pool, enabled, transaction, setChannelTgId }) {
         shares=COALESCE(EXCLUDED.shares, ig_daily.shares),
         follows=COALESCE(EXCLUDED.follows, ig_daily.follows),
         unfollows=COALESCE(EXCLUDED.unfollows, ig_daily.unfollows),
-        captured_at=now()`;
-    await executor.query(sql, [channelId, JSON.stringify(rows)]);
-    return rows.length;
+        captured_at=now()${guardWhere}`;
+    const params = [channelId, JSON.stringify(rows)];
+    if (igUserId) params.push(igUserId);
+    const result = await executor.query(sql, params);
+    return guard ? (result && Number.isInteger(result.rowCount) ? result.rowCount : 0) : rows.length;
   }
 
   // Дневные метрики МойСклада. rows: [{ day:'YYYY-MM-DD', revenue_kopecks, orders_count,
@@ -695,6 +713,124 @@ function createCollectorRepo({ pool, enabled, transaction, setChannelTgId }) {
     return true;
   }
 
+  // ── Догрузка истории Instagram (ig_backfill_state, миграция 042; движок jobs/igBackfillJob) ──
+  // Даты — строкой 'YYYY-MM-DD' (UTC-день ig_daily, как пишет крон), моменты — с оффсетом TZH:TZM.
+  const IG_BACKFILL_SELECT = `s.channel_id, s.ig_user_id, s.status,
+              to_char(s.cursor_day,'YYYY-MM-DD') AS cursor_day,
+              to_char(s.floor_day,'YYYY-MM-DD') AS floor_day,
+              to_char(s.horizon_day,'YYYY-MM-DD') AS horizon_day,
+              s.empty_streak, s.day_attempts, s.days_fetched, s.days_with_data,
+              to_char(s.calls_day,'YYYY-MM-DD') AS calls_day, s.calls_count, s.error,
+              to_char(s.started_at,'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS started_at,
+              to_char(s.finished_at,'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS finished_at,
+              to_char(s.updated_at,'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS updated_at,
+              EXTRACT(EPOCH FROM (now() - s.updated_at))::int AS updated_age_seconds`;
+
+  async function getIgBackfillState(channelId) {
+    if (!enabled || !channelId) return null;
+    const { rows } = await pool.query(
+      `SELECT ${IG_BACKFILL_SELECT} FROM ig_backfill_state s WHERE s.channel_id=$1`, [channelId]);
+    return rows[0] || null;
+  }
+
+  // Частичный upsert состояния — дисциплина setMsBackfillState: только присланные ключи из
+  // allow-list'а, значения только биндами, updated_at=now() всегда (heartbeat). ig_user_id — NOT NULL,
+  // а Postgres проверяет NOT NULL у предлагаемой строки ДО разбора ON CONFLICT, поэтому патч без
+  // ig_user_id (чекпойнт прохода) — чистый UPDATE существующей строки; с ig_user_id (сброс прохода,
+  // первая запись канала) — INSERT … ON CONFLICT. Возвращает, была ли строка записана.
+  const IG_BACKFILL_COLUMNS = ['ig_user_id', 'status', 'cursor_day', 'floor_day', 'horizon_day',
+    'empty_streak', 'day_attempts', 'days_fetched', 'days_with_data', 'calls_day', 'calls_count',
+    'error', 'started_at', 'finished_at'];
+  async function setIgBackfillState(channelId, patch = {}) {
+    if (!enabled || !channelId) return false;
+    const cols = ['channel_id'];
+    const vals = ['$1'];
+    const params = [channelId];
+    const sets = [];
+    for (const col of IG_BACKFILL_COLUMNS) {
+      if (!(col in patch)) continue;
+      let v = patch[col];
+      if (col === 'error' && v != null) v = String(v).slice(0, 200);
+      params.push(v);
+      cols.push(col);
+      vals.push(`$${params.length}`);
+      sets.push(`${col}=$${params.length}`);
+    }
+    sets.push('updated_at=now()');
+    if (!('ig_user_id' in patch)) {
+      const { rowCount } = await pool.query(
+        `UPDATE ig_backfill_state SET ${sets.join(', ')} WHERE channel_id=$1`, params);
+      return rowCount > 0;
+    }
+    await pool.query(
+      `INSERT INTO ig_backfill_state (${cols.join(', ')}, updated_at)
+       VALUES (${vals.join(', ')}, now())
+       ON CONFLICT (channel_id) DO UPDATE SET ${sets.join(', ')}`,
+      params);
+    return true;
+  }
+
+  // Кому нужен шаг догрузки: нет состояния; состояние чужой идентичности (переподключили другой
+  // аккаунт — проход начинается заново); idle/running; error — только если ошибке больше суток или
+  // аккаунт с тех пор обновлён (переподключение/продление токена штампует ig_accounts.updated_at).
+  // Самые давно не тронутые — первыми (updated_at NULLS FIRST), затем по каналу — детерминированно.
+  // Доверенный фоновый путь: без ownership-фильтра, как listIgAccounts; токен дешифрует вызывающий.
+  async function listIgBackfillCandidates(limit = 3) {
+    if (!enabled) return [];
+    const lim = clampInt(limit, 3, 1, 1000);
+    const { rows } = await pool.query(
+      `SELECT a.channel_id, a.ig_user_id, a.username, a.access_token_enc,
+              to_char(a.token_expires_at,'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS token_expires_at,
+              s.status AS state_status, s.ig_user_id AS state_ig_user_id
+         FROM ig_accounts a
+         LEFT JOIN ig_backfill_state s ON s.channel_id = a.channel_id
+        WHERE s.channel_id IS NULL
+           OR s.ig_user_id <> a.ig_user_id
+           OR s.status IN ('idle', 'running')
+           OR (s.status = 'error'
+               AND (s.updated_at < now() - interval '24 hours' OR a.updated_at > s.updated_at))
+        ORDER BY s.updated_at ASC NULLS FIRST, a.channel_id ASC
+        LIMIT $1`, [lim]);
+    return rows;
+  }
+
+  // Аккаунты с завершённой догрузкой той же идентичности — кандидаты на дневной ремонт/доливку
+  // (igBackfillJob, раз в UTC-сутки под durable-ключом). Порядок детерминирован.
+  async function listIgHealCandidates(limit = 25) {
+    if (!enabled) return [];
+    const lim = clampInt(limit, 25, 1, 1000);
+    const { rows } = await pool.query(
+      `SELECT a.channel_id, a.ig_user_id, a.username, a.access_token_enc,
+              to_char(a.token_expires_at,'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS token_expires_at,
+              to_char(s.horizon_day,'YYYY-MM-DD') AS horizon_day
+         FROM ig_accounts a
+         JOIN ig_backfill_state s ON s.channel_id = a.channel_id AND s.ig_user_id = a.ig_user_id
+        WHERE s.status = 'done'
+        ORDER BY a.channel_id ASC
+        LIMIT $1`, [lim]);
+    return rows;
+  }
+
+  // Статус дней архива канала в [from..to] (включительно): только СУЩЕСТВУЮЩИЕ строки.
+  //   occupied   — у дня есть данные (reach/views/total_interactions не null) ЛЮБОЙ идентичности,
+  //                либо строка чужой идентичности: guardSource её всё равно не перезапишет, и
+  //                тратить на неё вызовы бессмысленно;
+  //   incomplete — строка своей идентичности, где нет ни reach, ни views (ремонт перезапросит день).
+  async function listIgDayStatus(channelId, from, to) {
+    if (!enabled || !channelId || !from || !to) return [];
+    const { rows } = await pool.query(
+      `SELECT to_char(d.day,'YYYY-MM-DD') AS day,
+              (d.reach IS NOT NULL OR d.views IS NOT NULL OR d.total_interactions IS NOT NULL
+               OR (d.source_id IS NOT NULL AND a.source_id IS NOT NULL AND d.source_id <> a.source_id)) AS occupied,
+              (d.reach IS NULL AND d.views IS NULL
+               AND NOT (d.source_id IS NOT NULL AND a.source_id IS NOT NULL AND d.source_id <> a.source_id)) AS incomplete
+         FROM ig_daily d
+         LEFT JOIN ig_accounts a ON a.channel_id = d.channel_id
+        WHERE d.channel_id = $1 AND d.day BETWEEN $2::date AND $3::date
+        ORDER BY d.day ASC`, [channelId, from, to]);
+    return rows;
+  }
+
   // Per-media lifetime-инсайты по дням. rows: [{ media_id, day, reach, likes, comments,
   // saved, shares, views }]. Insights кумулятивны → каждый день — новая точка траектории.
   async function upsertIgMediaDaily(channelId, rows, executor = pool) {
@@ -875,6 +1011,7 @@ function createCollectorRepo({ pool, enabled, transaction, setChannelTgId }) {
     upsertIgDaily, upsertIgMediaDaily, upsertMsDaily, upsertYmDaily,
     upsertMsOrders, countMsOrders, getMsBackfillState, setMsBackfillState,
     upsertMsReturns, countMsReturns, getMsReturnsBackfillState, setMsReturnsBackfillState,
+    getIgBackfillState, setIgBackfillState, listIgBackfillCandidates, listIgHealCandidates, listIgDayStatus,
     saveRawSnapshot, pruneRawSnapshots, pruneIgMediaDaily, pruneIngestReceipts, rollupChannelMonthly,
   };
 }
