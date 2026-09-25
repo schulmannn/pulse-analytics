@@ -1,5 +1,5 @@
 import { useContext } from 'react';
-import type { CSSProperties, ReactNode } from 'react';
+import type { ComponentProps, CSSProperties, ReactNode } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { ChartExpandOverlay } from './ChartExpandOverlay';
@@ -20,6 +20,10 @@ import type { ChartSectionProps } from './types';
  *  • в оверлее нет ни окон, ни грануляции, ни типа графика, ни «Линий», ни строки
  *    Мин/Макс/Среднее/Сумма: графиковый разбор живёт на маршруте /metrics/*;
  *  • у ChartSection нет пропа `expand` — конфиг, который никогда не рендерился, не компилируется.
+ *
+ * Сторож «rich-режим не воскресает» — типовой: пропы rich-разворота у оверлея и `expand` у
+ * ChartSection ловит tsc (`npm run build` / `npm run typecheck`), а не vitest. Рантайм-тесты
+ * ниже — характеризация вывода Tier-1 оверлея: без rich-пропов их прошёл бы и старый оверлей.
  *
  * DetailShell — Radix-портал, которого нет в node-рендере, поэтому здесь он заменён прозрачной
  * обёрткой, которая печатает то, что оверлей ему передал.
@@ -47,6 +51,18 @@ function Probe() {
     />
   );
 }
+
+/** Пропы rich-разворота (прежний ChartExpandConfig + initialDays оверлея), снесённые в EXPAND-17. */
+type RichExpandProp =
+  | 'renderExpanded'
+  | 'renderExpandedBar'
+  | 'statsFor'
+  | 'statsSum'
+  | 'grainable'
+  | 'extraControls'
+  | 'initialDays';
+/** Какие из них снова принимает оверлей — должно быть never. */
+type ResurrectedRichProp = Extract<keyof ComponentProps<typeof ChartExpandOverlay>, RichExpandProp>;
 
 const renderOverlay = (accentStyle?: CSSProperties) =>
   renderToStaticMarkup(
@@ -79,7 +95,7 @@ describe('ChartExpandOverlay — Tier-1 разворот на месте', () =>
     expect(html).toContain('>Лучшие публикации<');
   });
 
-  it('rich-эксплорер не воскресает: ни окон, ни грануляции, ни типа графика, ни «Линий», ни статистики', () => {
+  it('печатает только заголовок и тело: ни окон, ни грануляции, ни типа графика, ни «Линий», ни статистики', () => {
     const html = renderOverlay();
     for (const word of ['Окно', 'Грануляция', 'Тип графика', 'Линии', 'Мин', 'Макс', 'Среднее', 'Сумма', 'к пред. периоду']) {
       expect(html).not.toContain(word);
@@ -93,6 +109,11 @@ describe('ChartExpandOverlay — Tier-1 разворот на месте', () =>
   it('акцент карточки переносится в портал на display:contents-обёртке', () => {
     const html = renderOverlay({ '--brand-iris': 'var(--chart-3-accent)' } as CSSProperties);
     expect(html).toContain('class="contents" style="--brand-iris:var(--chart-3-accent)"');
+  });
+
+  it('rich-пропы не возвращаются в оверлей (сторож — tsc: вернувшийся проп ломает сборку)', () => {
+    const none: [ResurrectedRichProp] extends [never] ? true : false = true;
+    expect(none).toBe(true);
   });
 });
 

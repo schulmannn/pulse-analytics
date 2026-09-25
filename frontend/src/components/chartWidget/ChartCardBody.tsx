@@ -7,8 +7,8 @@ import { fmt } from '@/lib/format';
 import { useWidgetSize } from '@/lib/widgetSize';
 import type { MetricDelta } from '@/lib/delta';
 
-/** Мин/макс видимого окна для строки-сводки карточки. По умолчанию — регистр fmt.kpi (тот же,
-    что у леджера разворота OverlayStats); денежные/процентные карточки передают свой format. */
+/** Мин/макс видимого окна для строки-сводки карточки. По умолчанию — регистр fmt.kpi;
+    денежные/процентные карточки передают свой format. */
 export interface RangeSummary {
   lo: number;
   hi: number;
