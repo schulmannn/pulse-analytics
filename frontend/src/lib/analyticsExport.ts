@@ -55,14 +55,32 @@ export function toYmd(ms: number): string {
   return `${year}-${month}-${day}`;
 }
 
-/** Filesystem-safe Unicode slug (lowercase letter/number runs joined by '-'). Unicode keeps a
-    Cyrillic-only channel identifiable instead of silently dropping its source from the filename. */
+/** Кириллица → латиница для имён файлов. Ровно ГОСТ-подобная практичная схема: цель — читаемый
+    и узнаваемый источник, а не обратимость. */
+const TRANSLIT: Record<string, string> = {
+  а: 'a', б: 'b', в: 'v', г: 'g', д: 'd', е: 'e', ё: 'e', ж: 'zh', з: 'z', и: 'i', й: 'y',
+  к: 'k', л: 'l', м: 'm', н: 'n', о: 'o', п: 'p', р: 'r', с: 's', т: 't', у: 'u', ф: 'f',
+  х: 'h', ц: 'ts', ч: 'ch', ш: 'sh', щ: 'sch', ъ: '', ы: 'y', ь: '', э: 'e', ю: 'yu', я: 'ya',
+  ғ: 'g', қ: 'k', ң: 'n', ө: 'o', ұ: 'u', ү: 'u', һ: 'h', і: 'i', ї: 'i', є: 'e', ґ: 'g', ў: 'u',
+};
+
+/** Filesystem-safe ASCII slug (lowercase letter/number runs joined by '-').
+ *
+ *  ASCII, а не Unicode, — измеренное требование БРАУЗЕРА, а не вкусовщина: Chrome 149 (проверено и
+ *  на полном бинарнике, и на headless-shell) молча ОТБРАСЫВАЕТ атрибут `download` целиком, если в
+ *  нём есть не-ASCII, и сохраняет файл под именем «download» — без расширения и без источника.
+ *  Поэтому кириллицу транслитерируем: «Мой Канал» → «moy-kanal» остаётся узнаваемым, а прежний
+ *  «мой-канал» терял не часть имени, а ВСЁ имя. Остатки не-ASCII (иероглифы, эмодзи) режем — они
+ *  уронили бы имя так же. */
 export function slugify(raw: string | null | undefined): string {
   if (!raw) return '';
   return raw
     .toLowerCase()
     .normalize('NFKC')
-    .replace(/[^\p{L}\p{N}]+/gu, '-')
+    .replace(/\p{L}/gu, (ch) => TRANSLIT[ch] ?? ch)
+    .normalize('NFKD')
+    .replace(/\p{Diacritic}/gu, '')
+    .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, 60)
     .replace(/-+$/g, '');

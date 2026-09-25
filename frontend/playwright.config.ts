@@ -37,8 +37,12 @@ export default defineConfig({
     use: { ...devices['Desktop Chrome'], viewport: { width: v.width, height: v.height } },
   })),
   webServer: {
-    command: `npm run dev -- --port ${PORT}`,
-    url: `http://localhost:${PORT}`,
+    // ЯВНО 127.0.0.1 в обоих местах. `localhost` на Windows резолвится в ::1, vite без --host
+    // слушает только его, а health-check Playwright уходит на IPv4 — сервер «не поднимается»
+    // ровно 120 секунд и падает по таймауту. На Linux-раннере CI обе записи эквивалентны,
+    // поэтому правка ничего там не меняет и чинит локальный прогон.
+    command: `npm run dev -- --port ${PORT} --host 127.0.0.1`,
+    url: `http://127.0.0.1:${PORT}`,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
   },

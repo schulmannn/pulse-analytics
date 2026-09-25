@@ -2,8 +2,8 @@ const STORAGE_KEY = 'pulse_channel';
 const MEMORY_KEY = 'pulse_source_channels';
 
 /**
- * Selected-channel id, persisted in localStorage (same key style as pulse_token /
- * pulse_theme / pulse_demo). Persistence kills the bootstrap double-fetch: on reload the
+ * Selected-channel id, persisted in localStorage (same key style as pulse_theme /
+ * pulse_demo). Persistence kills the bootstrap double-fetch: on reload the
  * provider starts from the stored id instead of null, so channel-scoped queries fire once
  * with the right key instead of "null-key fetch → ChannelCard sets id → full refetch".
  * The stored id is validated against /api/channels once the list loads (SourceSwitcher);

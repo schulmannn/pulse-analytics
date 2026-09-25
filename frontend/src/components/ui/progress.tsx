@@ -18,7 +18,10 @@ const Progress = React.forwardRef<
   >
     <ProgressPrimitive.Indicator
       className={cn(
-        'h-full flex-1 rounded-full bg-primary transition-all duration-300',
+        // transition-transform only: the value is carried by the translateX below, so a blanket
+        // property list bought nothing but the layout-triggering w-1/3 ↔ w-full flip (a mode
+        // change that should snap, not tween). dur-reveal leaves animate-pulse on its own beat.
+        'h-full flex-1 rounded-full bg-primary transition-transform dur-reveal ease-house',
         value == null
           ? 'w-1/3 animate-pulse motion-reduce:animate-none'
           : 'w-full',

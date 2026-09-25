@@ -9,7 +9,7 @@ test('product dynamics compares against the previous equal window with honest la
   await bootDemo(page, '/metrics/ms-products', { theme: 'dark' });
   await expect(page.getByRole('heading', { name: 'Товары', level: 1 })).toBeVisible();
 
-  const viewSwitch = page.getByRole('group', { name: 'Вид отчёта товаров' });
+  const viewSwitch = page.getByRole('toolbar', { name: 'Вид отчёта товаров' });
 
   // Switching to «Динамика» fires the opt-in compare=prev request (compact card never does).
   const compareRequest = page.waitForRequest((request) => {
@@ -55,7 +55,7 @@ test('product dynamics compares against the previous equal window with honest la
   page.off('request', recordProductRequest);
 
   // Switching the change metric to «Штуки» persists change=units and reads values in pieces.
-  await page.getByRole('group', { name: 'Метрика изменения' }).getByRole('button', { name: 'Штуки' }).click();
+  await page.getByRole('toolbar', { name: 'Метрика изменения' }).getByRole('button', { name: 'Штуки' }).click();
   await expect(page).toHaveURL(/[?&]change=units/);
   await expect(page.getByText('120 шт.')).toBeVisible();
 

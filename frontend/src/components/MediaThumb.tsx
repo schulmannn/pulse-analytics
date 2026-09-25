@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { cn } from '@/lib/utils';
 
 /** Decorative media preview with a stable text fallback for missing or failed remote images. */
@@ -13,6 +13,18 @@ export function MediaThumb({
 }) {
   const [failedSrc, setFailedSrc] = useState<string | null>(null);
   const showImage = Boolean(src && failedSrc !== src);
+  const imageRef = useRef<HTMLImageElement>(null);
+
+  // A failed network image is lifecycle state, not a user gesture. Keeping the listener native
+  // leaves this decorative thumbnail correctly non-interactive while retaining the text fallback.
+  useLayoutEffect(() => {
+    const image = imageRef.current;
+    if (!image || !src || !showImage) return;
+    const handleError = () => setFailedSrc(src);
+    image.addEventListener('error', handleError);
+    if (image.complete && image.naturalWidth === 0) handleError();
+    return () => image.removeEventListener('error', handleError);
+  }, [showImage, src]);
 
   return (
     <span
@@ -23,11 +35,11 @@ export function MediaThumb({
     >
       {showImage ? (
         <img
+          ref={imageRef}
           loading="lazy"
           src={src!}
           alt=""
           referrerPolicy="no-referrer"
-          onError={() => setFailedSrc(src!)}
           className="h-full w-full object-cover"
         />
       ) : (

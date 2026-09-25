@@ -1,8 +1,9 @@
-// Bundled sample data for demo mode. Only endpoints WITHOUT a server-side mock are covered here
-// (Telegram + channels); Instagram endpoints intentionally fall through to the server, which already
-// serves realistic ig_mock payloads for a no-account (demo) request. Shapes match the permissive
-// zod schemas in api/schemas.ts. All series are generated deterministically (no Math.random) so the
-// demo looks identical on every render and never trips React's strict-mode double-invoke.
+// Bundled sample data for demo mode: Telegram + channels here, Instagram in demoIgFixtures.ts.
+// The old contract «IG falls through to the server's ig_mock» only worked while demo required a
+// login; the PUBLIC demo boot has no session, so every /api/ig/* request dies on requireAuth with
+// 401 — the demo graph must serve IG client-side too. Shapes match the permissive zod schemas in
+// api/schemas.ts. All series are generated deterministically (no Math.random) so the demo looks
+// identical on every render and never trips React's strict-mode double-invoke.
 
 import { DEMO_CHANNEL_ID } from '@/lib/demo';
 import { periodDateTimestamp } from '@/lib/period';
@@ -18,8 +19,11 @@ const wobble = (i: number, amp: number, period = 6) => Math.round(Math.sin((i / 
 function buildHistory() {
   const rows: Array<Record<string, number | string>> = [];
   let subs = 10_900;
-  for (let d = 89; d >= 0; d--) {
-    const age = 89 - d; // 0 = oldest, 89 = today
+  // Архив подписчиков ГЛУБЖЕ ряда просмотров (365 дн. у календаря активности) — это инвариант
+  // демо-стенда: карточка с разрешимой датой обязана честно пустеть за пределами графика постов,
+  // тогда как уровень подписчиков там ещё есть (tg-top-posts.spec держит оба конца).
+  for (let d = 419; d >= 0; d--) {
+    const age = 419 - d; // 0 = oldest, 419 = today
     const joins = 46 + Math.round(14 * Math.abs(Math.sin(age / 4))) + wobble(age, 7) + Math.round(age * 0.15);
     const leaves = 22 + Math.abs(wobble(age, 8, 5));
     subs += joins - leaves;
@@ -36,7 +40,39 @@ function buildHistory() {
   }
   return rows;
 }
-const HISTORY_ROWS = buildHistory();
+
+/**
+ * ЗАПАС ГЛУБИНЫ ПЕРЕД АРХИВОМ. Спек tg-top-posts выбирает окно «13 месяцев назад, 5–15 число» —
+ * и расстояние до его НАЧАЛА гуляет вместе с сегодняшним числом: от ~395 дней (если сегодня 1-е)
+ * до ~426 (если сегодня 31-е). Ровно 420 дней архива хватало не всегда, и в конце длинного месяца
+ * окно уезжало за край: карточка честно пустела, а спек падал — не из-за правки, а из-за календаря.
+ * Дни ДОБАВЛЯЮТСЯ НАЗАД от самой старой строки, поэтому ни одно существующее число не меняется:
+ * уровень подписчиков, сегодняшний итог и все производные ряды остаются прежними.
+ */
+function withDeeperPast(rows: Array<Record<string, number | string>>, extraDays: number) {
+  const oldest = rows[0];
+  const head: Array<Record<string, number | string>> = [];
+  let subs = Number(oldest.subscribers);
+  const oldestOffset = rows.length - 1;
+  for (let i = 1; i <= extraDays; i++) {
+    const joins = 38 + Math.abs(wobble(i, 9, 7));
+    const leaves = 24 + Math.abs(wobble(i, 6, 5));
+    subs -= joins - leaves; // идём в прошлое: чем дальше, тем меньше подписчиков
+    const views = 3000 + wobble(i, 600, 9);
+    head.unshift({
+      day: day(oldestOffset + i),
+      subscribers: subs,
+      joins,
+      leaves,
+      views,
+      forwards: Math.round(views * 0.012),
+      reactions: Math.round(views * 0.052),
+    });
+  }
+  return [...head, ...rows];
+}
+
+const HISTORY_ROWS = withDeeperPast(buildHistory(), 60);
 const CURRENT_SUBS = Number(HISTORY_ROWS[HISTORY_ROWS.length - 1].subscribers);
 
 // ── Recent posts ──
@@ -54,6 +90,17 @@ const POST_SEED: Array<{ text: string; media: string; tags?: string[] }> = [
   { text: 'Мини-исследование: когда ваша аудитория онлайн', media: 'text', tags: ['#аналитика'] },
   { text: 'Спасибо за 12 000 подписчиков! Дальше — интереснее 🚀', media: 'photo' },
 ];
+// Часы публикаций — детерминированный разброс по «рабочему» окну. Без него все посты демо
+// приходились на один час (дата строилась как «сейчас минус N суток»): тепловая карта 7×24
+// вырождалась в одну вертикальную полосу, а «лучшее время» менялось в течение дня.
+const POST_HOURS = [9, 12, 15, 19, 11, 21, 14, 10, 18, 13, 20, 16];
+/** Дата поста: смещение в сутках + СВОЙ час (в локальной зоне — по ней же группируют сетки). */
+const isoAtHour = (offsetDays: number, hour: number) => {
+  const d = new Date(now - offsetDays * DAY_MS);
+  d.setHours(hour, (hour * 7) % 60, 0, 0);
+  return d.toISOString();
+};
+
 function buildPosts() {
   return POST_SEED.map((p, i) => {
     const views = 5600 - i * 210 + wobble(i, 620);
@@ -61,7 +108,7 @@ function buildPosts() {
     return {
       id: 2001 + i,
       text: p.text,
-      date: iso(i * 2 + 1),
+      date: isoAtHour(i * 2 + 1, POST_HOURS[i % POST_HOURS.length]),
       views,
       reactions,
       forwards: Math.round(views * 0.013),
@@ -85,11 +132,28 @@ HISTORY_ROWS.slice(-30).forEach((r) => {
 });
 
 // ── Fixture payloads (one per endpoint) ──
+
+// «Команда» в демо: витрина состава без сети. Мутации демо и так блокирует apiSend (кроме
+// /api/auth/*), поэтому приглашение здесь честно упрётся в «демо только на чтение».
+const TEAM = {
+  workspace: { id: 1, name: 'notem' },
+  members: [
+    { uid: 1, email: 'demo@atlavue.app', role: 'owner', created_at: '2026-01-12T09:00:00' },
+    { uid: 2, email: 'editor@atlavue.app', role: 'member', created_at: '2026-02-03T11:20:00' },
+  ],
+  invites: [
+    { id: 1, email: 'analyst@atlavue.app', role: 'viewer', created_at: '2026-02-10T08:00:00', expires_at: '2026-12-31T08:00:00' },
+  ],
+  memberships: [],
+  seats: { used: 2, limit: 10 },
+  email_configured: true,
+};
+
 const CHANNELS = {
   enabled: true,
   channels: [
-    // ig_connected: true so the demo keeps showcasing Instagram (its endpoints fall through to the
-    // server's ig_mock) — the switcher's IG-gating hides IG only for real unconnected channels.
+    // ig_connected: true so the demo keeps showcasing Instagram (served by demoIgFixtures.ts) —
+    // the switcher's IG-gating hides IG only for real unconnected channels.
     { id: DEMO_CHANNEL_ID, username: 'demo_channel', title: 'Демо-канал', status: 'active', source: 'central', memberCount: CURRENT_SUBS, owner_uid: 0, ig_connected: true },
   ],
   selected: DEMO_CHANNEL_ID,
@@ -135,15 +199,41 @@ const TG_VELOCITY = {
 };
 
 const growthValues = HISTORY_ROWS.slice(-30).map((r) => Number(r.subscribers));
-const viewsValues = HISTORY_ROWS.slice(-30).map((r) => Number(r.views));
-const reactValues = HISTORY_ROWS.slice(-30).map((r) => Number(r.reactions));
+// The yearly activity calendar reads the exact same interactions/views row as production. Give the
+// public demo a complete deterministic year so the widget demonstrates its density and quantiles.
+const DAILY_VIEW_ROWS = Array.from({ length: 365 }, (_, index) => {
+  const offset = 364 - index;
+  const weekly = index % 7 === 5 || index % 7 === 6 ? 0.72 : 1;
+  const views = Math.max(0, Math.round((3100 + index * 5 + wobble(index, 980, 13)) * weekly));
+  return { day: day(offset), views, reactions: Math.round(views * 0.052) };
+});
+const viewsValues = DAILY_VIEW_ROWS.map((row) => row.views);
+const reactValues = DAILY_VIEW_ROWS.map((row) => row.reactions);
 // Telegram StatsGraph x values are epoch milliseconds. Keeping the demo in the same unit is
 // essential: page-period windowing otherwise interprets every point as a date in January 1970.
-const xAxis = HISTORY_ROWS.slice(-30).map((r) => periodDateTimestamp(String(r.day)));
+const followerXAxis = HISTORY_ROWS.slice(-30).map((r) => periodDateTimestamp(String(r.day)));
+const interactionsXAxis = DAILY_VIEW_ROWS.map((row) => periodDateTimestamp(row.day));
+// Валовое движение базы для «Чистого прироста» и «Динамики оттока»: подписки/отписки по дням,
+// согласованные с дневными дельтами уровня (joined − left = Δ базы). Раньше здесь лежал ОДИН
+// ряд-уровень — deriveFollowerFlows требует пары, и обе карточки в публичном демо были скрыты
+// (витрина без двух виджетов; вскрылось на ревизии слабых виджетов 2026-08-18).
+const followerDeltas = growthValues.map((value, index, arr) =>
+  index === 0 ? 0 : value - Number(arr[index - 1]),
+);
+const followerLeft = followerDeltas.map((delta, index) =>
+  Math.max(2, Math.round(14 + wobble(index, 9, 7) - Math.min(delta, 0) * 0.4)),
+);
+const followerJoined = followerDeltas.map((delta, index) => Math.max(0, delta + followerLeft[index]));
 const TG_GRAPHS = {
-  growth: { x: xAxis, series: [{ name: 'Подписчики', values: growthValues }] },
-  followers: { x: xAxis, series: [{ name: 'Подписчики', values: growthValues }] },
-  interactions: { x: xAxis, series: [{ name: 'Просмотры', values: viewsValues }, { name: 'Реакции', values: reactValues }] },
+  growth: { x: followerXAxis, series: [{ name: 'Подписчики', values: growthValues }] },
+  followers: {
+    x: followerXAxis,
+    series: [
+      { name: 'Подписалось', values: followerJoined },
+      { name: 'Отписалось', values: followerLeft },
+    ],
+  },
+  interactions: { x: interactionsXAxis, series: [{ name: 'Просмотры', values: viewsValues }, { name: 'Реакции', values: reactValues }] },
   top_hours: { hours: Array.from({ length: 24 }, (_, h) => h), values: Array.from({ length: 24 }, (_, h) => 40 + Math.round(60 * Math.max(0, Math.sin(((h - 6) / 24) * Math.PI * 2)))) },
   views_by_source: [
     { label: 'Подписчики', value: 71 },
@@ -200,6 +290,9 @@ const MENTION_PREV_VIEWS = sumBy(MENTION_PREV_DAILY, 'views');
 
 const MENTIONS = {
   available: true,
+  // Остаток дневной квоты поиска — витрина обязана показывать и лимиты продукта: десктоп печатает
+  // «осталось N из M», и без этого поля демо показывало бы только общую фразу.
+  quota: { remains: 7, total: 10 },
   total: MENTION_CUR_TOTAL,
   unique_channels: MENTION_CHANNELS.length,
   total_views: MENTION_CUR_VIEWS,
@@ -279,6 +372,26 @@ function demoLocalDay(daysAgo: number): string {
   const pad = (x: number) => String(x).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
+
+/**
+ * Здоровье управляемой QR-сессии для демо. Демо-канал объявлен `source: 'central'`, поэтому
+ * Overview и /connect безусловно спрашивают GET /api/tg/qr/status — а он стоит за requireAuth, и у
+ * публичного демо сессии нет: запрос уходил в сеть и возвращал 401 в консоль (аудит #554, D18;
+ * причина там названа неверно — /api/prefs давно закрыт своим isDemoMode-гейтом). Фикстура
+ * отвечает ДО сети и повторяет прежний экран один в один: `central_owner: false` означает, что
+ * зритель демо не владелец центрального канала, значит `connection_state` игнорируется и баннер
+ * здоровья по-прежнему решается только свежестью архива.
+ */
+const TG_QR_STATUS = {
+  server_ready: true,
+  connected: true,
+  username: 'demo_channel',
+  connected_at: iso(30),
+  connection_state: 'connected',
+  last_success_at: iso(0),
+  central_owner: false,
+};
+
 const ANNOTATIONS = () => ({
   annotations: [
     { id: 1, day: demoLocalDay(12), label: 'Реклама у блогера' },
@@ -286,14 +399,46 @@ const ANNOTATIONS = () => ({
   ],
 });
 
+/**
+ * e2e-спеки МойСклада держат СВОИ payload'ы сетевыми стабами Playwright (helpers.demoMsPayload) и
+ * проверяют по ним продуктовые инварианты — компакт-лимиты карточек, сортировки, длинные списки под
+ * виртуализацию. Клиентская фикстура перехватывает запрос ДО сети и подменила бы их молча, поэтому
+ * bootDemo поднимает этот флаг и МС/ЯМ-неймспейсы уступают дорогу стабу спеки. В приложении флага
+ * нет никогда: витрину демо обслуживают фикстуры (ветки ниже).
+ */
+function specOwnsMsYm(): boolean {
+  try {
+    return typeof localStorage !== 'undefined' && localStorage.getItem('pulse_demo_net_msym') === '1';
+  } catch {
+    return false;
+  }
+}
+
 export function demoFixture(path: string): unknown | undefined {
   const p = path.split('?')[0];
+  // Весь IG-неймспейс — клиентские фикстуры (см. шапку файла: у публичного демо нет сессии,
+  // серверный ig_mock за requireAuth недостижим). Query (days/limit/timeframe) разбирает сам модуль.
+  // Импорт ДИНАМИЧЕСКИЙ: demoFixtures сидит в общем графе api/client, и статический импорт
+  // IG-модуля раздувал КАЖДУЮ роут-группу за bundle-size бюджет; ветка возвращает Promise,
+  // который apiGet прозрачно await'ит (для остальных путей ответ по-прежнему синхронный).
+  if (p.startsWith('/api/ig/')) return import('@/lib/demoIgFixtures').then((m) => m.igDemoFixture(path));
+  // МойСклад и Яндекс.Метрика — та же история и то же лекарство: /api/ms/* и /api/ym/* стоят за
+  // requireAuth, у публичного демо сессии нет, и «Склад»/«Метрика» показывали «Не удалось получить
+  // данные». Импорт тоже ДИНАМИЧЕСКИЙ — статический раздул бы каждую роут-группу за bundle-бюджет.
+  if (p.startsWith('/api/ms/')) {
+    return specOwnsMsYm() ? undefined : import('@/lib/demoMsFixtures').then((m) => m.msDemoFixture(path));
+  }
+  if (p.startsWith('/api/ym/')) {
+    return specOwnsMsYm() ? undefined : import('@/lib/demoYmFixtures').then((m) => m.ymDemoFixture(path));
+  }
+  if (p === '/api/team') return TEAM;
   if (p === '/api/channels') return CHANNELS;
   if (/^\/api\/channels\/\d+\/annotations$/.test(p)) return ANNOTATIONS();
   if (p === '/api/tg/full') return TG_FULL;
   if (p === '/api/history/channel') return HISTORY_RESP;
   if (p === '/api/history/mentions' || p === '/api/tg/mtproto/mentions') return MENTIONS;
   if (p === '/api/tg/mention-settings') return MENTION_SETTINGS;
+  if (p === '/api/tg/qr/status') return TG_QR_STATUS;
   if (p === '/api/tg/mtproto/stats') return TG_STATS;
   if (p === '/api/tg/mtproto/graphs') return TG_GRAPHS;
   if (p === '/api/tg/mtproto/velocity') return TG_VELOCITY;

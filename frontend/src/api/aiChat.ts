@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiGet, apiSend } from './client';
+import { qk } from './queryKeys';
 
 /**
  * AI-чат (STEEP-паттерн): CRUD личных диалогов. Эндпоинты не каналозависимы —
@@ -57,7 +58,7 @@ const AiOkSchema = z.object({ ok: z.boolean().optional() }).passthrough();
 
 export function useAiChats(enabled: boolean) {
   return useQuery({
-    queryKey: ['ai-chats'],
+    queryKey: qk.aiChats,
     enabled,
     staleTime: 30_000,
     queryFn: ({ signal }) => apiGet('/api/ai/chats', AiChatsResponseSchema, { signal, channelId: null }),
@@ -66,7 +67,7 @@ export function useAiChats(enabled: boolean) {
 
 export function useAiChat(chatId: number | null) {
   return useQuery({
-    queryKey: ['ai-chat', chatId],
+    queryKey: qk.aiChat(chatId),
     enabled: chatId != null,
     queryFn: ({ signal }) =>
       apiGet(`/api/ai/chats/${chatId}`, AiChatWithMessagesSchema, { signal, channelId: null }),
@@ -77,7 +78,7 @@ export function useCreateAiChat() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: () => apiSend('POST', '/api/ai/chats', undefined, AiChatCreatedSchema, { channelId: null }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['ai-chats'] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.aiChats }),
   });
 }
 
@@ -86,7 +87,7 @@ export function useDeleteAiChat() {
   return useMutation({
     mutationFn: (chatId: number) =>
       apiSend('DELETE', `/api/ai/chats/${chatId}`, undefined, AiOkSchema, { channelId: null }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['ai-chats'] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.aiChats }),
   });
 }
 

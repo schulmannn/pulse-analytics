@@ -29,35 +29,47 @@ function encodeValue(v) {
   return v;
 }
 
-const { rows: tables } = await pool.query(
-  `SELECT table_name FROM information_schema.tables
-   WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
-   ORDER BY table_name`,
-);
+// ОДНО соединение + REPEATABLE READ (аудит P1): каждый SELECT раньше был отдельным autocommit-
+// запросом — параллельные UPDATE/INSERT на живой базе могли продублировать или пропустить строки
+// (страничный ORDER BY ctid LIMIT/OFFSET между снимками видел разные версии). Один транзакционный
+// snapshot даёт консистентный срез ВСЕХ таблиц на момент BEGIN — снимать можно и под трафиком.
+const client = await pool.connect();
+try {
+  await client.query('BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
 
-const manifest = { taken_at: new Date().toISOString(), database: DATABASE_URL.replace(/:\/\/.*@/, '://***@'), tables: {} };
+  const { rows: tables } = await client.query(
+    `SELECT table_name FROM information_schema.tables
+     WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
+     ORDER BY table_name`,
+  );
 
-for (const { table_name: t } of tables) {
-  const out = createWriteStream(join(outDir, `${t}.jsonl`));
-  let count = 0;
-  // Keyset-free paged read via OFFSET is fine at drill scale; ORDER BY ctid keeps it stable enough
-  // for a quiesced database (take snapshots with the app stopped or during low traffic).
-  const PAGE = 5000;
-  for (let offset = 0; ; offset += PAGE) {
-    const { rows } = await pool.query(`SELECT * FROM "${t}" ORDER BY ctid LIMIT ${PAGE} OFFSET ${offset}`);
-    for (const row of rows) {
-      const enc = {};
-      for (const [k, v] of Object.entries(row)) enc[k] = encodeValue(v);
-      out.write(JSON.stringify(enc) + '\n');
-      count++;
+  const manifest = { taken_at: new Date().toISOString(), database: DATABASE_URL.replace(/:\/\/.*@/, '://***@'), tables: {} };
+
+  for (const { table_name: t } of tables) {
+    const out = createWriteStream(join(outDir, `${t}.jsonl`));
+    let count = 0;
+    // Постраничное чтение внутри REPEATABLE READ видит один и тот же snapshot — OFFSET-страницы
+    // стабильны по построению (ctid неизменен в рамках снимка; конкурентные записи невидимы).
+    const PAGE = 5000;
+    for (let offset = 0; ; offset += PAGE) {
+      const { rows } = await client.query(`SELECT * FROM "${t}" ORDER BY ctid LIMIT ${PAGE} OFFSET ${offset}`);
+      for (const row of rows) {
+        const enc = {};
+        for (const [k, v] of Object.entries(row)) enc[k] = encodeValue(v);
+        out.write(JSON.stringify(enc) + '\n');
+        count++;
+      }
+      if (rows.length < PAGE) break;
     }
-    if (rows.length < PAGE) break;
+    await new Promise((res) => out.end(res));
+    manifest.tables[t] = count;
+    console.log(`${t}: ${count} rows`);
   }
-  await new Promise((res) => out.end(res));
-  manifest.tables[t] = count;
-  console.log(`${t}: ${count} rows`);
-}
 
-writeFileSync(join(outDir, 'manifest.json'), JSON.stringify(manifest, null, 2));
-console.log(`snapshot written to ${outDir}`);
+  await client.query('COMMIT');
+  writeFileSync(join(outDir, 'manifest.json'), JSON.stringify(manifest, null, 2));
+  console.log(`snapshot written to ${outDir}`);
+} finally {
+  client.release();
+}
 await pool.end();

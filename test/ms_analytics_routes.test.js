@@ -11,9 +11,10 @@
 //   • /api/ms/top-products days=0 — честное «Всё» (якорь от старейшего заказа архива, фолбэк
 //     '2020-01-01' на пустом архиве, кэш-ключ различает 0 и 30);
 //   • /api/ms/top-customers — DB-агрегат + имена ОДНИМ OR-вызовом словаря контрагентов
-//     (деградация → name:null без кэша, 401/403 → ms_token_revoked, кэш-хит);
+//     (деградация → name:null без кэша, 401 → ms_token_revoked, 403 → ms_forbidden, кэш-хит);
 //   • /api/ms/sales-by-channel — DB-агрегат + словарь saleschannel (name/type, NULL-канал →
-//     no_channel_orders, мягкая деградация без кэша, 401/403 → ms_token_revoked, кэш-хит словаря);
+//     no_channel_orders, мягкая деградация без кэша, 401 → ms_token_revoked, 403 → ms_forbidden,
+//     кэш-хит словаря);
 //   • /api/ms/geography — чистый DB-агрегат (нормализация города — в SQL, здесь только проброс
 //     total/no_city и копейки→рубли, без словаря и кэша);
 //   • /api/ms/rfm — exact-window tenant-агрегат без live-вызова, копейки→рубли и no-agent хвост;
@@ -782,7 +783,7 @@ test('top-customers: sinceDay-окно в repo, имена ОДНИМ OR-выз�
   assert.equal(repoCalls.length, 1, 'кэш укрывает и DB-агрегат');
 });
 
-test('top-customers: сбой словаря → name:null без кэша; days=0 → вся история; 401/403 → ms_token_revoked', async () => {
+test('top-customers: сбой словаря → name:null без кэша; days=0 → вся история; 401 → ms_token_revoked, 403 → ms_forbidden', async () => {
   let dictCalls = 0;
   let seenSince = 'UNSET';
   const { routes } = buildMs({
@@ -806,17 +807,21 @@ test('top-customers: сбой словаря → name:null без кэша; days
   await invoke(routes, 'GET /api/ms/top-customers', { query: { days: '0' } });
   assert.equal(dictCalls, 2, 'деградированный ответ не кэшируется — имена пробуются снова');
 
-  const revoked = buildMs({
-    msFetch: async () => {
-      const e = new Error('МойСклад: HTTP 403');
-      e.status = 403;
-      throw e;
-    },
-    db: { getMsTopCustomersForActor: async () => [{ agent_id: 'cp-a', orders: 1, sum_kopecks: 100 }] },
-  });
-  const r2 = await invoke(revoked.routes, 'GET /api/ms/top-customers', { query: { days: '7' } });
-  assert.equal(r2.statusCode, 401, 'отозванный токен не маскируется под name:null');
-  assert.equal(r2.body.code, 'ms_token_revoked');
+  // 401 = токен отозван (reconnect-CTA); 403 = токен жив, но у сотрудника нет прав — отдельный
+  // ms_forbidden со статусом 403 (не «переподключите»). Ни то, ни другое не маскируется под name:null.
+  for (const [upstream, statusCode, code] of [[401, 401, 'ms_token_revoked'], [403, 403, 'ms_forbidden']]) {
+    const denied = buildMs({
+      msFetch: async () => {
+        const e = new Error(`МойСклад: HTTP ${upstream}`);
+        e.status = upstream;
+        throw e;
+      },
+      db: { getMsTopCustomersForActor: async () => [{ agent_id: 'cp-a', orders: 1, sum_kopecks: 100 }] },
+    });
+    const r2 = await invoke(denied.routes, 'GET /api/ms/top-customers', { query: { days: '7' } });
+    assert.equal(r2.statusCode, statusCode, `МС ${upstream} не маскируется под name:null`);
+    assert.equal(r2.body.code, code);
+  }
 });
 
 test('sales-by-channel: словарь saleschannel мапит name/type, NULL-канал → no_channel_orders, словарь кэшируется', async () => {
@@ -862,7 +867,7 @@ test('sales-by-channel: словарь saleschannel мапит name/type, NULL-�
   assert.equal(dictPaths.length, 1, 'второй запрос берёт словарь каналов из кэша (1 час)');
 });
 
-test('sales-by-channel: словарь деградирует мягко (name/type null) и НЕ кэшируется; days=0 → вся история; 401/403 → ms_token_revoked', async () => {
+test('sales-by-channel: словарь деградирует мягко (name/type null) и НЕ кэшируется; days=0 → вся история; 401 → ms_token_revoked, 403 → ms_forbidden', async () => {
   let dictCalls = 0;
   let seenSince = 'UNSET';
   const { routes } = buildMs({
@@ -886,18 +891,20 @@ test('sales-by-channel: словарь деградирует мягко (name/t
   await invoke(routes, 'GET /api/ms/sales-by-channel', { query: { days: '0' } });
   assert.equal(dictCalls, 2, 'неуспех словаря не кэшируется — следующий запрос пробует снова');
 
-  // 401/403 = отозванный токен, не молчаливый name:null (как top-customers).
-  const revoked = buildMs({
-    msFetch: async () => {
-      const e = new Error('МойСклад: HTTP 403');
-      e.status = 403;
-      throw e;
-    },
-    db: { getMsSalesByChannelForActor: async () => [{ sales_channel_id: 'ch-site', orders: 1, sum_kopecks: 100 }] },
-  });
-  const r2 = await invoke(revoked.routes, 'GET /api/ms/sales-by-channel', { query: { days: '7' } });
-  assert.equal(r2.statusCode, 401, 'отозванный токен не маскируется под name:null');
-  assert.equal(r2.body.code, 'ms_token_revoked');
+  // 401 = отозванный токен, 403 = нет прав у сотрудника — не молчаливый name:null (как top-customers).
+  for (const [upstream, statusCode, code] of [[401, 401, 'ms_token_revoked'], [403, 403, 'ms_forbidden']]) {
+    const denied = buildMs({
+      msFetch: async () => {
+        const e = new Error(`МойСклад: HTTP ${upstream}`);
+        e.status = upstream;
+        throw e;
+      },
+      db: { getMsSalesByChannelForActor: async () => [{ sales_channel_id: 'ch-site', orders: 1, sum_kopecks: 100 }] },
+    });
+    const r2 = await invoke(denied.routes, 'GET /api/ms/sales-by-channel', { query: { days: '7' } });
+    assert.equal(r2.statusCode, statusCode, `МС ${upstream} не маскируется под name:null`);
+    assert.equal(r2.body.code, code);
+  }
 });
 
 test('geography: sinceDay-окно в repo, копейки → рубли, total/no_city проброшены, БЕЗ словаря и БЕЗ кэша', async () => {
@@ -1097,6 +1104,30 @@ test('MS summary: точный диапазон идёт ЖИВЫМ plotseries (
     assert.match(decodeURIComponent(p), /momentFrom=2026-03-05 00:00:00/);
     assert.match(decodeURIComponent(p), /momentTo=2026-03-18 23:59:59/);
   }
+});
+
+test('MS summary: 403 отчёта продаж (у сотрудника нет прав) → 403 ms_forbidden, а 401 → 401 ms_token_revoked', async () => {
+  // Токен сотрудника без прав на отчёты проходит connect (тот проверяет только employee/organization),
+  // а plotseries отвечает 403. Раньше это становилось «токен отозван — переподключите», хотя
+  // переподключение тем же токеном ничего не меняет.
+  const failing = (status) => buildMs({
+    msFetch: async (_token, path) => {
+      if (path.startsWith('/report/sales/plotseries')) {
+        const e = new Error(`МойСклад: HTTP ${status}`);
+        e.status = status;
+        throw e;
+      }
+      return { series: [] };
+    },
+  });
+  const forbidden = await invoke(failing(403).routes, 'GET /api/ms/summary', { query: { days: '30' } });
+  assert.equal(forbidden.statusCode, 403, 'не 401: фронт не должен читать нехватку прав как конец сессии');
+  assert.equal(forbidden.body.code, 'ms_forbidden');
+  assert.doesNotMatch(forbidden.body.error, /отозван|переподключ/i);
+
+  const revoked = await invoke(failing(401).routes, 'GET /api/ms/summary', { query: { days: '30' } });
+  assert.equal(revoked.statusCode, 401);
+  assert.equal(revoked.body.code, 'ms_token_revoked');
 });
 
 test('connect/disconnect: audit-события ms_connect/ms_disconnect с identity-полями и БЕЗ токена', async () => {

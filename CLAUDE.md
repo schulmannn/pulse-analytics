@@ -4,10 +4,11 @@
 [`PROJECT_MEMORY.md`](PROJECT_MEMORY.md)** — там текущее состояние, инварианты и план.
 
 ## Границы работника
-- **Не коммить, не push, не merge, не deploy** и не трогай секреты/историю git. Результат —
-  проверенный diff в выделенном рабочем дереве и короткий handoff интегратору.
-- `main` авто-деплоится на Railway: **merge в `main` = прод**. Интегратор самостоятельно ревьюит
-  diff, запускает проверки, создаёт PR и отвечает за выпуск.
+- Работа ведётся в отдельном рабочем дереве. Коммит, пуш своей ветки и создание PR — разрешены.
+  Секреты и историю git не трогать: никаких force-push и rebase поверх опубликованного.
+- `main` авто-деплоится на Railway: **merge в `main` = прод**. Мержить только с зелёным CI
+  (непустой check-runs) и только по явной отмашке владельца — эта отмашка даётся на конкретный
+  выпуск и не переносится на следующий.
 
 ## Архитектура (entry points)
 - **`server/`** — Node/Express: `config.js` → `app.js` (роуты/middleware) → `composition.js`
@@ -15,7 +16,7 @@
   `routes/` → `services/` → `repos/` → `db/` (+ `jobs/`, `infrastructure/`, `middleware/`,
   `lib/`); фасад `db.js` сохраняет форму вызовов.
 - **`server/migrations/*.sql`** — forward-only, применяются на старте (`npm start`).
-- **`frontend/`** — React 18 + Vite + TS (strict), TanStack Query + Zod и Tailwind;
+- **`frontend/`** — React 19 + Vite + TS (strict), TanStack Query + Zod и Tailwind;
   build → `frontend/dist`, отдаётся Express на `/`. Канон дизайна — `frontend/DESIGN_TOKENS.md`.
 - **`mtproto/service.py`** — Python/FastAPI + Telethon, приватный `:8001`.
 - **`collector/pulse_collector.py`** — локальный агент пользователя (SQLite queue/retry).

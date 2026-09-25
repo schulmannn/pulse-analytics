@@ -44,6 +44,45 @@ test('web entrypoint refuses COLLECTION_RECOVERY_MODE=worker (cannot accidentall
   assert.equal(compositionBuilt, false, 'composition-фабрика не вызвана для worker-режима на web');
 });
 
+test('production web boots with a small PGPOOL_MAX: GDPR export limit is a startup warning, not a ConfigError', async () => {
+  // Дефолтный GDPR_EXPORT_MAX_CONCURRENT=2 при PGPOOL_MAX=2 раньше был фатальной ошибкой конфига и
+  // ронял прод на старте. Теперь лимит зажимается под пул, а оператор видит WARNING в логе.
+  const app = express();
+  const composition = {
+    db: { async close() {} },
+    memoryCache: { start() {}, stop() {} },
+    jobTracker: createJobTracker(),
+    drainState: { draining: false },
+    async boot() {},
+    createHttpApp() { return app; },
+  };
+  const warnings = [];
+  const originalWarn = console.warn;
+  console.warn = (...args) => { warnings.push(args.join(' ')); };
+  let runtime;
+  try {
+    runtime = await main({
+      env: {
+        NODE_ENV: 'production', SESSION_SECRET: 's', DATABASE_URL: 'postgres://x',
+        APP_URL: 'https://atlavue.app', PGPOOL_MAX: '2',
+      },
+      port: 0,
+      compositionFactory: () => composition,
+      installSignalHandlers: false,
+      shutdownTimeoutMs: 1_000,
+    });
+  } finally {
+    console.warn = originalWarn;
+  }
+  assert.ok(runtime.server.listening, 'web стартовал');
+  assert.ok(
+    warnings.some((line) => /\[boot\] WARNING: config: database\.gdprExportMaxConcurrent: .*PGPOOL_MAX=2/.test(line)),
+    `предупреждение о зажатом лимите в логе старта: ${JSON.stringify(warnings)}`,
+  );
+  await runtime.stop();
+  process.exitCode = 0;
+});
+
 test('runtime removes signal listeners and drains tracked tails before DB close', async () => {
   const tracker = createJobTracker();
   const events = [];

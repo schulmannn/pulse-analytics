@@ -1,16 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-// ── Клиентские staleTime-ярусы (арх-аудит: API-fanout) ────────────────────────────────────────
-// Переключение источника/канала и каждый маунт карточек давали burst одинаковых запросов:
-// staleTime по умолчанию 0 → рефетч на всё. Сервер и так кэширует ответы ~10 мин, свежесть
-// виджетам сообщает бейдж «обновлено N мин назад», а канон обновления — ручной (кнопка/retry:
-// refetch() ВСЕГДА идёт в сеть, staleTime глушит только автоматические remount-рефетчи).
-const STALE_LIVE = 5 * 60 * 1000;      // живые агрегаты (tg-full, ig-insights, посты, графы)
-const STALE_ARCHIVE = 30 * 60 * 1000;  // дневные архивы Postgres (history, ig_daily, velocity)
-const STALE_STATUS = 60 * 1000;        // свежесть-статусы (collector-status кормит бейдж)
-
+import { STALE_ARCHIVE, STALE_LIVE, STALE_STATUS } from '@/api/policy';
 import { z } from 'zod';
 import { apiGet, apiSend } from '@/api/client';
-import { msPeriodKey, msPeriodQuery, type MsPeriod } from '@/lib/msPeriod';
+import { qk } from '@/api/queryKeys';
+import { keepPreviousForChannel } from '@/api/keepPrevious';
 import type { CampaignSourceScope } from '@/lib/campaignSources';
 import {
   AdminUserSchema,
@@ -43,6 +36,10 @@ import {
   IgTagsSchema,
   KeySchema,
   LoginResponseSchema,
+  MentionNotifyLinkSchema,
+  MentionNotifyRunSchema,
+  MentionNotifyStatusSchema,
+  MentionNotifySubscriptionSchema,
   MentionSettingsSchema,
   MentionsSchema,
   MeSchema,
@@ -55,7 +52,6 @@ import {
   VelocitySchema,
 } from '@/api/schemas';
 import type { CampaignPostInput, CampaignStatus, MentionRules, ReportConfig, TgFull } from '@/api/schemas';
-import { clearSessionToken, setSessionToken } from '@/lib/session';
 import { isDemoMode } from '@/lib/demo';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { effectiveLimit, usePeriod } from '@/lib/period';
@@ -64,7 +60,7 @@ import type { DateRange, PeriodDays } from '@/lib/period';
 /** Current session. retry:false so a 401 surfaces immediately (→ login gate). */
 export function useMe() {
   return useQuery({
-    queryKey: ['me'],
+    queryKey: qk.me,
     staleTime: STALE_LIVE,
     queryFn: ({ signal }) => apiGet('/api/auth/me', MeSchema, { signal }),
     retry: false,
@@ -76,14 +72,14 @@ export function useUpdateAvatar() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (dataUrl: string) => apiSend('POST', '/api/me/avatar', { dataUrl }, AuthOkSchema),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['me'] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.me }),
   });
 }
 export function useRemoveAvatar() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: () => apiSend('DELETE', '/api/me/avatar', undefined, AuthOkSchema),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['me'] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.me }),
   });
 }
 
@@ -99,21 +95,12 @@ export function useChangePassword() {
   });
 }
 
-function sessionTtl(expiresAt?: string | null): number | undefined {
-  if (!expiresAt) return undefined;
-  const ttlMs = Date.parse(expiresAt) - Date.now();
-  return Number.isFinite(ttlMs) && ttlMs > 0 ? ttlMs : undefined;
-}
-
 export function useLogin() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: { email: string; password: string }) =>
       apiSend('POST', '/api/auth/login', body, LoginResponseSchema),
-    onSuccess: (data) => {
-      setSessionToken(data.token, sessionTtl(data.expiresAt));
-      return qc.invalidateQueries();
-    },
+    onSuccess: () => qc.invalidateQueries(),
   });
 }
 
@@ -143,10 +130,7 @@ export function useGoogleLogin() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (credential: string) => apiSend('POST', '/api/auth/google', { credential }, LoginResponseSchema),
-    onSuccess: (data) => {
-      setSessionToken(data.token, sessionTtl(data.expiresAt));
-      return qc.invalidateQueries();
-    },
+    onSuccess: () => qc.invalidateQueries(),
   });
 }
 
@@ -178,18 +162,13 @@ export function useReset() {
 export function useLogout() {
   const qc = useQueryClient();
   const { setChannelId } = useSelectedChannel();
-  const clearLocalSession = () => {
-    clearSessionToken();
-    setChannelId(null);
-  };
   return useMutation({
     mutationFn: () => apiSend('POST', '/api/auth/logout', undefined, AuthOkSchema),
     onSuccess: () => {
-      clearLocalSession();
-      return qc.invalidateQueries();
+      setChannelId(null);
+      // Keep this mutation alive until its per-call onSuccess navigation fires.
+      qc.getQueryCache().clear();
     },
-    onError: clearLocalSession,
-    onSettled: () => qc.clear(),
   });
 }
 
@@ -242,7 +221,7 @@ export function useMentions() {
   const { channelId } = useSelectedChannel();
   return useQuery({
     enabled: false,
-    queryKey: ['mentions', channelId],
+    queryKey: qk.mentions(channelId),
     queryFn: ({ signal }) => apiGet('/api/tg/mtproto/mentions', MentionsSchema, { signal, channelId }),
   });
 }
@@ -252,7 +231,7 @@ export function useMentionSettings() {
   const { channelId } = useSelectedChannel();
   return useQuery({
     enabled: channelId != null,
-    queryKey: ['mention-settings', channelId],
+    queryKey: qk.mentionSettings(channelId),
     staleTime: STALE_STATUS,
     retry: false,
     queryFn: ({ signal }) =>
@@ -270,9 +249,72 @@ export function useSaveMentionSettings() {
       return apiSend('PUT', '/api/tg/mention-settings', body, MentionSettingsSchema, { channelId });
     },
     onSuccess: (data) => {
-      qc.setQueryData(['mention-settings', channelId], data);
-      return qc.invalidateQueries({ queryKey: ['mentions', channelId] });
+      qc.setQueryData(qk.mentionSettings(channelId), data);
+      return qc.invalidateQueries({ queryKey: qk.mentions(channelId) });
     },
+  });
+}
+
+/**
+ * Личные уведомления об упоминаниях: статус привязки бота + подписки выбранного канала.
+ * `poll` включает refetchInterval — диалог ждёт нажатия Start в Telegram после deep-link'а.
+ */
+export function useMentionNotifyStatus(poll = false) {
+  const { channelId } = useSelectedChannel();
+  return useQuery({
+    enabled: channelId != null,
+    queryKey: qk.mentionNotify(channelId),
+    staleTime: STALE_STATUS,
+    retry: false,
+    refetchInterval: poll ? 3000 : false,
+    // Диалог монтируется только по клику: всегда тянем свежий статус, иначе закрытие до
+    // подтверждения привязки показывает при повторном открытии устаревшее «не привязан».
+    refetchOnMount: 'always',
+    queryFn: ({ signal }) =>
+      apiGet('/api/tg/mention-notify', MentionNotifyStatusSchema, { signal, channelId }),
+  });
+}
+
+/** Выдать deep-link t.me/<bot>?start=… для привязки личного чата с ботом. */
+export function useMentionNotifyLink() {
+  return useMutation({
+    mutationFn: () => apiSend('POST', '/api/tg/mention-notify/link', {}, MentionNotifyLinkSchema),
+  });
+}
+
+/** Тумблер + расписание личной подписки на упоминания выбранного канала. */
+export function useSetMentionNotify() {
+  const { channelId } = useSelectedChannel();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { enabled: boolean; send_days?: number[]; send_hour?: number }) => {
+      if (channelId == null) return Promise.reject(new Error('Сначала выберите канал'));
+      return apiSend('PUT', '/api/tg/mention-notify', body, MentionNotifySubscriptionSchema, { channelId });
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.mentionNotify(channelId) }),
+  });
+}
+
+/** Ручной тест-прогон «Прислать сейчас» — тратит квоту searchPosts подписчика вне планового дня. */
+export function useRunMentionNotify() {
+  const { channelId } = useSelectedChannel();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => {
+      if (channelId == null) return Promise.reject(new Error('Сначала выберите канал'));
+      return apiSend('POST', '/api/tg/mention-notify/run', {}, MentionNotifyRunSchema, { channelId });
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.mentionNotify(channelId) }),
+  });
+}
+
+/** Отвязать личный чат с ботом (подписки замолкают до новой привязки). */
+export function useUnbindMentionNotify() {
+  const { channelId } = useSelectedChannel();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiSend('DELETE', '/api/tg/mention-notify/binding', undefined, AuthOkSchema),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.mentionNotify(channelId) }),
   });
 }
 
@@ -325,8 +367,9 @@ export function useMentionsArchive(
   return useQuery({
     // opts.enabled — внешний гейт поверх канального (офскрин-виджеты Главной), queryKey прежний.
     enabled: channelId != null && opts?.enabled !== false,
-    queryKey: ['mentions-archive', channelId, d, src, lim, rng?.from ?? null, rng?.to ?? null],
+    queryKey: qk.mentionsArchive.window(channelId, d, src, lim, rng?.from ?? null, rng?.to ?? null),
     staleTime: STALE_ARCHIVE,
+    placeholderData: keepPreviousForChannel(channelId),
     queryFn: ({ signal }) =>
       apiGet(`/api/history/mentions${qs ? `?${qs}` : ''}`, MentionsSchema, { signal, channelId }),
   });
@@ -338,8 +381,9 @@ export function useHistory(days = 730, opts?: { enabled?: boolean }) {
   return useQuery({
     // opts.enabled — внешний гейт поверх канального (офскрин-виджеты Главной), queryKey прежний.
     enabled: channelId != null && opts?.enabled !== false,
-    queryKey: ['history-channel', channelId, days],
+    queryKey: qk.historyChannel.window(channelId, days),
     staleTime: STALE_ARCHIVE,
+    placeholderData: keepPreviousForChannel(channelId),
     queryFn: ({ signal }) => apiGet(`/api/history/channel?days=${days}`, HistorySchema, { signal, channelId }),
   });
 }
@@ -350,7 +394,7 @@ export function useVelocity(opts?: { enabled?: boolean }) {
   return useQuery({
     // opts.enabled — внешний гейт поверх канального (офскрин-виджеты Главной), queryKey прежний.
     enabled: channelId != null && opts?.enabled !== false,
-    queryKey: ['velocity', channelId],
+    queryKey: qk.velocity(channelId),
     staleTime: STALE_ARCHIVE,
     queryFn: ({ signal }) => apiGet('/api/tg/mtproto/velocity', VelocitySchema, { signal, channelId }),
   });
@@ -363,7 +407,7 @@ export function useIgProfile(enabled = true) {
   const { channelId } = useSelectedChannel();
   return useQuery({
     enabled: enabled && channelId != null,
-    queryKey: ['ig-profile', channelId],
+    queryKey: qk.ig.profile(channelId),
     staleTime: STALE_LIVE,
     queryFn: ({ signal }) => apiGet('/api/ig/profile', IgProfileSchema, { signal, channelId }),
   });
@@ -378,7 +422,7 @@ export function useIgInsights(days = 90, enabled = true) {
   // for every `insightsQ.data` consumer.
   return useQuery<IgInsights>({
     enabled: enabled && channelId != null,
-    queryKey: ['ig-insights', channelId, days],
+    queryKey: qk.ig.insights(channelId, days),
     staleTime: STALE_LIVE,
     // A period change re-keys `days`; keep the previous window's data mounted while the new one
     // loads (same contract as useTgFull windowPair). Without it ig.loading flips to true and the
@@ -386,8 +430,7 @@ export function useIgInsights(days = 90, enabled = true) {
     // MorphingSeries period morph never runs (owner report: «переход не как в shadcn»). The old
     // series re-windows client-side instantly, then the fresh response retargets the morph.
     // Never carry data across a channel switch — that would flash another source's metrics.
-    placeholderData: (previous, previousQuery) =>
-      previousQuery?.queryKey[1] === channelId ? previous : undefined,
+    placeholderData: keepPreviousForChannel(channelId),
     queryFn: ({ signal }) => apiGet(`/api/ig/insights?days=${days}`, IgInsightsSchema, { signal, channelId }),
   });
 }
@@ -396,7 +439,7 @@ export function useIgPosts(limit = 20, enabled = true) {
   const { channelId } = useSelectedChannel();
   return useQuery({
     enabled: enabled && channelId != null,
-    queryKey: ['ig-posts', channelId, limit],
+    queryKey: qk.ig.posts(channelId, limit),
     staleTime: STALE_LIVE,
     queryFn: ({ signal }) => apiGet(`/api/ig/posts?limit=${limit}`, IgPostsSchema, { signal, channelId }),
   });
@@ -408,12 +451,11 @@ export function useIgBreakdowns(timeframe = 'last_30_days', enabled = true) {
   return useQuery<IgBreakdowns>({
     // enabled — внешний гейт поверх канального (офскрин-виджеты Главной), queryKey прежний.
     enabled: enabled && channelId != null,
-    queryKey: ['ig-breakdowns', channelId, timeframe],
+    queryKey: qk.ig.breakdowns(channelId, timeframe),
     staleTime: STALE_ARCHIVE,
     // Period switches re-key `timeframe` — hold the previous breakdowns for the same channel so
     // the Аудитория sections don't collapse to empty mid-switch (mirrors useIgInsights above).
-    placeholderData: (previous, previousQuery) =>
-      previousQuery?.queryKey[1] === channelId ? previous : undefined,
+    placeholderData: keepPreviousForChannel(channelId),
     queryFn: ({ signal }) => apiGet(`/api/ig/breakdowns?timeframe=${timeframe}`, IgBreakdownsSchema, { signal, channelId }),
   });
 }
@@ -424,7 +466,7 @@ export function useIgOnline(enabled = true) {
   return useQuery({
     // enabled — внешний гейт поверх канального (офскрин-виджеты Главной), queryKey прежний.
     enabled: enabled && channelId != null,
-    queryKey: ['ig-online', channelId],
+    queryKey: qk.ig.online(channelId),
     staleTime: STALE_ARCHIVE,
     queryFn: ({ signal }) => apiGet('/api/ig/online', IgOnlineSchema, { signal, channelId }),
   });
@@ -435,7 +477,7 @@ export function useIgStories() {
   const { channelId } = useSelectedChannel();
   return useQuery({
     enabled: channelId != null,
-    queryKey: ['ig-stories', channelId],
+    queryKey: qk.ig.stories(channelId),
     staleTime: STALE_LIVE,
     queryFn: ({ signal }) => apiGet('/api/ig/stories', IgStoriesSchema, { signal, channelId }),
   });
@@ -446,7 +488,7 @@ export function useIgTags() {
   const { channelId } = useSelectedChannel();
   return useQuery({
     enabled: channelId != null,
-    queryKey: ['ig-tags', channelId],
+    queryKey: qk.ig.tags(channelId),
     staleTime: STALE_LIVE,
     queryFn: ({ signal }) => apiGet('/api/ig/tags', IgTagsSchema, { signal, channelId }),
   });
@@ -458,8 +500,9 @@ export function useIgHistory(days = 400, enabled = true) {
   const { channelId } = useSelectedChannel();
   return useQuery({
     enabled: enabled && channelId != null && !isDemoMode(),
-    queryKey: ['ig-history', channelId, days],
+    queryKey: qk.ig.history(channelId, days),
     staleTime: STALE_ARCHIVE,
+    placeholderData: keepPreviousForChannel(channelId),
     queryFn: ({ signal }) => apiGet(`/api/ig/history?days=${days}`, IgHistorySchema, { signal, channelId }),
   });
 }
@@ -475,6 +518,9 @@ const IgOauthStatusSchema = z
     ig_user_id: z.string().nullable(),
     connected_at: z.string().nullable(),
     token_expires_at: z.string().nullable(),
+    // Срок токена в машинном виде. Дефолт 'ok' — совместимость со старым ответом сервера (кэш
+    // страницы переживает деплой): отсутствие поля не должно рисовать тревогу на живом аккаунте.
+    token_state: z.enum(['none', 'ok', 'expiring', 'expired']).default('ok'),
   })
   .passthrough();
 export type IgOauthStatus = z.infer<typeof IgOauthStatusSchema>;
@@ -485,7 +531,7 @@ export function useIgOauthStatus() {
   const { channelId } = useSelectedChannel();
   return useQuery({
     enabled: channelId != null,
-    queryKey: ['ig-oauth-status', channelId],
+    queryKey: qk.ig.oauthStatus(channelId),
     staleTime: STALE_LIVE,
     queryFn: ({ signal }) => apiGet('/api/ig/oauth/status', IgOauthStatusSchema, { signal, channelId }),
   });
@@ -509,9 +555,17 @@ export function useConnectIg() {
 /** Disconnect the Instagram account from the current channel; refetch IG data + status. */
 export function useDisconnectIg() {
   const qc = useQueryClient();
+  const { channelId } = useSelectedChannel();
   return useMutation({
     mutationFn: () => apiSend('DELETE', '/api/ig/oauth', undefined, OkSchema),
-    onSuccess: () => qc.invalidateQueries({ predicate: (q) => String(q.queryKey[0]).startsWith('ig-') }),
+    onSuccess: () =>
+      Promise.all([
+        qc.invalidateQueries({ queryKey: qk.channels }),
+        // Префикс семьи вместо строкового predicate: сбрасывается IG ЭТОГО канала, а не всех
+        // сразу. Отключение поканальное (DELETE идёт с x-channel-id), и сбрасывать чужие
+        // аккаунты было лишним — они просто перезапрашивались без причины.
+        qc.invalidateQueries({ queryKey: qk.ig.all(channelId) }),
+      ]),
   });
 }
 
@@ -559,7 +613,7 @@ export function useTgGraphs(opts?: { enabled?: boolean }) {
 export function useTgQrStatus(enabled = true) {
   return useQuery({
     enabled,
-    queryKey: ['tg-qr-status'],
+    queryKey: qk.tgQrStatus,
     staleTime: STALE_STATUS,
     queryFn: ({ signal }) => apiGet('/api/tg/qr/status', TgQrStatusSchema, { signal }),
   });
@@ -570,576 +624,9 @@ const OkSchema = z.object({ ok: z.boolean() }).passthrough();
 
 export function useChannels() {
   return useQuery({
-    queryKey: ['channels'],
+    queryKey: qk.channels,
     staleTime: STALE_LIVE,
     queryFn: ({ signal }) => apiGet('/api/channels', ChannelsResponseSchema, { signal }),
-  });
-}
-
-// ── «МойСклад» (source='ms'): сервер-агрегированные отчёты, все суммы уже в РУБЛЯХ ──────────
-const MsRevenuePointSchema = z.object({ day: z.string(), value: z.number() }).passthrough();
-const MsOrdersPointSchema = z.object({ day: z.string(), sum: z.number(), count: z.number() }).passthrough();
-const MsSummarySchema = z
-  .object({
-    revenue: z.object({ total: z.number(), series: z.array(MsRevenuePointSchema) }).passthrough(),
-    orders: z.object({ totalSum: z.number(), totalCount: z.number(), series: z.array(MsOrdersPointSchema) }).passthrough(),
-  })
-  .passthrough();
-// Additive-сводка концентрации: считается сервером по ПОЛНОМУ raw-отчёту до limit. null =
-// отчёт усечён/неполон (честно недоступна). Доли/маржа = null при неположительном знаменателе.
-const MsTopSummarySchema = z
-  .object({
-    complete: z.boolean(),
-    product_count: z.number(),
-    top_n: z.number(),
-    revenue_positive_total: z.number(),
-    profit_positive_total: z.number(),
-    revenue_top10_share_pct: z.number().nullable(),
-    profit_top10_share_pct: z.number().nullable(),
-    net_margin_pct: z.number().nullable(),
-    loss_making_count: z.number(),
-    loss_making_amount: z.number(),
-  })
-  .passthrough();
-export type MsTopSummary = z.infer<typeof MsTopSummarySchema>;
-
-// Сравнение ассортимента с предыдущим равным окном (opt-in compare=prev). Все величины уже в
-// натуральной единице метрики: rub — рубли (сервер конвертировал копейки на границе), count — штуки.
-// deltaPct честно null, когда предыдущая база <= 0 (ноль не даёт конечного процента, отрицательная
-// прибыль не имеет однозначной процентной интерпретации). Сопоставление и вывод
-// предыдущего окна — на сервере; фронт только рендерит.
-const MsMoverSchema = z
-  .object({
-    name: z.string(),
-    current: z.number(),
-    previous: z.number(),
-    delta: z.number(),
-    deltaPct: z.number().nullable(),
-  })
-  .passthrough();
-const MsMetricComparisonSchema = z
-  .object({
-    unit: z.enum(['rub', 'count']),
-    gainers: z.array(MsMoverSchema),
-    losers: z.array(MsMoverSchema),
-    appeared: z.array(MsMoverSchema),
-    disappeared: z.array(MsMoverSchema),
-  })
-  .passthrough();
-export type MsMetricComparison = z.infer<typeof MsMetricComparisonSchema>;
-const MsAssortmentComparisonSchema = z.discriminatedUnion('available', [
-  z.object({ available: z.literal(false), reason: z.string() }).passthrough(),
-  z
-    .object({
-      available: z.literal(true),
-      partial: z.boolean(),
-      identity_fallback_count: z.number(),
-      current: z.object({ from: z.string(), to: z.string() }).passthrough(),
-      previous: z.object({ from: z.string(), to: z.string() }).passthrough(),
-      counts: z.object({ current_only: z.number(), previous_only: z.number(), both: z.number() }).passthrough(),
-      metrics: z.object({
-        revenue: MsMetricComparisonSchema,
-        profit: MsMetricComparisonSchema,
-        units: MsMetricComparisonSchema,
-      }),
-      limit: z.number(),
-    })
-    .passthrough(),
-]);
-export type MsAssortmentComparison = z.infer<typeof MsAssortmentComparisonSchema>;
-
-const MsTopProductsSchema = z
-  .object({
-    rows: z.array(
-      z
-        .object({
-          name: z.string(),
-          quantity: z.number(),
-          revenue: z.number(),
-          profit: z.number(),
-          margin: z.number().nullable(),
-        })
-        .passthrough(),
-    ),
-    total: z.number().optional(),
-    truncated: z.boolean().optional(),
-    summary: MsTopSummarySchema.nullable().optional(),
-    comparison: MsAssortmentComparisonSchema.optional(),
-  })
-  .passthrough();
-
-const MsStatusSchema = z.object({ connected: z.boolean(), org_name: z.string().nullable().optional() }).passthrough();
-
-export function useMsStatus() {
-  const { channelId } = useSelectedChannel();
-  return useQuery({
-    enabled: channelId != null,
-    queryKey: ['ms-status', channelId],
-    staleTime: STALE_STATUS,
-    retry: false,
-    queryFn: ({ signal }) => apiGet('/api/ms/status', MsStatusSchema, { signal, channelId }),
-  });
-}
-
-const MsBackfillStatusSchema = z
-  .object({
-    status: z.string(),
-    fetched: z.number(),
-    total: z.number().nullable().optional(),
-    cursor_month: z.string().nullable().optional(),
-    orders_in_db: z.number().optional(),
-    error: z.string().nullable().optional(),
-  })
-  .passthrough();
-type MsBackfillStatus = z.infer<typeof MsBackfillStatusSchema>;
-
-export function useMsBackfillStatus(enabled: boolean, pollAnyway = false) {
-  const { channelId } = useSelectedChannel();
-  // Явные дженерики обязательны: inline-refetchInterval, читающий query.state.data,
-  // зацикливает вывод TQueryFnData и схлопывает тип данных в {}.
-  return useQuery<MsBackfillStatus, Error>({
-    enabled: enabled && channelId != null,
-    queryKey: ['ms-backfill', channelId],
-    retry: false,
-    // Живой прогресс: опрос каждые 2с пока история грузится ИЛИ пока вызывающий ждёт старта
-    // (pollAnyway): движок пишет running-строку только ПОСЛЕ живой оценки объёма (~секунда),
-    // и без внешнего толчка интервал не завёлся бы вовсе — кнопка выглядела мёртвой (прод-фидбек).
-    refetchInterval: (query) => (pollAnyway || query.state.data?.status === 'running' ? 2000 : false),
-    queryFn: ({ signal }) => apiGet('/api/ms/backfill-status', MsBackfillStatusSchema, { signal, channelId }),
-  });
-}
-
-// ── МойСклад, слайс 3: аналитика архива заказов (все суммы уже В РУБЛЯХ с бэка) ──
-const MsFunnelSchema = z
-  .object({
-    window_days: z.number(),
-    total_orders: z.number(),
-    no_state_orders: z.number(),
-    no_state_sum: z.number(),
-    rows: z.array(
-      z
-        .object({
-          state_id: z.string(),
-          name: z.string().nullable(),
-          color: z.string().nullable(),
-          orders: z.number(),
-          sum: z.number(),
-        })
-        .passthrough(),
-    ),
-  })
-  .passthrough();
-
-export function useMsFunnel(period: MsPeriod) {
-  const { channelId } = useSelectedChannel();
-  return useQuery({
-    enabled: channelId != null,
-    queryKey: ['ms-funnel', channelId, ...msPeriodKey(period)],
-    staleTime: STALE_LIVE,
-    retry: false,
-    queryFn: ({ signal }) => apiGet(`/api/ms/funnel?${msPeriodQuery(period)}`, MsFunnelSchema, { signal, channelId }),
-  });
-}
-
-const MsCustomersSchema = z
-  .object({
-    window_days: z.number(),
-    summary: z
-      .object({
-        customers: z.number(),
-        new_customers: z.number(),
-        repeat_customers: z.number(),
-        orders_new: z.number(),
-        orders_repeat: z.number(),
-        sum_new: z.number(),
-        sum_repeat: z.number(),
-        no_agent_orders: z.number(),
-        repeat_ever: z.number(),
-      })
-      .passthrough(),
-    series: z.array(
-      z
-        .object({
-          day: z.string(),
-          new_orders: z.number(),
-          repeat_orders: z.number(),
-          sum_new: z.number(),
-          sum_repeat: z.number(),
-        })
-        .passthrough(),
-    ),
-  })
-  .passthrough();
-
-export function useMsCustomers(period: MsPeriod) {
-  const { channelId } = useSelectedChannel();
-  return useQuery({
-    enabled: channelId != null,
-    queryKey: ['ms-customers', channelId, ...msPeriodKey(period)],
-    staleTime: STALE_LIVE,
-    retry: false,
-    queryFn: ({ signal }) => apiGet(`/api/ms/customers?${msPeriodQuery(period)}`, MsCustomersSchema, { signal, channelId }),
-  });
-}
-
-const MsRfmSchema = z
-  .object({
-    window_days: z.number(),
-    as_of: z.string().nullable(),
-    customers: z.number(),
-    no_agent_orders: z.number(),
-    total_orders: z.number(),
-    total_sum: z.number(),
-    segments: z.array(
-      z
-        .object({
-          key: z.enum(['champions', 'loyal', 'potential', 'new', 'at_risk', 'hibernating']),
-          customers: z.number(),
-          orders: z.number(),
-          sum: z.number(),
-          average_recency_days: z.number().nullable(),
-          average_frequency: z.number().nullable(),
-          average_monetary: z.number().nullable(),
-        })
-        .passthrough(),
-    ),
-  })
-  .passthrough();
-
-export type MsRfm = z.infer<typeof MsRfmSchema>;
-
-export function useMsRfm(period: MsPeriod) {
-  const { channelId } = useSelectedChannel();
-  return useQuery({
-    enabled: channelId != null,
-    queryKey: ['ms-rfm', channelId, ...msPeriodKey(period)],
-    staleTime: STALE_LIVE,
-    retry: false,
-    queryFn: ({ signal }) => apiGet(`/api/ms/rfm?${msPeriodQuery(period)}`, MsRfmSchema, { signal, channelId }),
-  });
-}
-
-// Покупатели одного RFM-сегмента — в отличие от агрегатного /api/ms/rfm это сознательный
-// tenant-scoped листинг. name/address резолвит живой словарь counterparty только для строк
-// страницы; при сбое словаря бэк честно отдаёт name/address = null (и не кэширует ответ).
-const MsRfmCustomersSchema = z
-  .object({
-    window_days: z.number(),
-    as_of: z.string().nullable(),
-    segment: z.string(),
-    // Покупателей в ЭТОМ сегменте за окно (после фильтра, до пагинации) — опора «Показать ещё».
-    total_customers: z.number(),
-    rows: z.array(
-      z
-        .object({
-          agent_id: z.string(),
-          name: z.string().nullable(),
-          address: z.string().nullable(),
-          // Контакты из того же словаря counterparty; при деградации словаря — null.
-          phone: z.string().nullable(),
-          email: z.string().nullable(),
-          // Город ПОСЛЕДНЕГО заказа клиента с непустым city (архив ms_orders); null если нет.
-          city: z.string().nullable(),
-          orders: z.number(),
-          sum: z.number(),
-          last_day: z.string(),
-          recency_days: z.number(),
-          r: z.number(),
-          f: z.number(),
-          m: z.number(),
-        })
-        .passthrough(),
-    ),
-  })
-  .passthrough();
-
-export type MsRfmCustomers = z.infer<typeof MsRfmCustomersSchema>;
-
-/** Размер страницы листинга покупателей сегмента (совпадает с серверным дефолтом limit=50). */
-export const MS_RFM_CUSTOMERS_PAGE = 50;
-
-/** Страница покупателей выбранного RFM-сегмента; `segment == null` — сегмент не выбран, запрос не идёт. */
-export function useMsRfmSegmentCustomers(period: MsPeriod, segment: string | null, offset: number) {
-  const { channelId } = useSelectedChannel();
-  return useQuery({
-    enabled: channelId != null && segment != null,
-    queryKey: ['ms-rfm-customers', channelId, ...msPeriodKey(period), segment, offset],
-    staleTime: STALE_LIVE,
-    retry: false,
-    queryFn: ({ signal }) =>
-      apiGet(
-        `/api/ms/rfm-customers?${msPeriodQuery(period)}&segment=${encodeURIComponent(segment ?? '')}&limit=${MS_RFM_CUSTOMERS_PAGE}&offset=${offset}`,
-        MsRfmCustomersSchema,
-        { signal, channelId },
-      ),
-  });
-}
-
-/** Императивная страница ТОГО ЖЕ листинга для CSV-выгрузки сегмента. Прямой apiGet, мимо кэша
-    React Query: у выгрузки свой limit, и запись её страниц под ключи интерактивного листинга
-    (limit=50) подсунула бы «Показать ещё» чужие по размеру страницы. */
-export function fetchMsRfmCustomersPage(
-  channelId: number,
-  period: MsPeriod,
-  segment: string,
-  limit: number,
-  offset: number,
-): Promise<MsRfmCustomers> {
-  return apiGet(
-    `/api/ms/rfm-customers?${msPeriodQuery(period)}&segment=${encodeURIComponent(segment)}&limit=${limit}&offset=${offset}`,
-    MsRfmCustomersSchema,
-    { channelId },
-  );
-}
-
-const MsCohortsSchema = z
-  .object({
-    cohorts: z.array(
-      z
-        .object({
-          cohort_month: z.string(),
-          size: z.number(),
-          // revenue — выручка заказов клиентов когорты в offset-месяце, В РУБЛЯХ (граница API уже
-          // сконвертировала копейки). active/size сохранены для ретеншена и старых вызывающих.
-          cells: z.array(z.object({ offset: z.number(), active: z.number(), revenue: z.number().nullable() }).passthrough()),
-        })
-        .passthrough(),
-    ),
-  })
-  .passthrough();
-
-export function useMsCohorts() {
-  const { channelId } = useSelectedChannel();
-  return useQuery({
-    enabled: channelId != null,
-    queryKey: ['ms-cohorts', channelId],
-    staleTime: STALE_ARCHIVE,
-    retry: false,
-    queryFn: ({ signal }) => apiGet('/api/ms/cohorts', MsCohortsSchema, { signal, channelId }),
-  });
-}
-
-const MsSalesByChannelSchema = z
-  .object({
-    window_days: z.number(),
-    total_orders: z.number(),
-    no_channel_orders: z.number(),
-    // Выручка заказов без канала (синтетическая строка «Без канала» на странице вклада каналов).
-    no_channel_sum: z.number(),
-    rows: z.array(
-      z
-        .object({
-          sales_channel_id: z.string(),
-          name: z.string().nullable(),
-          type: z.string().nullable(),
-          orders: z.number(),
-          sum: z.number(),
-        })
-        .passthrough(),
-    ),
-  })
-  .passthrough();
-
-export function useMsSalesByChannel(period: MsPeriod) {
-  const { channelId } = useSelectedChannel();
-  return useQuery({
-    enabled: channelId != null,
-    queryKey: ['ms-sales-by-channel', channelId, ...msPeriodKey(period)],
-    staleTime: STALE_LIVE,
-    retry: false,
-    queryFn: ({ signal }) =>
-      apiGet(`/api/ms/sales-by-channel?${msPeriodQuery(period)}`, MsSalesByChannelSchema, { signal, channelId }),
-  });
-}
-
-const MsDayPointSchema = z.object({ day: z.string(), orders: z.number(), sum: z.number() }).passthrough();
-const MsChannelSeriesSchema = z
-  .object({
-    window_days: z.number(),
-    // Echo of the selected channel ids (null = all channels aggregated).
-    channels: z.array(z.string()).nullable(),
-    // AGGREGATE series over the selected channels (or all) — the Steep «filter = aggregate» view.
-    series: z.array(MsDayPointSchema),
-    // Per-channel series, present only when Breakdown is requested; bounded server-side.
-    groups: z
-      .array(z.object({ sales_channel_id: z.string(), series: z.array(MsDayPointSchema) }).passthrough())
-      .nullable()
-      .optional(),
-    // How many separate series the server rendered vs how many the caller asked for — lets the UI
-    // state the limit honestly rather than silently dropping channels.
-    group_limit: z.number().optional(),
-    group_total: z.number().optional(),
-  })
-  .passthrough();
-export type MsChannelSeries = z.infer<typeof MsChannelSeriesSchema>;
-
-/** Daily revenue/orders series for the sales-channel axis. `channels` empty = all channels
-    aggregated (the default). `breakdown` asks the server for per-channel series (bounded). */
-export function useMsChannelSeries(period: MsPeriod, opts: { channels: string[]; breakdown: boolean }) {
-  const { channelId } = useSelectedChannel();
-  const channels = [...opts.channels].sort();
-  const breakdown = opts.breakdown && channels.length > 0;
-  const channelParam = channels.length > 0 ? `&channels=${encodeURIComponent(channels.join(','))}` : '';
-  return useQuery({
-    enabled: channelId != null,
-    queryKey: ['ms-channel-series', channelId, ...msPeriodKey(period), channels.join(',') || 'all', breakdown],
-    staleTime: STALE_LIVE,
-    retry: false,
-    queryFn: ({ signal }) =>
-      apiGet(
-        `/api/ms/channel-series?${msPeriodQuery(period)}${channelParam}${breakdown ? '&breakdown=1' : ''}`,
-        MsChannelSeriesSchema,
-        { signal, channelId },
-      ),
-  });
-}
-
-const MsGeographySchema = z
-  .object({
-    window_days: z.number(),
-    total_orders: z.number(),
-    no_city_orders: z.number(),
-    rows: z.array(z.object({ city: z.string(), orders: z.number(), sum: z.number() }).passthrough()),
-  })
-  .passthrough();
-
-export function useMsGeography(period: MsPeriod) {
-  const { channelId } = useSelectedChannel();
-  return useQuery({
-    enabled: channelId != null,
-    queryKey: ['ms-geography', channelId, ...msPeriodKey(period)],
-    staleTime: STALE_LIVE,
-    retry: false,
-    queryFn: ({ signal }) => apiGet(`/api/ms/geography?${msPeriodQuery(period)}`, MsGeographySchema, { signal, channelId }),
-  });
-}
-
-const MsTopCustomersSchema = z
-  .object({
-    window_days: z.number(),
-    rows: z.array(
-      z
-        .object({ agent_id: z.string(), name: z.string().nullable(), orders: z.number(), sum: z.number() })
-        .passthrough(),
-    ),
-  })
-  .passthrough();
-
-export function useMsTopCustomers(period: MsPeriod) {
-  const { channelId } = useSelectedChannel();
-  return useQuery({
-    enabled: channelId != null,
-    queryKey: ['ms-top-customers', channelId, ...msPeriodKey(period)],
-    staleTime: STALE_LIVE,
-    retry: false,
-    queryFn: ({ signal }) => apiGet(`/api/ms/top-customers?${msPeriodQuery(period)}`, MsTopCustomersSchema, { signal, channelId }),
-  });
-}
-
-const MsReturnsSchema = z
-  .object({
-    window_days: z.number(),
-    archive_status: z.enum(['pending', 'idle', 'running', 'done', 'error']),
-    complete: z.boolean(),
-    archived_count: z.number(),
-    total_estimate: z.number().nullable(),
-    count: z.number(),
-    sum: z.number(),
-    // Дневная серия архива (только дни с возвратами; фронт дозаполняет календарь нулями). Сумма
-    // уже в рублях. Возвраты считаются ОТДЕЛЬНО и из выручки заказов не вычитаются.
-    series: z.array(z.object({ day: z.string(), count: z.number(), sum: z.number() }).passthrough()).default([]),
-  })
-  .passthrough();
-
-export function useMsReturns(period: MsPeriod) {
-  const { channelId } = useSelectedChannel();
-  return useQuery({
-    enabled: channelId != null,
-    queryKey: ['ms-returns', channelId, ...msPeriodKey(period)],
-    staleTime: STALE_LIVE,
-    retry: false,
-    queryFn: ({ signal }) => apiGet(`/api/ms/returns?${msPeriodQuery(period)}`, MsReturnsSchema, { signal, channelId }),
-  });
-}
-
-export function useMsSummary(period: MsPeriod, opts?: { enabled?: boolean }) {
-  const { channelId } = useSelectedChannel();
-  return useQuery({
-    // opts.enabled — внешний гейт поверх канального (офскрин-виджеты Главной), queryKey прежний.
-    enabled: channelId != null && opts?.enabled !== false,
-    queryKey: ['ms-summary', channelId, ...msPeriodKey(period)],
-    staleTime: STALE_LIVE,
-    retry: false,
-    queryFn: ({ signal }) => apiGet(`/api/ms/summary?${msPeriodQuery(period)}`, MsSummarySchema, { signal, channelId }),
-  });
-}
-
-export type MsProductSort = 'revenue' | 'profit' | 'margin';
-
-export function useMsTopProducts(period: MsPeriod, limit = 10, sort: MsProductSort = 'revenue', enabled = true) {
-  const { channelId } = useSelectedChannel();
-  return useQuery({
-    enabled: enabled && channelId != null,
-    queryKey: ['ms-top-products', channelId, ...msPeriodKey(period), limit, sort],
-    staleTime: STALE_LIVE,
-    retry: false,
-    queryFn: ({ signal }) =>
-      apiGet(`/api/ms/top-products?${msPeriodQuery(period)}&limit=${limit}&sort=${sort}`, MsTopProductsSchema, { signal, channelId }),
-  });
-}
-
-/**
- * Сравнение ассортимента текущего окна с предыдущим равным (compare=prev). Отдельный хук с `enabled`-
- * гейтом, чтобы компактная карточка «Товаров» НИКОГДА не запрашивала сравнение — только полная
- * страница на вкладке «Динамика». Сервер отдаёт сразу три метрики (выручка/прибыль/штуки), поэтому
- * ключ окна-независим от выбранной метрики: переключение показателя не рефетчит и не плодит ключей.
- * `limit=1` держит легаси-rows минимальными — списки движений приходят из comparison, а не из rows.
- */
-export function useMsAssortmentComparison(period: MsPeriod, enabled: boolean) {
-  const { channelId } = useSelectedChannel();
-  return useQuery({
-    enabled: enabled && channelId != null,
-    queryKey: ['ms-top-products-compare', channelId, ...msPeriodKey(period)],
-    staleTime: STALE_LIVE,
-    retry: false,
-    queryFn: ({ signal }) =>
-      apiGet(`/api/ms/top-products?${msPeriodQuery(period)}&limit=1&compare=prev`, MsTopProductsSchema, { signal, channelId }),
-  });
-}
-
-const MsStockSchema = z
-  .object({
-    window_days: z.number(),
-    // Сервер сортирует по срочности (days_left ASC NULLS LAST → stock ASC) и отдаёт первые
-    // 200 строк; days_left=null — товар без продаж за окно («нет продаж», не бесконечность).
-    rows: z.array(
-      z
-        .object({
-          id: z.string().nullable(),
-          name: z.string().nullable(),
-          stock: z.number(),
-          reserve: z.number(),
-          days_left: z.number().nullable(),
-          sold_window: z.number(),
-        })
-        .passthrough(),
-    ),
-  })
-  .passthrough();
-export type MsStock = z.infer<typeof MsStockSchema>;
-export type MsStockRow = MsStock['rows'][number];
-
-/** Остатки «что заканчивается»: живой отчёт склада + скорость продаж выбранного окна. Окно
-    ОБЯЗАНО быть конечным — «Всё» (days=0 без диапазона) сервер отвечает 400, вызывающие
-    подменяют его конечным 30-дневным окном. */
-export function useMsStock(period: MsPeriod) {
-  const { channelId } = useSelectedChannel();
-  return useQuery({
-    enabled: channelId != null,
-    queryKey: ['ms-stock', channelId, ...msPeriodKey(period)],
-    staleTime: STALE_LIVE,
-    retry: false,
-    queryFn: ({ signal }) => apiGet(`/api/ms/stock?${msPeriodQuery(period)}`, MsStockSchema, { signal, channelId }),
   });
 }
 
@@ -1151,9 +638,8 @@ export type ChartAnnotation = z.infer<typeof AnnotationSchema>;
 export function useAnnotations(channelId: number | null) {
   return useQuery({
     enabled: channelId != null,
-    queryKey: ['annotations', channelId],
+    queryKey: qk.annotations(channelId),
     staleTime: STALE_ARCHIVE,
-    retry: false,
     queryFn: ({ signal }) => apiGet(`/api/channels/${channelId}/annotations`, AnnotationsResponseSchema, { signal }),
   });
 }
@@ -1161,7 +647,7 @@ export function useAnnotations(channelId: number | null) {
 export function useChannelKeys(id: number | null) {
   return useQuery({
     enabled: id != null,
-    queryKey: ['channel-keys', id],
+    queryKey: qk.channelKeys(id),
     staleTime: STALE_LIVE,
     queryFn: ({ signal }) =>
       apiGet(`/api/channels/${id}/keys`, z.object({ keys: z.array(KeySchema) }).passthrough(), { signal }),
@@ -1171,7 +657,7 @@ export function useChannelKeys(id: number | null) {
 export function useCollectorStatus(id: number | null) {
   return useQuery({
     enabled: id != null,
-    queryKey: ['collector-status', id],
+    queryKey: qk.collectorStatus(id),
     staleTime: STALE_STATUS,
     queryFn: ({ signal }) => apiGet(`/api/channels/${id}/collector-status`, CollectorStatusResponseSchema, { signal }),
   });
@@ -1179,7 +665,7 @@ export function useCollectorStatus(id: number | null) {
 
 export function useAdminUsers() {
   return useQuery({
-    queryKey: ['admin-users'],
+    queryKey: qk.adminUsers,
     staleTime: STALE_LIVE,
     queryFn: ({ signal }) => apiGet('/api/admin/users', AdminUsersResponseSchema, { signal }),
   });
@@ -1187,7 +673,7 @@ export function useAdminUsers() {
 
 export function useBugs() {
   return useQuery({
-    queryKey: ['bugs'],
+    queryKey: qk.bugs,
     staleTime: STALE_LIVE,
     queryFn: ({ signal }) => apiGet('/api/bugs', BugsResponseSchema, { signal }),
   });
@@ -1197,7 +683,7 @@ export function useCreateChannel() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: { username: string }) => apiSend('POST', '/api/channels', body, ChannelSchema),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['channels'] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.channels }),
   });
 }
 
@@ -1205,7 +691,7 @@ export function useDeleteChannel() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: number) => apiSend('DELETE', `/api/channels/${id}`, undefined, OkSchema),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['channels'] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.channels }),
   });
 }
 
@@ -1213,7 +699,7 @@ export function useCreateKey(channelId: number) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: { label: string }) => apiSend('POST', `/api/channels/${channelId}/key`, body, CreateKeyResponseSchema),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['channel-keys', channelId] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.channelKeys(channelId) }),
   });
 }
 
@@ -1221,7 +707,7 @@ export function useRevokeKey(channelId: number) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (keyId: number) => apiSend('DELETE', `/api/channels/${channelId}/key/${keyId}`, undefined, OkSchema),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['channel-keys', channelId] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.channelKeys(channelId) }),
   });
 }
 
@@ -1229,7 +715,7 @@ export function useUpdateUser(id: number) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: { role?: string; status?: string }) => apiSend('PATCH', `/api/admin/users/${id}`, body, AdminUserSchema),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin-users'] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.adminUsers }),
   });
 }
 
@@ -1238,15 +724,15 @@ export function useAdminDeleteUser() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: number) => apiSend('DELETE', `/api/admin/users/${id}`, undefined, OkSchema),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin-users'] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.adminUsers }),
   });
 }
 
 /**
  * GDPR F4 (self-serve): немедленный hard-delete собственного аккаунта. `confirm` — email
  * аккаунта (подтверждение намерения; пароль не годится — Google-аккаунты живут без него).
- * После успеха сессия мертва и на сервере (users-строки больше нет) — чистим локально и
- * сбрасываем весь кэш; редирект — на вызывающей стороне.
+ * После успеха сервер удаляет пользователя и очищает HttpOnly-cookie; сбрасываем
+ * выбранный канал/кэш, редирект остаётся на вызывающей стороне.
  */
 export function useDeleteAccount() {
   const qc = useQueryClient();
@@ -1254,9 +740,8 @@ export function useDeleteAccount() {
   return useMutation({
     mutationFn: (confirm: string) => apiSend('DELETE', '/api/account', { confirm }, OkSchema),
     onSuccess: () => {
-      clearSessionToken();
       setChannelId(null);
-      qc.clear();
+      qc.getQueryCache().clear();
     },
   });
 }
@@ -1266,7 +751,7 @@ export function useCreateBug() {
   return useMutation({
     mutationFn: (body: { text: string; severity: string; context: string; kind: string }) =>
       apiSend('POST', '/api/bugs', body, BugSchema),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['bugs'] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.bugs }),
   });
 }
 
@@ -1274,7 +759,7 @@ export function useUpdateBugStatus(id: number) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: { status: string }) => apiSend('PATCH', `/api/bugs/${id}`, body, BugSchema),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['bugs'] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.bugs }),
   });
 }
 
@@ -1282,7 +767,7 @@ export function useDeleteBug() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: number) => apiSend('DELETE', `/api/bugs/${id}`, undefined, OkSchema),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['bugs'] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.bugs }),
   });
 }
 
@@ -1295,7 +780,7 @@ export type ReportSchedule = 'none' | 'weekly' | 'monthly';
 export function useReports(enabled = true) {
   return useQuery({
     enabled,
-    queryKey: ['reports'],
+    queryKey: qk.reports,
     staleTime: STALE_LIVE,
     queryFn: ({ signal }) => apiGet('/api/reports', ReportsResponseSchema, { signal }),
   });
@@ -1305,7 +790,7 @@ export function useReports(enabled = true) {
 export function useReport(id: number | null) {
   return useQuery({
     enabled: id != null,
-    queryKey: ['report', id],
+    queryKey: qk.report(id),
     staleTime: STALE_LIVE,
     queryFn: ({ signal }) => apiGet(`/api/reports/${id}`, ReportResponseSchema, { signal }),
   });
@@ -1318,8 +803,8 @@ export function useCreateReport() {
       apiSend('POST', '/api/reports', body, ReportResponseSchema),
     onSuccess: (data) => {
       // Seed the detail cache so the follow-up navigate renders without a refetch.
-      qc.setQueryData(['report', data.report.id], data);
-      return qc.invalidateQueries({ queryKey: ['reports'] });
+      qc.setQueryData(qk.report(data.report.id), data);
+      return qc.invalidateQueries({ queryKey: qk.reports });
     },
   });
 }
@@ -1332,8 +817,8 @@ export function useUpdateReport(id: number) {
     onSuccess: (data) => {
       // The PUT echoes the full report — write it straight into the detail cache (no refetch
       // after every debounced config save) and refresh the list (name / updated_at ordering).
-      qc.setQueryData(['report', id], data);
-      return qc.invalidateQueries({ queryKey: ['reports'] });
+      qc.setQueryData(qk.report(id), data);
+      return qc.invalidateQueries({ queryKey: qk.reports });
     },
   });
 }
@@ -1342,7 +827,7 @@ export function useDeleteReport() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: number) => apiSend('DELETE', `/api/reports/${id}`, undefined, OkSchema),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['reports'] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.reports }),
   });
 }
 
@@ -1353,7 +838,7 @@ export function useDeleteReport() {
 export function useCampaigns(channelId: number | null = null) {
   return useQuery({
     enabled: !isDemoMode() && channelId != null,
-    queryKey: ['campaigns', channelId],
+    queryKey: qk.campaigns.list(channelId),
     staleTime: STALE_LIVE,
     queryFn: ({ signal }) => apiGet(`/api/campaigns?channel_id=${channelId}`, CampaignsResponseSchema, { signal }),
   });
@@ -1362,7 +847,7 @@ export function useCampaigns(channelId: number | null = null) {
 export function useCampaign(id: number | null) {
   return useQuery({
     enabled: id != null && !isDemoMode(),
-    queryKey: ['campaign', id],
+    queryKey: qk.campaign(id),
     staleTime: STALE_LIVE,
     queryFn: ({ signal }) => apiGet(`/api/campaigns/${id}`, CampaignResponseSchema, { signal }),
   });
@@ -1373,7 +858,7 @@ export function useCampaign(id: number | null) {
 export function useCampaignPosts(id: number | null) {
   return useQuery({
     enabled: id != null && !isDemoMode(),
-    queryKey: ['campaign-posts', id],
+    queryKey: qk.campaignPosts(id),
     staleTime: STALE_LIVE,
     queryFn: ({ signal }) => apiGet(`/api/campaigns/${id}/posts`, CampaignPostsResponseSchema, { signal }),
   });
@@ -1390,7 +875,7 @@ export function useCampaignSummary(
     : '';
   return useQuery({
     enabled: enabled && id != null && !isDemoMode(),
-    queryKey: ['campaign-summary', id, scopeKey],
+    queryKey: qk.campaignSummary(id, scopeKey),
     staleTime: STALE_LIVE,
     queryFn: ({ signal }) => apiGet(`/api/campaigns/${id}/summary${query}`, CampaignSummaryResponseSchema, { signal }),
   });
@@ -1411,8 +896,8 @@ export function useCreateCampaign() {
     mutationFn: (body: CampaignBody & { name: string; channel_id: number }) =>
       apiSend('POST', '/api/campaigns', body, CampaignResponseSchema),
     onSuccess: (data) => {
-      qc.setQueryData(['campaign', data.campaign.id], data);
-      return qc.invalidateQueries({ queryKey: ['campaigns'] });
+      qc.setQueryData(qk.campaign(data.campaign.id), data);
+      return qc.invalidateQueries({ queryKey: qk.campaigns.all });
     },
   });
 }
@@ -1422,10 +907,10 @@ export function useUpdateCampaign(id: number) {
   return useMutation({
     mutationFn: (body: CampaignBody) => apiSend('PATCH', `/api/campaigns/${id}`, body, CampaignResponseSchema),
     onSuccess: (data) => {
-      qc.setQueryData(['campaign', id], data);
+      qc.setQueryData(qk.campaign(id), data);
       // Сводка несёт копию campaign-строки в заголовке — обновляем и её.
-      qc.invalidateQueries({ queryKey: ['campaign-summary', id] });
-      return qc.invalidateQueries({ queryKey: ['campaigns'] });
+      qc.invalidateQueries({ queryKey: qk.campaignSummary(id) });
+      return qc.invalidateQueries({ queryKey: qk.campaigns.all });
     },
   });
 }
@@ -1435,10 +920,10 @@ export function useDeleteCampaign() {
   return useMutation({
     mutationFn: (id: number) => apiSend('DELETE', `/api/campaigns/${id}`, undefined, OkSchema),
     onSuccess: (_data, id) => {
-      qc.removeQueries({ queryKey: ['campaign', id] });
-      qc.removeQueries({ queryKey: ['campaign-posts', id] });
-      qc.removeQueries({ queryKey: ['campaign-summary', id] });
-      return qc.invalidateQueries({ queryKey: ['campaigns'] });
+      qc.removeQueries({ queryKey: qk.campaign(id) });
+      qc.removeQueries({ queryKey: qk.campaignPosts(id) });
+      qc.removeQueries({ queryKey: qk.campaignSummary(id) });
+      return qc.invalidateQueries({ queryKey: qk.campaigns.all });
     },
   });
 }
@@ -1450,10 +935,10 @@ export function useAddCampaignPosts() {
     mutationFn: ({ campaignId, items }: { campaignId: number; items: CampaignPostInput[] }) =>
       apiSend('POST', `/api/campaigns/${campaignId}/posts`, { items }, CampaignAddResultSchema),
     onSuccess: (_data, { campaignId }) => {
-      qc.invalidateQueries({ queryKey: ['campaign', campaignId] });
-      qc.invalidateQueries({ queryKey: ['campaign-posts', campaignId] });
-      qc.invalidateQueries({ queryKey: ['campaign-summary', campaignId] });
-      return qc.invalidateQueries({ queryKey: ['campaigns'] });
+      qc.invalidateQueries({ queryKey: qk.campaign(campaignId) });
+      qc.invalidateQueries({ queryKey: qk.campaignPosts(campaignId) });
+      qc.invalidateQueries({ queryKey: qk.campaignSummary(campaignId) });
+      return qc.invalidateQueries({ queryKey: qk.campaigns.all });
     },
   });
 }
@@ -1464,10 +949,10 @@ export function useRemoveCampaignPosts() {
     mutationFn: ({ campaignId, items }: { campaignId: number; items: CampaignPostInput[] }) =>
       apiSend('DELETE', `/api/campaigns/${campaignId}/posts`, { items }, CampaignRemoveResultSchema),
     onSuccess: (_data, { campaignId }) => {
-      qc.invalidateQueries({ queryKey: ['campaign', campaignId] });
-      qc.invalidateQueries({ queryKey: ['campaign-posts', campaignId] });
-      qc.invalidateQueries({ queryKey: ['campaign-summary', campaignId] });
-      return qc.invalidateQueries({ queryKey: ['campaigns'] });
+      qc.invalidateQueries({ queryKey: qk.campaign(campaignId) });
+      qc.invalidateQueries({ queryKey: qk.campaignPosts(campaignId) });
+      qc.invalidateQueries({ queryKey: qk.campaignSummary(campaignId) });
+      return qc.invalidateQueries({ queryKey: qk.campaigns.all });
     },
   });
 }

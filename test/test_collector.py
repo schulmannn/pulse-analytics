@@ -1,4 +1,6 @@
+import argparse
 import asyncio
+import os
 import sqlite3
 import tempfile
 import unittest
@@ -9,6 +11,10 @@ from collector import pulse_collector
 from collector.pulse_collector import ApiHttpError, DeliveryQueue
 
 CONFIG = {"PULSE_API_URL": "http://api.test", "PULSE_API_KEY": "key"}
+
+
+class _StopLoop(Exception):
+    """Breaks the otherwise-eternal run loop once the recheck cadence has been observed."""
 
 
 def row_status(queue: DeliveryQueue, ingest_id: str):
@@ -144,6 +150,78 @@ class FlushQueueRetryPolicyTests(unittest.TestCase):
             self.assertEqual(queue.count(), 0)
             self.assertIsNone(row_status(queue, "ok-1"))
             queue.close()
+
+
+class RunLoopCompatibilityTests(unittest.TestCase):
+    """The eternal `run` re-verifies /api/collector/compatibility (doctor's check):
+    an incompatible schema stops the process loudly instead of silently dead-lettering
+    every collection; a transient failure of the check itself never kills the loop."""
+
+    def check(self):
+        return asyncio.run(pulse_collector.ensure_compatibility(CONFIG))
+
+    def test_supported_schema_keeps_running(self):
+        with mock.patch.object(
+            pulse_collector,
+            "api_request",
+            return_value={"supported_schema_versions": [pulse_collector.SCHEMA_VERSION]},
+        ):
+            self.check()  # must not raise
+
+    def test_incompatible_schema_stops_loudly_with_exit_code_2(self):
+        with mock.patch.object(
+            pulse_collector,
+            "api_request",
+            return_value={"supported_schema_versions": [999]},
+        ):
+            with self.assertLogs("pulse-collector", level="ERROR") as logs:
+                with self.assertRaises(SystemExit) as stop:
+                    self.check()
+        self.assertEqual(stop.exception.code, 2)
+        self.assertTrue(any("Update the collector" in line for line in logs.output))
+
+    def test_transient_check_failure_does_not_stop_the_loop(self):
+        with mock.patch.object(
+            pulse_collector,
+            "api_request",
+            side_effect=RuntimeError("Atlavue API unavailable: connection refused"),
+        ):
+            with self.assertLogs("pulse-collector", level="WARNING"):
+                self.check()  # must not raise
+
+    def test_run_loop_rechecks_on_first_pass_and_every_20th(self):
+        recheck_at: list[int] = []
+        runs = 0
+
+        async def fake_ensure(config):
+            recheck_at.append(runs)
+
+        async def fake_run_once(queue, config, include_mentions):
+            nonlocal runs
+            runs += 1
+
+        async def fake_sleep(seconds):
+            if runs > 2 * pulse_collector.COMPATIBILITY_RECHECK_PASSES:
+                raise _StopLoop()
+
+        with tempfile.TemporaryDirectory() as directory:
+            env = {
+                "COLLECTOR_STATE_DIR": directory,
+                "PULSE_API_URL": "http://api.test",
+                "PULSE_API_KEY": "key",
+                "TG_API_ID": "1",
+                "TG_API_HASH": "hash",
+                "TG_SESSION": "session",
+                "TG_CHANNEL": "@channel",
+            }
+            args = argparse.Namespace(command="run", mentions=False)
+            with mock.patch.dict(os.environ, env), \
+                    mock.patch.object(pulse_collector, "ensure_compatibility", fake_ensure), \
+                    mock.patch.object(pulse_collector, "run_once", fake_run_once), \
+                    mock.patch.object(pulse_collector.asyncio, "sleep", fake_sleep):
+                with self.assertRaises(_StopLoop):
+                    asyncio.run(pulse_collector.async_main(args))
+        self.assertEqual(recheck_at, [0, 20, 40])
 
 
 if __name__ == "__main__":

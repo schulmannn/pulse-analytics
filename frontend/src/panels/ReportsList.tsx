@@ -4,7 +4,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useChannels, useCreateReport, useReports } from '@/api/queries';
 import type { ReportListItem } from '@/api/schemas';
 import { useDemo } from '@/lib/demo-context';
-import { fmt } from '@/lib/format';
+import { fmt, pluralRu } from '@/lib/format';
 import { useMediaQuery } from '@/lib/useMediaQuery';
 import {
   filterReports,
@@ -123,6 +123,7 @@ function ReportsListDesktop() {
               onChange={setQuery}
               placeholder="Название или источник"
               ariaLabel="Поиск отчётов"
+              resultsLabel={`${visible.length} ${pluralRu(visible.length, ['отчёт', 'отчёта', 'отчётов'])}`}
             />
             <SegmentedControl<ReportListFilter>
               ariaLabel="Фильтр отчётов"

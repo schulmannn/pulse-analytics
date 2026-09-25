@@ -1,4 +1,5 @@
 import { useState, type ChangeEvent, type FormEvent } from 'react';
+import { toast } from 'sonner';
 import {
   useChangePassword,
   useDeleteAccount,
@@ -8,8 +9,6 @@ import {
 } from '@/api/queries';
 import { ApiError } from '@/api/client';
 import { resizeImageToDataUrl } from '@/lib/image';
-import { useTheme, type ThemeMode } from '@/lib/theme';
-import { cn } from '@/lib/utils';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import {
   AlertDialog,
@@ -21,24 +20,19 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import {
-  BTN_DESTRUCTIVE,
-  BTN_SECONDARY,
-  SettingsGroup,
-  SettingsIcon,
-  SettingsRow,
-  type SettingsIconName,
-} from '@/components/settings/primitives';
+import { SettingsGroup, SettingsRow } from '@/components/settings/primitives';
 
-/**
- * The account panes — Профиль / Оформление / Безопасность. Each is its own dialog section
- * (left-nav item), so panes hold ONLY their rows: open hairline ledger, no inner rail,
- * no scroll-spy, no duplicated heading (the dialog header already names the pane).
- */
+/** Account settings: профиль и безопасность. Оформление живёт в AppearanceStudio. */
 
 export function ProfileSection() {
   const me = useMe();
@@ -78,128 +72,84 @@ export function ProfileSection() {
 
   return (
     <SettingsGroup>
-      <SettingsRow
-        title="Фото профиля"
-        description="PNG, JPEG или WebP — уменьшим до 256 px."
-        control={
-          <>
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-avatar text-xs font-medium text-ink2">
-              {avatar ? (
-                <img
-                  src={avatar}
-                  alt=""
-                  className="h-full w-full object-cover"
+      <div className="px-5 py-5 @min-[34rem]:py-6">
+        <div className="flex flex-col gap-4 @min-[34rem]:flex-row @min-[34rem]:items-center">
+          <span className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-full bg-avatar text-base font-medium text-ink2 ring-1 ring-border">
+            {avatar ? (
+              <img src={avatar} alt="" className="h-full w-full object-cover" />
+            ) : (
+              initials
+            )}
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium text-foreground">Фото профиля</p>
+            <p className="mt-1 text-xs leading-relaxed text-ink3">
+              PNG, JPEG или WebP. Изображение автоматически уменьшается до 256 px.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 @min-[34rem]:shrink-0">
+            <Button
+              asChild
+              variant="secondary"
+              size="sm"
+              pending={updateAvatar.isPending}
+              className="cursor-pointer bg-secondary text-secondary-foreground hover:bg-secondary/80"
+            >
+              <label>
+                {updateAvatar.isPending
+                  ? 'Загрузка…'
+                  : avatar
+                    ? 'Сменить фото'
+                    : 'Загрузить фото'}
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  className="hidden"
+                  onChange={onFile}
+                  disabled={updateAvatar.isPending}
                 />
-              ) : (
-                initials
-              )}
-            </span>
-            <label className={cn(BTN_SECONDARY, 'cursor-pointer')}>
-              {updateAvatar.isPending
-                ? 'Загрузка…'
-                : avatar
-                  ? 'Сменить фото'
-                  : 'Загрузить фото'}
-              <input
-                type="file"
-                accept="image/png,image/jpeg,image/webp"
-                className="hidden"
-                onChange={onFile}
-                disabled={updateAvatar.isPending}
-              />
-            </label>
+              </label>
+            </Button>
             {avatar && (
-              <button
+              <Button
                 type="button"
+                variant="destructive"
+                size="sm"
                 onClick={() => removeAvatar.mutate()}
+                pending={removeAvatar.isPending}
                 disabled={removeAvatar.isPending}
-                className={BTN_DESTRUCTIVE}
               >
                 Удалить
-              </button>
+              </Button>
             )}
-          </>
-        }
-        footer={
-          err ? (
-            <p className="mt-2 text-xs font-medium text-destructive">{err}</p>
-          ) : null
-        }
-      />
-      <SettingsRow
-        title="Email"
-        description="Адрес, с которым вы входите в Atlavue."
-        control={
-          <span className="font-mono text-xs text-ink2">{email || '—'}</span>
-        }
-      />
+          </div>
+        </div>
+        {err ? (
+          <p role="alert" className="mt-3 text-xs font-medium text-destructive">
+            {err}
+          </p>
+        ) : null}
+      </div>
+      <div className="px-5 py-4 @min-[34rem]:py-5">
+        <p className="text-sm font-medium text-foreground">Email</p>
+        <p className="mt-1 break-all text-sm text-ink2">{email || '—'}</p>
+        <p className="mt-1 text-xs leading-relaxed text-ink3">
+          Адрес, с которым вы входите в Atlavue.
+        </p>
+      </div>
     </SettingsGroup>
-  );
-}
-
-const THEME_OPTIONS: Array<{
-  value: ThemeMode;
-  label: string;
-  icon: SettingsIconName;
-}> = [
-  { value: 'light', label: 'Светлая', icon: 'sun' },
-  { value: 'system', label: 'Системная', icon: 'monitor' },
-  { value: 'dark', label: 'Тёмная', icon: 'moon' },
-];
-
-export function AppearanceSection() {
-  return (
-    <SettingsGroup>
-      <SettingsRow
-        title="Тема"
-        description="Внешний вид интерфейса на этом устройстве."
-        control={<ThemeControl />}
-      />
-    </SettingsGroup>
-  );
-}
-
-/** Pill segment Светлая | Системная | Тёмная — same store the account-menu segment uses. */
-function ThemeControl() {
-  const { mode, setMode } = useTheme();
-  return (
-    <div
-      role="group"
-      aria-label="Тема интерфейса"
-      className="flex items-center gap-0.5 rounded-full border border-border p-0.5"
-    >
-      {THEME_OPTIONS.map((option) => {
-        const active = mode === option.value;
-        return (
-          <button
-            key={option.value}
-            type="button"
-            aria-pressed={active}
-            onClick={() => setMode(option.value)}
-            className={cn(
-              'flex items-center gap-1.5 rounded-full px-3 py-1 text-xs transition-colors',
-              active
-                ? 'bg-muted font-medium text-foreground'
-                : 'text-muted-foreground hover:text-foreground',
-            )}
-          >
-            <SettingsIcon name={option.icon} className="h-3.5 w-3.5" />
-            {option.label}
-          </button>
-        );
-      })}
-    </div>
   );
 }
 
 /** «Безопасность» — change the account password (POST /api/auth/change-password). */
 export function SecuritySection() {
+  const me = useMe();
   const changePassword = useChangePassword();
+  const [open, setOpen] = useState(false);
   const [current, setCurrent] = useState('');
   const [next, setNext] = useState('');
   const [confirm, setConfirm] = useState('');
   const [err, setErr] = useState<string | null>(null);
-  const [done, setDone] = useState(false);
 
   const tooShort = next.length > 0 && next.length < 8;
   const mismatch = confirm.length > 0 && confirm !== next;
@@ -209,10 +159,17 @@ export function SecuritySection() {
     next.length >= 8 &&
     confirm === next;
 
+  const resetForm = () => {
+    setCurrent('');
+    setNext('');
+    setConfirm('');
+    setErr(null);
+    changePassword.reset();
+  };
+
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setErr(null);
-    setDone(false);
     if (next.length < 8) {
       setErr('Новый пароль минимум 8 символов');
       return;
@@ -223,10 +180,9 @@ export function SecuritySection() {
     }
     try {
       await changePassword.mutateAsync({ current, next });
-      setDone(true);
-      setCurrent('');
-      setNext('');
-      setConfirm('');
+      toast('Пароль изменён');
+      setOpen(false);
+      resetForm();
     } catch (error) {
       setErr(
         error instanceof ApiError
@@ -239,101 +195,132 @@ export function SecuritySection() {
   };
 
   return (
-    <SettingsGroup>
-      <SettingsRow
-        title="Пароль"
-        description="Минимум 8 символов. После смены другие сессии остаются активными."
-        footer={
-          <form
-            onSubmit={onSubmit}
-            className="mt-4 w-full max-w-[340px] space-y-3"
-          >
-            <div>
-              <Label htmlFor="pw-current" className="mb-1.5 block">
-                Текущий пароль
-              </Label>
-              <Input
-                id="pw-current"
-                type="password"
-                autoComplete="current-password"
-                value={current}
-                onChange={(e) => {
-                  setCurrent(e.target.value);
-                  setErr(null);
-                  setDone(false);
-                }}
-                disabled={changePassword.isPending}
-              />
-            </div>
-            <div>
-              <Label htmlFor="pw-next" className="mb-1.5 block">
-                Новый пароль
-              </Label>
-              <Input
-                id="pw-next"
-                type="password"
-                autoComplete="new-password"
-                minLength={8}
-                aria-invalid={tooShort || undefined}
-                aria-describedby={tooShort ? 'pw-next-hint' : undefined}
-                value={next}
-                onChange={(e) => {
-                  setNext(e.target.value);
-                  setErr(null);
-                  setDone(false);
-                }}
-                disabled={changePassword.isPending}
-              />
-              {tooShort && (
-                <p id="pw-next-hint" className="mt-1 text-2xs text-ink3">
-                  Минимум 8 символов.
-                </p>
-              )}
-            </div>
-            <div>
-              <Label htmlFor="pw-confirm" className="mb-1.5 block">
-                Повторите новый пароль
-              </Label>
-              <Input
-                id="pw-confirm"
-                type="password"
-                autoComplete="new-password"
-                aria-invalid={mismatch || undefined}
-                aria-describedby={mismatch ? 'pw-confirm-err' : undefined}
-                value={confirm}
-                onChange={(e) => {
-                  setConfirm(e.target.value);
-                  setErr(null);
-                  setDone(false);
-                }}
-                disabled={changePassword.isPending}
-              />
-              {mismatch && (
-                <p
-                  id="pw-confirm-err"
-                  className="mt-1 text-2xs text-destructive"
-                >
-                  Пароли не совпадают.
-                </p>
-              )}
-            </div>
-
-            <div className="flex items-center gap-3 pt-0.5" aria-live="polite">
-              <Button type="submit" size="sm" disabled={!canSubmit}>
-                {changePassword.isPending ? 'Сохранение…' : 'Изменить пароль'}
+    <div className="space-y-8">
+      <SettingsGroup>
+        <SettingsRow
+          title="Пароль"
+          description="После изменения все остальные сессии будут завершены."
+          control={
+            <>
+              <Button type="button" variant="secondary" size="sm" onClick={() => setOpen(true)}>
+                Сменить пароль
               </Button>
-              {done && <Badge variant="success">Пароль изменён</Badge>}
-            </div>
-            {err && (
-              <Alert variant="destructive" className="py-2.5">
-                <AlertDescription className="text-xs">{err}</AlertDescription>
-              </Alert>
-            )}
-          </form>
-        }
-      />
-      <DeleteAccountRow />
-    </SettingsGroup>
+              <Dialog
+                open={open}
+                onOpenChange={(nextOpen) => {
+                  setOpen(nextOpen);
+                  if (!nextOpen) resetForm();
+                }}
+              >
+                <DialogContent className="max-w-md">
+                  <DialogHeader>
+                    <DialogTitle>Сменить пароль</DialogTitle>
+                    <DialogDescription>
+                      Используйте не менее 8 символов. После изменения все остальные сессии будут завершены.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <form onSubmit={onSubmit} className="space-y-3">
+                    <div>
+                      <Label htmlFor="pw-current" className="mb-1.5 block">
+                        Текущий пароль
+                      </Label>
+                      <Input
+                        id="pw-current"
+                        type="password"
+                        autoComplete="current-password"
+                        value={current}
+                        onChange={(event) => {
+                          setCurrent(event.target.value);
+                          setErr(null);
+                        }}
+                        disabled={changePassword.isPending}
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="pw-next" className="mb-1.5 block">
+                        Новый пароль
+                      </Label>
+                      <Input
+                        id="pw-next"
+                        type="password"
+                        autoComplete="new-password"
+                        minLength={8}
+                        aria-invalid={tooShort || undefined}
+                        aria-describedby={tooShort ? 'pw-next-hint' : undefined}
+                        value={next}
+                        onChange={(event) => {
+                          setNext(event.target.value);
+                          setErr(null);
+                        }}
+                        disabled={changePassword.isPending}
+                      />
+                      {tooShort && (
+                        <p id="pw-next-hint" className="mt-1 text-2xs text-ink3">
+                          Минимум 8 символов.
+                        </p>
+                      )}
+                    </div>
+                    <div>
+                      <Label htmlFor="pw-confirm" className="mb-1.5 block">
+                        Повторите новый пароль
+                      </Label>
+                      <Input
+                        id="pw-confirm"
+                        type="password"
+                        autoComplete="new-password"
+                        aria-invalid={mismatch || undefined}
+                        aria-describedby={mismatch ? 'pw-confirm-err' : undefined}
+                        value={confirm}
+                        onChange={(event) => {
+                          setConfirm(event.target.value);
+                          setErr(null);
+                        }}
+                        disabled={changePassword.isPending}
+                      />
+                      {mismatch && (
+                        <p id="pw-confirm-err" className="mt-1 text-2xs text-destructive">
+                          Пароли не совпадают.
+                        </p>
+                      )}
+                    </div>
+                    {err && (
+                      <Alert variant="destructive" className="py-2.5">
+                        <AlertDescription className="text-xs">{err}</AlertDescription>
+                      </Alert>
+                    )}
+                    <div className="flex flex-col-reverse gap-2 pt-1 sm:flex-row sm:justify-end">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => {
+                          setOpen(false);
+                          resetForm();
+                        }}
+                      >
+                        Отмена
+                      </Button>
+                      <Button type="submit" size="sm" pending={changePassword.isPending} disabled={!canSubmit}>
+                        {changePassword.isPending ? 'Сохранение…' : 'Изменить пароль'}
+                      </Button>
+                    </div>
+                  </form>
+                </DialogContent>
+              </Dialog>
+            </>
+          }
+        />
+      </SettingsGroup>
+      {me.data?.role !== 'superuser' && (
+        <SettingsGroup
+          title="Опасная зона"
+          description="Действия ниже необратимы и требуют отдельного подтверждения."
+          variant="danger"
+        >
+          <DeleteAccountRow />
+        </SettingsGroup>
+      )}
+    </div>
   );
 }
 
@@ -435,6 +422,7 @@ function DeleteAccountRow() {
                   type="submit"
                   variant="destructive"
                   size="sm"
+                  pending={deleteAccount.isPending}
                   disabled={!match || deleteAccount.isPending}
                 >
                   {deleteAccount.isPending ? 'Удаление…' : 'Удалить навсегда'}

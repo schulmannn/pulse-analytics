@@ -82,14 +82,20 @@ export const MeSchema = z
     // Гейт AI-поверхностей (hero на Главной, /ai): optional — старые ответы/фикстуры без поля
     // просто прячут фичу, ничего не ломая.
     ai: z.object({ enabled: z.boolean().optional() }).passthrough().optional(),
+    // Гейт витрин Rusender — тем же bootstrap-запросом и по той же причине, что ai: оболочка
+    // обязана знать про флаг, чтобы не показывать нав-строки разделов, которых для неё ещё нет,
+    // а тянуть ради этого ленивый модуль источника в шелл нельзя (бюджет бандла оболочки).
+    // optional — старые ответы/фикстуры без поля просто прячут разделы, ничего не ломая.
+    // ПЛОСКОЕ поле, а не вложенный объект как у `ai`: MeSchema лежит в общем чанке, и вложенный
+    // z.object().passthrough() стоил ~полкилобайта КАЖДОМУ маршруту метрик — маршрут МойСклада
+    // и так стоял в полукилобайте от потолка. Один булев того не стоит.
   })
   .passthrough();
 export type Me = z.infer<typeof MeSchema>;
 
 export const LoginResponseSchema = z
   .object({
-    token: z.string(),
-    expiresAt: z.string().optional().nullable(),
+    ok: z.literal(true),
     user: z
       .object({
         email: z.string().optional().nullable(),
@@ -267,6 +273,65 @@ export const MentionSettingsSchema = z
   })
   .passthrough();
 export type MentionSettings = z.infer<typeof MentionSettingsSchema>;
+
+/** Статус личных уведомлений об упоминаниях (привязка бота + подписка выбранного канала). */
+export const MentionNotifyStatusSchema = z
+  .object({
+    available: z.boolean(),
+    bot_configured: z.boolean(),
+    binding: z
+      .object({
+        bound: z.boolean(),
+        username: z.string().optional().nullable(),
+        bound_at: z.string().optional().nullable(),
+      })
+      .passthrough(),
+    subscription: z
+      .object({
+        enabled: z.boolean(),
+        send_days: z.array(z.coerce.number()).optional().nullable(),
+        send_hour: z.coerce.number().optional().nullable(),
+        last_run_at: z.string().optional().nullable(),
+        last_notified_at: z.string().optional().nullable(),
+        last_error: z.string().optional().nullable(),
+      })
+      .passthrough(),
+    requirements: z
+      .object({
+        rules_configured: z.boolean(),
+        session_state: z.enum(['ok', 'missing', 'reauth_required']),
+      })
+      .passthrough()
+      .optional(),
+  })
+  .passthrough();
+export type MentionNotifyStatus = z.infer<typeof MentionNotifyStatusSchema>;
+
+export const MentionNotifyLinkSchema = z
+  .object({ url: z.string(), expires_in_minutes: z.coerce.number().optional() })
+  .passthrough();
+
+export const MentionNotifySubscriptionSchema = z
+  .object({
+    enabled: z.boolean(),
+    send_days: z.array(z.coerce.number()).optional().nullable(),
+    send_hour: z.coerce.number().optional().nullable(),
+    last_run_at: z.string().optional().nullable(),
+    last_notified_at: z.string().optional().nullable(),
+    last_error: z.string().optional().nullable(),
+  })
+  .passthrough();
+
+/** Итог ручного тест-прогона «Прислать сейчас». */
+export const MentionNotifyRunSchema = z
+  .object({
+    ok: z.boolean(),
+    seed: z.boolean().optional(),
+    found: z.coerce.number().optional(),
+    fresh: z.coerce.number().optional(),
+    sent: z.coerce.number().optional(),
+  })
+  .passthrough();
 
 export const HistoryRowSchema = z
   .object({

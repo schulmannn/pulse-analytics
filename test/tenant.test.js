@@ -104,3 +104,62 @@ t.test('hasWorkspaceRole ranks roles and falls back to creator', () => {
   a.ok(hasWorkspaceRole({ id: null }, user, 'owner'), 'DB-off dev mode allows');
   a.throws(() => hasWorkspaceRole({ id: 1 }, user, 'root'), /unknown workspace role/);
 });
+
+const { tenantChannelId } = require('../server/middleware/tenant');
+
+/**
+ * Канал арендатора: заголовок — канон, `?channel=` — только для ссылок, где заголовок не поставить.
+ *
+ * Прежняя строка `parseInt(req.query.channel || req.headers['x-channel-id'], 10) || 0` превращала
+ * ЛЮБОЙ мусор в «канал по умолчанию» и заодно съедала заголовок. На этом лента заказов СДЭКа,
+ * слав свой фильтр `?channel=yandex_market`, уезжала на чужой канал и отвечала 404.
+ */
+const req = (query, headers = {}) => ({ query, headers });
+
+test('tenantChannelId: числовой ?channel выигрывает у заголовка', () => {
+  assert.equal(tenantChannelId(req({ channel: '5' }, { 'x-channel-id': '9' })), 5);
+});
+
+test('tenantChannelId: нечисловой ?channel игнорируется, берётся заголовок', () => {
+  assert.equal(tenantChannelId(req({ channel: 'yandex_market' }, { 'x-channel-id': '5' })), 5);
+  // Ключ канала продаж, случайно похожий на число с хвостом, — тоже не идентификатор.
+  assert.equal(tenantChannelId(req({ channel: '5abc' }, { 'x-channel-id': '7' })), 7);
+  assert.equal(tenantChannelId(req({ channel: ' 5' }, { 'x-channel-id': '7' })), 7);
+});
+
+test('tenantChannelId: повторённый ?channel — массив, а не идентификатор', () => {
+  // `?channel=1&channel=2` Express отдаёт массивом; «первый попавшийся» тут выбирать нельзя.
+  assert.equal(tenantChannelId(req({ channel: ['1', '2'] }, { 'x-channel-id': '5' })), 5);
+});
+
+test('tenantChannelId: нет ни того, ни другого — 0 (канал по умолчанию)', () => {
+  assert.equal(tenantChannelId(req({}, {})), 0);
+  assert.equal(tenantChannelId(req({ channel: 'own' }, {})), 0);
+});
+
+/**
+ * Разбор канала арендатора живёт в ОДНОМ месте — и это проверяется по исходникам.
+ *
+ * Строка `parseInt(req.query.channel || req.headers['x-channel-id'], 10) || 0` была скопирована в
+ * шесть роутов. В СДЭКе рядом с копией завёлся фильтр с тем же именем — и лента заказов начала
+ * отвечать «Не удалось получить заказы» (#502); в МойСкладе такой же фильтр стоит рядом до сих пор
+ * («legacy single», moysklad.js). Чинить это по одному экземпляру бессмысленно: седьмая копия
+ * заведётся раньше, чем найдут шестую.
+ */
+test('ни один роут не разбирает канал арендатора сам', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const dir = path.join(__dirname, '..', 'server', 'routes');
+  const offenders = [];
+  for (const name of fs.readdirSync(dir)) {
+    if (!name.endsWith('.js')) continue;
+    const text = fs.readFileSync(path.join(dir, name), 'utf8');
+    text.split('\n').forEach((line, i) => {
+      // Признак самодельного разбора: чтение query.channel/x-channel-id вне tenantChannelId.
+      if (/req\.query\.channel\b\s*\|\|/.test(line) || /req\.headers\['x-channel-id'\]/.test(line)) {
+        offenders.push(`${name}:${i + 1} → ${line.trim()}`);
+      }
+    });
+  }
+  assert.deepEqual(offenders, [], `разбор канала арендатора продублирован:\n${offenders.join('\n')}`);
+});

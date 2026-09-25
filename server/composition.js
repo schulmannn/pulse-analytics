@@ -7,21 +7,31 @@
 const { rateLimit, ipKeyGenerator } = require('express-rate-limit');
 const crypto = require('crypto');
 const { createDatabase } = require('./db');
-const { hashPassword, verifyPassword, rateLimitKey } = require('./lib/auth');
+const { hashPassword, verifyPassword, rateLimitKey, readCookie, SESSION_COOKIE } = require('./lib/auth');
 const { captionSnippet } = require('./lib/caption');
 const { fetchWithTimeout } = require('./lib/http');
 const { createMtprotoClient } = require('./lib/mtproto-client');
 const { createIgCrypto } = require('./lib/ig_crypto');
 const { createMsCrypto } = require('./lib/ms_crypto');
 const { createMsClient } = require('./lib/msClient');
+const { createYmCrypto } = require('./lib/ym_crypto');
+const { createYmClient } = require('./lib/ymClient');
+const { createRusenderCrypto } = require('./lib/rusender_crypto');
+const { createRusenderClient } = require('./lib/rusenderClient');
 const { createTgCrypto } = require('./lib/tg_crypto');
 const { createNotionCrashClient } = require('./lib/notion_crash');
 const { log: defaultLog } = require('./lib/observability');
 const { makeResolveChannel, hasWorkspaceRole } = require('./middleware/tenant');
 const { createApp } = require('./app');
+// GDPR — сервис над пулом; собирается ЗДЕСЬ и инъектируется в фасад данных: db.js не имеет права
+// тянуть слой сервисов (гвард границ), а composition и так собирает все сервисы.
+const { createGdprService } = require('./services/gdprService');
 const { createAuthService } = require('./services/authService');
 const { createAiProvider } = require('./infrastructure/aiProvider');
 const { createAiChatService } = require('./services/aiChatService');
+const { createCdekImportService } = require('./services/cdekImportService');
+const { readSheetRows } = require('./lib/sheetReader');
+const { parseCdekSheet } = require('./domain/cdekImport');
 const { createEmailService } = require('./services/emailService');
 const { createAuditService } = require('./services/auditService');
 const { createInstagramClient } = require('./infrastructure/instagramClient');
@@ -31,9 +41,15 @@ const {
 } = require('./jobs/instagramCollectionJob');
 const { createMsCollectionJob } = require('./jobs/msCollectionJob');
 const { createMsBackfillEngine } = require('./jobs/msBackfillJob');
+const { createYmCollectionJob } = require('./jobs/ymCollectionJob');
+const { createRusenderCollectionJob } = require('./jobs/rusenderCollectionJob');
 const { createMemoryCache } = require('./infrastructure/memoryCache');
 const { createPersistenceJob } = require('./jobs/persistenceJob');
 const { createTgQrCollectionJob } = require('./jobs/tgQrCollectionJob');
+const { createMentionNotifyJob } = require('./jobs/mentionNotifyJob');
+const { createIgTokenRefreshJob } = require('./jobs/igTokenRefreshJob');
+const { createTgBot } = require('./lib/tgBot');
+const { webhookSecretOf } = require('./lib/tgNotifyText');
 const { createReportScheduleJob } = require('./jobs/reportScheduleJob');
 const { createDailyIngestJob } = require('./jobs/dailyIngestJob');
 const { createJobTracker } = require('./infrastructure/jobTracker');
@@ -46,7 +62,9 @@ const {
 
 function createComposition(config, overrides = {}) {
   const log = overrides.log || defaultLog;
-  const db = overrides.db || createDatabase(config, overrides.databaseOptions);
+  // databaseOptions несёт фабрики, которые фасад не собирает сам (см. createGdprService выше).
+  const databaseOptions = { createGdprService, ...(overrides.databaseOptions || {}) };
+  const db = overrides.db || createDatabase(config, databaseOptions);
   // Отдельный МАЛЫЙ пул для фонового сбора/отчётов/maintenance — тяжёлый хвост не должен занимать
   // коннекты у live HTTP/auth/tenant-путей (они держат основной `db`). Те же конечные DB-deadlines,
   // только `max` меньше (config.database.backgroundPoolMax, дефолт 2).
@@ -60,7 +78,9 @@ function createComposition(config, overrides = {}) {
       ? db
       : createDatabase(
           { ...config, database: { ...config.database, poolMax: config.database.backgroundPoolMax } },
-          overrides.backgroundDatabaseOptions || overrides.databaseOptions,
+          overrides.backgroundDatabaseOptions
+            ? { createGdprService, ...overrides.backgroundDatabaseOptions }
+            : databaseOptions,
         ));
   const mtprotoClient =
     overrides.mtprotoClient ||
@@ -79,6 +99,23 @@ function createComposition(config, overrides = {}) {
   const msClient =
     overrides.msClient || createMsClient({ fetchImpl: fetchWithTimeout, log });
   const msFetch = msClient.msFetch;
+  // Яндекс.Метрика: свой ключ шифрования токенов (YM_TOKEN_KEY) + единый исходящий GET-клиент
+  // (lib/ymClient — заголовок OAuth, один ретрай на 429). Тот же fetchWithTimeout; токены живут
+  // только в заголовке запроса, в логи не попадают.
+  const ymCrypto =
+    overrides.ymCrypto || createYmCrypto(config.metrika.tokenKey);
+  const ymClient =
+    overrides.ymClient || createYmClient({ fetchImpl: fetchWithTimeout, log });
+  const ymFetch = ymClient.ymFetch;
+  // Rusender: свой ключ шифрования API-ключей (RUSENDER_KEY) + единый исходящий GET-клиент
+  // (lib/rusenderClient — заголовок Bearer, гейт параллелизма, один ретрай на 429). Тот же
+  // fetchWithTimeout; ключи живут только в заголовке запроса, в логи не попадают.
+  const rusenderCrypto =
+    overrides.rusenderCrypto || createRusenderCrypto(config.rusender.tokenKey);
+  const rusenderClient =
+    overrides.rusenderClient || createRusenderClient({ fetchImpl: fetchWithTimeout, log });
+  const rusenderFetch = rusenderClient.rusenderFetch;
+  const rusenderFetchAllPages = rusenderClient.fetchAllPages;
   const tgCrypto =
     overrides.tgCrypto ||
     createTgCrypto(config.telegram.sessionKey, config.telegram.previousSessionKeys);
@@ -107,8 +144,12 @@ function createComposition(config, overrides = {}) {
     limit: 600,
     // v8: сырые IPv6 в ключах запрещены валидацией — ipKeyGenerator нормализует до /56-бакета
     // (иначе ротация адресов внутри одного /64 обнуляла бы лимит). uid-ветка не меняется.
+    // Сессия приходит только HttpOnly-cookie: другого транспорта у неё нет.
     keyGenerator: (req) =>
-      rateLimitKey(parseToken(req.headers['x-session-token']), req.ip ? ipKeyGenerator(req.ip) : undefined),
+      rateLimitKey(
+        parseToken(readCookie(req.headers.cookie, SESSION_COOKIE)),
+        req.ip ? ipKeyGenerator(req.ip) : undefined,
+      ),
     message: { error: 'Слишком много запросов. Попробуй через 15 минут.' },
   });
 
@@ -128,11 +169,13 @@ function createComposition(config, overrides = {}) {
   const {
     AUTH_SECRET,
     SESSION_TTL,
+    SESSION_ABSOLUTE_TTL,
     GOOGLE_CLIENT_ID,
     signSession,
     parseToken,
     VERIFY_TTL,
     RESET_TTL,
+    INVITE_TTL,
     sha256,
     newToken,
     DUMMY_HASH,
@@ -269,6 +312,17 @@ function createComposition(config, overrides = {}) {
   });
   const collectIgForAccount = igCollectionJob.collectIgForAccount;
 
+  // Проактивное продление токенов IG — jobs/igTokenRefreshJob. До него продление жило только в
+  // хвосте чтения: аккаунт, который перестали открывать, молча доезжал до истечения (@bynotem,
+  // 1 сентября 2026). Полоса идёт в operational-бегунке и использует фоновый paced-клиент —
+  // квота продления не конкурирует с живыми запросами пользователя.
+  const { processIgTokenRefresh } = createIgTokenRefreshJob({
+    db: backgroundDb,
+    log,
+    igCrypto,
+    refreshIgIfNeeded: collectionIgClient.refreshIgIfNeeded,
+  });
+
   // Дневной сбор МойСклада в архив ms_daily — jobs/msCollectionJob (проход по всем подключённым
   // складам, durable per-day гейты). Пишет через backgroundDb, как IG-сбор; msFetch/msCrypto —
   // те же синглтоны, что у живых роутов (у МС нет отдельного paced-клиента: лимит per-account,
@@ -277,6 +331,31 @@ function createComposition(config, overrides = {}) {
     db: backgroundDb,
     msFetch,
     msCrypto,
+    log,
+  });
+
+  // Дневной сбор Яндекс.Метрики в архив ym_daily — jobs/ymCollectionJob (проход по всем
+  // подключённым счётчикам, durable per-day гейты; первый проход после connect бэкфиллит всю
+  // историю счётчика). Пишет через backgroundDb, как МС-сбор; ymFetch/ymCrypto — те же
+  // синглтоны, что у живых роутов. Проход едет в collection recovery runner ниже.
+  const ymCollectionJob = createYmCollectionJob({
+    db: backgroundDb,
+    ymFetch,
+    ymCrypto,
+    log,
+  });
+
+  // Дневной сбор Rusender в архив (снимок базы + рассылки + ограниченная пачка дневной
+  // активности) — jobs/rusenderCollectionJob, durable per-day гейты. Бэкфилла у источника нет
+  // и быть не может: истории размера базы Rusender не отдаёт. Пишет через backgroundDb;
+  // rusenderFetch/rusenderCrypto — те же синглтоны, что у живых роутов. Проход едет в
+  // collection recovery runner ниже. Сбор НЕ гейтится фичефлагом витрин: архив копится с
+  // момента подключения, иначе включение экранов застало бы пустую историю.
+  const rusenderCollectionJob = createRusenderCollectionJob({
+    db: backgroundDb,
+    rusenderFetch,
+    fetchAllPages: rusenderFetchAllPages,
+    rusenderCrypto,
     log,
   });
 
@@ -350,10 +429,32 @@ function createComposition(config, overrides = {}) {
       tgMediaRepairWindowDays: config.runtime.tgMediaRepairWindowDays,
     });
 
-  // ── Telegram Bot API env — read here; still surfaced by /api/health + the boot banner, and
-  // injected into routes/tg.js (which owns the Bot-API fetch helper and the /api/tg/* handlers). ──
+  // ── Telegram Bot API env — read here and injected into routes/tg.js (which owns the Bot-API
+  // fetch helper and the /api/tg/* handlers). Наружу конфигурация больше не публикуется: блок
+  // `env` в /api/health убран (I-1) — «настроен ли TG» больше нигде не отвечается по HTTP. ──
   const TG_TOKEN = config.telegram.botToken || undefined; // || undefined — как IG выше
   const TG_CHANNEL = config.telegram.channel || undefined;
+
+  // Бот доставки упоминаний — ТОТ ЖЕ TG_BOT_TOKEN, что и статистика канала в routes/tg.js.
+  // Секрет вебхука дериватен от токена (lib/tgNotifyText) — отдельного env не нужно.
+  const tgBot = overrides.tgBot || createTgBot({ token: config.telegram.botToken, fetchImpl: fetchWithTimeout, log });
+  const tgBotWebhookSecret = webhookSecretOf(config.telegram.botToken);
+
+  // Доставка новых упоминаний в личку — jobs/mentionNotifyJob. Плановые тики: хвост дневного
+  // ingest'а + почасовой operational-свип (расписание «дни/час МСК» живёт в подписке, день-ключ
+  // runJobOnce не даёт второй отправки). runMentionNotifyTest — ручной «Прислать сейчас» из
+  // диалога (routes/tgNotify). Поиск идёт через managed-сессию ПОДПИСЧИКА тем же приватным
+  // /mentions/search, что и живой поиск по кнопке; фоновые записи — через backgroundDb.
+  const { processMentionNotify, runMentionNotifyTest } = createMentionNotifyJob({
+    db: backgroundDb,
+    log,
+    tgCrypto,
+    tgBot,
+    mtprotoPost,
+    MTPROTO_TOKEN,
+    MTPROTO_TIMEOUT_HEAVY_MS,
+    appUrl: config.http.publicUrl,
+  });
 
   // Email-выгрузка отчётов (weekly/monthly + «Неделя канала» в теле) — jobs/reportScheduleJob;
   // дёргается из ingest-хвостов. weekDigest-движок job требует сам (lib).
@@ -381,6 +482,7 @@ function createComposition(config, overrides = {}) {
     processReportSchedules,
     processPersistence,
     processTgQrCollection,
+    processMentionNotify,
   });
 
   // ── AI-ассистент (STEEP-паттерн) ──────────────────────────────────
@@ -407,6 +509,17 @@ function createComposition(config, overrides = {}) {
     // Складские инструменты ассистента: живой топ товаров и словарь статусов ходят в МС тем же
     // клиентом/шифром, что data-роуты; без MS_TOKEN_KEY/аккаунта инструменты честно отказывают.
     sklad: { msFetch, msCrypto },
+  });
+
+  // Импорт выгрузок СДЭК (038): ридер листа и разбор домена инъектируются, чтобы сервис можно
+  // было проверить на настоящем файле без БД и HTTP. Крона у источника нет по построению —
+  // данные приезжают только тогда, когда пользователь загрузил файл.
+  const cdekImport = createCdekImportService({
+    db,
+    readSheetRows,
+    parseCdekSheet,
+    log,
+    maxRows: config.cdek.maxRows,
   });
 
   // Флаг дренажа (graceful shutdown): main.js ставит true в stop() → /api/ready 503.
@@ -450,13 +563,17 @@ function createComposition(config, overrides = {}) {
       DUMMY_HASH,
       signSession,
       SESSION_TTL,
+      SESSION_ABSOLUTE_TTL,
       GOOGLE_CLIENT_ID,
       appBase,
       sha256,
       newToken,
       VERIFY_TTL,
       RESET_TTL,
+      INVITE_TTL,
       sendEmail,
+      sendEmailDetailed,
+      emailConfigured,
       emailShell,
       emailBtn,
       escHtml,
@@ -468,6 +585,10 @@ function createComposition(config, overrides = {}) {
       msCrypto,
       msFetch,
       msBackfill: msBackfillEngine,
+      ymCrypto,
+      ymFetch,
+      rusenderCrypto,
+      rusenderFetch,
       nearestOf,
       cacheGet,
       cacheSet,
@@ -481,12 +602,16 @@ function createComposition(config, overrides = {}) {
       collectManagedPostStatsNow,
       TG_TOKEN,
       TG_CHANNEL,
+      tgBot,
+      tgBotWebhookSecret,
+      runMentionNotifyTest,
       timingSafeEqualStr,
       dailyIngestJob,
       jobTracker,
       mtprotoClient,
       notionCrash,
       aiChatService,
+      cdekImport,
     });
   }
 
@@ -509,6 +634,8 @@ function createComposition(config, overrides = {}) {
       repairCentralMedia,
       runMsCollectionPass: msCollectionJob.runMsCollectionPass,
       runMsOrdersPass: msBackfillEngine.runMsOrdersPass,
+      runYmCollectionPass: ymCollectionJob.runYmCollectionPass,
+      runRusenderCollectionPass: rusenderCollectionJob.runRusenderCollectionPass,
       igCap: config.runtime.igAccountsPerPass,
       tgCap: config.runtime.tgQrChannelsPerPass,
       mediaCap: config.runtime.tgMediaRepairPerPass,
@@ -530,6 +657,12 @@ function createComposition(config, overrides = {}) {
       jobTracker,
       processReportSchedules,
       runDailyMaintenanceOnce,
+      // Третья полоса: почасовой свип доставки упоминаний — подписка с send_hour получает свой
+      // час МСК, а не время внешнего daily-крона; durable день-ключ не даёт второй отправки.
+      processMentionNotify,
+      // Четвёртая полоса: продление токенов Instagram до входа в зону истечения — единственный
+      // путь, не зависящий от того, открывал ли кто-нибудь экран Instagram на этой неделе.
+      processIgTokenRefresh,
       publicUrl: config.http.publicUrl,
       initialDelayMs: config.runtime.operationalRunnerInitialDelayMs,
       intervalMs: config.runtime.operationalRunnerIntervalMs,

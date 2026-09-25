@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { toast } from 'sonner';
 import { ApiError } from '@/api/client';
 import {
   useCampaignPosts,
@@ -13,6 +14,7 @@ import { EmptyState } from '@/components/EmptyState';
 import { useConfirm } from '@/components/ConfirmDialogProvider';
 import { ErrorState } from '@/components/ErrorState';
 import { CampaignDialog } from '@/components/campaigns/CampaignDialog';
+import { CAMPAIGNS_LIST } from '@/components/campaigns/routes';
 import { canEditCampaign } from '@/components/campaigns/shared';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
@@ -25,8 +27,6 @@ import { useMediaQuery } from '@/lib/useMediaQuery';
 import { CampaignPageDesktop } from '@/panels/campaign/CampaignPageDesktop';
 import { CampaignPageMobile } from '@/panels/campaign/CampaignPageMobile';
 import type { CampaignViewProps } from '@/panels/campaign/campaignView';
-
-const CAMPAIGNS_LIST = '/posts?view=campaigns';
 
 /**
  * Оркестратор страницы кампании: маршрут `/campaigns/:id`, запросы (сводка + source-scoped
@@ -126,7 +126,12 @@ export function CampaignPage() {
       reason: 'Публикации останутся в источниках — удаляется только группировка.',
     });
     if (!ok) return;
-    del.mutate(campaign.id, { onSuccess: () => navigate(CAMPAIGNS_LIST) });
+    del.mutate(campaign.id, {
+      onSuccess: () => {
+        toast('Кампания удалена');
+        navigate(CAMPAIGNS_LIST);
+      },
+    });
   };
   const onToggleArchive = () => {
     update.mutate({ status: isArchived ? 'active' : 'archived' });

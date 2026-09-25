@@ -41,9 +41,9 @@ function keysChanged(a?: ReadonlyArray<unknown>, b?: ReadonlyArray<unknown>): bo
 // A 'card' fallback must occupy the same 6-col grid footprint the healthy widget would (mirrors
 // ChartWidget's SIZE_COL_SPAN / SIZE_H). Kept as a small local copy so this leaf boundary doesn't
 // import the heavy ChartWidget module (which imports this one).
-const CARD_SPAN: Record<'third' | 'half' | 'full', string> = {
+export const CARD_SPAN: Record<'third' | 'half' | 'full', string> = {
   third: 'lg:col-span-2',
-  half: 'lg:col-span-4',
+  half: 'lg:col-span-3',
   full: 'lg:col-span-6',
 };
 const CARD_MIN_H: Record<'third' | 'half' | 'full', string> = {

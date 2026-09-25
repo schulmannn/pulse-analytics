@@ -22,10 +22,13 @@ export function defaultHomeKeys(channels: readonly ChannelSourceLike[] = []): st
   const hasTg = channels.some(networkByKey('tg').hasChannel);
   const hasIg = channels.some(networkByKey('ig').hasChannel);
   const hasMs = channels.some(networkByKey('ms').hasChannel);
+  const hasYm = channels.some(networkByKey('ym').hasChannel);
 
-  // МС-only workspace: в HOME_REGISTRY пока нет кураторских карточек склада — честная пустая доска
-  // (Home покажет CTA добавления, каталог предлагает МС-метрики) вместо сева мёртвых TG-виджетов.
-  if (!hasTg && !hasIg && hasMs) return [];
+  // МС/ЯМ-only workspace: в HOME_REGISTRY пока нет кураторских карточек склада и Метрики — честная
+  // пустая доска (Home покажет CTA добавления, каталог предлагает ms-/ym-метрики) вместо сева
+  // мёртвых TG-виджетов. Условие требует ХОТЯ БЫ ОДИН такой источник: пустой список каналов
+  // (ещё не загрузились) обязан и дальше падать в telegram-first fallback ниже.
+  if (!hasTg && !hasIg && (hasMs || hasYm)) return [];
 
   // IG-only workspace (a standalone Instagram account, no Telegram side): an all-IG default so the
   // board isn't seeded with Telegram widgets that can never resolve a source.

@@ -143,7 +143,6 @@ function InsightCell({ insight, spanFull }: { insight: TgInsight; spanFull?: boo
   const dot =
     insight.tone === 'up' ? 'bg-verdant' : insight.tone === 'down' ? 'bg-ember' : 'bg-primary';
   const ev = insight.evidence;
-  const evText = ev?.caption ? (ev.caption.length > 52 ? `${ev.caption.slice(0, 52)}…` : ev.caption) : '';
   return (
     <div className={`flex items-start gap-3 bg-background p-3${spanFull ? ' sm:col-span-2' : ''}`}>
       <span aria-hidden="true" className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${dot}`} />
@@ -156,15 +155,20 @@ function InsightCell({ insight, spanFull }: { insight: TgInsight; spanFull?: boo
             {insight.action}
           </p>
         )}
-        {ev?.permalink && evText && (
+        {ev?.permalink && ev.caption && (
           <a
             href={ev.permalink}
             target="_blank"
             rel="noopener noreferrer"
-            className="block truncate text-xs font-medium text-primary hover:underline"
+            /* Усечение было двойным (JS slice(0,52) + CSS truncate), из-за чего строка обрывалась
+               дважды, а закрывающая кавычка со стрелкой уезжали за край. Теперь режет только CSS и
+               только внутренний span с текстом — обрамление остаётся видимым. */
+            className="flex items-baseline text-xs font-medium text-primary hover:underline"
             title={ev.caption}
           >
-            Пример: «{evText}» →
+            <span className="shrink-0">Пример: «</span>
+            <span className="truncate">{ev.caption}</span>
+            <span className="shrink-0">» →</span>
           </a>
         )}
       </div>

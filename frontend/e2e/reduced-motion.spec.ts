@@ -4,7 +4,7 @@ import { bootDemo } from './helpers';
 
 /**
  * prefers-reduced-motion gate. Every animation in the app is either hand-gated (targeted
- * `animation: none` rules / framer useReducedMotion on the landing) or neutralised by the global
+ * `animation: none` rules / the landing's media-query gate) or neutralised by the global
  * safety net in index.css (0.01ms × 1 iteration). The observable invariant: with reduced motion
  * emulated, NOTHING is left running after the page settles — jiggle, shimmer, twinkle included.
  */
@@ -52,8 +52,8 @@ test('reduced motion: chart marks and tooltip render in their final state', asyn
   await expect(morphGroup).toHaveAttribute('data-chart-morph-state', 'idle');
   const primary = chart.locator('[data-chart-series="primary"]');
   const oldPath = await primary.getAttribute('d');
-  await expect(page.getByRole('group', { name: 'Период', exact: true }).getByRole('button', { name: '30д' })).toHaveAttribute('aria-pressed', 'true');
-  await page.getByRole('group', { name: 'Период', exact: true }).getByRole('button', { name: '7д', exact: true }).click();
+  await expect(page.getByRole('toolbar', { name: 'Период', exact: true }).getByRole('button', { name: '30д' })).toHaveAttribute('aria-pressed', 'true');
+  await page.getByRole('toolbar', { name: 'Период', exact: true }).getByRole('button', { name: '7д', exact: true }).click();
   await expect.poll(() => primary.getAttribute('d')).not.toBe(oldPath);
   // JS motion observes the same preference: it snaps to the target without scheduling a RAF frame.
   await expect(morphGroup).toHaveAttribute('data-chart-morph-state', 'idle');
@@ -110,7 +110,7 @@ test('reduced motion: home edit mode works and does not jiggle', async ({ page }
   await expect(toggle).toHaveAttribute('aria-pressed', 'false');
 });
 
-test('reduced motion: public landing renders static (framer gated)', async ({ page }) => {
+test('reduced motion: public landing renders its CSS-native motion static', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   // Logged-out = an explicit 401 from the me endpoint (offline without the stub the proxy 500s and
   // the app rightly shows the error state, not the landing).

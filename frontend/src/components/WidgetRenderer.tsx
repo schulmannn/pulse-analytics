@@ -3,18 +3,24 @@ import type { ReactNode } from 'react';
 import { DeltaPill } from '@/components/DeltaPill';
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
+import { DivergingBars } from '@/components/DivergingBars';
+import { Sparkline } from '@/components/Sparkline';
 import { PieChart } from '@/components/PieChart';
 import { Breakdown } from '@/components/Breakdown';
 import { ChartExpandedContext, ExpandedChartHeightContext, WidgetTargetContext } from '@/components/ExpandableChart';
+import { ChartCardBody } from '@/components/chartWidget/ChartCardBody';
+import { RadialGauge } from '@/components/RadialGauge';
 import { observeSize } from '@/lib/observeSize';
-import { MetricExplainPanel, MetricExplainTooltip } from '@/components/MetricExplain';
+import { MetricExplainTooltip } from '@/components/MetricExplain';
 import { EmptyState } from '@/components/EmptyState';
+import type { EmptyGhost } from '@/components/EmptyGhost';
 import { ChartSkeleton } from '@/components/ui/dataSkeleton';
 import { pluralRu } from '@/lib/resolveWidgetMetric';
 import { networkDisplayName } from '@/lib/networks';
 import type { WidgetMeta, WidgetResult } from '@/lib/resolveWidgetMetric';
-import type { WidgetViz } from '@/lib/widgetMetrics';
+import { getMetric, type WidgetViz } from '@/lib/widgetMetrics';
 import { breakdownTitles, effectiveViz, seriesStats, seriesToChart } from '@/lib/widgetRender';
+import { KpiValue } from '@/components/chartWidget/KpiValue';
 
 /**
  * Loading placeholder shaped like the story card (hero bar + chart area), shown while the widget's
@@ -25,6 +31,24 @@ export function WidgetSkeleton({ viz }: { viz: WidgetViz }) {
   // Value/series vizzes lead with a hero number; breakdowns (donut/list) lead with the chart itself.
   const heroLed = viz === 'kpi' || viz === 'line' || viz === 'bar';
   return <ChartSkeleton headline={heroLed} />;
+}
+
+/**
+ * Силуэт пустой карточки — по ЗАЯВЛЕННОЙ визуализации, а не по `effectiveViz`.
+ *
+ * ГРАБЛЯ: `effectiveViz` подбирает вид по ФОРМЕ ПРИШЕДШИХ ДАННЫХ, а у пустого результата нет ни
+ * серии, ни разбивки — он схлопнул бы КАЖДУЮ пустую карточку в `kpi`, и призрак потерял бы ровно
+ * то, ради чего он есть: обещание конкретной формы. Обещание карточки — это её конфиг.
+ *
+ * `kpi` силуэта не получает осознанно: у числа нет формы, а рисовать под ним чужую — врать.
+ */
+function ghostForViz(viz: WidgetViz): EmptyGhost | undefined {
+  if (viz === 'line') return 'line';
+  if (viz === 'bar' || viz === 'ledger') return 'bars';
+  if (viz === 'donut') return 'ring';
+  if (viz === 'kpi') return undefined;
+  // list / rank / pivot / table — все проекции строками.
+  return 'rows';
 }
 
 /**
@@ -56,6 +80,9 @@ export function WidgetRenderer({
   // Detail overlay / explorer set this true → show the full explain panel there; the collapsed card
   // gets the compact ⓘ instead (see the meta row below).
   const expanded = useContext(ChartExpandedContext);
+  // На РАЗВЁРНУТОЙ поверхности (полноэкранный эксплорер `/widgets/:id`, оверлей развёртки) высоту
+  // плота задаёт хост — useExplorerChartHeight / измеренный регион оверлея. Её и уважаем.
+  const requestedHeight = useContext(ExpandedChartHeightContext);
   // The chart must size to ITS band, not the whole card body: the card's height context carries the
   // full body measurement (hero + chart + meta), so a hero-led card's chart rendered taller than its
   // flex band and the bottom of the plot (min-value points) was clipped by overflow-hidden
@@ -78,6 +105,7 @@ export function WidgetRenderer({
       <div className="flex h-full min-h-24 flex-col items-center justify-center gap-2 px-3 text-center">
         <EmptyState
           compact
+          ghost={ghostForViz(viz)}
           title="Нет данных за период"
           reason="Попробуйте другой период или источник."
           className="h-auto min-h-0 py-0"
@@ -92,15 +120,86 @@ export function WidgetRenderer({
   const hasValue = result.value != null;
   const eff = effectiveViz(viz, hasSeries, hasBreakdown, result.unit);
 
-  // Lead with a hero headline whenever the resolver provides one — value/series metrics, and now
-  // ADDITIVE breakdowns (a total, steep #4.9). A non-additive breakdown carries no value, so it
-  // still leads with its chart (the distribution IS the story, and the card title names it).
-  const showHero = hasValue;
-
   // «N% от цели» (steep) — when a target is set and the metric has a scalar to measure against it.
   const targetPct = result.targetPct;
   const progress =
     targetPct != null && Number.isFinite(targetPct) ? `${Math.round(targetPct)}% от цели` : null;
+
+  // KPI-виджет с целью — кольцевой прогресс (форма shadcn «Radial Text», выбор владельца):
+  // дуга = честная доля от цели, число метрики в центре. Hero при этом не дублируется — кольцо
+  // и есть герой; дельта уезжает в строку под кольцом. Серийные визы не трогаем: у линии/баров
+  // цель уже нарисована пунктирной goal-линией на самом графике.
+  const kpiGauge = eff === 'kpi' && targetPct != null && Number.isFinite(targetPct);
+
+  // Lead with a hero headline whenever the resolver provides one — value/series metrics, and now
+  // ADDITIVE breakdowns (a total, steep #4.9). A non-additive breakdown carries no value, so it
+  // still leads with its chart (the distribution IS the story, and the card title names it).
+  // Развёрнутая поверхность отдаёт всю площадь графику — число уже есть в шапке страницы. Но у
+  // метрики БЕЗ ряда и без разреза графика не существует (WidgetChart вернул бы null), и тогда
+  // эксплорер оставался пустым: ни числа, ни графика. Такое значение показываем героем и там.
+  const showHero = hasValue && (!expanded || (!hasSeries && !hasBreakdown)) && !kpiGauge;
+
+  if (kpiGauge) {
+    return (
+      <div className="flex h-full min-h-0 flex-col" data-widget-story-card>
+        <div className="min-h-0 flex-1">
+          <RadialGauge
+            fraction={(targetPct as number) / 100}
+            value={result.value ?? '—'}
+            label={`${Math.round(targetPct as number)}% от цели`}
+            size={expanded ? 220 : 132}
+          />
+        </div>
+        {result.delta && (
+          <div className="flex shrink-0 justify-center pt-1">
+            <DeltaPill delta={result.delta} />
+          </div>
+        )}
+        {!expanded && (
+          <WidgetMetaLine
+            meta={result.meta}
+            className="mt-2"
+            info={<MetricExplainTooltip metricId={result.metricId} meta={result.meta} />}
+          />
+        )}
+      </div>
+    );
+  }
+
+  // A collapsed single-series line is a dashboard story, not a miniature report. Reuse the same
+  // horizontal anatomy as the curated Overview cards (headline left, axis-free sparkline right).
+  // The full-page explorer still renders the complete LineChart below: axes, comparison ghost,
+  // targets and detail annotations belong to that proof surface.
+  if (!expanded && showHero && eff === 'line' && result.series && result.series.length > 1 && result.target == null) {
+    const c = seriesToChart(result);
+    return (
+      <div className="h-full min-h-0" data-widget-story-card>
+        <ChartCardBody
+          value={result.value ?? '—'}
+          delta={result.delta}
+          caption={
+            <WidgetStoryMeta
+              caption={result.caption}
+              progress={progress}
+              meta={result.meta}
+              metricId={result.metricId}
+            />
+          }
+          onValueClick={onDrill}
+          drillLabel={drillLabel}
+        >
+          <Sparkline
+            values={c.values}
+            labels={c.labels}
+            area
+            strokeWidth={2}
+            interactive
+            className="h-full min-h-14 w-full"
+          />
+        </ChartCardBody>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -108,18 +207,15 @@ export function WidgetRenderer({
         <div className="shrink-0">
           <div className="flex items-baseline gap-2.5">
             {onDrill ? (
-              <button
-                type="button"
-                onClick={onDrill}
-                aria-label={drillLabel ? `Разбор: ${drillLabel}` : 'Открыть страницу метрики'}
-                className="rounded text-2xl font-medium leading-none tabular-nums tracking-tight text-foreground transition-colors hover:text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40"
-              >
-                {result.value}
-              </button>
+              <KpiValue
+                size="small"
+                text={result.value ?? ''}
+                onDrill={onDrill}
+                ariaLabel={drillLabel ? `Разбор: ${drillLabel}` : 'Открыть страницу метрики'}
+                className="text-foreground"
+              />
             ) : (
-              <span className="text-2xl font-medium leading-none tabular-nums tracking-tight text-foreground">
-                {result.value}
-              </span>
+              <KpiValue size="small" text={result.value ?? ''} className="text-foreground" />
             )}
             <DeltaPill delta={result.delta} />
           </div>
@@ -135,19 +231,24 @@ export function WidgetRenderer({
       <WidgetTargetContext.Provider value={result.target ?? null}>
         {/* overflow-hidden: fixed-tile charts size their svg from the measured BODY height, which
             can overrun this flex-1 band and paint under the meta line / stats footer — clip the
-            chart to its allotted band so the caption stays legible. */}
-        <div ref={bandRef} className={`min-h-0 flex-1 overflow-hidden ${showHero ? 'mt-3' : ''}`}>
-          <ExpandedChartHeightContext.Provider value={bandH}>
+            chart to its allotted band so the caption stays legible. Развёрнутая поверхность живёт
+            наоборот: высоту диктует хост, полоса растёт под неё (мерить полосу там значило бы
+            гонять высоту по кругу — на одном и том же экране разные виджеты получали 706px и
+            548px вместо заявленных explorer-высот). */}
+        <div
+          ref={bandRef}
+          className={`min-h-0 ${expanded ? '' : 'flex-1 overflow-hidden'} ${showHero ? 'mt-3' : ''}`}
+        >
+          <ExpandedChartHeightContext.Provider value={expanded ? requestedHeight : bandH}>
             <WidgetChart result={result} eff={eff} onDrill={onDrill} expanded={expanded} />
           </ExpandedChartHeightContext.Provider>
         </div>
       </WidgetTargetContext.Provider>
-      {expanded ? (
-        // Detail / explorer has room: the full «почему это число такое» panel (formula + source +
-        // live period / sample / freshness / comparison), which subsumes the one-line meta.
-        <MetricExplainPanel metricId={result.metricId} meta={result.meta} className="mt-4 border-t border-border pt-4" />
-      ) : (
-        // Collapsed card: the terse meta line + a compact ⓘ that opens the same explanation.
+      {/* Развёрнутая поверхность — БЕЗ панели «Почему это число такое» (владелец: техническая
+          информация, лишнее на графике). Методология остаётся доступной через компакт-ⓘ на лице
+          карточки; эксплорер отдаёт площадь графику и статистике. */}
+      {!expanded && (
+        // Collapsed card: the terse meta line + a compact ⓘ that opens the explanation.
         <WidgetMetaLine
           meta={result.meta}
           className="mt-2"
@@ -158,6 +259,36 @@ export function WidgetRenderer({
           it duplicated the hero and the chart (владелец: «слишком много текста», steep cards
           carry title + number + delta + chart, nothing else). */}
       {expanded && <SeriesStatsFooter result={result} eff={eff} />}
+    </div>
+  );
+}
+
+/** Quiet metadata under the story headline. It deliberately omits a second chart caption/axis row:
+ *  the card header already carries source identity, while period/sample/honesty stay reachable here
+ *  with the same explanation tooltip as every other config-driven widget. */
+function WidgetStoryMeta({
+  caption,
+  progress,
+  meta,
+  metricId,
+}: {
+  caption?: string | null;
+  progress: string | null;
+  meta?: WidgetMeta;
+  metricId: string;
+}) {
+  return (
+    <div className="max-w-44 space-y-1">
+      {(caption || progress) && (
+        <div className="flex flex-wrap items-baseline gap-x-2">
+          {caption ? <span>{caption}</span> : null}
+          {progress ? <span className="font-medium">{progress}</span> : null}
+        </div>
+      )}
+      <WidgetMetaLine
+        meta={meta}
+        info={<MetricExplainTooltip metricId={metricId} meta={meta} />}
+      />
     </div>
   );
 }
@@ -240,6 +371,7 @@ function WidgetChart({ result, eff, onDrill, expanded = false }: { result: Widge
       <LineChart
         values={c.values}
         labels={c.labels}
+        axisLabels={c.axisLabels}
         titles={c.titles}
         ghost={result.ghost}
         ghostLabel={result.ghostLabel}
@@ -248,14 +380,21 @@ function WidgetChart({ result, eff, onDrill, expanded = false }: { result: Widge
         markExtremes={expanded && c.values.length > 1}
         // Кольца-точки — деталь-поверхностей (метрик-страница/разворот); на карточке они были
         // единственным местом в продукте с точками на каждой дате (владелец: «нигде больше»).
-        showPoints={expanded && c.values.length > 1 && c.values.length <= 45}
+        showPoints={expanded && c.values.length > 1}
         onPointClick={onPointClick}
       />
     );
   }
   if (eff === 'bar') {
     const c = seriesToChart(result);
-    return <BarChart values={c.values} labels={c.labels} titles={c.titles} ghost={result.ghost} ghostLabel={result.ghostLabel} onPointClick={onPointClick} />;
+    // Знакопеременный ряд (чистый прирост: подписки − отписки) столбцами от нуля не рисуется —
+    // BarChart масштабирует от 0 вверх, и минусовой день ушёл бы за базовую линию. Такие ряды
+    // берёт DivergingBars: столбцы вокруг нулевой линии, направление несёт ПОЛОЖЕНИЕ, а не цвет.
+    // Пропуск в дивергентной форме геометрии не имеет — читается как нулевой день.
+    if (c.values.some((value) => (value ?? 0) < 0)) {
+      return <DivergingBars values={c.values.map((value) => value ?? 0)} labels={c.labels} axisLabels={c.axisLabels} titles={c.titles} />;
+    }
+    return <BarChart values={c.values} labels={c.labels} axisLabels={c.axisLabels} titles={c.titles} ghost={result.ghost} ghostLabel={result.ghostLabel} onPointClick={onPointClick} />;
   }
   if (eff === 'donut') {
     const items = result.breakdown ?? [];
@@ -264,17 +403,43 @@ function WidgetChart({ result, eff, onDrill, expanded = false }: { result: Widge
         values={items.map((i) => i.value)}
         labels={items.map((i) => i.label)}
         titles={breakdownTitles(result)}
+        // Доля — от полной суммы разбивки (у урезанных топ-N списков она шире видимых значений),
+        // поэтому круговая и список печатают одно число.
+        shares={items.map((i) => i.share)}
         colors={items.map((i) => i.color)}
       />
     );
   }
   if (eff === 'list') {
-    return <Breakdown items={result.breakdown ?? []} />;
+    // Имя колонки значения — из определения метрики: конфиг-виджет собирается пользователем, и
+    // единственное, что о числах известно рендеру, — какую метрику он показывает. Измерение
+    // разбивки у таких метрик встроено в саму метрику и отдельного имени не имеет, поэтому левая
+    // колонка называется нейтрально — иначе пришлось бы врать конкретикой.
+    const valueLabel = getMetric(result.metricId)?.label;
+    return (
+      <Breakdown
+        items={result.breakdown ?? []}
+        columns={valueLabel ? { label: 'Категория', value: valueLabel } : undefined}
+      />
+    );
   }
-  // kpi — the hero already carries the number; a series (if any) becomes a compact sparkline beneath.
+  // KPI cards keep the same quiet, axis-free story language as the curated Overview. The expanded
+  // explorer still needs the full report chart (axes + point interaction), so only the card face
+  // swaps the generic LineChart for the lightweight Sparkline.
   if (result.series?.length) {
     const c = seriesToChart(result);
-    return <LineChart values={c.values} labels={c.labels} titles={c.titles} height={64} onPointClick={onPointClick} />;
+    if (!expanded) {
+      return (
+        <Sparkline
+          values={c.values}
+          labels={c.labels}
+          area
+          interactive
+          className="h-full min-h-14 w-full"
+        />
+      );
+    }
+    return <LineChart values={c.values} labels={c.labels} axisLabels={c.axisLabels} titles={c.titles} height={64} onPointClick={onPointClick} />;
   }
   return null;
 }

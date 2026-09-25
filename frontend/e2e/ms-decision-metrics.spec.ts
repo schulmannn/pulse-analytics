@@ -8,7 +8,7 @@ test.beforeEach(async ({ page }, testInfo) => {
 test('product ranking switches between revenue, profit and margin without clipping the card', async ({ page }, testInfo) => {
   await bootDemo(page, '/sklad', { theme: 'dark' });
   const card = page.getByRole('heading', { name: 'Товары', exact: true }).locator('xpath=ancestor::section[1]');
-  const metric = card.getByRole('group', { name: 'Метрика рейтинга товаров' });
+  const metric = card.getByRole('toolbar', { name: 'Метрика рейтинга товаров' });
 
   await expect(card.getByText('Товар A', { exact: true })).toBeVisible();
   const marginRequest = page.waitForRequest((request) => {
@@ -35,15 +35,15 @@ test('customer cards expose repeat revenue and the shared independent-window exp
   const repeatCard = page.getByRole('heading', { name: 'Повторные покупки' }).locator('xpath=ancestor::section[1]');
   await expect(repeatCard.getByText('Доля повторной выручки')).toBeVisible();
 
-  // «Развернуть» ведёт на полностраничную метрику /metrics/ms-customers (общий independent-window
-  // explorer), а не в модальный оверлей.
-  await page.getByRole('button', { name: 'Развернуть виджет «Покупатели»' }).click();
+  // Вся карточка ведёт на полностраничную метрику /metrics/ms-customers (общий independent-window
+  // explorer), а не в модальный оверлей. Отдельная стрелка «Развернуть» намеренно удалена.
+  await page.locator('[data-drill-to="/metrics/ms-customers"]').click({ position: { x: 24, y: 24 } });
   await expect(page).toHaveURL(/\/metrics\/ms-customers$/);
   // The MS metric page is a lazy chunk. Allow the cold Vite transform to finish when this suite
   // runs in parallel with the all-routes parity pass; the production bundle is already built.
   await expect(page.getByRole('heading', { name: 'Покупатели', level: 1 })).toBeVisible({ timeout: 20_000 });
   await expect(page.getByRole('dialog')).toHaveCount(0);
-  const metric = page.getByRole('group', { name: 'Метрика покупателей' });
+  const metric = page.getByRole('toolbar', { name: 'Метрика покупателей' });
   const window = page.getByRole('group', { name: 'Окно', exact: true });
   await expect(metric).toBeVisible();
   await expect(window.getByRole('button', { name: '30д' })).toHaveAttribute('aria-pressed', 'true');
@@ -55,12 +55,12 @@ test('customer cards expose repeat revenue and the shared independent-window exp
   await window.getByRole('button', { name: '90д' }).click();
   await request90;
   await metric.getByRole('button', { name: 'Выручка' }).click();
-  await expect(page.getByText('новые и повторные покупки', { exact: true })).toBeVisible();
+  await expect(metric.getByRole('button', { name: 'Выручка' })).toHaveAttribute('aria-pressed', 'true');
   await metric.getByRole('button', { name: 'Доля повторных' }).click();
-  await expect(page.getByText('доля повторной выручки', { exact: true })).toBeVisible();
+  await expect(metric.getByRole('button', { name: 'Доля повторных' })).toHaveAttribute('aria-pressed', 'true');
 
-  await page.getByRole('group', { name: 'Грануляция' }).getByRole('button', { name: 'Месяц' }).click();
-  await page.getByRole('group', { name: 'Тип графика' }).getByRole('button', { name: 'Столбцы' }).click();
+  await page.getByRole('toolbar', { name: 'Грануляция' }).getByRole('button', { name: 'Месяц' }).click();
+  await page.getByRole('toolbar', { name: 'Тип графика' }).getByRole('button', { name: 'Столбцы' }).click();
   await expect(page.locator('svg[data-chart-kind="bar"]')).toBeVisible();
 
   const shot = testInfo.outputPath('moysklad-customers-explorer-dark.png');

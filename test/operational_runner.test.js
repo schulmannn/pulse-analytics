@@ -47,11 +47,14 @@ function makeRunner(over = {}) {
   const jobTracker = over.jobTracker || createJobTracker();
   const reportBases = [];
   const maintCalls = [];
+  const events = [];
   const runner = createOperationalRunner({
-    log: () => {},
+    log: (level, event, meta) => events.push({ level, event, meta }),
     jobTracker,
     processReportSchedules: over.processReportSchedules || (async (base) => { reportBases.push(base); return { due: 0 }; }),
     runDailyMaintenanceOnce: over.runDailyMaintenanceOnce || (async () => { maintCalls.push(true); return { skipped: false }; }),
+    processMentionNotify: over.processMentionNotify,
+    processIgTokenRefresh: over.processIgTokenRefresh,
     publicUrl: over.publicUrl || PUBLIC_URL,
     initialDelayMs: 1000,
     intervalMs: 5000,
@@ -59,7 +62,7 @@ function makeRunner(over = {}) {
     setTimeoutFn: clock.setTimeoutFn,
     clearTimeoutFn: clock.clearTimeoutFn,
   });
-  return { runner, clock, jobTracker, reportBases, maintCalls };
+  return { runner, clock, jobTracker, reportBases, maintCalls, events };
 }
 
 test('start(): планирует первый проход через initialDelay, unref-таймер', () => {
@@ -171,4 +174,42 @@ test('enabled=false (DB-less): start() инертен и ручной runOnce о
   stopped.runner.stop();
   assert.deepEqual(await stopped.runner.runOnce(), { skipped: true });
   assert.deepEqual(stopped.reportBases, []);
+});
+
+// ── Опциональные полосы: упоминания и продление токенов Instagram ─────────────────────────────────
+// Хвост результатов позиционен: если одну опциональную полосу не передали, вторая не должна
+// «съехать» и попасть в лог под чужим именем.
+test('полоса продления токенов IG выполняется и попадает в сводку прохода', async () => {
+  const igCalls = [];
+  const { runner, clock, events } = makeRunner({
+    processIgTokenRefresh: async () => { igCalls.push(true); return { due: 1, refreshed: 1, rejected: 0 }; },
+  });
+  runner.start();
+  await clock.fireNext();
+  assert.deepEqual(igCalls, [true]);
+  const done = events.find((e) => e.event === 'operational_pass_done');
+  assert.equal(done.meta.igToken, 'fulfilled');
+  assert.equal(done.meta.mentions, undefined, 'полоса упоминаний не передана — её в сводке нет');
+});
+
+test('обе опциональные полосы: статусы не путаются местами', async () => {
+  const { runner, clock, events } = makeRunner({
+    processMentionNotify: async () => ({ sent: 0 }),
+    processIgTokenRefresh: async () => { throw new Error('graph down'); },
+  });
+  runner.start();
+  await clock.fireNext();
+  const done = events.find((e) => e.event === 'operational_pass_done');
+  assert.equal(done.meta.mentions, 'fulfilled');
+  assert.equal(done.meta.igToken, 'rejected');
+  assert.equal(done.meta.rep, 'fulfilled', 'падение опциональной полосы не топит основные');
+  assert.equal(done.meta.maint, 'fulfilled');
+});
+
+test('без полосы IG сводка прохода не меняется', async () => {
+  const { runner, clock, events } = makeRunner();
+  runner.start();
+  await clock.fireNext();
+  const done = events.find((e) => e.event === 'operational_pass_done');
+  assert.deepEqual(Object.keys(done.meta).sort(), ['maint', 'rep']);
 });

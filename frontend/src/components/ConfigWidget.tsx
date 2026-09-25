@@ -1,19 +1,18 @@
 import { memo, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useChannels } from '@/api/queries';
 import { ChartSection, PERIOD_WORD } from '@/components/ChartWidget';
 import { WidgetRenderer, WidgetSkeleton } from '@/components/WidgetRenderer';
 import { ConfigEditDialog } from '@/components/ConfigEditDialog';
-import { WidgetExplorer } from '@/components/WidgetExplorer';
 import { LEGACY_RENDER } from '@/components/legacyAdapters';
 import { ChannelScope, useSelectedChannel } from '@/lib/channel-context';
-import { getRememberedChannel } from '@/lib/channel';
-import { resolveHomeSourceChannel } from '@/lib/channelSource';
+import { useWidgetSourceChannel } from '@/lib/useWidgetSource';
+import { ErrorState } from '@/components/ErrorState';
 import { useWidgetData } from '@/lib/useWidgetData';
 import { useIgWidgetData } from '@/lib/useIgWidgetData';
 import { useMsWidgetData } from '@/lib/useMsWidgetData';
+import { useYmWidgetData } from '@/lib/useYmWidgetData';
 import { getMetric } from '@/lib/widgetMetrics';
-import { coerceSizeForViz, effectiveTinted } from '@/lib/widgetSurface';
+import { coerceSizeForViz, effectiveTinted, vizAllowsThirdWidth } from '@/lib/widgetSurface';
 import { updateWidgetConfig } from '@/lib/widgetStore';
 import { LEGACY_LABEL, legacyKeyForMetricId, type LegacyKey } from '@/lib/legacyWidgets';
 import {
@@ -43,22 +42,19 @@ export const ConfigWidget = memo(function ConfigWidget({ config, homeKey }: { co
   const navigate = useNavigate();
   const metric = getMetric(config.metricId);
   const legacyKey = legacyKeyForMetricId(config.metricId);
-  const sourceNetwork = metric?.source === 'ig' ? 'ig' : metric?.source === 'ms' ? 'ms' : 'tg';
   // Metric widgets and legacy composites both drive the universal editor / explorer.
   const configurable = !!metric || !!legacyKey;
   const label = config.title || metric?.label || (legacyKey ? LEGACY_LABEL[legacyKey] : undefined) || 'Метрика';
   const { channelId: globalChannelId } = useSelectedChannel();
-  const channels = useChannels().data?.channels;
   // Канон Главной: карточка НЕ следует глобальному свитчеру. Без явного «Источника» карточка
   // на доске (homeKey) пинится к каналу СВОЕЙ сети — запомненному per-network либо первому
   // подходящему: глобальный выбор может быть каналом другой сети (например, МойСклад), и тогда
-  // TG/IG-виджет читал бы пустоту под чужой подписью. Вне Главной (превью/эксплорер/страницы)
-  // поведение прежнее — следовать активному каналу.
-  const effectiveSource = useMemo(() => {
-    if (config.source != null) return config.source;
-    if (!homeKey) return null;
-    return resolveHomeSourceChannel(channels ?? [], sourceNetwork, getRememberedChannel(sourceNetwork));
-  }, [config.source, homeKey, channels, sourceNetwork]);
+  // TG/IG-виджет читал бы пустоту под чужой подписью. Вне Главной (превью) поведение прежнее —
+  // следовать активному каналу. Полноэкранный эксплорер той же карточки резолвит источник ЭТИМ
+  // ЖЕ хуком (см. WidgetExplorer), иначе он расходился бы с карточкой, из которой открыт.
+  const { network: sourceNetwork, channelId: effectiveSource } = useWidgetSourceChannel(config, {
+    pinned: !!homeKey,
+  });
   // Drilldown (steep #9): only the six core TG metrics have a metric page (/metrics/:drillKey), so
   // only those cards' hero value + chart points navigate. Everything else (IG, breakdowns, legacy)
   // has no page → no drill. A card pinned to ДРУГОЙ канал (в т.ч. авто-пин Главной) is not
@@ -93,26 +89,17 @@ export const ConfigWidget = memo(function ConfigWidget({ config, homeKey }: { co
         color: config.style?.color,
         tinted: effectiveTinted(config.viz, config.style?.tinted),
         size,
+        minSize: vizAllowsThirdWidth(config.viz) ? 'third' : 'half',
+        onSizeChange: (nextSize) => updateWidgetConfig(config.id, { size: nextSize }),
         // The goal line is now resolver-computed (result.target) and provided by WidgetRenderer, so
         // the card-level target override is no longer needed (it also covers dynamic targets, S9).
       }}
-      // «Развернуть» opens the universal explorer sandbox (mutable draft; «Применить» commits it).
-      explorer={
-        configurable
-          ? (close, originRect) => (
-              <WidgetExplorer
-                config={config}
-                onApply={(next) => updateWidgetConfig(config.id, next)}
-                onClose={close}
-                originRect={originRect}
-              />
-            )
-          : undefined
-      }
+      // Config-driven cards follow the same contract as every other graph: a card click and the
+      // expand affordance navigate to a stable, shareable full-page explorer instead of an overlay.
+      drillTo={configurable ? `/widgets/${encodeURIComponent(config.id)}` : undefined}
     >
-      {/* The pin scopes ONLY the card body — not the whole ChartSection: the explorer render-prop
-          must stay OUTSIDE the pin so its draft fully controls its own scope («Как в свитчере» in
-          the sandbox previews switcher data, not the still-pinned original channel). */}
+      {/* The pin scopes only the card body. The dedicated explorer route reads the stored config
+          independently, so its local draft remains free to switch the source. */}
       {effectiveSource != null ? (
         <ChannelScope channelId={effectiveSource}>
           <WidgetBody config={config} onDrill={onDrill} drillLabel={label} />
@@ -148,6 +135,7 @@ export function WidgetBody({ config, onDrill, drillLabel }: { config: WidgetConf
   const metric = getMetric(config.metricId);
   if (metric?.source === 'ig') return <IgWidgetBody config={config} />;
   if (metric?.source === 'ms') return <MsWidgetBody config={config} onDrill={onDrill} drillLabel={drillLabel} />;
+  if (metric?.source === 'ym') return <YmWidgetBody config={config} onDrill={onDrill} drillLabel={drillLabel} />;
   return <TgWidgetBody config={config} onDrill={onDrill} drillLabel={drillLabel} />;
 }
 
@@ -175,20 +163,50 @@ function LegacyWidgetBody({ legacyKey, config }: { legacyKey: LegacyKey; config:
   );
 }
 
+/**
+ * Тело виджета в состоянии сбоя. Отдельный компонент, потому что все четыре источника обязаны
+ * говорить об ошибке ОДИНАКОВО: раньше упавший запрос доходил до резолвера как пустые данные, и
+ * карточка печатала «Нет данных за период» — выдавала сбой сети за достоверный ответ, да ещё и
+ * без единого способа повторить. `size="chart"` держит тот же footprint, что скелетон и график,
+ * поэтому подмена состояния не дёргает высоту плитки.
+ */
+function WidgetErrorBody({ isRetrying, onRetry }: { isRetrying: boolean; onRetry: () => void }) {
+  return (
+    <ErrorState
+      compact
+      size="chart"
+      title="Не удалось загрузить"
+      reason="Данные источника не пришли — это сбой запроса, а не пустой период."
+      onRetry={onRetry}
+      retrying={isRetrying}
+    />
+  );
+}
+
 function TgWidgetBody({ config, onDrill, drillLabel }: { config: WidgetConfig; onDrill?: () => void; drillLabel?: string }) {
-  const { result, isLoading } = useWidgetData(config);
+  const { result, isLoading, isError, isRetrying, retry } = useWidgetData(config);
   if (isLoading) return <WidgetSkeleton viz={config.viz} />;
+  if (isError) return <WidgetErrorBody isRetrying={isRetrying} onRetry={retry} />;
   return <WidgetRenderer result={result} viz={config.viz} onDrill={onDrill} drillLabel={drillLabel} />;
 }
 
 function IgWidgetBody({ config }: { config: WidgetConfig }) {
-  const { result, isLoading } = useIgWidgetData(config);
+  const { result, isLoading, isError, isRetrying, retry } = useIgWidgetData(config);
   if (isLoading) return <WidgetSkeleton viz={config.viz} />;
+  if (isError) return <WidgetErrorBody isRetrying={isRetrying} onRetry={retry} />;
   return <WidgetRenderer result={result} viz={config.viz} />;
 }
 
 function MsWidgetBody({ config, onDrill, drillLabel }: { config: WidgetConfig; onDrill?: () => void; drillLabel?: string }) {
-  const { result, isLoading } = useMsWidgetData(config);
+  const { result, isLoading, isError, isRetrying, retry } = useMsWidgetData(config);
   if (isLoading) return <WidgetSkeleton viz={config.viz} />;
+  if (isError) return <WidgetErrorBody isRetrying={isRetrying} onRetry={retry} />;
+  return <WidgetRenderer result={result} viz={config.viz} onDrill={onDrill} drillLabel={drillLabel} />;
+}
+
+function YmWidgetBody({ config, onDrill, drillLabel }: { config: WidgetConfig; onDrill?: () => void; drillLabel?: string }) {
+  const { result, isLoading, isError, isRetrying, retry } = useYmWidgetData(config);
+  if (isLoading) return <WidgetSkeleton viz={config.viz} />;
+  if (isError) return <WidgetErrorBody isRetrying={isRetrying} onRetry={retry} />;
   return <WidgetRenderer result={result} viz={config.viz} onDrill={onDrill} drillLabel={drillLabel} />;
 }

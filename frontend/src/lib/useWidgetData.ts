@@ -8,11 +8,16 @@ import { useMemo } from 'react';
 import { useChannels, useHistory, useTgFull, useTgGraphs } from '@/api/queries';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { DEFAULT_WIDGET_DAYS, widgetPeriodValue } from '@/lib/period';
-import { resolveWidgetMetric, type DataContext, type WidgetResult } from '@/lib/resolveWidgetMetric';
+import { resolveWidgetMetric, type DataContext } from '@/lib/resolveWidgetMetric';
 import type { WidgetConfig } from '@/lib/widgetConfig';
+import { widgetDataStateOf, type WidgetDataState } from '@/lib/widgetDataState';
 import { useWidgetInView } from '@/lib/widgetViewport';
 
-export function useWidgetData(config: WidgetConfig): { result: WidgetResult; isLoading: boolean } {
+// Ошибка ≠ пустота. Если запрос упал, `isPending` становится false, данные остаются undefined,
+// резолвер честно отдаёт `empty`, и карточка печатала «Нет данных за период» — то есть выдавала
+// сбой сети за достоверный ответ «за этот период пусто». Отдаём ошибку отдельным флагом и даём
+// повтор: гейтим по ТЕМ ЖЕ запросам, что и `isLoading`, чтобы состояния были взаимоисключающими.
+export function useWidgetData(config: WidgetConfig): WidgetDataState {
   const days = config.period ?? DEFAULT_WIDGET_DAYS;
   // The widget's window (preset only — per-widget custom ranges are a later follow-up, like the
   // rest of the app). Memoized on `days` so `inRange`'s identity is stable across re-renders.
@@ -48,13 +53,21 @@ export function useWidgetData(config: WidgetConfig): { result: WidgetResult; isL
     return resolveWidgetMetric(config, ctx);
     // Date.now() is read inside deliberately (a fresh resolve on data/period change uses the
     // current instant; it isn't a dependency — the window rounds to day buckets anyway).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [config, days, period, full, history, channels, graphs, channelId]);
 
   // Loading = a channel is selected AND the two universal TG sources (posts + subscriber archive)
   // haven't arrived yet. So the card shows a shaped skeleton instead of flashing «Нет данных» before
   // data loads. When no channel is selected the queries are disabled (perpetually pending) — that is
   // a genuine empty state, not loading, so gate on channelId to avoid a forever-skeleton.
-  const isLoading = channelId != null && (fullQ.isPending || historyQ.isPending);
-  return { result, isLoading };
+  const state = widgetDataStateOf({
+    channelId,
+    pending: [fullQ.isPending, historyQ.isPending],
+    errored: [fullQ.isError, historyQ.isError],
+    fetching: [fullQ.isFetching, historyQ.isFetching],
+  });
+  const retry = () => {
+    void fullQ.refetch();
+    void historyQ.refetch();
+  };
+  return { result, ...state, retry };
 }

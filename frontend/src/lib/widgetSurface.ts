@@ -30,6 +30,35 @@ export function effectiveTinted(viz: WidgetViz, savedTinted: boolean | undefined
   return (savedTinted ?? true) && vizAllowsTonalSurface(viz);
 }
 
+/** Тинт КУРАТИРУЕМОЙ (не config-driven) карточки, когда пользователь ничего не сохранял.
+ *
+ *  Канон: дефолт — нейтральная поверхность, тинт — ручной инструмент ОДНОЙ истории страницы.
+ *  Поэтому у карточки С акцентом дефолт объявляет хост (`defaultTinted`, по умолчанию выключен) —
+ *  доска из пяти разноцветных заливок сразу обесценивает цвет. У карточки БЕЗ акцента заливать
+ *  нечем: её `--card-tint`-подложка — базовая поверхность карточки, а не история, и остаётся
+ *  включённой.
+ *
+ *  ВАЖНО: `defaultColor` — акцент, ОБЪЯВЛЕННЫЙ ХОСТОМ в JSX, а не эффективный акцент карточки.
+ *  Дефолт описывает вид карточки «из коробки»; подставить сюда сохранённый пользователем цвет
+ *  значит снять заливку у того, кто выбрал акцент, но переключатель не трогал.
+ *
+ *  Сохранённый выбор пользователя (`pulse_widget_prefs.tinted`) всегда главнее дефолта. */
+export function defaultWidgetTint(defaultColor: number | undefined, defaultTinted: boolean | undefined): boolean {
+  return defaultColor ? (defaultTinted ?? false) : true;
+}
+
+/** Эффективный тинт карточки: СОХРАНЁННЫЙ выбор пользователя главнее дефолта хоста, и только
+ *  отсутствующий (`undefined`) выбор падает в `defaultWidgetTint` (с тем же объявленным хостом
+ *  акцентом). Смена дефолта поэтому НИКОГДА не перекрашивает карточку, которую пользователь уже
+ *  настроил руками (prefs не мигрируются). */
+export function resolveWidgetTint(
+  savedTinted: boolean | undefined,
+  defaultColor: number | undefined,
+  defaultTinted: boolean | undefined,
+): boolean {
+  return savedTinted ?? defaultWidgetTint(defaultColor, defaultTinted);
+}
+
 /** Vizzes that read as a temporal line/area and cannot survive a third-width footprint. */
 const TEMPORAL_LINE_VIZ: ReadonlySet<WidgetViz> = new Set<WidgetViz>(['line']);
 

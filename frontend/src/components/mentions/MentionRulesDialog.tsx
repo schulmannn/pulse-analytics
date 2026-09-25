@@ -1,13 +1,13 @@
-import { useEffect, useId, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+import { useId, useState } from 'react';
+import { toast } from 'sonner';
 import type { MentionRules, MentionSettings } from '@/api/schemas';
 import { useSaveMentionSettings } from '@/api/queries';
-import { Icon } from '@/components/nav-icons';
-import { useFocusTrap } from '@/lib/useFocusTrap';
+import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 
 const INPUT_CLASS =
-  'mt-1.5 w-full resize-none rounded border border-border bg-background px-3 py-2.5 text-sm leading-5 text-foreground outline-hidden placeholder:text-muted-foreground/70 focus:border-primary focus:ring-1 focus:ring-primary read-only:cursor-default read-only:text-muted-foreground';
+  'mt-1.5 w-full resize-none rounded border border-border bg-background px-3 py-2.5 text-sm leading-5 text-foreground outline-hidden placeholder:text-muted-foreground focus:border-primary focus:ring-1 focus:ring-primary read-only:cursor-default read-only:text-muted-foreground';
 
 function lines(value: string): string[] {
   return value
@@ -41,8 +41,6 @@ export function MentionRulesDialog({
   onClose: () => void;
 }) {
   const titleId = useId();
-  const panelRef = useRef<HTMLDivElement>(null);
-  useFocusTrap(panelRef);
 
   const [include, setInclude] = useState(settings.rules.include_terms.join('\n'));
   const [exclude, setExclude] = useState(settings.rules.exclude_terms.join('\n'));
@@ -52,22 +50,6 @@ export function MentionRulesDialog({
   const [mode, setMode] = useState<MentionRules['match_mode']>(settings.rules.match_mode);
   const [localError, setLocalError] = useState<string | null>(null);
   const save = useSaveMentionSettings();
-
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.stopPropagation();
-        onClose();
-      }
-    };
-    document.addEventListener('keydown', onKey, true);
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.removeEventListener('keydown', onKey, true);
-      document.body.style.overflow = previousOverflow;
-    };
-  }, [onClose]);
 
   const submit = async () => {
     const rules: MentionRules = {
@@ -83,42 +65,26 @@ export function MentionRulesDialog({
     }
     setLocalError(null);
     const result = await save.mutateAsync(rules).catch(() => null);
-    if (result) onClose();
+    if (result) {
+      onClose();
+      // Диалог закрывается мгновенно — без тоста успех неотличим от отмены (канон CampaignDialog).
+      toast('Правила сохранены');
+    }
   };
 
   const ownSource = ownSourceLabel(settings);
   const error = localError ?? (save.error instanceof Error ? save.error.message : null);
 
-  return createPortal(
-    <div
-      className="fixed inset-0 z-modal flex items-start justify-center overflow-y-auto bg-background/75 p-8 backdrop-blur-xs backdrop-grayscale"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby={titleId}
-      onClick={onClose}
-    >
-      <div
-        ref={panelRef}
-        tabIndex={-1}
-        className="my-auto w-full max-w-2xl rounded-lg border border-border bg-card shadow-2xl focus:outline-hidden"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <header className="flex items-start justify-between gap-6 border-b border-border px-6 py-5">
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-w-2xl gap-0 overflow-y-auto p-0">
+        <header className="border-b border-border px-6 py-5 pr-12">
           <div>
-            <h2 id={titleId} className="text-base font-medium text-foreground">Правила упоминаний</h2>
-            <p className="mt-1 text-xs leading-5 text-muted-foreground">
+            <DialogTitle className="pr-0 text-base leading-normal">Правила упоминаний</DialogTitle>
+            <DialogDescription className="mt-1 text-xs leading-5">
               Правила относятся только к выбранному Telegram-каналу и применятся при следующем поиске. Архив не удаляется.
-            </p>
+            </DialogDescription>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Закрыть правила упоминаний"
-            title="Закрыть"
-            className="flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
-          >
-            <Icon name="close" className="size-4" />
-          </button>
         </header>
 
         <form
@@ -149,7 +115,8 @@ export function MentionRulesDialog({
 
           <div>
             <span className="text-xs font-medium text-muted-foreground">Совпадение</span>
-            <div role="group" aria-label="Режим совпадения" className="mt-1.5 inline-flex overflow-hidden rounded-full border border-border">
+            <fieldset className="m-0 mt-1.5 inline-flex min-w-0 overflow-hidden rounded-full border border-border p-0">
+              <legend className="sr-only">Режим совпадения</legend>
               {([
                 ['contains', 'Вхождение'],
                 ['word', 'Целое слово'],
@@ -162,13 +129,13 @@ export function MentionRulesDialog({
                   onClick={() => setMode(value)}
                   className={cn(
                     'border-r border-border px-3 py-1.5 text-xs last:border-r-0 disabled:cursor-default',
-                    mode === value ? 'bg-primary/10 font-medium text-primary' : 'text-muted-foreground hover:bg-muted/50',
+                    mode === value ? 'bg-primary/10 font-medium text-accent-foreground' : 'text-muted-foreground hover:bg-muted/50',
                   )}
                 >
                   {label}
                 </button>
               ))}
-            </div>
+            </fieldset>
           </div>
 
           <div className="grid grid-cols-2 gap-5">
@@ -201,7 +168,7 @@ export function MentionRulesDialog({
 
           {ownSource && (
             <div className="flex items-center gap-2 border-t border-border pt-4 text-xs text-muted-foreground">
-              <span className="size-1.5 rounded-full bg-success" aria-hidden="true" />
+              <span className="size-1.5 rounded-full bg-verdant" aria-hidden="true" />
               Собственный канал {ownSource} исключается автоматически.
             </div>
           )}
@@ -223,18 +190,19 @@ export function MentionRulesDialog({
               {settings.can_edit ? 'Отмена' : 'Закрыть'}
             </button>
             {settings.can_edit && (
-              <button
+              <Button
                 type="submit"
+                pending={save.isPending}
                 disabled={save.isPending || lines(include).length === 0}
-                className="btn-pill bg-primary px-4 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                size="xs"
+                className="px-4"
               >
                 {save.isPending ? 'Сохранение…' : 'Сохранить правила'}
-              </button>
+              </Button>
             )}
           </footer>
         </form>
-      </div>
-    </div>,
-    document.body,
+      </DialogContent>
+    </Dialog>
   );
 }

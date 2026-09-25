@@ -1,0 +1,824 @@
+import { useState } from 'react';
+import type { ReactNode } from 'react';
+import { Link } from 'react-router-dom';
+import { ChartSection as ChartWidget } from '@/components/ChartWidget';
+
+import { SegmentedControl } from '@/components/SegmentedControl';
+import { PeriodChips } from '@/components/PeriodChips';
+import { SourceIdentity } from '@/components/SourceIdentity';
+import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
+import { Breakdown, type BreakdownColumns } from '@/components/Breakdown';
+import { LineChart } from '@/components/LineChart';
+import { BarChart } from '@/components/BarChart';
+import { EmptyState } from '@/components/EmptyState';
+import { ErrorState } from '@/components/ErrorState';
+import { Skeleton } from '@/components/ui/skeleton';
+import { HeatmapWidgetBody, VelocityWidgetBody } from '@/panels/Charts';
+import { ContentOpportunity } from '@/panels/ContentOpportunity';
+import { usePeriod, calendarWindowForPeriod } from '@/lib/period';
+import { WidgetPeriodProvider, widgetPeriodValue } from '@/lib/period';
+import type { PeriodDays, DateRange, WidgetPeriodValue } from '@/lib/period';
+import { useExplorerChartHeight } from '@/lib/useExplorerChartHeight';
+import { isTgExtraMetricKey } from '@/panels/tgMetricKeys';
+import { useTgFull, useTgGraphs } from '@/api/queries';
+import type { TgFull, TgGraphs } from '@/api/schemas';
+import { useTgCampaignScope } from '@/lib/campaignFilter';
+import { normalizeTgPosts } from '@/lib/posts';
+import { fmt, pluralRu } from '@/lib/format';
+import type { BreakdownLikeItem } from '@/components/widgets/variants';
+import {
+  deriveEmojis,
+  deriveCompositionFromPosts,
+  deriveViewsByTypeFromPosts,
+  deriveFormatPerf,
+  deriveWeekday,
+  deriveFollowerFlows,
+  tgViewsBySourceItems,
+  tgNewFollowersBySourceItems,
+  tgLanguageItems,
+  tgSentimentItems,
+  tgTopHours,
+  WD_LABELS,
+} from '@/panels/TgAnalytics';
+import { deriveWeekdayReach, deriveFormatViews } from '@/panels/Compare';
+import { deriveHashtags } from '@/panels/Hashtags';
+import { MetricColumns, MetricDescriptor, WindowBarShell, RailSection, MetricPageHeader} from '@/components/metric/shared';
+
+/**
+ * Полностраничные «дополнительные» графики Telegram — `/metrics/tg-*`. Это те карточки вкладок
+ * Аналитики, что НЕ входят в числовой drill-набор kpiDerive (views/avgReach/…/subscribers → steep
+ * MetricPage): тепловая карта активности и профиль скорости набора просмотров. Раньше они открывали
+ * generic `?detail=` оверлей — теперь ведут на выделенный route той же грамматики, что `/metrics/ig-views`
+ * и `/metrics/ym-visits`: назад-ссылка, тихая шапка (имя метрики + источник + дескриптор), две колонки
+ * (главный блок + rail «О метрике»), контролы под графиком.
+ *
+ * ЧЕСТНОСТЬ важнее паритета: тепловая карта — своя 7×24 форма без Line/Bar/сравнения; скорость —
+ * настоящий кумулятивный профиль с выбором Line/Bar, но без выдуманного baseline-сравнения (это
+ * агрегат по всем постам, у него нет «прошлого периода»).
+ */
+export function TgMetricPage({ metricKey }: { metricKey: string }) {
+  if (!isTgExtraMetricKey(metricKey)) return null;
+  switch (metricKey) {
+    case 'tg-heatmap':
+      return <TgHeatmapPage />;
+    case 'tg-velocity':
+      return <TgVelocityPage />;
+    case 'tg-content-opportunity':
+      return <TgContentOpportunityPage />;
+    case 'tg-churn':
+      return <TgChurnPage />;
+    case 'tg-weekday-reach':
+    case 'tg-weekday-views':
+    case 'tg-post-count':
+    case 'tg-hours':
+      return <TgCategorySeriesPage def={CATEGORY_DEFS[metricKey]} />;
+    default:
+      return <TgBreakdownPage def={BREAKDOWN_DEFS[metricKey]} />;
+  }
+}
+
+/** Re-export guard so the route dispatcher can gate `tg-*` extra keys without importing the page eagerly. */
+export { isTgExtraMetricKey };
+
+// ── Shared shell ─────────────────────────────────────────────────────────────────────────────
+
+/** Тихая шапка + две колонки (главный блок + rail «О метрике»/сравнение), как у `/metrics/ig-reach`.
+    Назад ведёт на конкретную вкладку Аналитики, откуда карточка засеяла drillTo. */
+function TgMetricShell({
+  back,
+  term,
+  descriptor,
+  aside,
+  children,
+}: {
+  back: { to: string; label: string };
+  term: string;
+  descriptor?: string;
+  aside?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <div className="space-y-5">
+      <MetricPageHeader back={back} />
+
+      <div>
+        <h1 className="text-2xl font-medium tracking-tight text-foreground">{term}</h1>
+        <SourceIdentity network="tg" className="mt-1 max-w-full" />
+        {descriptor && <MetricDescriptor>{descriptor}</MetricDescriptor>}
+      </div>
+
+      <MetricColumns
+        rail={
+          <>
+            {aside}
+            {/* «О метрике» убран — техническая информация не для конечного пользователя (владелец,
+                #401). Этот файл появился за три дня до той зачистки и в неё не попал: блок жил
+                только у Telegram, а тексты во всех источниках остались в коде нерисуемыми. */}
+            <Link
+              to={back.to}
+              className="inline-flex items-center gap-1 text-xs font-medium text-primary transition-colors hover:text-primary/80"
+            >
+              Открыть Аналитику <span aria-hidden="true">→</span>
+            </Link>
+          </>
+        }
+      >
+        {children}
+      </MetricColumns>
+    </div>
+  );
+}
+
+/** Полноэкранная карточка с раскрытым (не-expandable) телом — та же роль, что у YmReportCard.
+    Раскрытые контексты дают LineChart/BarChart полную высоту explorer'а (heatmap их игнорирует). */
+function TgReportCard({ id, title, action, children }: { id: string; title: string; action?: ReactNode; children: ReactNode }) {
+  const chartH = useExplorerChartHeight();
+  return (
+    <ChartWidget id={id} title={title} defaultSize="full" noExpand action={action}>
+      <ChartExpandedContext.Provider value={true}>
+        <ExpandedChartHeightContext.Provider value={chartH}>{children}</ExpandedChartHeightContext.Provider>
+      </ChartExpandedContext.Provider>
+    </ChartWidget>
+  );
+}
+
+// ── Activity heatmap page ──────────────────────────────────────────────────────────────────────
+
+/** Тепловая карта активности 7×24 — своя форма распределения, БЕЗ Line/Bar/сравнения. Тело
+    (HeatmapWidgetBody) само фетчит useTgFull(0) и окном режет по useWidgetPeriod, поэтому оборачиваем
+    в WidgetPeriodProvider, засеянный глобальным explorer-периодом (тем, что drillTo протащил из
+    фид-топбара). Прямой заход/reload держат контекст: usePeriod URL-persist + канал из useSelectedChannel. */
+function TgHeatmapPage() {
+  const { days, setDays, range, setRange } = usePeriod();
+  return (
+    <TgMetricShell
+      back={{ to: '/analytics?tab=audience', label: 'Аналитика · Аудитория' }}
+      term="Тепловая карта активности"
+      descriptor="Когда посты собирают вовлечённость — сетка 7×24 по среднему ERV слота за выбранное окно"
+    >
+      <TgReportCard id="tg-page-heatmap" title="По дням недели и часам">
+        <WidgetPeriodProvider value={widgetPeriodValue(days, range)}>
+          <HeatmapWidgetBody />
+        </WidgetPeriodProvider>
+      </TgReportCard>
+
+      <WindowBarShell>
+        <span className="flex-1" />
+        <PeriodChips ariaLabel="Окно" value={days} onChange={setDays} range={range} onRangeChange={setRange} />
+      </WindowBarShell>
+    </TgMetricShell>
+  );
+}
+
+// ── Views-velocity page ────────────────────────────────────────────────────────────────────────
+
+/** Скорость набора просмотров — кумулятивный профиль (какая доля итоговых просмотров набрана к N-м
+    суткам после публикации, усреднённо по постам). Line/Bar оба честны для накопительной кривой;
+    сравнения нет — это агрегат-профиль по всем постам, «прошлого периода» у него не существует.
+    useVelocity() без периода (ключ — канал), так что окна тут нет, как и у ym-hourly нет Line/Bar. */
+function TgVelocityPage() {
+  const [kind, setKind] = useState<'line' | 'bar'>('line');
+  return (
+    <TgMetricShell
+      back={{ to: '/analytics?tab=dynamics', label: 'Аналитика · Динамика' }}
+      term="Скорость набора просмотров"
+      descriptor="Как быстро пост добирает свои просмотры — накопленная доля по суткам после публикации"
+    >
+      <TgReportCard
+        id="tg-page-velocity"
+        title="Накопленная доля просмотров"
+        action={
+          <SegmentedControl
+            ariaLabel="Тип графика"
+            className="shrink-0"
+            value={kind}
+            onChange={setKind}
+            options={[
+              { value: 'line', content: 'Линия', ariaLabel: 'Тип графика: Линия' },
+              { value: 'bar', content: 'Столбцы', ariaLabel: 'Тип графика: Столбцы' },
+            ]}
+          />
+        }
+      >
+        <VelocityWidgetBody viz={kind === 'bar' ? 'bar' : 'line'} />
+      </TgReportCard>
+    </TgMetricShell>
+  );
+}
+
+// ── Content-opportunity map ───────────────────────────────────────────────────────────────────
+
+/** A genuine two-dimensional analytical map: publication share on X and relative reach on Y.
+    Its shape is the meaning, so Line/Bar would be misleading. The selected campaign and explorer
+    period follow the same URL-backed contracts as the source card. */
+function TgContentOpportunityPage() {
+  const window = useTgMetricWindow();
+  const full = useTgFull(0);
+  const campaign = useTgCampaignScope();
+  const campaignPending = campaign.active && campaign.isPending;
+  const campaignError = campaign.active && campaign.isError;
+  const campaignEmpty =
+    campaign.active && !campaignPending && !campaignError && campaign.sourceMemberCount === 0;
+  const backTo =
+    campaign.campaignId != null
+      ? `/analytics?tab=content&campaign=${campaign.campaignId}`
+      : '/analytics?tab=content';
+
+  return (
+    <TgMetricShell
+      back={{ to: backTo, label: 'Аналитика · Форматы' }}
+      term="Карта возможностей контента"
+      descriptor="Какие форматы публикуются реже других, но дают охват выше среднего"
+      aside={
+        <TgNoComparison text="Это двухмерная карта состава текущего окна, а не временной ряд — Line/Bar и baseline прошлого периода здесь были бы ложными." />
+      }
+    >
+      <TgReportCard id="tg-page-content-opportunity" title="Частота публикаций × относительный охват">
+        {full.isPending || campaignPending ? (
+          <ReportSkeleton />
+        ) : full.isError || campaignError ? (
+          <ErrorState
+            title={
+              campaignError
+                ? 'Не удалось загрузить публикации кампании'
+                : 'Не удалось загрузить публикации канала'
+            }
+            onRetry={campaignError ? campaign.retry : () => void full.refetch()}
+          />
+        ) : campaignEmpty ? (
+          <EmptyState
+            compact
+            size="chart"
+            title="В этой кампании нет публикаций Telegram из текущего источника"
+            reason="Выберите другую кампанию или снимите фильтр."
+          />
+        ) : (
+          <WidgetPeriodProvider value={window.period}>
+            <ContentOpportunity inCampaign={campaign.inCampaign} />
+          </WidgetPeriodProvider>
+        )}
+      </TgReportCard>
+      <TgWindowBar window={window} />
+    </TgMetricShell>
+  );
+}
+
+// ── Shared window + rail helpers for the migrated chart cards ─────────────────────────────────────
+
+/** Назад-цели: каждая карточка возвращает на СВОЮ вкладку Аналитики. */
+const BACK = {
+  compare: { to: '/analytics?tab=compare', label: 'Аналитика · Сравнение' },
+  content: { to: '/analytics?tab=content', label: 'Аналитика · Форматы' },
+  audience: { to: '/analytics?tab=audience', label: 'Аналитика · Аудитория' },
+  dynamics: { to: '/analytics?tab=dynamics', label: 'Аналитика · Динамика' },
+} as const;
+
+/** Дефолтный rail-текст «Сравнение» для разрезов/распределений без канонической метрики периода. */
+const LIST_COMPARISON =
+  'Это разрез за окно, а не одна метрика периода — сравнение с прошлым периодом здесь не рассчитывается. Меняйте окно, чтобы пересобрать карточку.';
+/** Для graphs-разрезов (источники/языки/тональность/часы): фиксированное окно статистики Telegram. */
+const GRAPHS_COMPARISON =
+  'Разрез статистики канала за доступное окно Telegram — не метрика периода, сравнение с прошлым периодом не рассчитывается.';
+
+const keepAll = (): boolean => true;
+
+/** Нормализованные посты выбранного источника, суженные окном (та же связка, что у карточек). */
+function windowedPosts(full: TgFull | undefined, inRange: (dateISO: string | null | undefined) => boolean) {
+  return normalizeTgPosts(full?.posts ?? [], full?.channel ?? {}).filter((p) => inRange(p.date));
+}
+
+interface TgMetricWindow {
+  days: PeriodDays;
+  range: DateRange | null;
+  setDays: (days: PeriodDays) => void;
+  setRange: (range: DateRange | null) => void;
+  period: WidgetPeriodValue;
+}
+
+/** Живое окно из глобального explorer-периода (тот, что drillTo засеял из фид-топбара); прямой
+    заход/reload держат его (usePeriod URL-seed + канал из useSelectedChannel через SourceIdentity). */
+function useTgMetricWindow(): TgMetricWindow {
+  const { days, setDays, range, setRange } = usePeriod();
+  return { days, range, setDays, setRange, period: widgetPeriodValue(days, range) };
+}
+
+/** Пресеты окна одной строкой под карточкой (тайм-бар принадлежит контенту, а не краю экрана). */
+function TgWindowBar({ window }: { window: TgMetricWindow }) {
+  return (
+    <WindowBarShell>
+      <span className="flex-1" />
+      <PeriodChips ariaLabel="Окно" value={window.days} onChange={window.setDays} range={window.range} onRangeChange={window.setRange} />
+    </WindowBarShell>
+  );
+}
+
+/** Rail «Сравнение» с честным пояснением, почему сравнения периодов нет (требование дизайна). */
+function TgNoComparison({ text }: { text: string }) {
+  return (
+    <RailSection title="Сравнение">
+      <p className="text-xs leading-relaxed text-muted-foreground">{text}</p>
+    </RailSection>
+  );
+}
+
+function ReportSkeleton() {
+  return <Skeleton className="h-[360px] w-full" />;
+}
+
+// ── Categorical breakdown pages (truthful rank list, no fabricated Line/Bar or comparison) ────────
+
+interface DeriveCtx {
+  full: TgFull | undefined;
+  graphs: TgGraphs | undefined;
+  period: WidgetPeriodValue;
+  keep: (postId: number | null | undefined) => boolean;
+}
+
+interface TgBreakdownDef {
+  cardId: string;
+  back: { to: string; label: string };
+  term: string;
+  descriptor: string;
+  cardTitle: string;
+  /** Which payload gates loading/error — posts (period-scoped) vs graphs (fixed Telegram window). */
+  source: 'posts' | 'graphs';
+  /** Post-derived cards follow the seeded window; graphs cards are period-agnostic (no window bar). */
+  periodControl: boolean;
+  /** Content/hashtag cards honour the selected campaign carried in on `?campaign=`. */
+  campaignScoped: boolean;
+  comparison: string;
+  derive: (ctx: DeriveCtx) => BreakdownLikeItem[];
+  footer?: (ctx: DeriveCtx) => ReactNode;
+  empty: { title: string; reason?: string };
+  /** Имена колонок: без них правое число остаётся без единицы измерения. */
+  columns: BreakdownColumns;
+  /** Номер позиции — там, где порядок сам по себе является ответом (источники, языки, эмодзи). */
+  ranked?: boolean;
+}
+
+/**
+ * Полноэкранный разрез: TRUTHFUL rank-список (Breakdown раскрыт на всю высоту через
+ * ChartExpandedContext) — ни выдуманного графика-времянки, ни выбора Line/Bar, ни baseline-сравнения.
+ * Пост-производные карточки следуют засеянному окну (и кампании из `?campaign=`); graphs-разрезы
+ * период-агностичны (фиксированное окно статистики Telegram) — у них нет тайм-бара.
+ */
+function TgBreakdownPage({ def }: { def: TgBreakdownDef }) {
+  const window = useTgMetricWindow();
+  const full = useTgFull(0);
+  const graphs = useTgGraphs();
+  const campaign = useTgCampaignScope();
+  const q = def.source === 'graphs' ? graphs : full;
+  const keep = def.campaignScoped && campaign.active ? campaign.inCampaign : keepAll;
+  const ctx: DeriveCtx = { full: full.data, graphs: graphs.data, period: window.period, keep };
+  const campaignPending = def.campaignScoped && campaign.active && campaign.isPending;
+  const campaignError = def.campaignScoped && campaign.active && campaign.isError;
+  const pending = q.isPending || campaignPending;
+  const items = !pending && !q.isError && !campaignError ? def.derive(ctx) : [];
+  const back =
+    def.campaignScoped && campaign.campaignId != null
+      ? { ...def.back, to: `${def.back.to}&campaign=${campaign.campaignId}` }
+      : def.back;
+
+  return (
+    <TgMetricShell
+      back={back}
+      term={def.term}
+      descriptor={def.descriptor}
+      aside={<TgNoComparison text={def.comparison} />}
+    >
+      <TgReportCard id={def.cardId} title={def.cardTitle}>
+        {pending ? (
+          <ReportSkeleton />
+        ) : q.isError || campaignError ? (
+          <ErrorState
+            title={campaignError ? 'Не удалось загрузить состав кампании' : 'Не удалось загрузить данные'}
+            onRetry={campaignError ? campaign.retry : () => void q.refetch()}
+          />
+        ) : items.length === 0 ? (
+          <EmptyState compact size="chart" title={def.empty.title} reason={def.empty.reason} />
+        ) : (
+          <>
+            <Breakdown items={items} columns={def.columns} ranked={def.ranked} />
+            {def.footer?.(ctx)}
+          </>
+        )}
+      </TgReportCard>
+      {def.periodControl && <TgWindowBar window={window} />}
+    </TgMetricShell>
+  );
+}
+
+// ── Category Bar/Line pages (weekday / hour axis — Line is truthful for a category series) ─────────
+
+interface CategoryResult {
+  values: number[];
+  labels: string[];
+  titles: string[];
+}
+
+interface TgCategoryDef {
+  cardId: string;
+  back: { to: string; label: string };
+  term: string;
+  descriptor: string;
+  cardTitle: string;
+  source: 'posts' | 'graphs';
+  periodControl: boolean;
+  comparison: string;
+  derive: (ctx: DeriveCtx) => CategoryResult;
+  footer?: (ctx: DeriveCtx) => ReactNode;
+  empty: { title: string; reason?: string };
+}
+
+/**
+ * Полноэкранная категориальная серия по фиксированной оси (дни недели / часы суток). Line ЧЕСТЕН для
+ * категориальной оси ровно там, где исходная карточка уже давала Bar/Line — поэтому оставляем выбор
+ * Тип графика (Линия/Столбцы). Никакого сравнения периодов: это распределение за окно, а не метрика.
+ */
+function TgCategorySeriesPage({ def }: { def: TgCategoryDef }) {
+  const window = useTgMetricWindow();
+  const full = useTgFull(0);
+  const graphs = useTgGraphs();
+  const [kind, setKind] = useState<'line' | 'bar'>('line');
+  const q = def.source === 'graphs' ? graphs : full;
+  const ctx: DeriveCtx = { full: full.data, graphs: graphs.data, period: window.period, keep: keepAll };
+  const result = !q.isPending && !q.isError ? def.derive(ctx) : null;
+  const hasData = result != null && result.values.length > 0 && result.values.some((v) => v > 0);
+
+  return (
+    <TgMetricShell
+      back={def.back}
+      term={def.term}
+      descriptor={def.descriptor}
+      aside={<TgNoComparison text={def.comparison} />}
+    >
+      <TgReportCard
+        id={def.cardId}
+        title={def.cardTitle}
+        action={
+          <SegmentedControl
+            ariaLabel="Тип графика"
+            className="shrink-0"
+            value={kind}
+            onChange={setKind}
+            options={[
+              { value: 'line', content: 'Линия', ariaLabel: 'Тип графика: Линия' },
+              { value: 'bar', content: 'Столбцы', ariaLabel: 'Тип графика: Столбцы' },
+            ]}
+          />
+        }
+      >
+        {q.isPending ? (
+          <ReportSkeleton />
+        ) : q.isError ? (
+          <ErrorState title="Не удалось загрузить данные" onRetry={() => void q.refetch()} />
+        ) : !hasData || !result ? (
+          <EmptyState compact size="chart" title={def.empty.title} reason={def.empty.reason} />
+        ) : kind === 'line' ? (
+          <LineChart values={result.values} labels={result.labels} titles={result.titles} yMin={0} />
+        ) : (
+          <BarChart values={result.values} labels={result.labels} titles={result.titles} />
+        )}
+        {hasData && def.footer?.(ctx)}
+      </TgReportCard>
+      {def.periodControl && <TgWindowBar window={window} />}
+    </TgMetricShell>
+  );
+}
+
+// ── Churn page (join/left over the resolved window) ───────────────────────────────────────────────
+
+/** «Динамика оттока» — подписалось/отписалось за окно (два ряда + «N всего»), как исходная карточка:
+    единственная truthful форма — список, без выдуманного графика/сравнения. */
+function TgChurnPage() {
+  const window = useTgMetricWindow();
+  const graphs = useTgGraphs();
+  const flow = deriveFollowerFlows(graphs.data, calendarWindowForPeriod({ days: window.days, range: window.range }));
+  const flowTotal = flow.joinedTotal + flow.leftTotal;
+  // Доля — тем же слоем, что и у остальных разбивок-частей целого (lib/breakdownShare через
+  // `share` у Breakdown): один формат «значение · доля» на всё приложение, без локального
+  // Math.round, который округлял по своим правилам и расходился с соседней страницей.
+  const rowShare = (value: number) => (flowTotal > 0 ? value / flowTotal : undefined);
+
+  return (
+    <TgMetricShell
+      back={BACK.dynamics}
+      term="Динамика оттока"
+      descriptor="Сколько подписалось и отписалось за выбранное окно"
+      aside={<TgNoComparison text={LIST_COMPARISON} />}
+    >
+      <TgReportCard id="tg-page-churn" title="Подписки и отписки за окно">
+        {graphs.isPending ? (
+          <ReportSkeleton />
+        ) : graphs.isError ? (
+          <ErrorState title="Не удалось загрузить данные" onRetry={() => void graphs.refetch()} />
+        ) : flow.values.length === 0 ? (
+          <EmptyState compact size="chart" title="Нет данных за выбранный период." />
+        ) : (
+          <>
+            <Breakdown
+              columns={{ label: 'Событие', value: 'Подписчики' }}
+              items={[
+                {
+                  label: 'Отписалось',
+                  value: flow.leftTotal,
+                  display: fmt.num(flow.leftTotal),
+                  share: rowShare(flow.leftTotal),
+                },
+                {
+                  label: 'Подписалось',
+                  value: flow.joinedTotal,
+                  display: fmt.num(flow.joinedTotal),
+                  share: rowShare(flow.joinedTotal),
+                },
+              ]}
+            />
+            <div className="mt-3 text-xs font-medium text-muted-foreground">{fmt.num(flowTotal)} всего</div>
+          </>
+        )}
+      </TgReportCard>
+      <TgWindowBar window={window} />
+    </TgMetricShell>
+  );
+}
+
+// ── Definition tables ─────────────────────────────────────────────────────────────────────────────
+
+type BreakdownKey =
+  | 'tg-format-views'
+  | 'tg-hashtag-erv'
+  | 'tg-emoji'
+  | 'tg-engagement-mix'
+  | 'tg-reach-by-type'
+  | 'tg-erv-by-format'
+  | 'tg-views-by-source'
+  | 'tg-followers-by-source'
+  | 'tg-languages'
+  | 'tg-sentiment';
+
+const BREAKDOWN_DEFS: Record<BreakdownKey, TgBreakdownDef> = {
+  'tg-format-views': {
+    cardId: 'tg-page-format-views',
+    back: BACK.compare,
+    term: 'По форматам (просмотры)',
+    descriptor: 'Суммарные просмотры публикаций по формату за выбранное окно',
+    cardTitle: 'Просмотры по форматам',
+    source: 'posts',
+    periodControl: true,
+    campaignScoped: false,
+    comparison: LIST_COMPARISON,
+    derive: (ctx) => deriveFormatViews(windowedPosts(ctx.full, ctx.period.inRange)),
+    columns: { label: 'Формат', value: 'Просмотры' },
+    empty: { title: 'Нет публикаций за период' },
+  },
+  'tg-hashtag-erv': {
+    cardId: 'tg-page-hashtag-erv',
+    back: BACK.content,
+    term: 'Влияние хэштегов на ERV',
+    descriptor: 'Насколько тег поднимает вовлечённость против постов без тегов',
+    cardTitle: 'Хэштеги по приросту ERV',
+    source: 'posts',
+    periodControl: true,
+    campaignScoped: true,
+    comparison: LIST_COMPARISON,
+    derive: (ctx) => deriveHashtags(ctx.full, ctx.period.inRange, ctx.keep).breakdownItems,
+    footer: (ctx) => {
+      const { baseAvg } = deriveHashtags(ctx.full, ctx.period.inRange, ctx.keep);
+      if (baseAvg === null) return null;
+      return (
+        <div className="mt-3 text-xs font-medium text-muted-foreground">
+          база без тегов: <strong className="font-medium text-foreground">{baseAvg.toFixed(1)}%</strong> ERV
+        </div>
+      );
+    },
+    columns: { label: 'Хэштег', value: 'Прирост ERV' },
+    ranked: true,
+    empty: { title: 'Мало данных для хэштегов', reason: 'Нужно ≥2 поста с одним хэштегом' },
+  },
+  'tg-emoji': {
+    cardId: 'tg-page-emoji',
+    back: BACK.content,
+    term: 'Реакции по эмодзи',
+    descriptor: 'Какие эмодзи-реакции собирают публикации за выбранное окно',
+    cardTitle: 'Реакции по эмодзи',
+    source: 'posts',
+    periodControl: true,
+    campaignScoped: true,
+    comparison: LIST_COMPARISON,
+    derive: (ctx) =>
+      deriveEmojis(ctx.full, ctx.period.inRange, ctx.keep).map((e) => ({ label: e.label, value: e.value, display: fmt.num(e.value), share: e.share })),
+    columns: { label: 'Эмодзи', value: 'Реакции' },
+    ranked: true,
+    empty: { title: 'Нет реакций за период' },
+  },
+  'tg-engagement-mix': {
+    cardId: 'tg-page-engagement-mix',
+    back: BACK.content,
+    term: 'Состав вовлечённости',
+    descriptor: 'Как распределяется вовлечённость публикаций окна',
+    cardTitle: 'Состав вовлечённости',
+    source: 'posts',
+    periodControl: true,
+    campaignScoped: true,
+    comparison: LIST_COMPARISON,
+    derive: (ctx) =>
+      deriveCompositionFromPosts(ctx.full, ctx.period.inRange, ctx.keep).map((c) => ({
+        label: c.label,
+        value: c.value,
+        display: fmt.num(c.value),
+        color: c.color,
+        share: c.share,
+      })),
+    columns: { label: 'Вид вовлечённости', value: 'События' },
+    empty: { title: 'Нет вовлечённости за период' },
+  },
+  'tg-reach-by-type': {
+    cardId: 'tg-page-reach-by-type',
+    back: BACK.content,
+    term: 'Ср. охват по типу',
+    descriptor: 'Средние просмотры публикации по типу за выбранное окно',
+    cardTitle: 'Средний охват по типу',
+    source: 'posts',
+    periodControl: true,
+    campaignScoped: true,
+    comparison: LIST_COMPARISON,
+    derive: (ctx) =>
+      deriveViewsByTypeFromPosts(ctx.full, ctx.period.inRange, ctx.keep).map((t) => ({ label: t.label, value: t.value, display: fmt.num(t.value) })),
+    columns: { label: 'Тип публикации', value: 'Ср. охват' },
+    empty: { title: 'Нет публикаций за период' },
+  },
+  'tg-erv-by-format': {
+    cardId: 'tg-page-erv-by-format',
+    back: BACK.content,
+    term: 'Вовлечённость по формату',
+    descriptor: 'Средний ERV публикации по формату за выбранное окно',
+    cardTitle: 'ERV по формату',
+    source: 'posts',
+    periodControl: true,
+    campaignScoped: true,
+    comparison: LIST_COMPARISON,
+    derive: (ctx) =>
+      deriveFormatPerf(ctx.full, ctx.period.inRange, ctx.keep).map((f) => ({
+        label: f.label,
+        value: f.avgErv,
+        display: `${f.avgErv.toFixed(1)}% ERV · ${f.n} ${pluralRu(f.n, ['пост', 'поста', 'постов'])}`,
+      })),
+    columns: { label: 'Формат', value: 'Ср. ERV' },
+    empty: { title: 'Нет публикаций за период' },
+  },
+  'tg-views-by-source': {
+    cardId: 'tg-page-views-by-source',
+    back: BACK.audience,
+    term: 'Просмотры по источникам',
+    descriptor: 'Откуда пришли просмотры публикаций канала',
+    cardTitle: 'Просмотры по источникам',
+    source: 'graphs',
+    periodControl: false,
+    campaignScoped: false,
+    comparison: GRAPHS_COMPARISON,
+    derive: (ctx) => tgViewsBySourceItems(ctx.graphs),
+    columns: { label: 'Источник', value: 'Просмотры' },
+    ranked: true,
+    empty: { title: 'Нет данных по источникам' },
+  },
+  'tg-followers-by-source': {
+    cardId: 'tg-page-followers-by-source',
+    back: BACK.audience,
+    term: 'Новые подписчики по источникам',
+    descriptor: 'Откуда пришли новые подписчики канала',
+    cardTitle: 'Новые подписчики по источникам',
+    source: 'graphs',
+    periodControl: false,
+    campaignScoped: false,
+    comparison: GRAPHS_COMPARISON,
+    derive: (ctx) => tgNewFollowersBySourceItems(ctx.graphs),
+    columns: { label: 'Источник', value: 'Подписчики' },
+    ranked: true,
+    empty: { title: 'Нет данных по источникам' },
+  },
+  'tg-languages': {
+    cardId: 'tg-page-languages',
+    back: BACK.audience,
+    term: 'Языки аудитории',
+    descriptor: 'Языки интерфейса подписчиков канала',
+    cardTitle: 'Языки аудитории',
+    source: 'graphs',
+    periodControl: false,
+    campaignScoped: false,
+    comparison: GRAPHS_COMPARISON,
+    derive: (ctx) => tgLanguageItems(ctx.graphs),
+    columns: { label: 'Язык', value: 'Подписчики' },
+    ranked: true,
+    empty: { title: 'Нет данных по языкам' },
+  },
+  'tg-sentiment': {
+    cardId: 'tg-page-sentiment',
+    back: BACK.audience,
+    term: 'Тональность реакций',
+    descriptor: 'Соотношение положительных и отрицательных реакций',
+    cardTitle: 'Тональность реакций',
+    source: 'graphs',
+    periodControl: false,
+    campaignScoped: false,
+    comparison: GRAPHS_COMPARISON,
+    derive: (ctx) => tgSentimentItems(ctx.graphs),
+    columns: { label: 'Тональность', value: 'Реакции' },
+    empty: { title: 'Нет данных по тональности' },
+  },
+};
+
+type CategoryKey = 'tg-weekday-reach' | 'tg-weekday-views' | 'tg-post-count' | 'tg-hours';
+
+const CATEGORY_DEFS: Record<CategoryKey, TgCategoryDef> = {
+  'tg-weekday-reach': {
+    cardId: 'tg-page-weekday-reach',
+    back: BACK.compare,
+    term: 'Охват по дням недели',
+    descriptor: 'Средний охват публикации по дню недели за выбранное окно',
+    cardTitle: 'Средний охват по дням недели',
+    source: 'posts',
+    periodControl: true,
+    comparison: 'Среднее по дням недели за окно — распределение, а не метрика периода; сравнение с прошлым периодом не рассчитывается.',
+    derive: (ctx) => {
+      const w = deriveWeekdayReach(windowedPosts(ctx.full, ctx.period.inRange));
+      return {
+        values: w.values,
+        labels: w.labels,
+        titles: w.values.map((v, i) => `${w.labels[i]}: ${fmt.short(v)} ср. охват`),
+      };
+    },
+    empty: { title: 'Нет публикаций за период' },
+  },
+  'tg-weekday-views': {
+    cardId: 'tg-page-weekday-views',
+    back: BACK.audience,
+    term: 'По дням недели',
+    descriptor: 'Средние просмотры публикации по дню недели за выбранное окно',
+    cardTitle: 'Средние просмотры по дням недели',
+    source: 'posts',
+    periodControl: true,
+    comparison: 'Среднее по дням недели за окно — распределение, а не метрика периода; сравнение с прошлым периодом не рассчитывается.',
+    derive: (ctx) => {
+      const w = deriveWeekday(ctx.full, ctx.period.inRange);
+      return {
+        values: w.wdAvgValues,
+        labels: WD_LABELS,
+        titles: w.wdAvgValues.map((v, i) => `${WD_LABELS[i]}: ${fmt.num(v)} ср. просмотров`),
+      };
+    },
+    footer: (ctx) => {
+      const { bestWdLabel } = deriveWeekday(ctx.full, ctx.period.inRange);
+      if (!bestWdLabel) return null;
+      return (
+        <div className="mt-3 text-xs font-medium text-muted-foreground">
+          лучший день: <strong className="font-medium text-foreground">{bestWdLabel}</strong>
+        </div>
+      );
+    },
+    empty: { title: 'Нет публикаций за период' },
+  },
+  'tg-post-count': {
+    cardId: 'tg-page-post-count',
+    back: BACK.audience,
+    term: 'Количество постов',
+    descriptor: 'Сколько публикаций выходит по дням недели за выбранное окно',
+    cardTitle: 'Публикации по дням недели',
+    source: 'posts',
+    periodControl: true,
+    comparison: 'Распределение публикаций по дням недели за окно — не метрика периода; сравнение с прошлым периодом не рассчитывается.',
+    derive: (ctx) => {
+      const w = deriveWeekday(ctx.full, ctx.period.inRange);
+      return {
+        values: w.wdCountValues,
+        labels: WD_LABELS,
+        titles: w.wdCountValues.map((v, i) => `${WD_LABELS[i]}: ${fmt.num(v)} постов`),
+      };
+    },
+    empty: { title: 'Нет публикаций за период' },
+  },
+  'tg-hours': {
+    cardId: 'tg-page-hours',
+    back: BACK.audience,
+    term: 'Активность по часам',
+    descriptor: 'Суточный профиль активности аудитории канала',
+    cardTitle: 'Активность по часам суток',
+    source: 'graphs',
+    periodControl: false,
+    comparison: GRAPHS_COMPARISON,
+    derive: (ctx) => {
+      const th = tgTopHours(ctx.graphs);
+      if (!th) return { values: [], labels: [], titles: [] };
+      return {
+        values: th.values,
+        labels: th.hours.map(String),
+        titles: th.values.map((v, i) => `${th.hours[i] ?? i}:00 — ${fmt.num(v)}`),
+      };
+    },
+    footer: (ctx) => {
+      const th = tgTopHours(ctx.graphs);
+      if (!th) return null;
+      return <div className="mt-3 text-xs font-medium text-muted-foreground">пик активности ~ {th.peakHour}:00</div>;
+    },
+    empty: { title: 'Нет данных по часам' },
+  },
+};

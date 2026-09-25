@@ -10,11 +10,11 @@ import { CATEGORY_LABEL, CATEGORY_ORDER, metricsForSource, type MetricDef, type 
  * existing picker; this is the metric-first path alongside it.
  */
 
-const SOURCE_LABEL: Record<'tg' | 'ig' | 'ms', string> = { tg: 'Telegram', ig: 'Instagram', ms: 'МойСклад' };
+const SOURCE_LABEL: Record<'tg' | 'ig' | 'ms' | 'ym', string> = { tg: 'Telegram', ig: 'Instagram', ms: 'МойСклад', ym: 'Метрика' };
 // All sources resolve now (TG: S3; IG: S11; МС: слайс 4). A metric with no data for the active
 // channel still renders an honest «Нет данных» card, but the catalogue only offers metrics the
 // resolver handles — вкладки не гейтятся по подключённости (канон TG/IG сохранён и для МС).
-const AVAILABLE_SOURCES: Array<'tg' | 'ig' | 'ms'> = ['tg', 'ig', 'ms'];
+const AVAILABLE_SOURCES: Array<'tg' | 'ig' | 'ms' | 'ym'> = ['tg', 'ig', 'ms', 'ym'];
 
 export function WidgetCatalogModal({
   onPick,
@@ -23,7 +23,7 @@ export function WidgetCatalogModal({
   onPick: (metricId: string) => void;
   onClose: () => void;
 }) {
-  const [source, setSource] = useState<'tg' | 'ig' | 'ms'>(AVAILABLE_SOURCES[0]);
+  const [source, setSource] = useState<'tg' | 'ig' | 'ms' | 'ym'>(AVAILABLE_SOURCES[0]);
   const [query, setQuery] = useState('');
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -58,46 +58,37 @@ export function WidgetCatalogModal({
           searchRef.current?.focus();
         }}
       >
-        <div className="flex items-center justify-between gap-3">
-          <DialogTitle className="text-sm font-medium text-foreground">Добавить метрику</DialogTitle>
-          <button
-            type="button"
-            aria-label="Закрыть"
-            onClick={onClose}
-            className="rounded-full p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-          >
-            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-              <path d="M6 6l12 12M18 6 6 18" strokeLinecap="round" />
-            </svg>
-          </button>
-        </div>
+        <DialogTitle className="text-sm font-medium text-foreground">Добавить метрику</DialogTitle>
 
         {/* Source tabs (only when more than one source is available) + search. */}
         <div className="mt-4 flex flex-wrap items-center gap-3">
           {AVAILABLE_SOURCES.length > 1 && (
-            <div role="group" aria-label="Источник" className="flex overflow-hidden rounded-full border border-border">
+            <fieldset className="m-0 flex min-w-0 overflow-hidden rounded-full border border-border p-0">
+              <legend className="sr-only">Источник</legend>
               {AVAILABLE_SOURCES.map((s) => (
                 <button
                   key={s}
                   type="button"
+                  data-mobile-touch-target=""
                   aria-pressed={source === s}
                   onClick={() => setSource(s)}
-                  className={`border-r border-border px-3 py-1.5 text-xs font-medium transition-colors last:border-r-0 ${
+                  className={`min-h-11 min-w-11 border-r border-border px-3 py-1.5 text-xs font-medium transition-colors last:border-r-0 sm:min-h-0 sm:min-w-0 ${
                     source === s ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
                   }`}
                 >
                   {SOURCE_LABEL[s]}
                 </button>
               ))}
-            </div>
+            </fieldset>
           )}
           <input
             ref={searchRef}
+            data-mobile-touch-target=""
             aria-label="Поиск метрики"
             value={query}
             placeholder="Поиск метрики…"
             onChange={(e) => setQuery(e.target.value)}
-            className="min-w-0 flex-1 rounded border border-border bg-background px-3 py-2 text-sm text-foreground outline-hidden placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
+            className="min-h-11 min-w-0 flex-1 rounded border border-border bg-background px-3 py-2 text-sm text-foreground outline-hidden placeholder:text-muted-foreground focus:ring-1 focus:ring-primary sm:min-h-0"
           />
         </div>
 

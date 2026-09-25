@@ -399,7 +399,6 @@ class QrCollectVelocityTests(unittest.TestCase):
         self.assertTrue(client.disconnected)
 
     def test_opt_in_no_eligible_posts_is_available_false(self):
-        svc = self.svc
         client = QrClient([FakeMsg(1, 10)], None)   # below the 80-view floor
         out = self._call(client, include_velocity=True)
         self.assertEqual(out["velocity"], {"available": False, "posts_used": 0})

@@ -55,23 +55,26 @@ test('overview has one authoritative top-bar period and no card-local controls',
   const widgetPeriods = page.getByRole('group', { name: 'Период страницы' });
   await expect(pagePeriod).toHaveCount(1);
   await expect(widgetPeriods).toHaveCount(0);
-  await expect(page.getByRole('group', { name: 'Период виджета' })).toHaveCount(0);
+  await expect(page.getByRole('toolbar', { name: 'Период виджета' })).toHaveCount(0);
 
   // The page default wins over every stale saved widget override without rendering duplicate UI.
   await expect(pagePeriod.getByRole('button', { name: '30д' })).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.getByText('Просмотры · 30 дн.')).toBeVisible();
-  const periodIndicator = pagePeriod.locator('[data-segmented-indicator]');
-  await expect(periodIndicator).toHaveCount(1);
-  const indicatorBefore = await periodIndicator.evaluate((node) => getComputedStyle(node).transform);
-  const contextCard = page.getByRole('heading', { name: 'Главное изменение', exact: true }).locator('..').locator('..');
-  const contextBefore = await contextCard.innerText();
+  const periodToggleGroup = pagePeriod.locator('[data-slot="toggle-group"]');
+  await expect(periodToggleGroup).toHaveCount(1);
+  await expect(periodToggleGroup.locator('[data-state="on"]')).toHaveText('30д');
+
+  // Наблюдаемое «окно применилось» — САМО ЧИСЛО героя, а не подпись «Просмотры · 30 дн.»: окно
+  // больше не печатается в подписях ленты (оно уже стоит в шапке — владелец), поэтому проверять
+  // надо результат, а не повтор контрола. Карточка «Главное изменение» здесь тоже больше не
+  // локатор — она слита в «Неделю канала», которая недельная по замыслу и на период НЕ реагирует.
+  const heroValue = page.getByRole('button', { name: 'Разбор: Просмотры' });
+  const heroBefore = await heroValue.innerText();
 
   // The sole top-bar control re-windows every card on the page.
   await pagePeriod.getByRole('button', { name: '7д' }).click();
   await expect(pagePeriod.getByRole('button', { name: '7д' })).toHaveAttribute('aria-pressed', 'true');
-  await expect.poll(() => periodIndicator.evaluate((node) => getComputedStyle(node).transform)).not.toBe(indicatorBefore);
-  await expect(page.getByText('Просмотры · 7 дн.')).toBeVisible();
-  await expect.poll(() => contextCard.innerText()).not.toBe(contextBefore);
+  await expect(periodToggleGroup.locator('[data-state="on"]')).toHaveText('7д');
+  await expect.poll(() => heroValue.innerText()).not.toBe(heroBefore);
 });
 
 test('overview sparkline flows from one period shape into the next', async ({ page }, testInfo) => {
@@ -141,10 +144,15 @@ test('overview sparkline flows from one period shape into the next', async ({ pa
   // intermediate frame differs from BOTH endpoints (a genuine morph, not a snap); the morph node
   // survived (no keyed remount).
   expect(frames.some((frame) => frame.state === 'running'), morphEvidence).toBe(true);
-  // Recharts/shadcn parity: the update is intentionally visible for about 1.5s, never the old
-  // front-loaded ~700ms flash. Leave scheduling tolerance for loaded CI runners.
-  expect(measuredMorphMs, morphEvidence).toBeGreaterThanOrEqual(1300);
-  expect(measuredMorphMs, morphEvidence).toBeLessThanOrEqual(1750);
+  // Длительность сверяется с ТОКЕНОМ, а не с зашитым числом: раньше здесь стояли 1300..1750, и
+  // смена --motion-morph роняла спеку, хотя морф отрабатывал ровно как задан. Проверяем то, что
+  // тест и должен проверять — что JS-цикл идёт по канону, — с допуском на загруженный раннер.
+  const tokenMorphMs = await page.evaluate(() =>
+    Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--motion-morph')),
+  );
+  expect(tokenMorphMs, morphEvidence).toBeGreaterThan(0);
+  expect(measuredMorphMs, morphEvidence).toBeGreaterThanOrEqual(tokenMorphMs * 0.85);
+  expect(measuredMorphMs, morphEvidence).toBeLessThanOrEqual(tokenMorphMs + 250);
   expect(frames.at(-1)?.state).toBe('idle');
   expect(finalPath).not.toBe(oldPath);
   expect(frames.some((frame) => frame.primary.length > 0 && frame.primary !== oldPath && frame.primary !== finalPath), morphEvidence).toBe(true);
@@ -271,6 +279,43 @@ test('desktop sidebar glides between open and rail without moving the icon axis'
   await expect(sidebar).toHaveAttribute('data-rail', 'true');
   await expect.poll(async () => (await sidebar.boundingBox())?.width ?? 0).toBeCloseTo(64, 0);
   expect(await page.evaluate(() => localStorage.getItem('pulse_sidebar'))).toBe('rail');
+});
+
+test('Ctrl+B snaps the sidebar while the pointer toggle keeps the tween', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop-1440', 'desktop sidebar motion');
+  await page.addInitScript(() => localStorage.setItem('pulse_sidebar', 'open'));
+  await bootDemo(page, '/');
+
+  const sidebar = page.getByRole('complementary', { name: 'Боковая панель' });
+  expect((await requireBox(sidebar)).width).toBeCloseTo(240, 0);
+
+  // Keyboard path: a shortcut fires dozens of times a day, so the mode switch is painted at its
+  // target width on the very next frame instead of being tweened (Sidebar's `data-instant`).
+  await page.keyboard.press('Control+b');
+  const afterShortcut = await sidebar.evaluate(
+    (element) =>
+      new Promise<number>((resolve) => {
+        requestAnimationFrame(() => resolve(element.getBoundingClientRect().width));
+      }),
+  );
+  expect(afterShortcut).toBeCloseTo(64, 0);
+
+  // Pointer path is untouched: two frames into a 300ms tween the rail is still mid-flight.
+  await page.getByRole('button', { name: 'Показать панель' }).click();
+  const midFlight = await sidebar.evaluate(
+    (element) =>
+      new Promise<number>((resolve) => {
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() => resolve(element.getBoundingClientRect().width)),
+        );
+      }),
+  );
+  expect(midFlight).toBeGreaterThan(64);
+  expect(midFlight).toBeLessThan(240);
+  await expect.poll(async () => (await sidebar.boundingBox())?.width ?? 0).toBeCloseTo(240, 0);
+
+  // …and `data-instant` never survives the switch that used it — the next pointer toggle animates.
+  expect(await sidebar.evaluate((element) => element.hasAttribute('data-instant'))).toBe(false);
 });
 
 test('reduced motion removes sidebar duration and staged copy delay', async ({ page }, testInfo) => {

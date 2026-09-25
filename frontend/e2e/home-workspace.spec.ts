@@ -38,6 +38,32 @@ test.describe('desktop /home workspace (dark, 1440)', () => {
     await expect(identities.filter({ hasText: 'Instagram · @demo_channel' })).toHaveCount(1);
     await expect(page.getByRole('heading', { name: 'Показатели', exact: true })).toHaveCount(0);
 
+    // Config-driven Home cards use the same story anatomy as Overview: the half-width views card
+    // has its KPI on the left and an axis-free area sparkline on the right. The old generic renderer
+    // stacked a full report chart (with x/y axes) below the number, which made Home look unrelated.
+    const viewsCard = page.locator('section').filter({
+      has: page.getByRole('heading', { name: 'Просмотры', exact: true }),
+    });
+    await expect(viewsCard).toHaveCount(1);
+    await expect(viewsCard.locator('[data-widget-story-card]')).toBeVisible();
+    await expect(viewsCard.locator('svg[data-chart-kind="sparkline"]')).toBeVisible();
+    await expect(viewsCard.locator('svg[data-chart-kind="line"]')).toHaveCount(0);
+    const storyGeometry = await viewsCard.locator('[data-chart-card-body]').evaluate((body) => {
+      const headline = body.querySelector('[data-chart-card-headline]');
+      const plot = body.querySelector('[data-chart-card-plot]');
+      if (!headline || !plot) return null;
+      const headlineRect = headline.getBoundingClientRect();
+      const plotRect = plot.getBoundingClientRect();
+      return {
+        plotAfterHeadline: plotRect.left >= headlineRect.right,
+        plotWidth: plotRect.width,
+        headlineWidth: headlineRect.width,
+      };
+    });
+    expect(storyGeometry).not.toBeNull();
+    expect(storyGeometry!.plotAfterHeadline).toBe(true);
+    expect(storyGeometry!.plotWidth).toBeGreaterThan(storyGeometry!.headlineWidth);
+
     const hScroll = await page.evaluate(
       () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
     );
@@ -57,13 +83,15 @@ test.describe('desktop /home workspace (dark, 1440)', () => {
     await expect(edit).toHaveAttribute('aria-pressed', 'false');
 
     await add.click();
-    await expect(page.getByRole('dialog', { name: 'Каталог метрик' })).toBeVisible();
+    // Accessible name = the catalog's DialogTitle «Добавить метрику» (Radix dialog since the
+    // shadcn wave #316; the old hand-rolled wrapper carried aria-label «Каталог метрик»).
+    await expect(page.getByRole('dialog', { name: 'Добавить метрику' })).toBeVisible();
     // The direct add path never flips the board into edit mode.
     await expect(edit).toHaveAttribute('aria-pressed', 'false');
 
     // Escape closes the catalog and restores focus to the opener (focus-trap contract).
     await page.keyboard.press('Escape');
-    await expect(page.getByRole('dialog', { name: 'Каталог метрик' })).toHaveCount(0);
+    await expect(page.getByRole('dialog', { name: 'Добавить метрику' })).toHaveCount(0);
     await expect(add).toBeFocused();
   });
 
@@ -133,10 +161,132 @@ test.describe('desktop /home workspace (dark, 1440)', () => {
     const restWidth = (await board.boundingBox())!.width;
     await page.locator('button.edit-toggle').click();
     await expect(page.locator('button.edit-toggle')).toHaveAttribute('aria-pressed', 'true');
-    // Narrows immediately (no need to wait out a tween) and by the same amount.
+    // Narrows by the same amount as with motion. Ждём КАДР, а не твин: «мгновенность» уже
+    // доказана строкой выше (transition-duration ≈ 0), а стиль/лейаут борды долетают на следующем
+    // расчёте после коммита кнопки — одиночное чтение сразу после aria-pressed ловило ещё старую
+    // ширину. Соседний тест (с анимацией) поллит ровно по этой же причине.
+    await expect
+      .poll(async () => Math.round(restWidth - (await board.boundingBox())!.width))
+      .toBeGreaterThanOrEqual(90);
     const editWidth = (await board.boundingBox())!.width;
-    expect(restWidth - editWidth).toBeGreaterThanOrEqual(90);
     expect(restWidth - editWidth).toBeLessThanOrEqual(120);
+  });
+
+  test('edit mode resizes a card from its corner, snaps to S/M/L and keeps line at M+', async ({ page }, testInfo) => {
+    await page.addInitScript(() => {
+      localStorage.setItem(
+        'pulse_home_blocks',
+        JSON.stringify({ keys: ['custom:resize-bar', 'custom:resize-line', 'week'] }),
+      );
+      localStorage.setItem(
+        'pulse_widget_configs',
+        JSON.stringify([
+          { id: 'resize-bar', metricId: 'tg.avgReach', viz: 'bar', size: 'third' },
+          { id: 'resize-line', metricId: 'tg.views', viz: 'line', size: 'half' },
+        ]),
+      );
+    });
+    await bootDemo(page, '/home', { theme: 'dark' });
+    await page.locator('button.edit-toggle').click();
+
+    const barCard = page.locator('section').filter({
+      has: page.getByRole('heading', { name: 'Средний охват поста', exact: true }),
+    });
+    const lineCard = page.locator('section').filter({
+      has: page.getByRole('heading', { name: 'Просмотры', exact: true }),
+    });
+    const barHandle = barCard.getByRole('slider', {
+      name: 'Изменить размер виджета «Средний охват поста»',
+    });
+    const lineHandle = lineCard.getByRole('slider', {
+      name: 'Изменить размер виджета «Просмотры»',
+    });
+    await expect(barHandle).toBeVisible();
+    await expect(lineHandle).toBeVisible();
+    await expect(barCard).toHaveAttribute('data-widget-size', 'third');
+
+    // Pointer path: a rightward corner drag grows S → M without opening the card.
+    const cardBefore = await barCard.boundingBox();
+    const handleBox = await barHandle.boundingBox();
+    expect(cardBefore && handleBox).toBeTruthy();
+    const cardSurface = barCard.locator('[data-widget-card]');
+    const restingShadow = await cardSurface.evaluate((element) => getComputedStyle(element).boxShadow);
+    await page.mouse.move(handleBox!.x + handleBox!.width / 2, handleBox!.y + handleBox!.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(handleBox!.x + handleBox!.width / 2 + 220, handleBox!.y + handleBox!.height / 2, {
+      steps: 6,
+    });
+    const cardDuring = await barCard.boundingBox();
+    expect(cardDuring!.width).toBeGreaterThan(cardBefore!.width + 150);
+    await expect(barCard).toHaveAttribute('data-widget-resizing', '');
+    await expect.poll(() => cardSurface.evaluate((element) => getComputedStyle(element).boxShadow))
+      .not.toBe(restingShadow);
+    await page.mouse.up();
+    await expect(barCard).not.toHaveAttribute('data-widget-resizing', '');
+    await expect.poll(() => cardSurface.evaluate((element) => getComputedStyle(element).boxShadow))
+      .toBe(restingShadow);
+    await expect(page).toHaveURL(/\/home$/);
+    await expect(barCard).toHaveAttribute('data-widget-size', 'half');
+    await expect(barHandle).toHaveAttribute('aria-valuetext', 'M');
+
+    // Keyboard parity keeps the retained S/M/L control model reachable from the new handle.
+    await barHandle.focus();
+    await page.keyboard.press('ArrowRight');
+    await expect(barCard).toHaveAttribute('data-widget-size', 'full');
+    await expect(barHandle).toHaveAttribute('aria-valuetext', 'L');
+
+    // A temporal line has an M floor: dragging hard left must never force the chart into S.
+    const lineBox = await lineHandle.boundingBox();
+    expect(lineBox).not.toBeNull();
+    await page.mouse.move(lineBox!.x + lineBox!.width / 2, lineBox!.y + lineBox!.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(lineBox!.x - 800, lineBox!.y + lineBox!.height / 2, { steps: 6 });
+    await page.mouse.up();
+    await expect(lineCard).toHaveAttribute('data-widget-size', 'half');
+
+    // Curated/prefs-backed cards share the same handle but persist into widget prefs, not configs.
+    const weekCard = page.locator('section').filter({
+      has: page.getByRole('heading', { name: 'Неделя канала', exact: true }),
+    });
+    const weekHandle = weekCard.getByRole('slider', {
+      name: 'Изменить размер виджета «Неделя канала»',
+    });
+    // Ужимаем, а не растягиваем: «Неделя канала» теперь по умолчанию full (рассказ не влезает в
+    // 264px фикс-тайла), и ArrowRight с полной ширины никуда не ведёт — сохранять было бы нечего.
+    // Проверяемый контракт тот же: у curated/prefs-карточки размер уезжает в widget prefs, а не в
+    // configs.
+    await weekHandle.focus();
+    await page.keyboard.press('ArrowLeft');
+    await expect(weekCard).toHaveAttribute('data-widget-size', 'half');
+
+    const saved = await page.evaluate(() => {
+      const configs = JSON.parse(localStorage.getItem('pulse_widget_configs') ?? '[]') as Array<{
+        id: string;
+        size?: string;
+      }>;
+      const prefs = JSON.parse(localStorage.getItem('pulse_widget_prefs') ?? '{}') as Record<
+        string,
+        { size?: string }
+      >;
+      return {
+        configs: Object.fromEntries(configs.map((config) => [config.id, config.size])),
+        weekSize: prefs['home-week']?.size,
+      };
+    });
+    expect(saved.configs).toMatchObject({ 'resize-bar': 'full', 'resize-line': 'half' });
+    expect(saved.weekSize).toBe('half');
+
+    await page.getByRole('heading', { name: 'Главная', exact: true }).click();
+    const shot = testInfo.outputPath('home-widget-corner-resize-dark.png');
+    await page.screenshot({ path: shot, fullPage: true });
+    await testInfo.attach('home-widget-corner-resize-dark', { path: shot, contentType: 'image/png' });
+
+    // Reorder owns the whole-card pointer gesture, so resize handles step out while jiggle mode runs.
+    await barCard.getByRole('button', { name: 'Меню виджета «Средний охват поста»' }).click();
+    await page.getByRole('menuitem', { name: 'Переставить' }).click();
+    await expect(page.locator('[data-widget-resize-handle]')).toHaveCount(0);
+    await page.locator('[data-reorder-done]').click();
+    await expect(barHandle).toBeVisible();
   });
 
   test('empty state: unframed surface, catalog CTA, availability-aware defaults', async ({ page }, testInfo) => {
@@ -153,10 +303,11 @@ test.describe('desktop /home workspace (dark, 1440)', () => {
     await testInfo.attach('home-empty-dark', { path: shot, contentType: 'image/png' });
 
     // Primary CTA opens the catalog directly (both header + empty-state buttons share the name).
+    // Accessible name = the catalog's DialogTitle «Добавить метрику» (Radix dialog since #316).
     await page.getByRole('button', { name: 'Добавить виджет', exact: true }).first().click();
-    await expect(page.getByRole('dialog', { name: 'Каталог метрик' })).toBeVisible();
+    await expect(page.getByRole('dialog', { name: 'Добавить метрику' })).toBeVisible();
     await page.keyboard.press('Escape');
-    await expect(page.getByRole('dialog', { name: 'Каталог метрик' })).toHaveCount(0);
+    await expect(page.getByRole('dialog', { name: 'Добавить метрику' })).toHaveCount(0);
 
     // «Собрать по умолчанию» seeds a board; the demo channel has a connected IG source, so a
     // relevant IG widget is included (the TG-only exclusion path is covered by the unit test).
@@ -190,11 +341,13 @@ test.describe('desktop /home workspace (dark, 1440)', () => {
     const growth = byTitle('Рост подписчиков');
     const instagram = byTitle('IG · Охват по дням');
     const topPosts = byTitle('Топ постов');
-    expect(Math.abs(week.width - growth.width)).toBeLessThanOrEqual(2);
-    expect(week.top).toBe(growth.top);
-    expect(week.left).toBeLessThan(growth.left);
+    // «Неделя канала» больше не половинка рядом с «Ростом подписчиков»: рассказ не влезает в 264px
+    // фикс-тайла, поэтому карточка занимает ряд целиком и получает контентную высоту. Проверяем
+    // это, а не прежнее соседство: она шире соседа и стоит на своей строке НАД ним.
+    expect(week.width).toBeGreaterThan(growth.width * 1.8);
+    expect(week.top).toBeLessThan(growth.top);
     expect(instagram.top).toBeLessThan(topPosts.top);
-    expect(instagram.width).toBeGreaterThan(week.width * 1.8);
+    expect(Math.abs(instagram.width - week.width)).toBeLessThanOrEqual(2);
 
     await page.waitForTimeout(300);
     const defaultShot = testInfo.outputPath('home-default-dark.png');
@@ -224,9 +377,26 @@ test.describe('mobile /home invariant (430)', () => {
     // The desktop-only header «Добавить виджет» is hidden < md — only the empty-card primary remains.
     await expect(page.getByRole('button', { name: 'Добавить виджет', exact: true })).toHaveCount(1);
 
-    // The empty state stays the framed card (its verbatim mobile branch).
-    const card = page.locator('.rounded-xl.border.bg-card').filter({ hasText: 'На Главной пока пусто' });
+    // Пустое состояние остаётся карточкой в рамке (своя мобильная ветка).
+    //
+    // Проверка идёт по РИСОВАННОЙ рамке, а не по классу радиуса. Прежний селектор
+    // `.rounded-xl.border.bg-card` протух молча: карточки переехали на `rounded-2xl` вместе с
+    // каноном скруглений, а тест никогда не выполнялся — гейт mobile-430 гонял два файла из
+    // восьмидесяти шести (аудит #554, проход №2, N8). Радиус — деталь оформления и меняется
+    // решением владельца; «в рамке ли карточка» — контракт, за который тест и отвечает.
+    const card = page.locator('div').filter({ hasText: 'На Главной пока пусто' }).last();
     await expect(card).toBeVisible();
+    const framed = await card.evaluate((el) => {
+      const cs = getComputedStyle(el);
+      return {
+        border: Number.parseFloat(cs.borderTopWidth) > 0,
+        radius: Number.parseFloat(cs.borderTopLeftRadius),
+        filled: cs.backgroundColor !== 'rgba(0, 0, 0, 0)',
+      };
+    });
+    expect(framed.border, 'у пустой карточки есть рамка').toBe(true);
+    expect(framed.radius, 'и скругление').toBeGreaterThan(0);
+    expect(framed.filled, 'и своя подложка').toBe(true);
 
     // The edit chip is still the compact icon control (narrower than its reserved slot).
     const slot = page.locator('.edit-toggle-slot');

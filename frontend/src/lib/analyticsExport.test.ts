@@ -13,9 +13,23 @@ describe('slugify', () => {
     expect(slugify('My Channel!')).toBe('my-channel');
     expect(slugify('  spaced  out  ')).toBe('spaced-out');
   });
-  it('keeps Unicode letters and removes unsafe separators', () => {
-    expect(slugify('Мой / Канал')).toBe('мой-канал');
+  // Chrome отбрасывает весь атрибут `download`, если в нём есть не-ASCII (см. комментарий у
+  // slugify) — поэтому кириллица транслитерируется, а не сохраняется как есть.
+  it('transliterates Cyrillic instead of losing the whole filename', () => {
+    expect(slugify('Мой / Канал')).toBe('moy-kanal');
+    expect(slugify('тестовый-канал')).toBe('testovyy-kanal');
+    expect(slugify('Щи ёж')).toBe('schi-ezh');
     expect(slugify(null)).toBe('');
+  });
+  it('drops what it cannot transliterate rather than emitting non-ASCII', () => {
+    expect(slugify('канал 日本 🚀')).toBe('kanal');
+    expect(slugify('日本')).toBe('');
+    expect(slugify('Café')).toBe('cafe');
+  });
+  it('never emits a non-ASCII byte — the browser rule this exists for', () => {
+    for (const raw of ['Мой / Канал', 'Щи ёж', 'канал 日本 🚀', 'Café', 'Ünïcodé Ñame']) {
+      expect(slugify(raw)).toMatch(/^[a-z0-9-]*$/);
+    }
   });
 });
 
@@ -27,8 +41,8 @@ describe('exportFilename', () => {
       'telegram-analytics-my-chan-2026-06-01_2026-06-30.csv',
     );
   });
-  it('keeps a Unicode source and omits bounds when unknown', () => {
-    expect(exportFilename({ network: 'instagram', section: 'content', source: 'Канал' })).toBe('instagram-content-канал.csv');
+  it('transliterates the source and omits bounds when unknown', () => {
+    expect(exportFilename({ network: 'instagram', section: 'content', source: 'Канал' })).toBe('instagram-content-kanal.csv');
     expect(exportFilename({ network: 'instagram', section: 'content', from, to })).toBe(
       'instagram-content-2026-06-01_2026-06-30.csv',
     );

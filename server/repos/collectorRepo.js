@@ -465,6 +465,50 @@ function createCollectorRepo({ pool, enabled, transaction, setChannelTgId }) {
     return rows.length;
   }
 
+  // Дневные метрики Яндекс.Метрики. rows: [{ day:'YYYY-MM-DD', visits, users, pageviews,
+  //   bounce_rate, avg_visit_duration_seconds, page_depth, new_users, percent_new_visitors,
+  //   robot_visits, robot_percentage }]. Счётчики (visits/users/pageviews/new_users/robot_visits)
+  // — целые BIGINT; доли/средние — DOUBLE PRECISION. Батч-upsert по (channel_id, day), зеркально
+  // upsertMsDaily и с той же сознательной ЗАМЕНЯЮЩЕЙ семантикой (не COALESCE): крон пере-снимает
+  // окно ЦЕЛИКОМ из отчёта Метрики, а её допересчёт свежих дней бывает и ВНИЗ (пересмотр
+  // роботности) — свежая точка честно ЗАМЕНЯЕТ старую. Контракт вызывающего: все метрики приходят
+  // одним отчётом (ymCollectionJob частичных строк не строит), поэтому отсутствие трафика в дне =
+  // честный 0 у счётчиков; COALESCE к 0 у трёх NOT NULL-счётчиков — страховка от дырявой строки.
+  // Доли/средние и nullable-счётчики (new_users/robot_visits) пишутся КАК ЕСТЬ (без COALESCE):
+  // «нет данных» обязано остаться NULL, а не стать ложным нулём.
+  async function upsertYmDaily(channelId, rows, executor = pool) {
+    if (!enabled || !channelId || !rows || !rows.length) return 0;
+    const sql = `INSERT INTO ym_daily
+        (channel_id, day, visits, users, pageviews,
+         bounce_rate, avg_visit_duration_seconds, page_depth, new_users,
+         percent_new_visitors, robot_visits, robot_percentage, updated_at)
+      SELECT $1, x.day::date, COALESCE(x.visits, 0), COALESCE(x.users, 0),
+             COALESCE(x.pageviews, 0),
+             x.bounce_rate, x.avg_visit_duration_seconds, x.page_depth, x.new_users,
+             x.percent_new_visitors, x.robot_visits, x.robot_percentage, now()
+        FROM jsonb_to_recordset($2::jsonb) AS x(
+          day text, visits bigint, users bigint, pageviews bigint,
+          bounce_rate double precision, avg_visit_duration_seconds double precision,
+          page_depth double precision, new_users bigint,
+          percent_new_visitors double precision, robot_visits bigint,
+          robot_percentage double precision
+        )
+      ON CONFLICT (channel_id, day) DO UPDATE SET
+        visits=EXCLUDED.visits,
+        users=EXCLUDED.users,
+        pageviews=EXCLUDED.pageviews,
+        bounce_rate=EXCLUDED.bounce_rate,
+        avg_visit_duration_seconds=EXCLUDED.avg_visit_duration_seconds,
+        page_depth=EXCLUDED.page_depth,
+        new_users=EXCLUDED.new_users,
+        percent_new_visitors=EXCLUDED.percent_new_visitors,
+        robot_visits=EXCLUDED.robot_visits,
+        robot_percentage=EXCLUDED.robot_percentage,
+        updated_at=now()`;
+    await executor.query(sql, [channelId, JSON.stringify(rows)]);
+    return rows.length;
+  }
+
   // Заказы покупателей МойСклада (архив ms_orders, слайс 2б). rows: [{ order_id, moment,
   // sum_kopecks, state, state_id, agent_id, agent_name }] — суммы в КОПЕЙКАХ. Идемпотентный
   // батч-upsert по (channel_id, order_id); как у ms_daily — СОЗНАТЕЛЬНО полная ЗАМЕНА строки, не
@@ -517,8 +561,8 @@ function createCollectorRepo({ pool, enabled, transaction, setChannelTgId }) {
     const { rows } = await pool.query(
       `SELECT channel_id, status, to_char(cursor_from,'YYYY-MM-DD') AS cursor_from,
               total_estimate, fetched_count, error,
-              to_char(started_at,'YYYY-MM-DD"T"HH24:MI:SSOF') AS started_at,
-              to_char(updated_at,'YYYY-MM-DD"T"HH24:MI:SSOF') AS updated_at,
+              to_char(started_at,'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS started_at,
+              to_char(updated_at,'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS updated_at,
               EXTRACT(EPOCH FROM (now() - updated_at))::int AS updated_age_seconds
          FROM ms_backfill_state WHERE channel_id=$1`, [channelId]);
     return rows[0] || null;
@@ -617,8 +661,8 @@ function createCollectorRepo({ pool, enabled, transaction, setChannelTgId }) {
     const { rows } = await pool.query(
       `SELECT channel_id, status, to_char(cursor_from,'YYYY-MM-DD') AS cursor_from,
               total_estimate, fetched_count, error,
-              to_char(started_at,'YYYY-MM-DD"T"HH24:MI:SSOF') AS started_at,
-              to_char(updated_at,'YYYY-MM-DD"T"HH24:MI:SSOF') AS updated_at,
+              to_char(started_at,'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS started_at,
+              to_char(updated_at,'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS updated_at,
               EXTRACT(EPOCH FROM (now() - updated_at))::int AS updated_age_seconds
          FROM ms_returns_backfill_state WHERE channel_id=$1`, [channelId]);
     return rows[0] || null;
@@ -763,9 +807,14 @@ function createCollectorRepo({ pool, enabled, transaction, setChannelTgId }) {
   // points instead of scanning up to 730 daily rows per channel. Bounded to recent months so the
   // nightly recompute stays cheap. INERT until wired: nothing reads channel_monthly yet — the reader
   // (getChannelHistoryMonthly) lands with the frontend range-picker change (see CAPACITY doc §rollups).
-  async function rollupChannelMonthly(months = 3) {
+  // `channelId` — необязательный скоуп ДЛЯ ТЕСТОВ. Прод зовёт без него и сворачивает всю базу;
+  // тест, свернувший всю базу, ловил каскадное удаление канала из СОСЕДНЕГО файла между SELECT и
+  // INSERT — FK на channel_monthly падал на несуществующем channel_id. Скоуп по своему каналу
+  // делает тест независимым от того, что параллельно делают соседи.
+  async function rollupChannelMonthly(months = 3, { channelId = null } = {}) {
     if (!enabled) return 0;
     const m = Number.isFinite(+months) ? Math.max(1, Math.round(+months)) : 3;
+    const scoped = Number.isFinite(+channelId) ? Math.trunc(+channelId) : null;
     const { rowCount } = await pool.query(
       `INSERT INTO channel_monthly
          (channel_id, source_id, month, subscribers_end,
@@ -777,6 +826,7 @@ function createCollectorRepo({ pool, enabled, transaction, setChannelTgId }) {
          FROM channel_daily d
          JOIN channels c ON c.id = d.channel_id
         WHERE d.day >= date_trunc('month', CURRENT_DATE) - make_interval(months => $1)
+          AND ($2::int IS NULL OR d.channel_id = $2)
         GROUP BY d.channel_id, date_trunc('month', d.day)
        ON CONFLICT (channel_id, month) DO UPDATE SET
          source_id       = COALESCE(EXCLUDED.source_id, channel_monthly.source_id),
@@ -788,7 +838,7 @@ function createCollectorRepo({ pool, enabled, transaction, setChannelTgId }) {
          reactions_sum   = EXCLUDED.reactions_sum,
          days_count      = EXCLUDED.days_count,
          computed_at     = now()`,
-      [m]);
+      [m, scoped]);
     return rowCount;
   }
 
@@ -822,7 +872,7 @@ function createCollectorRepo({ pool, enabled, transaction, setChannelTgId }) {
     upsertPostMedia, getPostMedia, listCentralPostsMissingMedia,
     saveSnapshot, saveVelocity,
     ingestCollectorPayload, persistCentralDaily, persistTgBundleTx,
-    upsertIgDaily, upsertIgMediaDaily, upsertMsDaily,
+    upsertIgDaily, upsertIgMediaDaily, upsertMsDaily, upsertYmDaily,
     upsertMsOrders, countMsOrders, getMsBackfillState, setMsBackfillState,
     upsertMsReturns, countMsReturns, getMsReturnsBackfillState, setMsReturnsBackfillState,
     saveRawSnapshot, pruneRawSnapshots, pruneIgMediaDaily, pruneIngestReceipts, rollupChannelMonthly,

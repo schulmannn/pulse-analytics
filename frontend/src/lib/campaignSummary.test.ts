@@ -37,7 +37,8 @@ const SUMMARY = CampaignSummarySchema.parse({
 describe('timelineSeries', () => {
   it('сортирует дни, строит серии и флаги платформ', () => {
     const s = timelineSeries(SUMMARY.timeline);
-    expect(s.labels).toEqual(['10.06', '11.06', '12.06']);
+    // Единый канон подписи даты (U5): «10 июн.», не «10.06».
+    expect(s.labels).toEqual(['10 июн.', '11 июн.', '12 июн.']);
     expect(s.posts).toEqual([1, 3, 1]);
     expect(s.tgViews).toEqual([1000, 6000, 6000]);
     expect(s.igReach).toEqual([0, 800, 0]);

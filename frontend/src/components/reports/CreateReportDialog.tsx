@@ -1,15 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useChannels, useCreateReport } from '@/api/queries';
 import type { ReportSchedule } from '@/api/queries';
 import { useSelectedChannel } from '@/lib/channel-context';
 import type { ReportBlockKey } from '@/lib/reportBlocks';
-import { useFocusTrap } from '@/lib/useFocusTrap';
 import { PERIOD_CHIPS } from '@/panels/report/blocks';
 import type { PeriodDays } from '@/lib/period';
 import { PillSelect } from '@/components/PillSelect';
 import { SegmentedControl } from '@/components/SegmentedControl';
+import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 
 // Create-time templates: a compact set of curated starting points (selectable rows, not cards).
@@ -52,6 +52,7 @@ const INPUT_CLASS =
  * период и доставку → один POST → переход в новый отчёт. Источник по умолчанию — текущий канал.
  */
 export function CreateReportDialog({ onClose }: { onClose: () => void }) {
+  const formId = useId();
   const navigate = useNavigate();
   const createReport = useCreateReport();
   const { channelId: selectedChannelId } = useSelectedChannel();
@@ -77,24 +78,6 @@ export function CreateReportDialog({ onClose }: { onClose: () => void }) {
     if (touchedSource.current) return;
     if (source == null && defaultSource != null) setSource(defaultSource);
   }, [defaultSource, source]);
-
-  const panelRef = useRef<HTMLDivElement>(null);
-  useFocusTrap(panelRef);
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.stopPropagation();
-        onClose();
-      }
-    };
-    document.addEventListener('keydown', onKey, true);
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.removeEventListener('keydown', onKey, true);
-      document.body.style.overflow = prev;
-    };
-  }, [onClose]);
 
   const submit = async () => {
     const trimmed = name.trim();
@@ -124,21 +107,10 @@ export function CreateReportDialog({ onClose }: { onClose: () => void }) {
   const error = localError ?? (serverError ? serverError.message : null);
   const pending = createReport.isPending;
 
-  return createPortal(
-    <div
-      className="fixed inset-0 z-modal flex items-start justify-center overflow-y-auto bg-background/70 p-4 backdrop-blur-xs backdrop-grayscale sm:p-8"
-      role="dialog"
-      aria-modal="true"
-      aria-label="Новый отчёт"
-      onClick={onClose}
-    >
-      <div
-        ref={panelRef}
-        tabIndex={-1}
-        className="my-auto w-full max-w-lg rounded-xl border border-border bg-card p-5 focus:outline-hidden"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2 className="text-sm font-medium text-foreground">Новый отчёт</h2>
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-w-lg">
+        <DialogTitle>Новый отчёт</DialogTitle>
 
         <form
           className="mt-4 space-y-4"
@@ -150,7 +122,6 @@ export function CreateReportDialog({ onClose }: { onClose: () => void }) {
           <label className="block text-xs font-medium text-muted-foreground">
             Название
             <input
-              autoFocus
               value={name}
               onChange={(e) => setName(e.target.value)}
               maxLength={120}
@@ -159,24 +130,28 @@ export function CreateReportDialog({ onClose }: { onClose: () => void }) {
             />
           </label>
 
-          <div>
-            <span className="text-xs font-medium text-muted-foreground">Шаблон</span>
-            <div className="mt-1.5 overflow-hidden rounded border border-border" role="radiogroup" aria-label="Шаблон">
+          <fieldset className="m-0 min-w-0 border-0 p-0">
+            <legend className="text-xs font-medium text-muted-foreground">Шаблон</legend>
+            <div className="mt-1.5 overflow-hidden rounded border border-border">
               {TEMPLATES.map((t, i) => {
                 const active = t.id === templateId;
                 return (
-                  <button
+                  <label
                     key={t.id}
-                    type="button"
-                    onClick={() => setTemplateId(t.id)}
-                    role="radio"
-                    aria-checked={active}
                     className={cn(
-                      'flex w-full items-start gap-3 px-3 py-2.5 text-left transition-colors',
+                      'relative flex w-full cursor-pointer items-start gap-3 px-3 py-2.5 text-left transition-colors focus-within:z-10 focus-within:outline-hidden focus-within:ring-2 focus-within:ring-primary/50',
                       i > 0 && 'border-t border-border',
                       active ? 'bg-primary/10' : 'hover:bg-muted/50',
                     )}
                   >
+                    <input
+                      type="radio"
+                      name={`${formId}-template`}
+                      value={t.id}
+                      checked={active}
+                      onChange={() => setTemplateId(t.id)}
+                      className="sr-only"
+                    />
                     <span
                       aria-hidden="true"
                       className={cn(
@@ -197,15 +172,16 @@ export function CreateReportDialog({ onClose }: { onClose: () => void }) {
                       </span>
                       <span className="mt-0.5 block text-xs text-muted-foreground">{t.description}</span>
                     </span>
-                  </button>
+                  </label>
                 );
               })}
             </div>
-          </div>
+          </fieldset>
 
-          <label className="block text-xs font-medium text-muted-foreground">
+          <label htmlFor={`${formId}-source`} className="block text-xs font-medium text-muted-foreground">
             Источник · Telegram
             <PillSelect
+              id={`${formId}-source`}
               ariaLabel="Источник · Telegram"
               className="mt-1 w-full"
               value={String(source ?? '')}
@@ -236,9 +212,10 @@ export function CreateReportDialog({ onClose }: { onClose: () => void }) {
             />
           </div>
 
-          <label className="block text-xs font-medium text-muted-foreground">
+          <label htmlFor={`${formId}-schedule`} className="block text-xs font-medium text-muted-foreground">
             Доставка на почту
             <PillSelect<ReportSchedule>
+              id={`${formId}-schedule`}
               ariaLabel="Доставка на почту"
               className="mt-1 w-full"
               value={schedule}
@@ -265,17 +242,17 @@ export function CreateReportDialog({ onClose }: { onClose: () => void }) {
             >
               Отмена
             </button>
-            <button
+            <Button
               type="submit"
               disabled={pending || !name.trim() || source == null}
-              className="btn-pill bg-primary px-4 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+              size="xs"
+              className="px-4"
             >
               {pending ? 'Создание…' : 'Создать отчёт'}
-            </button>
+            </Button>
           </div>
         </form>
-      </div>
-    </div>,
-    document.body,
+      </DialogContent>
+    </Dialog>
   );
 }

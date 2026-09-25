@@ -1,0 +1,370 @@
+'use strict';
+
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const crypto = require('crypto');
+const { registerTgNotifyRoutes } = require('../server/routes/tgNotify');
+const { webhookSecretOf } = require('../server/lib/tgNotifyText');
+
+const SECRET = webhookSecretOf('bot:token');
+const sha256 = (v) => crypto.createHash('sha256').update(String(v)).digest('hex');
+
+function createRoutes(overrides = {}) {
+  const routes = new Map();
+  const app = {
+    get(path, ...handlers) { routes.set(`GET ${path}`, handlers); },
+    post(path, ...handlers) { routes.set(`POST ${path}`, handlers); },
+    put(path, ...handlers) { routes.set(`PUT ${path}`, handlers); },
+    delete(path, ...handlers) { routes.set(`DELETE ${path}`, handlers); },
+  };
+  const calls = { audit: [], logs: [], sent: [], unbound: [], links: [], subs: [], testRuns: [] };
+  // Durable-кулдаун ручного прогона живёт в таблице jobs — стаб повторяет контракт runJobOnce:
+  // succeeded-ключ больше не клеймится (skipped), failed переклеймливается (свободный ретрай).
+  const jobs = overrides.jobs || new Map();
+  const db = {
+    enabled: true,
+    isDbUnavailable: () => false,
+    runJobOnce: async (kind, key, fn) => {
+      const id = `${kind}:${key}`;
+      if (jobs.get(id) === 'succeeded') return { skipped: true, job: { status: 'succeeded' } };
+      try {
+        const result = await fn();
+        jobs.set(id, 'succeeded');
+        return { skipped: false, result };
+      } catch (e) {
+        jobs.set(id, 'failed');
+        throw e;
+      }
+    },
+    issueMentionNotifyLink: async (uid, tokenHash, ttl) => { calls.links.push({ uid, tokenHash, ttl }); return true; },
+    bindMentionNotifyByToken: async (tokenHash) => (tokenHash === sha256('validtoken123') ? 42 : null),
+    getMentionNotifyBinding: async () => ({ uid: 11, chat_id: 555, username: 'user', bound_at: '2026-07-22T10:00:00+00:00' }),
+    deleteMentionNotifyBinding: async () => true,
+    unbindMentionNotifyChat: async (chatId) => { calls.unbound.push(chatId); return true; },
+    getMentionNotifySubscription: async () => ({
+      enabled: false, send_days: [1, 5], send_hour: 9,
+      last_run_at: null, last_notified_at: null, last_error: null,
+    }),
+    setMentionNotifySubscriptionForActor: async (channelId, actor, enabled, schedule) => {
+      calls.subs.push({ channelId, uid: actor.uid, enabled, schedule });
+      return {
+        channel_id: channelId, uid: actor.uid, enabled,
+        send_days: (schedule && schedule.send_days) || [], send_hour: (schedule && schedule.send_hour) ?? 10,
+        last_run_at: null, last_notified_at: null, last_error: null,
+      };
+    },
+    getMentionSettingsForActor: async () => ({ configured: true }),
+    getTgSession: async () => ({ uid: 11, session_enc: 'enc', connection_state: 'healthy' }),
+    ...overrides.db,
+  };
+  const tgBot = {
+    configured: () => true,
+    getUsername: async () => 'atlavue_bot',
+    ensureWebhook: async () => true,
+    sendMessage: async (chatId, text) => { calls.sent.push({ chatId, text }); return { ok: true }; },
+    ...overrides.tgBot,
+  };
+  registerTgNotifyRoutes({
+    app,
+    requireAuth: (_req, _res, next) => next(),
+    resolveChannel: (_req, _res, next) => next(),
+    db,
+    audit: async (_req, action, metadata) => { calls.audit.push({ action, metadata }); },
+    log: (level, event, metadata) => calls.logs.push({ level, event, metadata }),
+    tgBot,
+    webhookSecret: SECRET,
+    newToken: () => 'validtoken123',
+    sha256,
+    appBase: () => 'https://atlavue.app',
+    runMentionNotifyTest: overrides.runMentionNotifyTest
+      || (async (channelId, uid) => { calls.testRuns.push({ channelId, uid }); return { ok: true, seed: false, found: 2, fresh: 1, sent: 1 }; }),
+  });
+  return { routes, db, calls, jobs };
+}
+
+async function invoke(handlers, req = {}) {
+  const res = {
+    statusCode: 200,
+    headers: {},
+    status(code) { this.statusCode = code; return this; },
+    set(k, v) { this.headers[k] = v; return this; },
+    json(body) { this.body = body; return this; },
+  };
+  let nextError = null;
+  const request = {
+    body: {},
+    headers: {},
+    user: { uid: 11 },
+    channel: { id: 7, owner_uid: 11, member_role: 'owner', username: 'own_brand', tg_channel_id: '777' },
+    ...req,
+  };
+  await handlers.at(-1)(request, res, (error) => { nextError = error; });
+  if (nextError) throw nextError;
+  return res;
+}
+
+// ── Вебхук ─────────────────────────────────────────────────────────────────────────────────────────
+
+test('webhook rejects a missing or wrong secret without leaking details', async () => {
+  const { routes } = createRoutes();
+  const noSecret = await invoke(routes.get('POST /api/tg-bot/webhook'), { headers: {} });
+  assert.equal(noSecret.statusCode, 403);
+  const wrong = await invoke(routes.get('POST /api/tg-bot/webhook'), {
+    headers: { 'x-telegram-bot-api-secret-token': 'guess' },
+  });
+  assert.equal(wrong.statusCode, 403);
+});
+
+test('webhook /start with a valid token binds and replies in chat', async () => {
+  const { routes, calls } = createRoutes();
+  const res = await invoke(routes.get('POST /api/tg-bot/webhook'), {
+    headers: { 'x-telegram-bot-api-secret-token': SECRET },
+    body: {
+      message: {
+        text: '/start validtoken123',
+        chat: { id: 555, type: 'private' },
+        from: { id: 999, username: 'user' },
+      },
+    },
+  });
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.ok, true);
+  // Ответ в чат подтверждает привязку (best-effort, но в happy-path обязан отправиться).
+  assert.equal(calls.sent.length, 1);
+  assert.match(calls.sent[0].text, /Готово/);
+});
+
+test('webhook /start with a stale token still answers 200 but reports expiry to the chat', async () => {
+  const { routes, calls } = createRoutes();
+  const res = await invoke(routes.get('POST /api/tg-bot/webhook'), {
+    headers: { 'x-telegram-bot-api-secret-token': SECRET },
+    body: {
+      message: { text: '/start expiredtoken1', chat: { id: 556, type: 'private' }, from: {} },
+    },
+  });
+  assert.equal(res.statusCode, 200);
+  assert.match(calls.sent[0].text, /устарела/);
+});
+
+test('webhook ignores group /start and non-start chatter', async () => {
+  const { routes, calls } = createRoutes();
+  await invoke(routes.get('POST /api/tg-bot/webhook'), {
+    headers: { 'x-telegram-bot-api-secret-token': SECRET },
+    body: { message: { text: '/start validtoken123', chat: { id: -100, type: 'supergroup' }, from: {} } },
+  });
+  await invoke(routes.get('POST /api/tg-bot/webhook'), {
+    headers: { 'x-telegram-bot-api-secret-token': SECRET },
+    body: { message: { text: 'привет', chat: { id: 555, type: 'private' }, from: {} } },
+  });
+  assert.equal(calls.sent.length, 0);
+});
+
+test('webhook my_chat_member kicked unbinds the chat', async () => {
+  const { routes, calls } = createRoutes();
+  const res = await invoke(routes.get('POST /api/tg-bot/webhook'), {
+    headers: { 'x-telegram-bot-api-secret-token': SECRET },
+    body: { my_chat_member: { chat: { id: 555 }, new_chat_member: { status: 'kicked' } } },
+  });
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(calls.unbound, [555]);
+});
+
+test('webhook answers 503 on transient DB unavailability so Telegram retries', async () => {
+  const { routes } = createRoutes({
+    db: {
+      isDbUnavailable: () => true,
+      bindMentionNotifyByToken: async () => { throw new Error('db down'); },
+    },
+  });
+  const res = await invoke(routes.get('POST /api/tg-bot/webhook'), {
+    headers: { 'x-telegram-bot-api-secret-token': SECRET },
+    body: { message: { text: '/start validtoken123', chat: { id: 555, type: 'private' }, from: {} } },
+  });
+  assert.equal(res.statusCode, 503);
+});
+
+// ── Deep-link ──────────────────────────────────────────────────────────────────────────────────────
+
+test('link endpoint stores only the token hash and returns the t.me URL', async () => {
+  const { routes, calls } = createRoutes();
+  const res = await invoke(routes.get('POST /api/tg/mention-notify/link'));
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.url, 'https://t.me/atlavue_bot?start=validtoken123');
+  assert.equal(calls.links[0].uid, 11);
+  assert.equal(calls.links[0].tokenHash, sha256('validtoken123'));   // в БД — хеш, не токен
+  assert.equal(calls.audit[0].action, 'tg.mention_notify.link_issued');
+});
+
+test('link endpoint fails closed when webhook registration fails', async () => {
+  const { routes } = createRoutes({ tgBot: { ensureWebhook: async () => { throw new Error('net'); } } });
+  const res = await invoke(routes.get('POST /api/tg/mention-notify/link'));
+  assert.equal(res.statusCode, 503);
+});
+
+// ── Статус и тумблер ───────────────────────────────────────────────────────────────────────────────
+
+test('GET status aggregates binding, subscription (incl. schedule) and requirements', async () => {
+  const { routes } = createRoutes();
+  const res = await invoke(routes.get('GET /api/tg/mention-notify'));
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.binding.bound, true);
+  assert.equal(res.body.subscription.enabled, false);
+  assert.deepEqual(res.body.subscription.send_days, [1, 5]);
+  assert.equal(res.body.subscription.send_hour, 9);
+  assert.deepEqual(res.body.requirements, { rules_configured: true, session_state: 'ok' });
+});
+
+test('PUT persists the schedule, normalizing a full week to the canonical empty set', async () => {
+  const { routes, calls } = createRoutes();
+  const res = await invoke(routes.get('PUT /api/tg/mention-notify'), {
+    body: { enabled: true, send_days: [7, 6, 5, 4, 3, 2, 1], send_hour: 18 },
+  });
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(calls.subs[0].schedule, { send_days: [], send_hour: 18 });
+  assert.equal(res.body.send_hour, 18);
+});
+
+test('PUT rejects malformed schedules with a 400 instead of silently swallowing them', async () => {
+  const { routes } = createRoutes();
+  for (const body of [
+    { enabled: false, send_days: [0] },
+    { enabled: false, send_days: [1, 8] },
+    { enabled: false, send_days: 'mon' },
+    { enabled: false, send_days: [] },
+    { enabled: false, send_hour: 24 },
+    { enabled: false, send_hour: 9.5 },
+  ]) {
+    const res = await invoke(routes.get('PUT /api/tg/mention-notify'), { body });
+    assert.equal(res.statusCode, 400, JSON.stringify(body));
+  }
+});
+
+test('POST run maps the job outcome: 200 with counters, 409 for a not-ready subscription', async () => {
+  const ok = createRoutes();
+  const res = await invoke(ok.routes.get('POST /api/tg/mention-notify/run'));
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body, { ok: true, seed: false, found: 2, fresh: 1, sent: 1 });
+  assert.deepEqual(ok.calls.testRuns, [{ channelId: 7, uid: 11 }]);
+  assert.equal(ok.calls.audit[0].action, 'tg.mention_notify.test_run');
+
+  const notReady = createRoutes({ runMentionNotifyTest: async () => ({ ok: false, reason: 'not_runnable' }) });
+  const res409 = await invoke(notReady.routes.get('POST /api/tg/mention-notify/run'));
+  assert.equal(res409.statusCode, 409);
+  assert.match(res409.body.error, /Подписка не готова/);
+
+  const broken = createRoutes({ runMentionNotifyTest: async () => ({ ok: false, reason: 'search_failed' }) });
+  const res503 = await invoke(broken.routes.get('POST /api/tg/mention-notify/run'));
+  assert.equal(res503.statusCode, 503);
+});
+
+// ── Ручной прогон: роль + durable-кулдаун ─────────────────────────────────────────────────────────
+
+test('POST run is owner/admin only — a viewer cannot burn the quota or write the shared archive', async () => {
+  const { routes, calls } = createRoutes();
+  const res = await invoke(routes.get('POST /api/tg/mention-notify/run'), {
+    channel: { id: 7, owner_uid: 99, member_role: 'viewer' },
+  });
+  assert.equal(res.statusCode, 403);
+  assert.match(res.body.error, /Недостаточно прав/);
+  assert.equal(calls.testRuns.length, 0, 'до джоба (и до квоты searchPosts) дело не дошло');
+});
+
+test('POST run: a second call inside the window is a 429 with Retry-After, not a second quota spend', async () => {
+  const { routes, calls } = createRoutes();
+  const first = await invoke(routes.get('POST /api/tg/mention-notify/run'));
+  assert.equal(first.statusCode, 200);
+
+  const second = await invoke(routes.get('POST /api/tg/mention-notify/run'));
+  assert.equal(second.statusCode, 429);
+  assert.equal(second.body.reason, 'cooldown');
+  assert.match(second.body.error, /Слишком часто/);
+  const retryAfter = Number(second.headers['Retry-After']);
+  assert.ok(Number.isInteger(retryAfter) && retryAfter > 0 && retryAfter <= 600, `Retry-After: ${retryAfter}`);
+  assert.equal(calls.testRuns.length, 1, 'второй клик не дошёл до поиска');
+});
+
+test('POST run: owner outside the window runs again (the cooldown key is per window, not forever)', async () => {
+  const { routes, calls, jobs } = createRoutes();
+  await invoke(routes.get('POST /api/tg/mention-notify/run'));
+  jobs.clear();                                     // окно сменилось — прежний ключ больше не занят
+  const again = await invoke(routes.get('POST /api/tg/mention-notify/run'));
+  assert.equal(again.statusCode, 200);
+  assert.equal(calls.testRuns.length, 2);
+});
+
+test('POST run: a refusal before any quota spend does not eat the cooldown window', async () => {
+  let runs = 0;
+  const { routes } = createRoutes({
+    runMentionNotifyTest: async () => {
+      runs += 1;
+      return runs === 1 ? { ok: false, reason: 'not_runnable' } : { ok: true, seed: false, found: 0, fresh: 0, sent: 1 };
+    },
+  });
+  const refused = await invoke(routes.get('POST /api/tg/mention-notify/run'));
+  assert.equal(refused.statusCode, 409);
+  // Подписку починили и нажали снова в том же окне — 429 здесь был бы наказанием ни за что.
+  const ok = await invoke(routes.get('POST /api/tg/mention-notify/run'));
+  assert.equal(ok.statusCode, 200);
+  assert.equal(runs, 2);
+});
+
+test('POST run: bot throttling maps to a Russian 503 carrying Telegram’s own Retry-After', async () => {
+  const { routes } = createRoutes({
+    runMentionNotifyTest: async () => ({ ok: false, reason: 'send_throttled', sent: 3, retry_after_sec: 42 }),
+  });
+  const res = await invoke(routes.get('POST /api/tg/mention-notify/run'));
+  assert.equal(res.statusCode, 503);
+  assert.equal(res.body.reason, 'send_throttled');
+  assert.match(res.body.error, /подождать/);
+  assert.equal(res.headers['Retry-After'], '42');
+});
+
+test('PUT enable requires binding, rules and a live session (409 with reason)', async () => {
+  const noBinding = createRoutes({ db: { getMentionNotifyBinding: async () => null } });
+  let res = await invoke(noBinding.routes.get('PUT /api/tg/mention-notify'), { body: { enabled: true } });
+  assert.equal(res.statusCode, 409);
+  assert.equal(res.body.reason, 'no_binding');
+
+  const noRules = createRoutes({ db: { getMentionSettingsForActor: async () => ({ configured: false }) } });
+  res = await invoke(noRules.routes.get('PUT /api/tg/mention-notify'), { body: { enabled: true } });
+  assert.equal(res.body.reason, 'no_rules');
+
+  const reauth = createRoutes({ db: { getTgSession: async () => ({ session_enc: 'enc', connection_state: 'reauth_required' }) } });
+  res = await invoke(reauth.routes.get('PUT /api/tg/mention-notify'), { body: { enabled: true } });
+  assert.equal(res.body.reason, 'reauth_required');
+});
+
+test('PUT enable happy-path writes through the actor gate and audits', async () => {
+  const { routes, calls } = createRoutes();
+  const res = await invoke(routes.get('PUT /api/tg/mention-notify'), { body: { enabled: true } });
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.enabled, true);
+  assert.deepEqual(calls.subs, [{ channelId: 7, uid: 11, enabled: true, schedule: {} }]);
+  assert.equal(calls.audit[0].action, 'tg.mention_notify.enabled');
+});
+
+test('PUT disable skips requirement checks and always lands', async () => {
+  const { routes } = createRoutes({
+    db: {
+      getMentionNotifyBinding: async () => null,
+      getMentionSettingsForActor: async () => ({ configured: false }),
+      getTgSession: async () => null,
+    },
+  });
+  const res = await invoke(routes.get('PUT /api/tg/mention-notify'), { body: { enabled: false } });
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.enabled, false);
+});
+
+test('PUT answers 403 when the SQL boundary rejects the actor', async () => {
+  const { routes } = createRoutes({ db: { setMentionNotifySubscriptionForActor: async () => null } });
+  const res = await invoke(routes.get('PUT /api/tg/mention-notify'), { body: { enabled: false } });
+  assert.equal(res.statusCode, 403);
+});
+
+test('DELETE binding unbinds and audits', async () => {
+  const { routes, calls } = createRoutes();
+  const res = await invoke(routes.get('DELETE /api/tg/mention-notify/binding'));
+  assert.equal(res.statusCode, 200);
+  assert.equal(calls.audit[0].action, 'tg.mention_notify.unbound');
+});

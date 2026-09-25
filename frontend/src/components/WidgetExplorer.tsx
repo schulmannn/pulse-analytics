@@ -1,44 +1,63 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { WidgetConfigControls } from '@/components/ConfigEditDialog';
 import { WidgetBody } from '@/components/ConfigWidget';
 import { WidgetErrorBoundary } from '@/components/WidgetErrorBoundary';
+import { Button } from '@/components/ui/button';
 import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
-import { DetailShell } from '@/components/DetailShell';
+import { MetricBackLink } from '@/components/metric/shared';
 import { ChannelScope } from '@/lib/channel-context';
 import { editorSpec } from '@/lib/widgetCapabilities';
+import { ChartSkeleton } from '@/components/ui/dataSkeleton';
 import { normalizeWidget, type WidgetConfig } from '@/lib/widgetConfig';
 import { useExplorerChartHeight } from '@/lib/useExplorerChartHeight';
+import { useWidgetSourceChannel } from '@/lib/useWidgetSource';
 
 /**
- * The universal fullscreen explorer — one place, every config widget. «Развернуть» opens a SANDBOX:
+ * The universal full-page explorer — one place, every config widget. A card opens a SANDBOX:
  * a big chart on the left (full axes) driven by a LOCAL draft config, the whole control set on the
  * right (the same WidgetConfigControls the editor uses). The user explores viz / period / grain /
  * comparison / filter / target freely WITHOUT touching the pinned widget; «Применить к виджету»
- * commits the draft, otherwise the widget is untouched on close. No per-chart explorer code — a
- * widget only needs a WidgetConfig + WidgetRenderer, and this works for all of them.
+ * commits the draft. Leaving the page without applying keeps the widget untouched. No per-chart
+ * explorer code — a widget only needs a WidgetConfig + WidgetRenderer, and this works for all of them.
  */
 export function WidgetExplorer({
   config,
   onApply,
-  onClose,
-  originRect,
+  backTo = '/home',
 }: {
   config: WidgetConfig;
   onApply?: (config: WidgetConfig) => void;
-  onClose: () => void;
-  /** Clicked-card rect for the shared-element grow (forwarded to DetailShell). */
-  originRect?: DOMRect | null;
+  backTo?: string;
 }) {
   const [draft, setDraft] = useState<WidgetConfig>(config);
   const spec = editorSpec(draft);
   const chartHeight = useExplorerChartHeight();
+  // Источник резолвится ТЕМ ЖЕ хуком, что и карточка, из которой открыт эксплорер: без явного
+  // «Источника» берётся канал сети виджета, а не глобальный свитчер. Иначе TG/IG-виджет,
+  // открытый при активном МойСклад/Метрика-канале, читал бы чужой канал (пустой ряд нулей).
+  // До resolved (холодный deep-link: список каналов ещё летит) график не монтируем — иначе
+  // data-хуки выстрелили бы по глобальному каналу и перещёлкнулись после ответа.
+  const { channelId: sourceChannel, resolved: sourceResolved } = useWidgetSourceChannel(draft, { pinned: true });
 
   const patch = (p: Partial<WidgetConfig>) => setDraft((d) => normalizeWidget({ ...d, ...p }) ?? d);
   const changed = JSON.stringify(draft) !== JSON.stringify(config);
 
+  // Аккаунт-синк может подменить `config` под открытым эксплорером (правило account-wins в
+  // hydrateWidgetConfigs). Draft заморожен на mount, поэтому НЕ ТРОНУТЫЙ пользователем эксплорер
+  // после гидрации показывал бы «есть изменения» и по «Применить» откатывал бы аккаунтную версию
+  // обратно. Пока правок нет — следуем за config; как только пользователь что-то изменил, его
+  // draft приоритетнее и мы в него не лезем.
+  const configKey = JSON.stringify(config);
+  const changedRef = useRef(changed);
+  changedRef.current = changed;
+  useEffect(() => {
+    if (!changedRef.current) setDraft(config);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [configKey]);
+
   // The sandbox is where users deliberately push a widget into edge-case configs, so guard the live
-  // preview: a throwing draft shows a calm fallback here instead of blanking the whole app behind the
-  // overlay. resetKeys on the draft signature → a corrected draft auto-clears the fallback, and the
+  // preview: a throwing draft shows a calm fallback here instead of blanking the whole explorer
+  // page. resetKeys on the draft signature → a corrected draft auto-clears the fallback, and the
   // control panel (right side, outside this boundary) stays usable throughout.
   const chart = (
     <WidgetErrorBoundary variant="inline" widgetId={`explorer-${draft.id}`} label={draft.title || spec.label} resetKeys={[JSON.stringify(draft)]}>
@@ -50,35 +69,64 @@ export function WidgetExplorer({
     </WidgetErrorBoundary>
   );
 
+  const label = draft.title || spec.label;
   return (
-    <DetailShell variant="fullscreen" ariaLabel={`Explorer «${draft.title || spec.label}»`} onClose={onClose} originRect={originRect}>
-      <header className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-4 py-3 pr-14">
-        <div className="min-w-0 truncate text-sm font-medium text-foreground">{draft.title || spec.label}</div>
-        <div className="flex shrink-0 items-center gap-3">
-          {onApply && (
-            <button
-              type="button"
-              disabled={!changed}
-              onClick={() => {
-                onApply(draft);
-                onClose();
-              }}
-              className="btn-pill bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
-            >
-              Применить к виджету
-            </button>
+    <div className="space-y-5">
+      <MetricBackLink to={backTo}>Главная</MetricBackLink>
+
+      <header className="flex flex-wrap items-start justify-between gap-4">
+        <div className="min-w-0">
+          <h1 className="truncate text-2xl font-medium tracking-tight text-foreground">{label}</h1>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Полноэкранный график · настройки применятся только после сохранения
+          </p>
+        </div>
+        {onApply && (
+          <Button
+            type="button"
+            disabled={!changed}
+            onClick={() => onApply(draft)}
+            size="sm"
+            className="shrink-0 px-4 text-sm"
+          >
+            Применить к виджету
+          </Button>
+        )}
+      </header>
+
+      {/* Намеренно НЕ MetricColumns: здесь grid-item'ы другие — левая колонка сама является
+          card-рамкой графика, а aside несёт min-w-0 (плотные контролы у фикс. rail 320px),
+          а не space-y-6. */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_320px] xl:gap-8">
+        <div className="min-w-0 rounded-2xl border border-border bg-card p-4 sm:p-5">
+          {!sourceResolved ? (
+            <ChartSkeleton />
+          ) : sourceChannel != null ? (
+            <ChannelScope channelId={sourceChannel}>{chart}</ChannelScope>
+          ) : (
+            chart
           )}
         </div>
-      </header>
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-6 overflow-y-auto p-4 sm:p-6 lg:grid-cols-[minmax(0,1fr)_320px]">
-        <div className="min-w-0">
-          {draft.source != null ? <ChannelScope channelId={draft.source}>{chart}</ChannelScope> : chart}
-        </div>
         <aside className="min-w-0">
-          <div className="mb-1 text-2xs font-medium tracking-wider text-muted-foreground">Настройки</div>
-          <WidgetConfigControls config={draft} spec={spec} onChange={patch} />
+          {/* `lg:sticky` тут стоял и был МЁРТВЫМ: sticky ограничен containing block'ом, то есть самим
+              aside, а при `align-items: stretch` его высота равна высоте строки грида. Рейл выше
+              карточки графика → диапазон залипания нулевой → элемент не пиннится никогда (замер:
+              рейл 1020px в скроллпорте 652px уезжал вместе со страницей на весь скролл).
+              Лечит не sticky, а ОГРАНИЧЕНИЕ ВЫСОТЫ + собственный скроллпорт: список полей
+              прокручивается внутри, страница перестаёт быть длинной, и шапка с «Применить к
+              виджету» остаётся на виду сама.
+              Высота считается от ЭЛЕМЕНТА-скроллера `[data-dashboard-scroll]`, а не от `100dvh`:
+              панель вложена в `md:p-2.5` + рамку (DashboardLayout), поэтому её вьюпорт ниже окна
+              на ~22px; плюс 16px sticky-отступ сверху и столько же снизу. Всё под `lg:` —
+              одноколоночная мобильная раскладка не меняется. */}
+          <div className="lg:sticky lg:top-4 lg:flex lg:max-h-[calc(100vh-3.5rem)] lg:flex-col">
+            <div className="mb-1 shrink-0 text-2xs font-medium tracking-wider text-muted-foreground">Настройки</div>
+            <div className="lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:overscroll-contain lg:pr-1">
+              <WidgetConfigControls config={draft} spec={spec} onChange={patch} />
+            </div>
+          </div>
         </aside>
       </div>
-    </DetailShell>
+    </div>
   );
 }

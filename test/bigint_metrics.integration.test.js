@@ -16,6 +16,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const { createTestDatabase } = require('./testDatabase');
 const { MAX_SAFE_METRIC } = require('../server/lib/metricNumber');
+const { anchor, dayKey } = require('./helpers/dates');
 
 const TEST_DB = process.env.TEST_DATABASE_URL;
 const skip = TEST_DB ? false : 'TEST_DATABASE_URL not set (integration suite runs on the local stand)';
@@ -28,7 +29,10 @@ let pool = null;
 const nonce = `big${Date.now().toString(36)}${process.pid}`;
 let seq = 0;
 const mail = (tag) => `${tag}.${seq++}.${nonce}@it.local`;
-const today = new Date().toISOString().slice(0, 10);
+// Якорь прогона — один на файл (test/helpers/dates): «сегодня», посчитанное дважды по
+// разные стороны полуночи, давало бы два разных дня внутри одного теста.
+const T = anchor();
+const today = dayKey(T);
 
 const mkUser = (tag) => db.createUser({ email: mail(tag), pass_hash: 'x', role: 'user', status: 'active' });
 const mkChannel = async (tag) => {
@@ -160,7 +164,9 @@ test('monthly rollup accepts a >INT4 subscriber level from widened channel_daily
   await db.upsertChannelDaily(ch.id, [{
     day: today, subscribers: BIG, joins: 1, leaves: 0, views: 2, forwards: 0, reactions: 0,
   }]);
-  await db.rollupChannelMonthly(3);
+  // Скоуп по своему каналу: свёртка всей базы ловила каскадное удаление канала из соседнего
+  // файла между SELECT и INSERT (FK на channel_monthly). Прод по-прежнему зовёт без скоупа.
+  await db.rollupChannelMonthly(3, { channelId: ch.id });
   const { rows } = await pool.query(
     `SELECT subscribers_end FROM channel_monthly WHERE channel_id=$1 ORDER BY month DESC LIMIT 1`,
     [ch.id]);

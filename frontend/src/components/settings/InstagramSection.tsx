@@ -1,3 +1,4 @@
+import { toast } from 'sonner';
 import { useConnectIg, useDisconnectIg, useIgOauthStatus } from '@/api/queries';
 import { fmt } from '@/lib/format';
 import {
@@ -13,10 +14,10 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { SettingsGroup, SettingsRow } from '@/components/settings/primitives';
+import { SettingsGroup, SettingsIconTile, SettingsRow } from '@/components/settings/primitives';
 
-/** «Instagram» — connect (OAuth) / disconnect for the selected channel, one settings row. */
-export function InstagramSection() {
+/** Instagram-подключение (OAuth/disconnect выбранного канала) — группа внутри секции «Каналы». */
+export function InstagramGroup() {
   const status = useIgOauthStatus();
   const connect = useConnectIg();
   const disconnect = useDisconnectIg();
@@ -25,13 +26,14 @@ export function InstagramSection() {
     connect.error instanceof Error ? connect.error.message : null;
 
   return (
-    <SettingsGroup>
+    <SettingsGroup title="Instagram">
       {status.isPending ? (
-        <div className="py-4">
+        <div className="px-5 py-4 @min-[32rem]:py-5">
           <Skeleton className="h-10 w-full" />
         </div>
       ) : s?.connected ? (
         <SettingsRow
+          leading={<SettingsIconTile name="instagram" />}
           title={
             <span className="flex items-center gap-2">
               <span
@@ -62,6 +64,7 @@ export function InstagramSection() {
                   type="button"
                   variant="destructive"
                   size="sm"
+                  pending={disconnect.isPending}
                   disabled={disconnect.isPending}
                 >
                   {disconnect.isPending ? 'Отключение…' : 'Отключить'}
@@ -82,7 +85,7 @@ export function InstagramSection() {
                       type="button"
                       variant="destructive"
                       size="sm"
-                      onClick={() => disconnect.mutate()}
+                      onClick={() => disconnect.mutate(undefined, { onSuccess: () => toast('Instagram отключён') })}
                     >
                       Отключить
                     </Button>
@@ -94,6 +97,7 @@ export function InstagramSection() {
         />
       ) : (
         <SettingsRow
+          leading={<SettingsIconTile name="instagram" />}
           title="Подключение Instagram"
           description={
             s?.server_ready
@@ -105,6 +109,7 @@ export function InstagramSection() {
               type="button"
               size="sm"
               onClick={() => connect.mutate()}
+              pending={connect.isPending}
               disabled={connect.isPending || !s?.server_ready}
               className="shrink-0"
             >

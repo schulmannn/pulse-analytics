@@ -328,6 +328,83 @@ function createChannelsRepo({ pool, enabled, transaction, ensureExternalSource }
     return rows[0] ? rows[0].id : null;
   }
 
+  // Standalone-канал Яндекс.Метрики — строка channels без платформенной TG/IG-идентичности
+  // (source='ym', username NULL), зеркально createMsChannel. Дедуп по идентичности счётчика —
+  // у вызывающего (findYmChannelByCounter).
+  async function createYmChannel({ owner_uid, name }) {
+    if (!enabled || owner_uid == null) return null;
+    const title = String(name || '').trim() || 'Яндекс.Метрика';
+    // Finding 2: канал + workspace-привязка одной транзакцией (см. createChannel).
+    return transaction(async (client) => {
+      const { rows } = await client.query(
+        `INSERT INTO channels (owner_uid, username, title, status, source)
+         VALUES ($1,NULL,$2,'active','ym') RETURNING ${CHANNEL_COLS}`,
+        [owner_uid, title]);
+      const row = rows[0] || null;
+      // Workspace сейчас; канонический ym-source штампует saveYmAccount (counter_id известен там).
+      if (row) await ensureChannelCanonical(row.id, owner_uid, {}, client);
+      return row;
+    });
+  }
+
+  // Канал пользователя, уже держащий этот счётчик Метрики (дедуп повторного connect).
+  async function findYmChannelByCounter(uid, counterId) {
+    if (!enabled || uid == null || !counterId) return null;
+    const { rows } = await pool.query(
+      `SELECT c.id FROM channels c JOIN ym_accounts ya ON ya.channel_id = c.id
+       WHERE c.owner_uid=$1 AND ya.counter_id=$2 AND c.status<>'disabled' LIMIT 1`,
+      [uid, String(counterId)]);
+    return rows[0] ? rows[0].id : null;
+  }
+
+  // Standalone-канал СДЭК Fulfillment (source='cdek', username NULL), зеркально createMsChannel.
+  // Пары findCdekChannelBy* здесь НЕТ, и это осознанно: у источника с ручной загрузкой Excel нет
+  // внешней идентичности, по которой его можно было бы узнать при повторном «подключении» —
+  // источник заводится руками один раз и живёт под своим именем (см. комментарий в cdekRepo).
+  async function createCdekChannel({ owner_uid, name }) {
+    if (!enabled || owner_uid == null) return null;
+    const title = String(name || '').trim() || 'СДЭК';
+    // Finding 2: канал + workspace-привязка одной транзакцией (см. createChannel).
+    return transaction(async (client) => {
+      const { rows } = await client.query(
+        `INSERT INTO channels (owner_uid, username, title, status, source)
+         VALUES ($1,NULL,$2,'active','cdek') RETURNING ${CHANNEL_COLS}`,
+        [owner_uid, title]);
+      const row = rows[0] || null;
+      // Workspace сейчас; канонический cdek-source штампует saveCdekSource (id канала известен там).
+      if (row) await ensureChannelCanonical(row.id, owner_uid, {}, client);
+      return row;
+    });
+  }
+
+  // Standalone-канал Rusender (source='rusender', username NULL), зеркально createMsChannel.
+  async function createRusenderChannel({ owner_uid, name }) {
+    if (!enabled || owner_uid == null) return null;
+    const title = String(name || '').trim() || 'Rusender';
+    // Finding 2: канал + workspace-привязка одной транзакцией (см. createChannel).
+    return transaction(async (client) => {
+      const { rows } = await client.query(
+        `INSERT INTO channels (owner_uid, username, title, status, source)
+         VALUES ($1,NULL,$2,'active','rusender') RETURNING ${CHANNEL_COLS}`,
+        [owner_uid, title]);
+      const row = rows[0] || null;
+      // Workspace сейчас; канонический rusender-source штампует saveRusenderAccount (accountId известен там).
+      if (row) await ensureChannelCanonical(row.id, owner_uid, {}, client);
+      return row;
+    });
+  }
+
+  // Канал пользователя, уже держащий этот аккаунт Rusender (дедуп повторного connect) —
+  // зеркало findYmChannelByCounter.
+  async function findRusenderChannelByAccount(uid, accountId) {
+    if (!enabled || uid == null || !accountId) return null;
+    const { rows } = await pool.query(
+      `SELECT c.id FROM channels c JOIN rusender_accounts ra ON ra.channel_id = c.id
+       WHERE c.owner_uid=$1 AND ra.account_id=$2 AND c.status<>'disabled' LIMIT 1`,
+      [uid, String(accountId)]);
+    return rows[0] ? rows[0].id : null;
+  }
+
   // The user's channel already holding this Instagram identity (multi-account reconnect dedup).
   async function findIgChannelByIgUser(uid, igUserId) {
     if (!enabled || uid == null || !igUserId) return null;
@@ -457,7 +534,9 @@ function createChannelsRepo({ pool, enabled, transaction, ensureExternalSource }
     listChannels, getDefaultChannelId, getChannelOrDefault, getChannel, getChannelById, getOwnerChannelId, setChannelTgId,
     getTgChannelIdentity, saveTgChannelAccessHash,
     ensurePersonalWorkspace, ensureChannelCanonical,
-    createChannel, createIgChannel, findIgChannelByIgUser, createMsChannel, findMsChannelByAccount, createTgChannel, deleteChannel,
+    createChannel, createIgChannel, findIgChannelByIgUser, createMsChannel, findMsChannelByAccount,
+    createYmChannel, findYmChannelByCounter, createCdekChannel, createTgChannel, deleteChannel,
+    createRusenderChannel, findRusenderChannelByAccount,
     createApiKey, getChannelByApiKey, listApiKeys, revokeApiKey,
     listAnnotations, createAnnotation, deleteAnnotation,
   };

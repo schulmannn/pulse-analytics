@@ -109,7 +109,7 @@ test('metric line chart flows from one period shape into the next', async ({ pag
 
   // The explorer defaults to 30d. Sample every browser frame while switching to the genuinely
   // shorter 7d window so a fast polling client cannot miss the running state.
-  await expect(page.getByRole('group', { name: 'Период', exact: true }).getByRole('button', { name: '30д' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('toolbar', { name: 'Период', exact: true }).getByRole('button', { name: '30д' })).toHaveAttribute('aria-pressed', 'true');
   await chart.evaluate((svg) => {
     const state = window as unknown as { __morphFrames: Array<{ primary: string; comparison: string; state: string | null }> };
     state.__morphFrames = [];
@@ -127,7 +127,7 @@ test('metric line chart flows from one period shape into the next', async ({ pag
     };
     requestAnimationFrame(sample);
   });
-  await page.getByRole('group', { name: 'Период', exact: true }).getByRole('button', { name: '7д', exact: true }).click();
+  await page.getByRole('toolbar', { name: 'Период', exact: true }).getByRole('button', { name: '7д', exact: true }).click();
   await page.waitForTimeout(1950);
   const frames = await page.evaluate(() => (window as unknown as { __morphFrames: Array<{ primary: string; comparison: string; state: string | null }> }).__morphFrames);
   const finalPath = await primarySeries.getAttribute('d');
@@ -152,6 +152,17 @@ test('metric line chart flows from one period shape into the next', async ({ pag
   await expect(morphGroup).toHaveAttribute('data-chart-morph-state', 'idle');
 });
 
+test('subscriber metric always renders the total curve even for a stale bar deep-link', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop-1440', 'Desktop-only metric explorer contract');
+  await bootDemo(page, '/metrics/subscribers?chart=bar', { theme: 'dark' });
+
+  await expect(page.getByRole('heading', { name: 'Подписчики', level: 1 })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Динамика подписчиков' })).toBeVisible();
+  await expect(page.getByRole('toolbar', { name: 'Тип графика' })).toHaveCount(0);
+  await expect(page.locator('svg[data-chart-kind="bar"]')).toHaveCount(0);
+  await expect(page.locator('svg[data-chart-kind="line"][data-chart-expanded]').first()).toBeVisible();
+});
+
 test('metric explorer gives the plot desktop space and exposes a hover inspector', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop-1440', 'Desktop-only metric explorer contract');
   await bootDemo(page, '/metrics/views', { theme: 'dark' });
@@ -164,9 +175,13 @@ test('metric explorer gives the plot desktop space and exposes a hover inspector
   const chart = page.locator('svg[data-chart-kind="line"][data-chart-expanded]').first();
   await chart.waitFor({ state: 'visible', timeout: 15_000 });
   await expect(chart).toHaveAttribute('data-chart-curve', 'smooth');
-  await expect(chart).toHaveAttribute('data-chart-comparison', 'area');
+  // Канон «previous-period stays dashed/no-fill»: у прошлого периода ТОЛЬКО штриховая линия —
+  // ни своей area, ни сплошного штриха (залитое сравнение мутило пересечения с текущей заливкой).
+  await expect(chart).toHaveAttribute('data-chart-comparison', 'dashed');
   await expect(chart.locator('[data-chart-series="primary-area"]')).toHaveCount(1);
-  await expect(chart.locator('[data-chart-series="comparison-area"]')).toHaveCount(1);
+  await expect(chart.locator('[data-chart-series="comparison-area"]')).toHaveCount(0);
+  await expect(chart.locator('[data-chart-series="comparison"]')).toHaveAttribute('stroke-dasharray', '5 4');
+  await expect(chart.locator('[data-chart-series="comparison"]')).toHaveAttribute('fill', 'none');
   await chart.scrollIntoViewIfNeeded();
   await page.waitForTimeout(300);
 
@@ -227,11 +242,14 @@ test('metric explorer redesign: cohesive chart card, comparison card, rank/pivot
   const cardTitle = card.getByRole('heading', { name: 'По дням' });
   await expect(cardTitle).toBeVisible();
   await expect(card.getByRole('button', { name: 'Тип графика: Линия' })).toBeVisible();
-  await expect(card.getByRole('button', { name: /^Меню виджета/ })).toBeVisible();
+  // Пин переехал из карточного «Меню виджета» в страничное действие (PR #351: explorer больше не
+  // несёт меню — WidgetMenu без group/homeKey/allowEdit не рендерится). Проверяем тот же
+  // пользовательский путь на его нынешнем контроле.
+  await expect(page.getByRole('button', { name: /Закрепить на Главной|На Главной/ })).toBeVisible();
   const toolbar = card.locator('[data-metric-toolbar]');
   await expect(toolbar).toBeVisible();
-  await expect(toolbar.getByRole('group', { name: 'Гранулярность' })).toBeVisible();
-  await expect(toolbar.getByRole('group', { name: 'Период' })).toBeVisible();
+  await expect(toolbar.getByRole('toolbar', { name: 'Гранулярность' })).toBeVisible();
+  await expect(toolbar.getByRole('toolbar', { name: 'Период' })).toBeVisible();
   await expect(toolbar.getByRole('button', { name: 'Свой диапазон' })).toBeVisible();
   await expect(toolbar.getByRole('button', { name: 'Предыдущее окно' })).toBeVisible();
   await expect(toolbar.getByRole('button', { name: 'Следующее окно' })).toBeVisible();
@@ -326,6 +344,11 @@ test('metric explorer top posts use a contained interactive card', async ({ page
   await expect(card.locator('[data-top-post-format]')).toHaveCount(8);
   const firstRow = rows.first();
   const firstButton = firstRow.getByRole('button');
+  // PostDetailModal is a Radix MODAL dialog (shadcn wave #316): while it is open the whole page
+  // behind it is aria-hidden, so role-based queries legitimately cannot resolve the row button.
+  // The same element, addressed structurally, keeps the aria-pressed assertion checkable inside
+  // the dialog-open window without weakening what is asserted.
+  const firstButtonDom = firstRow.locator('button');
   await expect(firstButton).toHaveAttribute('aria-pressed', 'false');
 
   const cardBox = await card.boundingBox();
@@ -343,7 +366,7 @@ test('metric explorer top posts use a contained interactive card', async ({ page
   const dialog = page.getByRole('dialog', { name: 'Детали поста №1' });
   await expect(dialog).toBeVisible();
   await expect(firstRow).toHaveAttribute('data-top-post-selected', '');
-  await expect(firstButton).toHaveAttribute('aria-pressed', 'true');
+  await expect(firstButtonDom).toHaveAttribute('aria-pressed', 'true');
   await dialog.getByRole('button', { name: 'Закрыть' }).click();
   await expect(dialog).toHaveCount(0);
   await expect(firstRow).not.toHaveAttribute('data-top-post-selected', '');
@@ -362,7 +385,7 @@ test('chart drill guard: a scrub across the chart does not navigate', async ({ p
     localStorage.setItem('pulse_widget_configs', JSON.stringify([{ id: 'probe1', metricId: 'tg.views', viz: 'line' }]));
   });
   await bootDemo(page, '/home');
-  const chart = page.locator('svg[aria-label^="График:"]').first();
+  const chart = page.locator('svg[data-chart-kind="sparkline"]').first();
   await chart.waitFor({ state: 'visible', timeout: 15_000 });
   await chart.scrollIntoViewIfNeeded();
   await page.waitForTimeout(300);
@@ -375,6 +398,48 @@ test('chart drill guard: a scrub across the chart does not navigate', async ({ p
   await page.mouse.move(box.x + box.width * 0.8, y, { steps: 8 });
   await page.mouse.up();
   await expect(page).not.toHaveURL(/\/metrics\//);
+});
+
+test('config widget opens a dedicated full-page explorer and applies its draft', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('pulse_home_blocks', JSON.stringify({ keys: ['custom:probe1'] }));
+    localStorage.setItem(
+      'pulse_widget_configs',
+      JSON.stringify([{ id: 'probe1', metricId: 'tg.views', viz: 'line' }]),
+    );
+  });
+  await bootDemo(page, '/home');
+
+  const card = page.locator('[data-drill-to="/widgets/probe1"]');
+  await expect(card).toBeVisible();
+  await card.click({ position: { x: 24, y: 24 } });
+
+  await expect(page).toHaveURL(/\/widgets\/probe1$/);
+  await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  const viz = page.getByRole('toolbar', { name: 'Визуализация' });
+  await expect(viz).toBeVisible();
+  await viz.getByRole('button', { name: 'Столбцы' }).click();
+
+  const apply = page.getByRole('button', { name: 'Применить к виджету' });
+  await expect(apply).toBeEnabled();
+  await apply.click();
+  await expect(apply).toBeDisabled();
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const configs = JSON.parse(localStorage.getItem('pulse_widget_configs') ?? '[]') as Array<{
+          id: string;
+          viz: string;
+        }>;
+        return configs.find((config) => config.id === 'probe1')?.viz;
+      }),
+    )
+    .toBe('bar');
+  await expect(page.locator('main').getByRole('link', { name: 'Главная' })).toHaveAttribute(
+    'href',
+    '/home',
+  );
 });
 
 test('edit-mode entry + exit (Home)', async ({ page }) => {
@@ -446,7 +511,7 @@ test('legacy Home cards use one config path and preserve old prefs during migrat
     history: {
       id: 'legacy-history',
       metricId: 'legacy:history',
-      viz: 'bar',
+      viz: 'line',
       period: 90,
       size: 'full',
       title: 'Моя история',
@@ -482,9 +547,11 @@ test('desktop Home splits the legacy Telegram «Показатели» composite
   // A saved board with the composite between two other widgets, plus the composite's old per-card
   // prefs (period + source) that each split card must inherit.
   await page.addInitScript(() => {
+    if (localStorage.getItem('e2e_home_kpi_split_seeded') === '1') return;
     localStorage.setItem('pulse_home_blocks', JSON.stringify({ keys: ['week', 'kpi', 'growth'] }));
     localStorage.setItem('pulse_widget_configs', '[]');
     localStorage.setItem('pulse_widget_prefs', JSON.stringify({ 'home-kpi': { period: 90, source: 3, includeToday: false } }));
+    localStorage.setItem('e2e_home_kpi_split_seeded', '1');
   });
 
   await bootDemo(page, '/home', { theme: 'dark' });

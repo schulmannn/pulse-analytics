@@ -16,7 +16,7 @@ import {
 } from '@/lib/widgetMetrics';
 import { DRILL_KEYS } from '@/lib/kpiDerive';
 
-const SOURCES = new Set(['tg', 'ig', 'ms', 'all']);
+const SOURCES = new Set(['tg', 'ig', 'ms', 'ym', 'all']);
 const KINDS = new Set(['value', 'series', 'breakdown', 'table']);
 const UNITS = new Set(['number', 'percent', 'posts', 'views', 'currency']);
 const VIZ = new Set<WidgetViz>(['kpi', 'line', 'bar', 'donut', 'list', 'rank', 'pivot', 'table', 'ledger']);
@@ -26,16 +26,18 @@ const RESOLVERS = new Set<MetricResolver>([
   'tg.netGrowth',
   'tg.breakdown',
   'ms',
+  'ym',
   'ig',
   'unavailable',
 ]);
 
 describe('widgetMetrics catalogue', () => {
-  it('is non-empty and covers TG, IG and МС', () => {
+  it('is non-empty and covers TG, IG, МС and Метрику', () => {
     expect(WIDGET_METRICS.length).toBeGreaterThan(0);
     expect(WIDGET_METRICS.some((m) => m.source === 'tg')).toBe(true);
     expect(WIDGET_METRICS.some((m) => m.source === 'ig')).toBe(true);
     expect(WIDGET_METRICS.some((m) => m.source === 'ms')).toBe(true);
+    expect(WIDGET_METRICS.some((m) => m.source === 'ym')).toBe(true);
   });
 
   it('every metric has well-formed required fields', () => {
@@ -112,6 +114,17 @@ describe('widgetMetrics catalogue', () => {
   it('level series metrics are the subscriber/follower counts', () => {
     const levels = WIDGET_METRICS.filter((m) => m.seriesAgg === 'level').map((m) => m.id).sort();
     expect(levels).toEqual(['ig.followers', 'tg.subscribers']);
+  });
+
+  // Подписчики — stock, а не дневной flow: уровень аудитории рисуется общей кривой, столбец от нуля
+  // врал бы, что это набранное за день. #429 закрепил это для истории и /metrics/subscribers,
+  // но каталог виджетов всё ещё предлагал «Столбцы». Сохранённый `bar` нормализуется в `line`
+  // штатной валидацией normalizeWidget (viz вне supportedViz → defaultViz).
+  it('level series metrics offer the curve only — never bars', () => {
+    for (const metric of WIDGET_METRICS.filter((m) => m.seriesAgg === 'level')) {
+      expect(metric.supportedViz, metric.id).toEqual(['line']);
+      expect(metric.defaultViz, metric.id).toBe('line');
+    }
   });
 
   it('METRIC_BY_ID / getMetric / isMetricId round-trip', () => {

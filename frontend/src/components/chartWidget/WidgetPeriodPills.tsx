@@ -1,4 +1,4 @@
-import { WIDGET_PERIODS } from '@/components/widgets/EditWidgetDialog';
+import { WIDGET_PERIODS } from '@/components/chartWidget/constants';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { usePagePeriod } from '@/lib/period';
 import type { PeriodDays } from '@/lib/period';
@@ -23,21 +23,19 @@ export function WidgetPeriodPills({ days, onChange, hidden }: WidgetPeriodPillsP
   const customRange = pagePeriod?.range ?? null;
   const changePeriod = pagePeriod?.setDays ?? onChange;
 
-  // Presets ride the shared sliding-glider primitive. When a custom range is active the glider
-  // hides (value matches no preset) and the «Свой» indicator stands in — same custom-range display
-  // semantics as before. Segments keep a ≥32px mobile hit area (compact desktop look returns at sm),
+  // Presets ride the shared shadcn/Radix ToggleGroup. When a custom range is active every preset is
+  // off and the «Свой» indicator stands in — same custom-range display
+  // semantics as before. Segments keep a ≥44px mobile hit area (compact desktop look returns at sm),
   // and this component owns the single public group so its dynamic label stays the sole labelled one.
-  const touch = 'min-h-8 min-w-8 tabular-nums sm:min-h-0 sm:min-w-0';
+  const touch = 'min-h-11 min-w-11 tabular-nums sm:min-h-0 sm:min-w-0';
+  const groupLabel = pagePeriod ? 'Период страницы' : 'Период виджета';
 
   return (
-    <div
-      role="group"
-      aria-label={pagePeriod ? 'Период страницы' : 'Период виджета'}
-      className="mt-2 flex items-center gap-2 print:hidden"
-    >
+    <fieldset className="m-0 mt-2 flex min-w-0 items-center gap-2 border-0 p-0 print:hidden">
+      <legend className="sr-only">{groupLabel}</legend>
       {customRange && (
         <span
-          className={`inline-flex ${touch} items-center justify-center rounded-full bg-secondary px-2.5 py-1 text-2xs font-medium text-foreground`}
+          className={`inline-flex h-8 ${touch} items-center justify-center rounded-full border border-input bg-accent px-2.5 text-2xs font-medium text-accent-foreground`}
           title="Выбранный период страницы"
         >
           Свой
@@ -51,6 +49,6 @@ export function WidgetPeriodPills({ days, onChange, hidden }: WidgetPeriodPillsP
         onChange={(next) => changePeriod(Number(next) as PeriodDays)}
         options={WIDGET_PERIODS.map((period) => ({ value: String(period.days), content: period.label }))}
       />
-    </div>
+    </fieldset>
   );
 }

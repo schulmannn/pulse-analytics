@@ -1,12 +1,12 @@
 import { expect, test } from '@playwright/test';
-import { bootDemo } from './helpers';
+import { bootDemo, expandWidget } from './helpers';
 
 test.beforeEach(async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop-1440', 'MoySklad analytics is desktop-first');
   await bootDemo(page, '/sklad/channels', { theme: 'dark' });
 });
 
-test('MoySklad channels uses the flat feed shell and multi-channel explorer', async ({ page }, testInfo) => {
+test('MoySklad channels saves the fullscreen filter for the compact chart', async ({ page }, testInfo) => {
   test.setTimeout(90_000);
   await expect(page.getByRole('heading', { name: 'Каналы', exact: true })).toBeVisible();
   await expect(page.locator('[data-source-identity]')).toContainText('МойСклад');
@@ -14,20 +14,38 @@ test('MoySklad channels uses the flat feed shell and multi-channel explorer', as
   await expect(page.getByRole('group', { name: 'Период', exact: true })).toHaveCount(1);
 
   // Anchor on the stable control group: the widget heading changes with the selected metric.
-  const dynamics = page.locator('section').filter({ has: page.getByRole('group', { name: 'Метрика', exact: true }) }).first();
-  await expect(dynamics.getByRole('group', { name: 'Метрика', exact: true })).toBeVisible();
-  await expect(dynamics.getByRole('group', { name: 'Вид' })).toBeVisible();
+  const dynamics = page.locator('section').filter({ has: page.getByRole('toolbar', { name: 'Метрика', exact: true }) }).first();
+  await expect(dynamics.getByRole('toolbar', { name: 'Метрика', exact: true })).toBeVisible();
+  await expect(dynamics.getByRole('toolbar', { name: 'Вид' })).toBeVisible();
+  await expect(dynamics.getByRole('button', { name: /^(Все каналы|Каналы:)/ })).toHaveCount(0);
 
-  await dynamics.getByRole('button', { name: 'Все каналы' }).click();
-  const picker = dynamics.getByRole('group', { name: 'Каналы продаж' });
-  await picker.getByRole('checkbox', { name: 'Интернет-магазин' }).check();
-  await picker.getByRole('checkbox', { name: 'Партнёры' }).check();
-  await page.keyboard.press('Escape');
-  await expect(dynamics.getByRole('button', { name: 'Каналы: 2' })).toBeVisible();
-  await expect(dynamics.getByText('2 канала', { exact: true })).toBeVisible();
+  // The compact card is overview-only. Filtering lives on the canonical metric page.
+  await expandWidget(page, /^Выручка по каналам/);
+  await expect(page).toHaveURL(/\/metrics\/ms-channels$/);
+  await expect(page.getByRole('heading', { name: 'Каналы продаж', level: 1 })).toBeVisible({ timeout: 20_000 });
+  const filter = page.locator('details[data-testid="ms-channel-filter"]:visible');
+  await filter.locator('summary').click();
+  const picker = filter.getByRole('group', { name: 'Каналы продаж' });
+  const online = picker.getByRole('checkbox', { name: 'Интернет-магазин' });
+  const partners = picker.getByRole('checkbox', { name: 'Партнёры' });
+  await online.click();
+  await expect(online).toBeChecked();
+  await partners.click();
+  await expect(partners).toBeChecked();
+  await expect(filter.getByText('Не сохранено')).toBeVisible();
+  await filter.getByRole('button', { name: 'Сохранить' }).click();
+  await expect(filter.getByRole('button', { name: 'Сохранить' })).toBeDisabled();
+  await expect(filter.getByText('Сохранено: 2')).toBeVisible();
 
-  await dynamics.getByRole('group', { name: 'Вид' }).getByRole('button', { name: 'По каналам' }).click();
-  const comparisonChart = dynamics.getByRole('img', {
+  // Returning to the source page applies the saved selection without reintroducing a filter button.
+  await page.getByRole('link', { name: /МойСклад · Каналы/ }).click();
+  await expect(page).toHaveURL(/\/sklad\/channels$/);
+  const savedDynamics = page.locator('section').filter({ has: page.getByRole('toolbar', { name: 'Метрика', exact: true }) }).first();
+  await expect(savedDynamics.getByRole('heading', { name: /Выручка по каналам .* · 2 кан\./ })).toBeVisible();
+  await expect(savedDynamics.getByRole('button', { name: /^(Все каналы|Каналы:)/ })).toHaveCount(0);
+
+  await savedDynamics.getByRole('toolbar', { name: 'Вид' }).getByRole('button', { name: 'По каналам' }).click();
+  const comparisonChart = savedDynamics.getByRole('slider', {
     name: /Выручка по каналам: Интернет-магазин, Партнёры/,
   });
   await expect(comparisonChart).toBeVisible();
@@ -38,7 +56,7 @@ test('MoySklad channels uses the flat feed shell and multi-channel explorer', as
   const channelAnimation = await channelMotion.evaluate((element) => getComputedStyle(element).animationName);
   expect(channelAnimation).toContain('chart-fade-in');
   await comparisonChart.focus();
-  await expect(dynamics.locator('.z-tooltip')).toBeVisible();
+  await expect(savedDynamics.locator('.z-tooltip')).toBeVisible();
   await page.keyboard.press('ArrowLeft');
 
   const pageShot = testInfo.outputPath('moysklad-channels-page-dark.png');
@@ -47,37 +65,38 @@ test('MoySklad channels uses the flat feed shell and multi-channel explorer', as
 
   // Sparse AOV keeps the shared calendar axis and honest empty tooltips, but each selected channel
   // remains a readable observation line instead of a collection of isolated one-point segments.
-  await dynamics.getByRole('group', { name: 'Метрика', exact: true }).getByRole('button', { name: 'Средний чек' }).click();
-  const aovComparisonChart = dynamics.getByRole('img', { name: /Средний чек по каналам/ });
+  await savedDynamics.getByRole('toolbar', { name: 'Метрика', exact: true }).getByRole('button', { name: 'Средний чек' }).click();
+  const aovComparisonChart = savedDynamics.getByRole('slider', { name: /Средний чек по каналам/ });
   await expect(aovComparisonChart).toBeVisible();
-  await expect(dynamics.getByText(/только периоды с заказами/)).toBeVisible();
+  await expect(savedDynamics.getByText(/только периоды с заказами/)).toBeVisible();
   const aovShot = testInfo.outputPath('moysklad-channels-aov-dark.png');
   await page.screenshot({ path: aovShot, fullPage: true });
   await testInfo.attach('moysklad-channels-aov-dark', { path: aovShot, contentType: 'image/png' });
-  await dynamics.getByRole('group', { name: 'Метрика', exact: true }).getByRole('button', { name: 'Выручка' }).click();
+  await savedDynamics.getByRole('toolbar', { name: 'Метрика', exact: true }).getByRole('button', { name: 'Выручка' }).click();
 
   // «Развернуть» ведёт на полностраничную метрику /metrics/ms-channels (общий explorer с MS-контролами),
   // а не в модальный оверлей. Страница открывается со своим состоянием (агрегат по умолчанию).
-  await page.getByRole('button', { name: /Развернуть виджет «Выручка по каналам/ }).click();
-  await expect(page).toHaveURL(/\/metrics\/ms-channels$/);
+  await expandWidget(page, /^Выручка по каналам/);
+  await expect(page).toHaveURL(/\/metrics\/ms-channels/);
   // The MS metric page is a lazy chunk. Allow the cold Vite transform to finish when this suite
   // runs in parallel with the all-routes parity pass; the production bundle is already built.
   await expect(page.getByRole('heading', { name: 'Каналы продаж', level: 1 })).toBeVisible({ timeout: 20_000 });
+  await expect.poll(() => new URL(page.url()).searchParams.get('channels')).toContain('16f07379');
   await expect(page.getByRole('dialog')).toHaveCount(0);
-  await expect(page.getByRole('group', { name: 'Метрика' })).toBeVisible();
-  const viewGroup = page.getByRole('group', { name: 'Вид' });
+  await expect(page.getByRole('toolbar', { name: 'Метрика' })).toBeVisible();
+  const viewGroup = page.getByRole('toolbar', { name: 'Вид' });
   await expect(viewGroup).toBeVisible();
   const windowGroup = page.getByRole('group', { name: 'Окно', exact: true });
   await expect(windowGroup).toBeVisible();
   await expect(windowGroup.getByRole('button', { name: '30д' })).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.getByRole('group', { name: 'Грануляция' })).toBeVisible();
+  await expect(page.getByRole('toolbar', { name: 'Грануляция' })).toBeVisible();
   // Aggregate (default) owns the meaningful line/bar toggle; breakdown stays a multi-line comparison.
-  await expect(page.getByRole('group', { name: 'Тип графика' })).toBeVisible();
+  await expect(page.getByRole('toolbar', { name: 'Тип графика' })).toBeVisible();
   await viewGroup.getByRole('button', { name: 'По каналам' }).click();
-  await expect(page.getByRole('group', { name: 'Тип графика' })).toHaveCount(0);
+  await expect(page.getByRole('toolbar', { name: 'Тип графика' })).toHaveCount(0);
   await viewGroup.getByRole('button', { name: 'Итог' }).click();
-  await expect(page.getByRole('group', { name: 'Тип графика' })).toBeVisible();
-  await page.getByRole('group', { name: 'Тип графика' }).getByRole('button', { name: 'Столбцы' }).click();
+  await expect(page.getByRole('toolbar', { name: 'Тип графика' })).toBeVisible();
+  await page.getByRole('toolbar', { name: 'Тип графика' }).getByRole('button', { name: 'Столбцы' }).click();
 
   const shot = testInfo.outputPath('moysklad-channels-explorer-dark.png');
   await page.screenshot({ path: shot, fullPage: true });
@@ -89,7 +108,7 @@ test('MoySklad channel ranking exposes useful sorting and derived metrics', asyn
   await expect(ranking.getByText(/ср\./).first()).toBeVisible();
   await expect(ranking.getByText(/%/).first()).toBeVisible();
 
-  const sort = ranking.getByRole('group', { name: 'Сортировка каналов' });
+  const sort = ranking.getByRole('toolbar', { name: 'Сортировка каналов' });
   await sort.getByRole('button', { name: 'Имя' }).click();
   const labels = await ranking.locator('div.flex.items-baseline.justify-between span.truncate').allTextContents();
   expect(labels.slice(0, 3)).toEqual(['Интернет-магазин', 'Партнёры', 'Розница']);
@@ -98,18 +117,18 @@ test('MoySklad channel ranking exposes useful sorting and derived metrics', asyn
 test('MoySklad channel contribution compares an equal window in the canonical metric page', async ({ page }) => {
   const contribution = page.getByRole('heading', { name: 'Что изменило результат', exact: true })
     .locator('xpath=ancestor::section[1]');
-  const metric = contribution.getByRole('group', { name: 'Метрика вклада каналов' });
+  const metric = contribution.getByRole('toolbar', { name: 'Метрика вклада каналов' });
   await expect(metric.getByRole('button', { name: 'Выручка' })).toHaveAttribute('aria-pressed', 'true');
   await expect(contribution.getByText('Без канала', { exact: true })).toBeVisible();
   await expect(contribution.getByText(/в сумме дают общее изменение/)).toBeVisible();
   await metric.getByRole('button', { name: 'Заказы' }).click();
   await expect(metric.getByRole('button', { name: 'Заказы' })).toHaveAttribute('aria-pressed', 'true');
 
-  await contribution.getByRole('button', { name: 'Развернуть виджет «Что изменило результат»' }).click();
+  await expandWidget(contribution, 'Что изменило результат');
   await expect(page).toHaveURL(/\/metrics\/ms-sales-channels$/);
   await expect(page.getByRole('heading', { name: 'Продажи по каналам', level: 1 })).toBeVisible({ timeout: 20_000 });
   await expect(page.getByRole('heading', { name: 'Что изменило результат', exact: true })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Структура текущего периода', exact: true })).toBeVisible();
-  await expect(page.getByRole('group', { name: 'Метрика вклада каналов' })).toBeVisible();
+  await expect(page.getByRole('toolbar', { name: 'Метрика вклада каналов' })).toBeVisible();
   await expect(page.getByText(/положительные и отрицательные изменения каналов/i)).toBeVisible();
 });

@@ -1,4 +1,5 @@
 import { useNavigate } from 'react-router-dom';
+import { Button } from '@/components/ui/button';
 import { useDemo } from '@/lib/demo-context';
 
 /** Warm line-art bloom — echoes the empty-state illustration, in the light "refined technical"
@@ -61,13 +62,9 @@ export function GetStarted() {
       </p>
 
       <div className="mt-7 flex flex-col items-stretch gap-3 sm:flex-row sm:items-center">
-        <button
-          type="button"
-          onClick={() => navigate('/settings')}
-          className="btn-pill bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-        >
+        <Button type="button" onClick={() => navigate('/connect')} size="lg" className="px-5">
           Подключить данные
-        </button>
+        </Button>
         <button
           type="button"
           onClick={enterDemo}
@@ -80,13 +77,6 @@ export function GetStarted() {
       <div className="mt-12 w-full border-t border-border pt-5">
         <p className="text-xs text-muted-foreground">Нужна помощь с настройкой?</p>
         <div className="mt-2 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-sm">
-          <button
-            type="button"
-            onClick={() => navigate('/connect')}
-            className="font-medium text-primary hover:underline"
-          >
-            Как это работает
-          </button>
           <a href="mailto:schulmannn@gmail.com" className="font-medium text-primary hover:underline">
             Написать нам
           </a>

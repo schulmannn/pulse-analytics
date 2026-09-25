@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { toast } from 'sonner';
 import { useConfirm } from '@/components/ConfirmDialogProvider';
 import { cn } from '@/lib/utils';
 import { Pencil, Printer, Save, X } from 'lucide-react';
@@ -53,6 +54,7 @@ export function ReportDocumentDesktop({
   // unless the viewer already has an explicit window (custom range / shared ?p= / ?from). Mirrors
   // the mobile surface so both open on the same period.
   const restoredRef = useRef(false);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: one-shot restore, guarded by the ref
   useEffect(() => {
     if (restoredRef.current) return;
     restoredRef.current = true;
@@ -60,7 +62,6 @@ export function ReportDocumentDesktop({
     const search = typeof window !== 'undefined' ? window.location.search : '';
     if (search.includes('p=') || search.includes('from=')) return;
     data.setDays(baseline.periodDays);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot restore, guarded by the ref
   }, []);
 
   if (data.status === 'pending') return <DesktopSkeleton />;
@@ -118,7 +119,13 @@ export function ReportDocumentDesktop({
 
   const save = () => {
     if (savePending || !nameValid || !sourceValid) return;
-    updateReport.mutate(draftToPutBody(draft, report.config), { onSuccess: () => setMode('read') });
+    updateReport.mutate(draftToPutBody(draft, report.config), {
+      // Выход в read сам по себе неотличим от «Отмены» — тост подтверждает, что PUT долетел.
+      onSuccess: () => {
+        setMode('read');
+        toast('Отчёт сохранён');
+      },
+    });
   };
   const handleDelete = async () => {
     const ok = await confirm({
@@ -126,7 +133,12 @@ export function ReportDocumentDesktop({
       reason: 'Документ и его настройки будут удалены.',
     });
     if (!ok) return;
-    deleteReport.mutate(report.id, { onSuccess: () => navigate('/reports', { replace: true }) });
+    deleteReport.mutate(report.id, {
+      onSuccess: () => {
+        toast('Отчёт удалён');
+        navigate('/reports', { replace: true });
+      },
+    });
   };
 
   const periodText = data.rangeLabel ?? reportPeriodLabel(editing ? draft.periodDays : baseline.periodDays);
@@ -232,9 +244,11 @@ export function ReportDocumentDesktop({
             <Button
               type="button"
               onClick={save}
+              pending={savePending}
               disabled={savePending || !nameValid || !sourceValid || !dirty}
               size="sm"
-              className="report-control bg-foreground text-background shadow-xs hover:bg-foreground/80"
+              variant="contrast"
+              className="report-control shadow-xs"
             >
               <Save aria-hidden="true" />
               {savePending ? 'Сохранение…' : 'Сохранить'}
@@ -243,6 +257,7 @@ export function ReportDocumentDesktop({
             <Button
               type="button"
               onClick={handleDelete}
+              pending={deleteReport.isPending}
               disabled={deleteReport.isPending}
               variant="ghost"
               size="sm"
@@ -266,7 +281,8 @@ export function ReportDocumentDesktop({
               type="button"
               onClick={enterEdit}
               size="sm"
-              className="report-control bg-foreground text-background shadow-xs hover:bg-foreground/80"
+              variant="contrast"
+              className="report-control shadow-xs"
             >
               <Pencil aria-hidden="true" />
               Редактировать

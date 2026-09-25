@@ -46,8 +46,14 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   const theme: Theme = mode === 'system' ? osTheme : mode;
 
+  // Класс на <html> уже стоит с прерисовочного бутстрапа (public/theme-boot.js, подключён в
+  // index.html) — здесь эффект идемпотентен на первом кадре и берёт тему на себя дальше.
+  // `color-scheme` синхронизируем ЯВНО: бутстрап пишет его инлайновым стилем, а инлайн перебивает
+  // :root/.dark из index.css — без этой строки после переключения темы остался бы прежний нативный
+  // скролл/контролы.
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark');
+    document.documentElement.style.colorScheme = theme;
   }, [theme]);
 
   const setMode = useCallback((nextMode: ThemeMode) => {

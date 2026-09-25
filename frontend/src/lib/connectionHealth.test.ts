@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { overviewHealthBanner, sidebarHealth } from './connectionHealth';
+import { orbitHealth, overviewHealthBanner } from './connectionHealth';
 import type { Freshness } from './freshness';
 
 const fresh: Freshness = { label: 'сегодня', stale: false };
@@ -131,49 +131,89 @@ describe('overviewHealthBanner — source=central, OWNER (managed session is the
   });
 });
 
-describe('sidebarHealth', () => {
-  it('prioritises actionable QR auth state over freshness', () => {
-    expect(sidebarHealth({ source: 'qr', connectionState: 'reauth_required', fresh })).toEqual({
-      tone: 'error',
-      label: 'нужно переподключить',
-    });
+describe('orbitHealth', () => {
+  const now = Date.UTC(2026, 7, 13, 12);
+
+  it('maps only the canonical managed Telegram failure states', () => {
+    expect(
+      orbitHealth({ telegram: { managed: true, connectionState: 'reauth_required' }, now })
+        .telegram,
+    ).toEqual({ health: 'error', reason: 'сессия недействительна' });
+    expect(
+      orbitHealth({ telegram: { managed: true, connectionState: 'degraded' }, now }).telegram,
+    ).toEqual({ health: 'warn', reason: 'временно недоступен' });
+    expect(
+      orbitHealth({ telegram: { managed: true, connectionState: 'connected' }, now }).telegram,
+    ).toEqual({ health: 'ok', reason: null });
+    expect(
+      orbitHealth({ telegram: { managed: true, connectionState: 'future_state' }, now }).telegram,
+    ).toEqual({ health: 'ok', reason: null });
   });
 
-  it('keeps transient QR degradation distinct from reauth', () => {
-    expect(sidebarHealth({ source: 'qr', connectionState: 'degraded', fresh })).toEqual({
-      tone: 'warn',
-      label: 'сбор временно недоступен',
-    });
+  it('ignores managed-session state for collector-only / central non-owner Telegram', () => {
+    expect(
+      orbitHealth({ telegram: { managed: false, connectionState: 'reauth_required' }, now })
+        .telegram,
+    ).toEqual({ health: 'ok', reason: null });
   });
 
-  it('falls back to the familiar freshness label', () => {
-    expect(sidebarHealth({ source: 'qr', connectionState: 'connected', fresh })).toEqual({
-      tone: 'ok',
-      label: 'обновлено сегодня',
-    });
-    expect(sidebarHealth({ source: 'collector', connectionState: null, fresh: stale })).toEqual({
-      tone: 'warn',
-      label: 'обновлено 4 дн. назад',
-    });
+  it('maps an expired Instagram token to error', () => {
+    expect(
+      orbitHealth({
+        instagram: {
+          connected: true,
+          tokenExpiresAt: new Date(now - 1).toISOString(),
+        },
+        now,
+      }).instagram,
+    ).toEqual({ health: 'error', reason: 'токен истёк' });
   });
 
-  it('reserves the loading state when neither health nor freshness is known', () => {
-    expect(sidebarHealth({ source: 'qr', connectionState: null, fresh: null })).toBeNull();
+  it('maps an Instagram token expiring within seven days to warn with remaining days', () => {
+    expect(
+      orbitHealth({
+        instagram: {
+          connected: true,
+          tokenExpiresAt: new Date(now + 6.25 * 24 * 60 * 60 * 1000).toISOString(),
+        },
+        now,
+      }).instagram,
+    ).toEqual({ health: 'warn', reason: 'токен истекает 7 дн' });
   });
 
-  it('owner central surfaces the managed repair labels; non-owner falls back to freshness', () => {
-    expect(sidebarHealth({ source: 'central', connectionState: 'reauth_required', fresh, centralOwner: true })).toEqual({
-      tone: 'error',
-      label: 'нужно переподключить',
+  it('keeps long-lived, invalid-date and environment-fallback Instagram statuses ok', () => {
+    expect(
+      orbitHealth({
+        instagram: {
+          connected: true,
+          tokenExpiresAt: new Date(now + 8 * 24 * 60 * 60 * 1000).toISOString(),
+        },
+        now,
+      }).instagram.health,
+    ).toBe('ok');
+    expect(
+      orbitHealth({ instagram: { connected: true, tokenExpiresAt: 'not-a-date' }, now }).instagram
+        .health,
+    ).toBe('ok');
+    expect(
+      orbitHealth({
+        instagram: {
+          connected: false,
+          envFallback: true,
+          tokenExpiresAt: new Date(now - 1).toISOString(),
+        },
+        now,
+      }).instagram.health,
+    ).toBe('ok');
+  });
+
+  it('does not invent health signals for current MS/YM status shapes', () => {
+    const health = orbitHealth({
+      moysklad: { connected: true },
+      metrika: { connected: true },
+      now,
     });
-    expect(sidebarHealth({ source: 'central', connectionState: 'degraded', fresh, centralOwner: true })).toEqual({
-      tone: 'warn',
-      label: 'сбор временно недоступен',
-    });
-    // Non-owner central: no managed repair label — just the familiar freshness readout.
-    expect(sidebarHealth({ source: 'central', connectionState: 'reauth_required', fresh, centralOwner: false })).toEqual({
-      tone: 'ok',
-      label: 'обновлено сегодня',
-    });
+    expect(health.moysklad).toEqual({ health: 'ok', reason: null });
+    expect(health.metrika).toEqual({ health: 'ok', reason: null });
   });
 });

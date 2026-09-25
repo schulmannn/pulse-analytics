@@ -11,9 +11,8 @@ import { useEffect, useRef, useState } from 'react';
  *   active flips → false   → mounted=true,  exiting=true   (play the exit animation for exitMs)
  *   after exitMs           → mounted=false, exiting=false  (unmounted)
  *
- * Re-activating mid-exit cancels the pending unmount. This is the deliberate hand-rolled stand-in for
- * framer's <AnimatePresence> (framer is landing-only per DESIGN_TOKENS.md); the exit itself is a CSS
- * animation on `home-remove-exit`, so the global prefers-reduced-motion cap already collapses it —
+ * Re-activating mid-exit cancels the pending unmount. Presence is deliberately tiny and local; the
+ * exit itself is a CSS animation on `home-remove-exit`, so the global reduced-motion cap collapses it —
  * pass `exitMs=0` under reduced motion so the unmount is immediate too.
  */
 export function useExitPresence(active: boolean, exitMs: number): { mounted: boolean; exiting: boolean } {

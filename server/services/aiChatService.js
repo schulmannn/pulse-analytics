@@ -15,7 +15,7 @@
    пользователей = замена одной проверки здесь + снятие requireSuper в routes/ai.js. */
 
 const { createAiTools } = require('./aiTools');
-const { makeChatTitle } = require('../repos/aiChatsRepo');
+const { makeChatTitle } = require('../lib/chatTitle');
 
 const HISTORY_MESSAGES = 30;      // сколько последних сообщений диалога уходит в контекст модели
 const HISTORY_CHARS_PER_MSG = 4000;

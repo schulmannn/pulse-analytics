@@ -7,7 +7,8 @@
 //     profit/byproduct: матч по id (хвост meta.href), фолбэк по имени, математика days_left,
 //     сорт days_left ASC NULLS LAST → stock ASC;
 //   • продажи = 0 → days_left null («нет продаж»), не выдуманная бесконечность;
-//   • отозванный токен (401/403 от МС) → 401 + code ms_token_revoked;
+//   • отозванный токен (401 от МС) → 401 + code ms_token_revoked; нет прав у сотрудника (403 от
+//     МС) → 403 + code ms_forbidden, а не «переподключите»;
 //   • кэш-хит вторым вызовом (без повторных живых вызовов) и общий raw-кэш с top-products
 //     (второго page-loop продаж нет);
 //   • «Всё» (days=0 без диапазона) → честный 400 ДО единого живого вызова;
@@ -152,7 +153,7 @@ test('stock: без продаж за окно — у всех days_left null, �
   ]);
 });
 
-test('stock: 401/403 от МС → 401 + ms_token_revoked (reconnect-CTA, не «сервис упал»)', async () => {
+test('stock: 401 от МС (токен отозван) → 401 + ms_token_revoked (reconnect-CTA, не «сервис упал»)', async () => {
   const { routes } = buildMs({
     msFetch: async () => {
       const e = new Error('МойСклад: HTTP 401');
@@ -163,6 +164,23 @@ test('stock: 401/403 от МС → 401 + ms_token_revoked (reconnect-CTA, не �
   const res = await invoke(routes, 'GET /api/ms/stock', { query: { days: '30' } });
   assert.equal(res.statusCode, 401);
   assert.equal(res.body.code, 'ms_token_revoked');
+});
+
+test('stock: 403 от МС (сотруднику не хватает прав) → 403 + ms_forbidden, не «токен отозван»', async () => {
+  const { routes } = buildMs({
+    msFetch: async () => {
+      const e = new Error('МойСклад: HTTP 403');
+      e.status = 403;
+      throw e;
+    },
+  });
+  const res = await invoke(routes, 'GET /api/ms/stock', { query: { days: '30' } });
+  // Не 401: фронт не должен читать нехватку прав как конец сессии, а переподключение тем же
+  // токеном ничего не даст — поэтому свой код и текст про права, без «переподключите».
+  assert.equal(res.statusCode, 403);
+  assert.equal(res.body.code, 'ms_forbidden');
+  assert.match(res.body.error, /прав/);
+  assert.doesNotMatch(res.body.error, /отозван|переподключ/i);
 });
 
 test('stock: повторный запрос — из кэша ответа; raw-отчёт продаж ОБЩИЙ с top-products (без второго page-loop)', async () => {

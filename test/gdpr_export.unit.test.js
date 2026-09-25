@@ -8,9 +8,12 @@
 //     освобождают клиент и прекращают запросы; аудит-исход возвращается только на 'ok'.
 const test = require('node:test');
 const assert = require('node:assert');
+const EventEmitter = require('node:events');
 const {
   createGdprService,
-  _internals: { ARCHIVE_SPECS, buildKeysetPredicate, pageQuery, createWriter, ExportAborted },
+  _internals: {
+    ARCHIVE_SPECS, buildKeysetPredicate, pageQuery, createWriter, ExportAborted, WRITE_SLICE_BYTES,
+  },
 } = require('../server/services/gdprService');
 
 // ── keyset-предикат ───────────────────────────────────────────────────────────────────────────
@@ -56,6 +59,31 @@ test('pageQuery: posts с NULL ведущим курсором → плейсх�
 test('pageQuery: первая страница — без предиката, LIMIT $2', () => {
   const sql = pageQuery(ARCHIVE_SPECS.daily, false, null);
   assert.match(sql, /SELECT \*, day::text AS __c0 FROM channel_daily WHERE channel_id = \$1 ORDER BY day ASC LIMIT \$2$/);
+});
+
+test('pageQuery: ym_daily использует тот же bounded day-keyset', () => {
+  const sql = pageQuery(ARCHIVE_SPECS.ymDaily, true, [false]);
+  assert.strictEqual(
+    sql,
+    'SELECT *, day::text AS __c0 FROM ym_daily'
+    + ' WHERE channel_id = $1 AND (((day IS NULL OR day > $2::date)))'
+    + ' ORDER BY day ASC LIMIT $3',
+  );
+});
+
+test('pageQuery: ms_daily живёт независимо от ms_accounts и использует day-keyset', () => {
+  assert.strictEqual(
+    pageQuery(ARCHIVE_SPECS.msDaily, true, [false]),
+    'SELECT *, day::text AS __c0 FROM ms_daily'
+    + ' WHERE channel_id = $1 AND (((day IS NULL OR day > $2::date)))'
+    + ' ORDER BY day ASC LIMIT $3',
+  );
+});
+
+test('pageQuery: raw_snapshots пагинируется уникальным day/source/kind keyset', () => {
+  const sql = pageQuery(ARCHIVE_SPECS.rawSnapshots, true, [false, false, false]);
+  assert.match(sql, /^SELECT \*, day::text AS __c0, source::text AS __c1, kind::text AS __c2 FROM raw_snapshots/);
+  assert.match(sql, /ORDER BY day ASC, source ASC, kind ASC LIMIT \$5$/);
 });
 
 test('pageQuery: следующая страница posts — курсор $2..$3, LIMIT $4', () => {
@@ -104,25 +132,99 @@ test('writer: обрыв соединения → ожидающий write па�
   w.cleanup();
 });
 
-test('writer: end() → close до finish-callback → отклоняется ExportAborted, не виснет', async () => {
+test('writer: ответ умер до создания writer\'а → closed сразу, write падает ExportAborted', async () => {
+  const gone = fakeSocket();
+  gone.destroyed = true; // 'close' уже отгремел — повторно не придёт
+  const w = createWriter(gone);
+  assert.strictEqual(w.closed, true);
+  await assert.rejects(w.write('x'), (e) => e instanceof ExportAborted);
+  w.cleanup();
+
+  const deadSocket = fakeSocket();
+  deadSocket.socket = { destroyed: true };
+  assert.strictEqual(createWriter(deadSocket).closed, true);
+  assert.strictEqual(createWriter(fakeSocket()).closed, false);
+});
+
+test('writer: end() → close до finish → отклоняется ExportAborted, не виснет', async () => {
   const sock = fakeSocket();
-  // res.end вызван, но сокет рвётся 'close' ДО его callback'а — end() обязан отклониться, а не
+  // res.end вызван, но сокет рвётся 'close' ДО 'finish' — end() обязан отклониться, а не
   // остаться pending навсегда.
-  sock.end = () => { sock.emit('close'); /* callback никогда не зовётся */ };
+  sock.end = () => { sock.emit('close'); /* 'finish' никогда не приходит */ };
   const w = createWriter(sock);
   await assert.rejects(w.end(), (e) => e instanceof ExportAborted);
   w.cleanup();
 });
 
-test('writer: end() дожидается finish-callback и резолвится один раз', async () => {
+test('writer: end() дожидается \'finish\' и резолвится один раз', async () => {
   const sock = fakeSocket();
   let calls = 0;
-  // Нормальное завершение: end зовёт callback (finish), затем эмитит 'close' — двойного исхода быть
-  // не должно (guard). Без ошибки — значит промис зарезолвился ровно раз.
-  sock.end = (cb) => { if (cb) cb(); sock.emit('close'); };
+  let endArgs = null;
+  // Нормальное завершение, как у настоящего ServerResponse: 'finish', затем 'close' — двойного
+  // исхода быть не должно (guard). Без ошибки — значит промис зарезолвился ровно раз.
+  sock.end = (...args) => { endArgs = args; sock.emit('finish'); sock.emit('close'); };
   const w = createWriter(sock);
   await w.end().then(() => { calls += 1; });
   assert.strictEqual(calls, 1);
+  // compression() подменяет res.end(chunk, encoding): любой аргумент (в том числе колбэк) он
+  // принимает за данные и падает на Buffer.from(fn) — финал сжатого ответа обрывался всегда.
+  assert.deepStrictEqual(endArgs, [], 'res.end вызывается без аргументов');
+  w.cleanup();
+});
+
+test('writer: клиент не забирает ответ дольше drainTimeoutMs → ответ разорван, write падает ExportAborted', { timeout: 5000 }, async () => {
+  const sock = fakeSocket([false]); // буфер полон, 'drain' не придёт никогда
+  sock.destroy = () => { sock.destroyed = true; };
+  const w = createWriter(sock, { drainTimeoutMs: 20 });
+  const started = Date.now();
+  await assert.rejects(w.write('x'), (e) => e instanceof ExportAborted);
+  assert.ok(Date.now() - started >= 15, 'рвём только по истечении таймаута');
+  assert.strictEqual(sock.destroyed, true, 'ответ уничтожен — сокет не висит');
+  assert.strictEqual(w.closed, true);
+  await assert.rejects(w.write('y'), (e) => e instanceof ExportAborted);
+  w.cleanup();
+});
+
+test('writer: \'drain\' пришёл вовремя → сторож снят, ответ не рвётся', async () => {
+  const sock = fakeSocket([false]);
+  sock.destroy = () => { sock.destroyed = true; };
+  const w = createWriter(sock, { drainTimeoutMs: 30 });
+  const p = w.write('x');
+  setTimeout(() => sock.emit('drain'), 5);
+  await p;
+  await new Promise((r) => setTimeout(r, 50)); // дольше таймаута — сработавший сторож был бы виден
+  assert.strictEqual(sock.destroyed, false);
+  assert.strictEqual(w.closed, false);
+  w.cleanup();
+});
+
+test('writer: хвост ответа не забран (нет \'finish\') дольше drainTimeoutMs → end() отклоняется', { timeout: 5000 }, async () => {
+  const sock = fakeSocket();
+  sock.destroy = () => { sock.destroyed = true; };
+  sock.end = () => { sock.writableEnded = true; /* ни 'finish', ни 'close' */ };
+  const w = createWriter(sock, { drainTimeoutMs: 20 });
+  await assert.rejects(w.end(), (e) => e instanceof ExportAborted);
+  assert.strictEqual(sock.destroyed, true);
+  w.cleanup();
+});
+
+test('writer: крупный кусок пишется байтовыми ломтями ≤ WRITE_SLICE_BYTES без порчи UTF-8', async () => {
+  const written = [];
+  const sock = fakeSocket();
+  sock.write = (chunk) => { written.push(chunk); return written.length % 2 === 1; };
+  const w = createWriter(sock, { drainTimeoutMs: 1000 });
+  // Кириллица (2 байта) и эмодзи (суррогатная пара, 4 байта) на стыках ломтей.
+  const big = `[${'ж😀'.repeat(WRITE_SLICE_BYTES / 2)}]`;
+  const p = w.write(big);
+  // На каждый false writer ждёт 'drain' — отдаём его, пока запись не закончится.
+  const pump = setInterval(() => sock.emit('drain'), 1);
+  await p;
+  clearInterval(pump);
+  assert.ok(written.length > 1, 'кусок разрезан');
+  for (const c of written) {
+    assert.ok(Buffer.isBuffer(c) && c.length <= WRITE_SLICE_BYTES, 'ломоть — Buffer не длиннее лимита');
+  }
+  assert.strictEqual(Buffer.concat(written).toString('utf8'), big, 'байты склеиваются в исходную строку');
   w.cleanup();
 });
 
@@ -138,7 +240,8 @@ function collectorRes() {
     off(ev, fn) { if (listeners[ev]) listeners[ev] = listeners[ev].filter((f) => f !== fn); return this; },
     emit(ev, ...a) { (listeners[ev] || []).slice().forEach((f) => f(...a)); },
     write(s) { this.chunks.push(s); return true; },
-    end(cb) { this.writableEnded = true; if (cb) cb(); this.emit('close'); },
+    // Как у настоящего ServerResponse: 'finish', затем 'close'. Колбэка нет — writer его не передаёт.
+    end() { this.writableEnded = true; this.emit('finish'); this.emit('close'); },
     destroy() { this.destroyed = true; this.emit('close'); },
     body() { return this.chunks.join(''); },
   };
@@ -151,15 +254,27 @@ function collectorRes() {
 function fakePool(spec) {
   const capture = [];
   let released = 0;
+  let releasedWith;
+  let connects = 0;
   const pages = { ...(spec.pages || {}) };
-  const client = {
+  // Как pg-клиент — EventEmitter: 'error' без слушателя бросает (в проде = падение процесса).
+  const client = Object.assign(new EventEmitter(), {
     async query(text, params) {
       // Workspaces SELECT содержит correlated subquery FROM workspace_members; основная таблица —
       // последний FROM в тексте. На простых запросах это тот же единственный match.
       const froms = [...text.matchAll(/\bFROM\s+(\w+)/g)];
-      const table = froms.length ? froms[froms.length - 1][1] : undefined;
+      let table = froms.length ? froms[froms.length - 1][1] : undefined;
+      // Campaign ownership/access probes contain a correlated FROM workspace_members; retain the
+      // actual paginated root table for page queues and assertions.
+      if (/\bFROM\s+campaign_posts\s+cp\b/i.test(text)) table = 'campaign_posts';
+      else if (/\bFROM\s+campaigns\s+c\b/i.test(text)) table = 'campaigns';
+      // EXISTS касается двух IG-таблиц, но это singleton presence-probe, не страница media archive.
+      if (/\bAS\s+has_instagram_archive\b/i.test(text)) table = 'instagram_archive_presence';
       capture.push({ text, params, table });
       if (spec.hooks && spec.hooks[table]) await spec.hooks[table]();
+      if (table === 'instagram_archive_presence') {
+        return { rows: [{ has_instagram_archive: Boolean(spec.hasInstagramArchive) }] };
+      }
       if (Array.isArray(pages[table])) {
         const page = pages[table].shift();
         return { rows: page || [] };
@@ -168,14 +283,58 @@ function fakePool(spec) {
       if (table === 'channels') return { rows: spec.channels || [] };
       return { rows: (spec.singles && spec.singles[table]) || [] };
     },
-    release() { released += 1; },
-  };
+    release(err) { released += 1; releasedWith = err; },
+  });
   return {
-    connect: async () => client,
+    connect: async () => { connects += 1; return client; },
+    client,
     capture,
     get released() { return released; },
+    get releasedWith() { return releasedWith; },
+    get connects() { return connects; },
   };
 }
+
+test('стирание: FK-safe pre-null, audit wipe и полный external-source sweep', async () => {
+  const queries = [];
+  const client = {
+    async query(text, params) {
+      queries.push({ text, params });
+      if (/DELETE FROM users/.test(text)) return { rowCount: 1, rows: [] };
+      return { rowCount: 0, rows: [] };
+    },
+  };
+  const svc = createGdprService({
+    pool: {},
+    enabled: true,
+    transaction: async (fn) => fn(client),
+  });
+  assert.strictEqual(await svc.deleteUserAccount(5), true);
+
+  const campaignCleanupIdx = queries.findIndex((q) => /DELETE FROM campaign_posts cp/.test(q.text));
+  const channelPreNullIdx = queries.findIndex((q) => /UPDATE channels SET workspace_id = NULL/.test(q.text));
+  assert.ok(campaignCleanupIdx >= 0 && campaignCleanupIdx < channelPreNullIdx,
+    'composite-FK campaign rows are removed before changing the foreign channel workspace_id');
+  const campaignCleanup = queries[campaignCleanupIdx];
+  assert.match(campaignCleanup.text, /cp\.channel_id = c\.id/);
+  assert.match(campaignCleanup.text, /c\.owner_uid IS DISTINCT FROM \$1/);
+  assert.deepStrictEqual(campaignCleanup.params, [5]);
+
+  const scrub = queries.find((q) => /UPDATE audit_events/.test(q.text));
+  assert.match(scrub.text, /metadata = '\{\}'::jsonb/);
+  assert.match(scrub.text, /ip_hash = NULL/);
+  assert.match(scrub.text, /request_id = NULL/);
+  assert.deepStrictEqual(scrub.params, [5]);
+
+  const sweep = queries.find((q) => /DELETE FROM external_sources/.test(q.text));
+  for (const table of [
+    'channels', 'ig_accounts', 'ms_accounts', 'ym_accounts', 'channel_daily', 'channel_monthly',
+    'posts', 'velocity_daily', 'mentions', 'ig_daily', 'ig_media_daily',
+  ]) {
+    assert.match(sweep.text, new RegExp(`NOT EXISTS \\(SELECT 1 FROM ${table}\\s+t WHERE t\\.source_id = s\\.id\\)`),
+      `${table} prevents deletion of a still-referenced canonical source`);
+  }
+});
 
 test('стрим: юзера нет → not_found, ни байта, onReady не звался, клиент освобождён', async () => {
   const pool = fakePool({ account: null });
@@ -194,11 +353,20 @@ test('стрим: собирает валидный JSON прежней форм
     account: { id: 5, email: 'e', role: 'user', status: 'active', avatar_url: null, created_at: 'T' },
     channels: [{ id: 9, username: 'u', title: 't', source: 'collector', tg_channel_id: null, created_at: 'T' }],
     pages: {
+      mention_notify_subscriptions: [[{
+        channel_id: 19, enabled: true, send_days: [], send_hour: 10,
+        last_run_at: null, last_notified_at: null, last_error: null,
+        created_at: 'T', updated_at: 'T',
+      }]],
       // Две полные страницы (по 2) + короткая → цикл должен запросить 2 раза с курсором и остановиться.
       channel_daily: [
         [{ day: '2024-01-01', views: 1, __c0: '2024-01-01' }, { day: '2024-01-02', views: 2, __c0: '2024-01-02' }],
         [{ day: '2024-01-03', views: 3, __c0: '2024-01-03' }],
       ],
+      ym_daily: [[{
+        channel_id: 9, day: '2024-01-01', visits: '7', users: '6', pageviews: '8',
+        __c0: '2024-01-01',
+      }]],
       ms_orders: [[{
         order_id: 'order-1', moment: '2024-01-02T10:00:00Z', sum_kopecks: '15000',
         agent_id: 'agent-1', agent_name: 'Customer', __c0: 'order-1',
@@ -228,6 +396,9 @@ test('стрим: собирает валидный JSON прежней форм
   assert.deepStrictEqual(doc.channels[0].archive.ms_orders.map((r) => r.order_id), ['order-1']);
   assert.deepStrictEqual(doc.channels[0].archive.ms_returns.map((r) => r.return_id), ['return-1']);
   assert.ok(!('__c0' in doc.channels[0].archive.ms_returns[0]), 'MoySklad cursor alias is not exported');
+  assert.deepStrictEqual(doc.channels[0].archive.ym_daily.map((r) => r.visits), ['7']);
+  assert.ok(!('__c0' in doc.channels[0].archive.ym_daily[0]), 'YM cursor alias is not exported');
+  assert.deepStrictEqual(doc.mention_notify_subscriptions.map((s) => s.channel_id), [19]);
   assert.deepStrictEqual(doc.channels[0].instagram, null);
 
   // Курсор второй страницы = последний __c0 первой ('2024-01-02').
@@ -235,6 +406,229 @@ test('стрим: собирает валидный JSON прежней форм
   assert.strictEqual(dailyCalls.length, 2, 'ровно две страницы (вторая короткая — стоп)');
   assert.deepStrictEqual(dailyCalls[0].params, [9, 2]);
   assert.deepStrictEqual(dailyCalls[1].params, [9, '2024-01-02', 2]);
+
+  const subscriptionCalls = pool.capture.filter((c) => c.table === 'mention_notify_subscriptions');
+  assert.strictEqual(subscriptionCalls.length, 2, 'top-level paged read + legacy owned-channel singleton');
+  assert.deepStrictEqual(subscriptionCalls[0].params, [5, 2]);
+  assert.doesNotMatch(subscriptionCalls[0].text, /\bJOIN\b|\bFROM\s+channels\b/i,
+    'subscription export does not join or reveal channel data');
+});
+
+test('стрим: AI/raw архивы bounded, а Instagram history переживает disconnect', async () => {
+  const pool = fakePool({
+    account: { id: 5, email: 'e', role: 'user', status: 'active', avatar_url: null, created_at: 'T' },
+    channels: [{ id: 9, username: 'own', title: 'Own', source: 'collector', tg_channel_id: null, created_at: 'T' }],
+    hasInstagramArchive: true,
+    pages: {
+      ai_chats: [
+        [{ id: 1, title: 'One' }, { id: 2, title: 'Two' }],
+        [{ id: 3, title: 'Three' }],
+      ],
+      ai_chat_messages: [
+        [
+          { id: 10, chat_id: 1, role: 'user', content: 'question' },
+          { id: 11, chat_id: 1, role: 'assistant', content: 'answer' },
+        ],
+        [{ id: 12, chat_id: 3, role: 'user', content: 'next' }],
+      ],
+      ai_usage_daily: [
+        [
+          { day: '2024-01-01', messages: 1, input_tokens: '2', output_tokens: '3', __cursor: '2024-01-01' },
+          { day: '2024-01-02', messages: 2, input_tokens: '4', output_tokens: '5', __cursor: '2024-01-02' },
+        ],
+        [{ day: '2024-01-03', messages: 1, input_tokens: '6', output_tokens: '7', __cursor: '2024-01-03' }],
+      ],
+      raw_snapshots: [[{
+        channel_id: 9, source: 'ig', kind: 'stories', day: '2024-01-01',
+        payload: { data: [{ id: 'story-own' }] }, created_at: 'T',
+        __c0: '2024-01-01', __c1: 'ig', __c2: 'stories',
+      }]],
+      ig_daily: [[{ channel_id: 9, day: '2024-01-01', reach: 8, __c0: '2024-01-01' }]],
+      ig_media_daily: [[{
+        channel_id: 9, media_id: 'media-own', day: '2024-01-01', reach: 7,
+        __c0: '2024-01-01', __c1: 'media-own',
+      }]],
+    },
+  });
+  const svc = createGdprService({ pool, enabled: true, transaction: null, exportPageSize: 2 });
+  const res = collectorRes();
+  const outcome = await svc.streamUserExport(5, res, { onReady() {} });
+  assert.strictEqual(outcome, 'ok');
+
+  const doc = JSON.parse(res.body());
+  assert.deepStrictEqual(doc.ai_chats.map((c) => c.id), [1, 2, 3]);
+  assert.deepStrictEqual(doc.ai_chat_messages.map((m) => m.id), [10, 11, 12]);
+  assert.deepStrictEqual(doc.ai_usage_daily.map((d) => d.day), ['2024-01-01', '2024-01-02', '2024-01-03']);
+  assert.ok(doc.ai_usage_daily.every((d) => !('__cursor' in d)), 'служебный day cursor не экспортируется');
+  assert.strictEqual(doc.channels[0].archive.raw_snapshots[0].payload.data[0].id, 'story-own');
+
+  const instagram = doc.channels[0].instagram;
+  assert.ok(instagram, 'history makes Instagram section present without ig_accounts');
+  assert.strictEqual(instagram.ig_user_id, null, 'disconnected integration identity is explicitly nullable');
+  assert.strictEqual(instagram.username, null);
+  assert.strictEqual(instagram.daily[0].reach, 8);
+  assert.strictEqual(instagram.media_daily[0].media_id, 'media-own');
+
+  const chatCalls = pool.capture.filter((c) => c.table === 'ai_chats');
+  assert.deepStrictEqual(chatCalls[0].params, [5, 2]);
+  assert.deepStrictEqual(chatCalls[1].params, [5, 2, 2]);
+  const messageCalls = pool.capture.filter((c) => c.table === 'ai_chat_messages');
+  assert.ok(messageCalls.every((c) => /JOIN ai_chats c ON c\.id = m\.chat_id/.test(c.text)));
+  assert.ok(messageCalls.every((c) => /WHERE c\.user_id=\$1/.test(c.text)));
+  assert.deepStrictEqual(messageCalls[1].params, [5, 11, 2]);
+  const rawCalls = pool.capture.filter((c) => c.table === 'raw_snapshots');
+  assert.deepStrictEqual(rawCalls[0].params, [9, 2], 'raw archive is scoped to the owned channel');
+});
+
+test('стрим: approved portability matrix использует safe projections и tenant guards', async () => {
+  const pool = fakePool({
+    account: { id: 5, email: 'e', role: 'user', status: 'active', avatar_url: null, created_at: 'T' },
+    channels: [{
+      id: 9, workspace_id: 40, username: 'own', title: 'Own', status: 'paused',
+      source: 'collector', tg_channel_id: 99, created_at: 'T',
+    }],
+    pages: {
+      workspaces: [[{ id: 40, name: 'Mine', kind: 'personal', created_at: 'T' }]],
+      workspace_members: [
+        [
+          { workspace_id: 40, role: 'owner', workspace_kind: 'personal' },
+          { workspace_id: 50, role: 'member', workspace_kind: 'team' },
+        ],
+        [{ workspace_id: 60, role: 'viewer', workspace_kind: 'team' }],
+      ],
+      campaigns: [
+        [{ id: 70, workspace_id: 40, name: 'Own A' }, { id: 71, workspace_id: 50, name: 'Own B' }],
+        [{ id: 72, workspace_id: 60, name: 'Own C' }],
+      ],
+      campaign_posts: [
+        [
+          {
+            campaign_id: 70, network: 'tg', channel_id: 9, post_ref: '100', added_at: 'T',
+            __c0: '70', __c1: 'tg', __c2: '9', __c3: '100',
+          },
+          {
+            campaign_id: 71, network: 'ig', channel_id: 10, post_ref: 'm1', added_at: 'T',
+            __c0: '71', __c1: 'ig', __c2: '10', __c3: 'm1',
+          },
+        ],
+        [{
+          campaign_id: 72, network: 'tg', channel_id: 11, post_ref: '200', added_at: 'T',
+          __c0: '72', __c1: 'tg', __c2: '11', __c3: '200',
+        }],
+      ],
+      audit_events: [
+        [{ id: 1, channel_id: 9, action: 'one', created_at: 'T' }, { id: 2, channel_id: 9, action: 'two', created_at: 'T' }],
+        [{ id: 3, channel_id: null, action: 'three', created_at: 'T' }],
+      ],
+      ms_daily: [
+        [
+          { channel_id: 9, day: '2024-01-01', revenue_kopecks: '10', __c0: '2024-01-01' },
+          { channel_id: 9, day: '2024-01-02', revenue_kopecks: '20', __c0: '2024-01-02' },
+        ],
+        [{ channel_id: 9, day: '2024-01-03', revenue_kopecks: '30', __c0: '2024-01-03' }],
+      ],
+      api_keys: [
+        [
+          { id: 1, key_prefix: 'pa_a', label: 'Collector A' },
+          { id: 2, key_prefix: 'pa_b', label: 'Collector B' },
+        ],
+        [{ id: 3, key_prefix: 'pa_c', label: 'Collector C' }],
+      ],
+    },
+    singles: {
+      tg_sessions: [{
+        tg_user_id: 123, username: 'me', connected_at: 'T', updated_at: 'T',
+        connection_state: 'degraded', last_attempt_at: 'T', last_success_at: null,
+        last_error_code: 'upstream', last_error_at: 'T',
+      }],
+      channel_snapshots: [{ data: { subscribers: 42 }, updated_at: 'T' }],
+      ms_accounts: [{ ms_account_id: 'ms-own', org_name: 'Own org', connected_at: 'T', updated_at: 'T' }],
+    },
+  });
+  const svc = createGdprService({ pool, enabled: true, transaction: null, exportPageSize: 2 });
+  const res = collectorRes();
+  assert.strictEqual(await svc.streamUserExport(5, res, { onReady() {} }), 'ok');
+  const doc = JSON.parse(res.body());
+
+  assert.deepStrictEqual(doc.workspaces, [{ id: 40, name: 'Mine', kind: 'personal', created_at: 'T' }]);
+  assert.deepStrictEqual(doc.workspace_memberships.map((m) => m.workspace_id), [40, 50, 60]);
+  assert.deepStrictEqual(doc.campaigns.map((c) => c.id), [70, 71, 72]);
+  assert.deepStrictEqual(doc.campaign_posts.map((p) => p.post_ref), ['100', 'm1', '200']);
+  assert.ok(doc.campaign_posts.every((p) =>
+    !('caption' in p) && !('published_at' in p) && !('media_type' in p) && !('added_by' in p)));
+  assert.deepStrictEqual(doc.audit_events.map((e) => e.id), [1, 2, 3]);
+  assert.strictEqual(doc.telegram_session.connection_state, 'degraded');
+  assert.strictEqual(doc.channels[0].workspace_id, 40);
+  assert.strictEqual(doc.channels[0].status, 'paused');
+  assert.deepStrictEqual(doc.channels[0].archive.ms_daily.map((d) => d.day),
+    ['2024-01-01', '2024-01-02', '2024-01-03']);
+  assert.deepStrictEqual(doc.channels[0].snapshot.data, { subscribers: 42 });
+  assert.strictEqual(doc.channels[0].moysklad.ms_account_id, 'ms-own');
+  // Экспорт обещает identity ВСЕХ подключений канала, а знал только три источника из пяти: архивы
+  // СДЭКа и Rusender уезжали, а «что именно у вас подключено» — нет (аудит #554, проход №2, N17).
+  // Секции обязаны присутствовать даже при отсутствующем подключении: null — это ответ «не
+  // подключено», а молчание — отсутствие ответа.
+  assert.ok('cdek' in doc.channels[0], 'секция СДЭКа есть всегда');
+  assert.ok('rusender' in doc.channels[0], 'секция Rusender есть всегда');
+  // Ключ Rusender — credential и в выборке отсутствует по построению.
+  const rusenderSql = pool.capture.filter((c) => /rusender_accounts/.test(c.text));
+  assert.ok(rusenderSql.length > 0, 'подключение Rusender запрашивается');
+  assert.ok(rusenderSql.every((c) => !/api_key_enc/.test(c.text)), 'ключ не выгружается никогда');
+  assert.deepStrictEqual(doc.channels[0].api_keys.map((k) => k.id), [1, 2, 3]);
+
+  const membershipCalls = pool.capture.filter((c) => c.table === 'workspace_members');
+  assert.ok(membershipCalls.every((c) => /WHERE m\.uid=\$1/.test(c.text)), 'only own membership rows');
+  assert.deepStrictEqual(membershipCalls[1].params, [5, 50, 2]);
+  const campaignCalls = pool.capture.filter((c) => c.table === 'campaigns');
+  assert.ok(campaignCalls.every((c) => /WHERE c\.created_by=\$1/.test(c.text)));
+  assert.ok(campaignCalls.every((c) => /w\.owner_uid=\$1 OR EXISTS/.test(c.text)));
+  assert.deepStrictEqual(campaignCalls[1].params, [5, 71, 2]);
+  const postCalls = pool.capture.filter((c) => c.table === 'campaign_posts');
+  assert.ok(postCalls.every((c) => /WHERE cp\.added_by=\$1/.test(c.text)));
+  assert.ok(postCalls.every((c) => !/cp\.(caption|published_at|media_type|added_by)\b/.test(
+    c.text.slice(0, c.text.indexOf('FROM campaign_posts')))));
+  assert.deepStrictEqual(postCalls[1].params, [5, '71', 'ig', '10', 'm1', 2]);
+  const auditCalls = pool.capture.filter((c) => c.table === 'audit_events');
+  assert.ok(auditCalls.every((c) => !/\b(ip_hash|request_id|metadata)\b/.test(c.text)));
+  assert.deepStrictEqual(auditCalls[1].params, [5, 2, 2]);
+  const snapshotCall = pool.capture.find((c) => c.table === 'channel_snapshots');
+  assert.match(snapshotCall.text, /data - 'channel_photo' AS data/);
+  const apiKeyCalls = pool.capture.filter((c) => c.table === 'api_keys');
+  assert.ok(apiKeyCalls.every((c) => !/\bkey_hash\b/.test(c.text)));
+  assert.deepStrictEqual(apiKeyCalls[1].params, [9, 2, 2]);
+});
+
+test('стрим: личные подписки пагинируются по channel_id независимо от owner-only channels', async () => {
+  const pool = fakePool({
+    account: { id: 5, email: 'e', role: 'user', status: 'active', avatar_url: null, created_at: 'T' },
+    channels: [],
+    pages: {
+      mention_notify_subscriptions: [
+        [
+          { channel_id: 7, enabled: true, send_days: [], send_hour: 9 },
+          { channel_id: 11, enabled: false, send_days: [1, 3], send_hour: 12 },
+        ],
+        [{ channel_id: 19, enabled: true, send_days: [5], send_hour: 18 }],
+      ],
+    },
+  });
+  const svc = createGdprService({ pool, enabled: true, transaction: null, exportPageSize: 2 });
+  const res = collectorRes();
+  const outcome = await svc.streamUserExport(5, res, { onReady() {} });
+  assert.strictEqual(outcome, 'ok');
+
+  const doc = JSON.parse(res.body());
+  assert.deepStrictEqual(doc.channels, [], 'subscription does not pull a non-owned channel into export');
+  assert.deepStrictEqual(doc.mention_notify_subscriptions.map((s) => s.channel_id), [7, 11, 19]);
+
+  const calls = pool.capture.filter((c) => c.table === 'mention_notify_subscriptions');
+  assert.strictEqual(calls.length, 2);
+  assert.deepStrictEqual(calls[0].params, [5, 2]);
+  assert.match(calls[0].text, /WHERE uid=\$1 ORDER BY channel_id ASC LIMIT \$2$/);
+  assert.deepStrictEqual(calls[1].params, [5, 11, 2]);
+  assert.match(calls[1].text, /AND channel_id > \$2 ORDER BY channel_id ASC LIMIT \$3$/);
+  assert.ok(calls.every((c) => !/\bJOIN\b|\bFROM\s+channels\b/i.test(c.text)),
+    'no shared-channel metadata query is introduced');
 });
 
 test('стрим: NULL date_published в курсоре posts → плейсхолдер пропущен, параметры без null', async () => {
@@ -388,4 +782,162 @@ test('стрим: сбой ДО первого байта → throw (роут у
   assert.strictEqual(ready, false, 'заголовки не ставились — 404/500 ещё возможны');
   assert.strictEqual(res.chunks.length, 0);
   assert.strictEqual(pool.released, 1);
+});
+
+test('стрим: клиент ушёл, пока экспорт ждал коннект → aborted без запросов и без заголовков', async () => {
+  const pool = fakePool({ account: { id: 5, email: 'e', role: 'user', status: 'active', avatar_url: null, created_at: 'T' } });
+  const res = collectorRes();
+  const connect = pool.connect;
+  pool.connect = async () => { res.destroy(); return connect(); }; // 'close' раньше writer'а
+  const svc = createGdprService({ pool, enabled: true, transaction: null });
+  let ready = false;
+  const outcome = await svc.streamUserExport(5, res, { onReady() { ready = true; } });
+  assert.strictEqual(outcome, 'aborted');
+  assert.strictEqual(pool.capture.length, 0, 'в БД не ходили');
+  assert.strictEqual(ready, false);
+  assert.strictEqual(res.chunks.length, 0);
+  assert.strictEqual(pool.released, 1);
+});
+
+// ── GDPR-2/DB-4: экспорт не держит коннект основного пула бесконечно ─────────────────────────────
+
+const ACCOUNT = { id: 5, email: 'e', role: 'user', status: 'active', avatar_url: null, created_at: 'T' };
+const CHANNEL = { id: 9, username: 'u', title: 't', source: 'collector', tg_channel_id: null, created_at: 'T' };
+
+test('стрим: клиент перестал читать → через drainTimeoutMs aborted, ответ разорван, коннект возвращён', { timeout: 5000 }, async () => {
+  const pool = fakePool({
+    account: ACCOUNT,
+    channels: [CHANNEL],
+    pages: { channel_daily: [[{ day: '2024-01-01', __c0: '2024-01-01' }]] },
+  });
+  const svc = createGdprService({ pool, enabled: true, transaction: null, exportDrainTimeoutMs: 30 });
+  const res = collectorRes();
+  // Сокет «полон» с первой же страницы архива и 'drain' не шлёт никогда (клиент не читает).
+  res.write = function write(s) { this.chunks.push(s); return !String(s).includes('2024-01-01'); };
+  const outcome = await svc.streamUserExport(5, res, { onReady() {} });
+  assert.strictEqual(outcome, 'aborted');
+  assert.strictEqual(res.destroyed, true, 'ответ разорван — сокет не висит вечно');
+  assert.strictEqual(pool.released, 1, 'коннект основного пула возвращён');
+  assert.ok(!pool.capture.some((c) => c.table === 'posts'), 'после обрыва в БД больше не ходим');
+});
+
+test('стрим: сверх лимита одновременных выгрузок → busy без коннекта и без байта; слот освобождается', { timeout: 5000 }, async () => {
+  let open;
+  const gate = new Promise((r) => { open = r; });
+  const pool = fakePool({ account: ACCOUNT, hooks: { users: () => gate } });
+  const svc = createGdprService({ pool, enabled: true, transaction: null, exportMaxConcurrent: 2 });
+  const a = collectorRes();
+  const b = collectorRes();
+  const pa = svc.streamUserExport(1, a, { onReady() {} });
+  const pb = svc.streamUserExport(2, b, { onReady() {} });
+  await new Promise((r) => setImmediate(r));
+  assert.strictEqual(pool.connects, 2);
+
+  const c = collectorRes();
+  let ready = false;
+  assert.strictEqual(await svc.streamUserExport(3, c, { onReady() { ready = true; } }), 'busy');
+  assert.strictEqual(pool.connects, 2, 'выгрузка сверх лимита коннект не берёт');
+  assert.strictEqual(ready, false, 'заголовки не ставились — роут ещё может ответить 503');
+  assert.strictEqual(c.chunks.length, 0);
+
+  open();
+  assert.deepStrictEqual(await Promise.all([pa, pb]), ['ok', 'ok']);
+  assert.strictEqual(await svc.streamUserExport(3, collectorRes(), { onReady() {} }), 'ok', 'слот освободился');
+});
+
+test('стрим: вторая выгрузка того же пользователя, пока идёт первая → busy', { timeout: 5000 }, async () => {
+  let open;
+  const gate = new Promise((r) => { open = r; });
+  const pool = fakePool({ account: ACCOUNT, hooks: { users: () => gate } });
+  const svc = createGdprService({ pool, enabled: true, transaction: null, exportMaxConcurrent: 2 });
+  const first = svc.streamUserExport(5, collectorRes(), { onReady() {} });
+  await new Promise((r) => setImmediate(r));
+  assert.strictEqual(await svc.streamUserExport(5, collectorRes(), { onReady() {} }), 'busy');
+  assert.strictEqual(pool.connects, 1);
+  open();
+  assert.strictEqual(await first, 'ok');
+  assert.strictEqual(await svc.streamUserExport(5, collectorRes(), { onReady() {} }), 'ok');
+});
+
+test('стрим: сбой ДО первого байта тоже освобождает слот лимита', async () => {
+  let failOnce = true;
+  const pool = fakePool({
+    account: ACCOUNT,
+    hooks: { user_prefs() { if (failOnce) { failOnce = false; throw new Error('early'); } } },
+  });
+  const svc = createGdprService({ pool, enabled: true, transaction: null, exportMaxConcurrent: 1 });
+  await assert.rejects(svc.streamUserExport(5, collectorRes(), { onReady() {} }), /early/);
+  // Тот же пользователь и единственный слот: если бы слот или uid утекли, здесь был бы busy.
+  assert.strictEqual(await svc.streamUserExport(5, collectorRes(), { onReady() {} }), 'ok');
+});
+
+test('стрим: обрыв соединения с БД, пока экспорт держит клиента → без падения процесса, клиент уничтожается', async () => {
+  let pool;
+  const dbGone = new Error('Connection terminated unexpectedly');
+  pool = fakePool({
+    account: ACCOUNT,
+    channels: [CHANNEL],
+    hooks: {
+      // Бэкенд рвёт соединение между запросами: pg эмитит 'error' на клиенте, а последующие
+      // запросы падают. Без слушателя 'error' это необработанное исключение (падение процесса).
+      posts() { pool.client.emit('error', dbGone); throw dbGone; },
+    },
+  });
+  const svc = createGdprService({ pool, enabled: true, transaction: null });
+  const res = collectorRes();
+  const outcome = await svc.streamUserExport(5, res, { onReady() {} });
+  assert.strictEqual(outcome, 'stream_error');
+  assert.strictEqual(pool.released, 1);
+  assert.strictEqual(pool.releasedWith, dbGone, 'битый клиент возвращается с ошибкой — пул его уничтожит');
+  assert.strictEqual(pool.client.listenerCount('error'), 0, 'свой слушатель снят при возврате');
+});
+
+test('стрим: на успехе клиент возвращается в пул без ошибки и без висящего слушателя', async () => {
+  const pool = fakePool({ account: ACCOUNT, channels: [CHANNEL] });
+  const svc = createGdprService({ pool, enabled: true, transaction: null });
+  assert.strictEqual(await svc.streamUserExport(5, collectorRes(), { onReady() {} }), 'ok');
+  assert.strictEqual(pool.releasedWith, undefined);
+  assert.strictEqual(pool.client.listenerCount('error'), 0);
+});
+
+// ── L-5: экспорт знает все шесть источников ───────────────────────────────────────────────────────
+// «Все архивы» в инварианте памяти было обещанием, а не фактом: ARCHIVE_SPECS знали ms, ym, ig и tg,
+// а выгрузки СДЭКа и рассылки Rusender в файл не попадали вовсе.
+test('ARCHIVE_SPECS покрывают СДЭК и Rusender', () => {
+  for (const key of ['cdekImports', 'cdekOrders', 'cdekOrderItems', 'cdekProducts',
+                     'rusenderDaily', 'rusenderCampaigns', 'rusenderCampaignActivity']) {
+    assert.ok(ARCHIVE_SPECS[key], `нет спеки ${key}`);
+    assert.equal(ARCHIVE_SPECS[key].chanCol, 'channel_id');
+    assert.ok(ARCHIVE_SPECS[key].keys.length >= 1, `${key}: пустой keyset`);
+  }
+});
+
+test('каждая спека имеет keyset, уникальный по своему PK', () => {
+  // Неуникальный keyset — это не «медленно», а «страница теряет или дублирует строки».
+  const expected = {
+    cdekImports: ['id'],
+    cdekOrders: ['order_id'],
+    cdekOrderItems: ['order_id', 'product_id'],
+    cdekProducts: ['product_id'],
+    rusenderDaily: ['day'],
+    rusenderCampaigns: ['campaign_id'],
+    rusenderCampaignActivity: ['campaign_id', 'day'],
+  };
+  for (const [key, cols] of Object.entries(expected)) {
+    assert.deepEqual(ARCHIVE_SPECS[key].keys.map((k) => k.col), cols, `${key}: keyset не по PK`);
+    // Порядок обязан совпадать с keyset — иначе курсор указывает не туда, куда сортирует ORDER BY.
+    assert.equal(ARCHIVE_SPECS[key].order, cols.map((c) => `${c} ASC`).join(', '), `${key}: order ≠ keyset`);
+  }
+});
+
+test('сырой файл импорта в экспорт не попадает', () => {
+  // file_bytes — десятки мегабайт бинаря на канал, и он весь уже разложен по cdek_orders/items.
+  assert.equal(/\bfile_bytes\b/.test(ARCHIVE_SPECS.cdekImports.cols), false);
+});
+
+test('ни одна спека не тянет секреты источника', () => {
+  for (const [key, spec] of Object.entries(ARCHIVE_SPECS)) {
+    assert.equal(/api_key_enc|access_token_enc|token_enc|pass_hash|session/.test(spec.cols || '*'), false,
+      `${key}: в экспорт просочился секрет`);
+  }
 });

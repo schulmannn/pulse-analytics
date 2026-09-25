@@ -6,11 +6,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-COPY mtproto/requirements.txt ./mtproto/requirements.txt
-COPY collector/requirements.txt ./collector/requirements.txt
-# Оба набора: mtproto (telethon/fastapi) + собственный коллектора (qrcode — команда `login`
-# внутри контейнера падала с ImportError, образ ставил только mtproto-зависимости).
-RUN pip install --no-cache-dir -r mtproto/requirements.txt -r collector/requirements.txt
+# Оба набора зависимостей — mtproto (telethon/fastapi: collector импортирует mtproto.service)
+# и собственный коллектора (qrcode — команда `login` внутри контейнера падала с ImportError,
+# когда образ ставил только mtproto-зависимости) — зафиксированы ОДНИМ lock-файлом с хешами,
+# скомпилированным pip-compile из mtproto/requirements.txt + collector/requirements.txt
+# (те остаются человекочитаемым источником, команда регенерации — в collector/requirements.txt).
+COPY collector/requirements.lock ./collector/requirements.lock
+RUN pip install --no-cache-dir --require-hashes -r collector/requirements.lock
 
 COPY mtproto ./mtproto
 COPY collector ./collector

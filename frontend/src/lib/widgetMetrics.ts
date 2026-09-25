@@ -19,7 +19,7 @@ import type { DrillKey } from '@/lib/kpiDerive';
 import type { WidgetSize } from '@/lib/widgetPrefsStore';
 
 /** Where the metric's data comes from. `all` = source-agnostic (rare; reserved). */
-export type MetricSource = 'tg' | 'ig' | 'ms' | 'all';
+export type MetricSource = 'tg' | 'ig' | 'ms' | 'ym' | 'all';
 
 /** The metric's natural data shape — drives which visualisations make sense.
  *   - value      → a scalar (+ optional delta): a KPI headline (ER now, ERV, virality);
@@ -43,7 +43,14 @@ export type MetricCategory = 'growth' | 'engagement' | 'content' | 'audience';
 /** How a series combines across grain buckets (S10): flow metrics SUM (views, reactions), level
  *  metrics take the LAST value in the bucket (subscribers, followers) — summing a level over a
  *  quarter would be nonsense. Default `flow`. */
-export type SeriesAggregation = 'flow' | 'level';
+/**
+ * Как сворачивать дневную серию в недельную корзину (capResultSeries):
+ *  - flow  — сумма (потоки: просмотры, реакции, выручка);
+ *  - level — последнее значение корзины (уровни: подписчики, средний чек);
+ *  - mean  — среднее наблюдений корзины (метрики-ОТНОШЕНИЯ, у которых точка ряда уже есть
+ *            среднее: складывать средние нельзя, а last-of-bucket выбросил бы остальные дни).
+ */
+export type SeriesAggregation = 'flow' | 'level' | 'mean';
 
 /** Runtime strategy used by the widget resolver. Keeping the strategy on the metric definition
  * makes catalogue coverage explicit: a new metric is either wired to a resolver family or marked
@@ -55,6 +62,7 @@ export type MetricResolver =
   | 'tg.breakdown'
   | 'ig'
   | 'ms'
+  | 'ym'
   | 'unavailable';
 
 export interface MetricDef {
@@ -125,6 +133,7 @@ type MetricSpec = Omit<MetricDef, 'defaultViz' | 'supportedViz' | 'resolver'> &
 function resolverFor(spec: MetricSpec): MetricResolver {
   if (spec.source === 'ig') return 'ig';
   if (spec.source === 'ms') return 'ms';
+  if (spec.source === 'ym') return 'ym';
   if (spec.drillKey) return 'tg.core';
   if (spec.id === 'tg.erv' || spec.id === 'tg.virality') return 'tg.ratio';
   if (spec.id === 'tg.netGrowth') return 'tg.netGrowth';
@@ -150,58 +159,72 @@ const TG_METRICS: MetricDef[] = [
   define({
     id: 'tg.views', label: 'Просмотры', glossaryLabel: 'Просмотры за период', source: 'tg', kind: 'series', unit: 'views',
     category: 'engagement', dimensions: POST_DIMS, drillKey: 'views',
-    formula: 'Сумма дневных просмотров канала в выбранном окне.', sourceNote: 'Статистика канала (дневной архив); без архива — сумма по постам окна.',
+    formula: 'Сумма дневных просмотров канала в выбранном окне.', sourceNote: 'Статистика канала (дневной архив). Без архива — сумма по постам окна. При фильтре по формату или дню недели график считается по постам, а число в шапке остаётся канальным.',
   }),
   define({
     id: 'tg.subscribers', label: 'Подписчики', source: 'tg', kind: 'series', unit: 'number',
     category: 'growth', seriesAgg: 'level', drillKey: 'subscribers',
+    defaultViz: 'line', supportedViz: ['line'],
     formula: 'Текущее число подписчиков канала.',
     included: 'Δ — изменение за период (из дневного архива), а не разница «сейчас минус показанное».',
     sourceNote: 'Дневной архив channel_daily.',
   }),
   define({
     id: 'tg.avgReach', label: 'Средний охват поста', source: 'tg', kind: 'series', unit: 'views',
-    category: 'engagement', dimensions: POST_DIMS, drillKey: 'avgReach',
-    formula: 'Просмотры за период ÷ число постов в окне.', sourceNote: 'Посты канала.',
+    category: 'engagement', dimensions: POST_DIMS, drillKey: 'avgReach', seriesAgg: 'mean',
+    // Среднее существует только в дни с постами — столбцы честнее линии, рисующей
+    // непрерывность между пропусками (решение владельца 2026-08-13, зеркало Home-дефолта).
+    defaultViz: 'bar', supportedViz: ['bar', 'line'],
+    formula: 'Сумма просмотров постов, опубликованных в окне, ÷ число этих постов.',
+    included: 'Это не карточка «Просмотры» — там канальный дневной архив, другая величина. На графике — среднее на пост за корзину; день без публикаций — пропуск, а не ноль.',
+    sourceNote: 'Посты канала.',
   }),
   define({
     id: 'tg.reactions', label: 'Реакции', source: 'tg', kind: 'series', unit: 'number',
     category: 'engagement', dimensions: POST_DIMS, drillKey: 'reactions',
+    // Дискретные постозависимые суточные суммы → столбцы (решение владельца 2026-08-13).
+    defaultViz: 'bar', supportedViz: ['bar', 'line'],
     formula: 'Сумма всех реакций-эмодзи под постами окна.', sourceNote: 'Посты канала.',
   }),
   define({
     id: 'tg.forwards', label: 'Репосты', source: 'tg', kind: 'series', unit: 'number',
     category: 'engagement', dimensions: POST_DIMS, drillKey: 'forwards',
+    // Как «Реакции»: счётный суточный поток → столбцы (решение владельца 2026-08-13).
+    defaultViz: 'bar', supportedViz: ['bar', 'line'],
     formula: 'Сколько раз посты переслали (forward) за период.', sourceNote: 'Посты канала.',
   }),
   define({
     id: 'tg.er', label: 'Вовлечённость (ER)', glossaryLabel: 'Вовлечённость', source: 'tg', kind: 'value', unit: 'percent',
     category: 'engagement', drillKey: 'er',
     formula: 'ER = (реакции + репосты + комментарии) ÷ подписчики × 100%.',
-    included: 'Доля подписчиков, как-либо отреагировавших на посты периода.', sourceNote: 'Посты канала + текущее число подписчиков.',
+    included: 'Все реакции, репосты и комментарии к постам периода, отнесённые к текущей базе подписчиков. Считаются действия, а не люди, поэтому значение может превысить 100%.',
+    sourceNote: 'Посты канала + текущее число подписчиков.',
   }),
   // Derived post-average KPIs (no clean daily series — shown as headline values).
   define({
     id: 'tg.erv', label: 'ERV', source: 'tg', kind: 'value', unit: 'percent', category: 'engagement',
-    formula: 'ERV = (реакции + репосты + комментарии) ÷ просмотры × 100%.',
+    formula: 'ERV = среднее по постам окна значение (реакции + репосты + комментарии) ÷ просмотры × 100%.',
     included: 'Вовлечённость на просмотр (а не на подписчика) — устойчивее к охвату.', sourceNote: 'Посты канала.',
   }),
   define({
     id: 'tg.virality', label: 'Виральность', source: 'tg', kind: 'value', unit: 'percent',
     category: 'engagement',
-    formula: 'Виральность = репосты ÷ просмотры × 100%.',
+    formula: 'Виральность = среднее по постам окна значение репосты ÷ просмотры × 100%.',
     included: 'Насколько активно контент разносят дальше.', sourceNote: 'Посты канала.',
   }),
   // Growth flows.
   define({
     id: 'tg.netGrowth', label: 'Чистый прирост подписчиков', source: 'tg', kind: 'series', unit: 'number',
+    // Столбцы — дефолт (владелец 2026-08-13): дневной ±поток вокруг нуля, день с оттоком виден
+    // сразу. Линия остаётся вариантом и рисует НАКОПЛЕНИЕ за окно — форма ряда следует
+    // представлению, см. resolveNetGrowth.
     category: 'growth', defaultViz: 'bar', supportedViz: ['bar', 'line'],
-    formula: 'Подписавшиеся − отписавшиеся за каждый день.', sourceNote: 'График подписчиков (MTProto).',
+    formula: 'Накопительная сумма подписавшихся − отписавшихся от начала периода.', sourceNote: 'График подписчиков (MTProto).',
   }),
   define({
     id: 'tg.churn', label: 'Динамика оттока', source: 'tg', kind: 'breakdown', unit: 'number',
     category: 'growth',
-    formula: 'Всего подписавшихся против всего отписавшихся за период.',
+    formula: 'Всего подписавшихся против всего отписавшихся за окно графика подписчиков Telegram — период карточки на разбивку не влияет.',
   }),
   define({
     id: 'tg.newFollowersBySource', label: 'Новые подписчики по источникам', source: 'tg', kind: 'breakdown',
@@ -216,7 +239,7 @@ const TG_METRICS: MetricDef[] = [
   define({
     id: 'tg.engagementComposition', label: 'Состав вовлечённости', source: 'tg', kind: 'breakdown',
     unit: 'number', category: 'engagement', additive: true,
-    formula: 'Реакции против репостов против комментариев за период.',
+    formula: 'Реакции против репостов против комментариев по последним загруженным постам канала (до 100) — период карточки на разбивку не влияет.',
   }),
   define({
     id: 'tg.viewsByType', label: 'Ср. охват по типу', source: 'tg', kind: 'breakdown', unit: 'views',
@@ -244,11 +267,12 @@ const TG_METRICS: MetricDef[] = [
   }),
   define({
     id: 'tg.languages', label: 'Языки аудитории', source: 'tg', kind: 'breakdown', unit: 'number',
-    category: 'audience', formula: 'Языки интерфейса подписчиков (топ-8).',
+    category: 'audience',
+    formula: 'Языки аудитории из графика Telegram — топ-6 (больше сервер не отдаёт); значение строки — сумма дневных значений графика.',
   }),
   define({
     id: 'tg.sentiment', label: 'Тональность реакций', source: 'tg', kind: 'breakdown', unit: 'number',
-    category: 'audience', additive: true, formula: 'Положительные / нейтральные / отрицательные реакции.',
+    category: 'audience', additive: true, formula: 'Положительные / прочие / отрицательные реакции (метки графика Telegram).',
   }),
   define({
     id: 'tg.hours', label: 'Активность по часам', source: 'tg', kind: 'breakdown', unit: 'number',
@@ -270,31 +294,43 @@ const TG_METRICS: MetricDef[] = [
 const IG_METRICS: MetricDef[] = [
   define({
     id: 'ig.reach', label: 'Охват', source: 'ig', kind: 'series', unit: 'views', category: 'engagement',
-    formula: 'Уникальные аккаунты, увидевшие контент за период.', sourceNote: 'Instagram Graph (insights).',
+    formula: 'Сумма дневных охватов за окно; дневной охват — уникальные аккаунты за сутки.',
+    included: 'Сумма дневных уникальных ≠ уникальные за период: зритель, вернувшийся в разные дни, посчитан несколько раз.',
+    sourceNote: 'Instagram Graph (insights).',
   }),
   define({
     id: 'ig.followers', label: 'Подписчики', source: 'ig', kind: 'series', unit: 'number', category: 'growth',
-    seriesAgg: 'level', formula: 'Текущее число подписчиков аккаунта.', sourceNote: 'Instagram Graph.',
+    seriesAgg: 'level', defaultViz: 'line', supportedViz: ['line'],
+    formula: 'Текущее число подписчиков аккаунта.',
+    included: 'История уровня реконструируется по движению follows − unfollows: Instagram не отдаёт дневной ряд самого числа подписчиков.',
+    sourceNote: 'Профиль Instagram Graph (текущее число) + дневной архив для линии.',
   }),
   define({
     id: 'ig.netFollowers', label: 'Прирост подписчиков', source: 'ig', kind: 'series', unit: 'number',
+    // Зеркало tg.netGrowth: столбцы = дневной ±поток, линия = накопление (см. resolveIgMetric).
     category: 'growth', defaultViz: 'bar', supportedViz: ['bar', 'line'],
-    formula: 'Дневной чистый прирост подписчиков (follower_count).',
+    formula: 'Чистый прирост подписчиков за окно: подписки минус отписки.',
+    included: 'Instagram отдаёт подписки и отписки только агрегатом за окно, дневного ряда нет — на графике величина приходит одной ступенью в конце периода. Честное число — в шапке.',
   }),
   define({
     id: 'ig.erv', label: 'Вовлечённость (ER)', source: 'ig', kind: 'value', unit: 'percent',
     category: 'engagement',
-    formula: 'ER = взаимодействия ÷ охват × 100%.',
-    included: 'Вовлечённость на охват — устойчивее к размеру аудитории.',
+    formula: 'ER = взаимодействия ÷ сумма дневных охватов × 100%.',
+    included: 'Вовлечённость на охват устойчивее к размеру аудитории. Знаменатель — сумма дневных охватов, а не дедуплицированный охват периода, поэтому значение ниже ER из раздела Instagram.',
   }),
   define({
     id: 'ig.interactions', label: 'Взаимодействия', source: 'ig', kind: 'series', unit: 'number',
     category: 'engagement',
+    // Счётный поток → столбцы (решение владельца 2026-08-13); оконный агрегат-одиночка
+    // столбцом виден, точкой линии — нет.
+    defaultViz: 'bar', supportedViz: ['bar', 'line'],
     formula: 'Лайки + комментарии + сохранения + репосты за период.',
+    included: 'Instagram считает взаимодействия агрегатом за окно, дневного ряда нет — на графике весь период приходит одной точкой в конце. Честное число — в шапке.',
   }),
   define({
-    id: 'ig.formats', label: 'Форматы', source: 'ig', kind: 'breakdown', unit: 'number', category: 'content',
-    formula: 'Распределение публикаций по типу (Лента / Reels / Stories / Карусель).',
+    id: 'ig.formats', label: 'Вовлечённость по форматам', source: 'ig', kind: 'breakdown', unit: 'number', category: 'content',
+    formula: 'Сумма взаимодействий по типу публикации — Лента / Reels / Stories / Карусель.',
+    included: 'Считаются взаимодействия, а не число публикаций: формат с одним вирусным постом обгонит формат с десятью тихими.',
   }),
   define({
     id: 'ig.age', label: 'Возраст', source: 'ig', kind: 'breakdown', unit: 'number', category: 'audience',
@@ -317,7 +353,9 @@ const IG_METRICS: MetricDef[] = [
   define({
     id: 'ig.hours', label: 'Лучшее время', source: 'ig', kind: 'breakdown', unit: 'number', category: 'audience',
     defaultViz: 'bar', supportedViz: ['bar', 'line'],
-    formula: 'Когда подписчики онлайн (по часам).', sourceNote: 'Instagram Graph (online_followers).',
+    formula: 'Относительная активность часа: среднее число подписчиков онлайн в этот час по каждому дню недели, затем семь значений складываются.',
+    included: 'Часы сравнимы между собой, но само значение — не число людей онлайн.',
+    sourceNote: 'Instagram Graph (online_followers).',
   }),
 ];
 
@@ -329,23 +367,54 @@ const MS_METRICS: MetricDef[] = [
   define({
     id: 'ms.revenue', label: 'Выручка', source: 'ms', kind: 'series', unit: 'currency',
     category: 'growth', drillTo: '/sklad',
-    formula: 'Сумма продаж по дням за окно.', sourceNote: 'МойСклад (серверный отчёт; «Всё» — дневной архив).',
+    // Деньги за день дискретны, провалы выходных столбцами честнее (решение владельца 2026-08-13).
+    defaultViz: 'bar', supportedViz: ['bar', 'line'],
+    formula: 'Сумма продаж по дням за окно.',
+    included: 'Возвраты считаются отдельно и из выручки не вычитаются.',
+    sourceNote: 'МойСклад (серверный отчёт; «Всё» — дневной архив).',
   }),
   define({
     id: 'ms.orders', label: 'Заказы', source: 'ms', kind: 'series', unit: 'number',
     category: 'growth', drillTo: '/sklad',
+    // Штуки за день → столбцы (решение владельца 2026-08-13).
+    defaultViz: 'bar', supportedViz: ['bar', 'line'],
     formula: 'Число заказов покупателей по дням за окно.', sourceNote: 'МойСклад.',
   }),
   define({
     id: 'ms.avgCheck', label: 'Средний чек', source: 'ms', kind: 'series', unit: 'currency',
     category: 'growth', drillTo: '/sklad',
-    formula: 'Сумма заказов дня ÷ число заказов дня; хедлайн — среднее за всё окно.',
+    formula: 'Сумма заказов дня ÷ число заказов дня; хедлайн — сумма заказов окна ÷ число заказов окна (не среднее дневных чеков).',
     included: 'Дни без заказов в серию не входят (нет чека — нечего усреднять).', sourceNote: 'МойСклад.',
   }),
 ];
 
-/** The full catalogue — TG first, then IG, then МС, in a sensible reading order per source. */
-export const WIDGET_METRICS: MetricDef[] = [...TG_METRICS, ...IG_METRICS, ...MS_METRICS];
+// ── Яндекс.Метрика ──────────────────────────────────────────────────────────────────────────
+// Величины сайта (визиты/посетители/просмотры страниц) — СВОИ, четвёртая независимая семья
+// (канон TG-views ≠ IG-reach ≠ MS-revenue ≠ YM-visits). Данные — серверные агрегаты
+// /api/ym/summary (окно виджета), серии приходят уже нарезанными по дням.
+const YM_METRICS: MetricDef[] = [
+  define({
+    id: 'ym.visits', label: 'Визиты', source: 'ym', kind: 'series', unit: 'number',
+    category: 'growth', drillTo: '/metrika',
+    formula: 'Число визитов сайта по дням за окно; хедлайн — период-точный итог из отчёта Метрики.',
+    sourceNote: 'Яндекс.Метрика (accuracy=full). «Всё»: серия — дневной архив, хедлайн — точный итог за всю историю счётчика; без живого доступа — сумма архива.',
+  }),
+  define({
+    id: 'ym.users', label: 'Посетители', source: 'ym', kind: 'series', unit: 'number',
+    category: 'growth', drillTo: '/metrika',
+    formula: 'Уникальные посетители по дням; хедлайн — период-точный уникум из отчёта Метрики, а не сумма дней.',
+    included: 'Если итоги периода не пришли, показывается сумма дневных уникальных — она выше настоящего уникума, потому что вернувшийся посетитель посчитан в каждый свой день.',
+    sourceNote: 'Яндекс.Метрика.',
+  }),
+  define({
+    id: 'ym.pageviews', label: 'Просмотры страниц', source: 'ym', kind: 'series', unit: 'number',
+    category: 'growth', drillTo: '/metrika',
+    formula: 'Просмотры страниц сайта по дням за окно.', sourceNote: 'Яндекс.Метрика.',
+  }),
+];
+
+/** The full catalogue — TG first, then IG, then МС и Метрика, in a sensible reading order per source. */
+export const WIDGET_METRICS: MetricDef[] = [...TG_METRICS, ...IG_METRICS, ...MS_METRICS, ...YM_METRICS];
 
 /** id → MetricDef for O(1) lookup (the WidgetConfig resolves its metric through this). */
 export const METRIC_BY_ID: Record<string, MetricDef> = Object.fromEntries(
@@ -372,8 +441,8 @@ export function isMetricId(raw: string | undefined | null): raw is string {
   return typeof raw === 'string' && raw in METRIC_BY_ID;
 }
 
-/** Metrics available for a source: `tg` / `ig` / `ms` themselves plus any `all` (source-agnostic) ones. */
-export function metricsForSource(source: 'tg' | 'ig' | 'ms'): MetricDef[] {
+/** Metrics available for a source: `tg` / `ig` / `ms` / `ym` themselves plus any `all` (source-agnostic) ones. */
+export function metricsForSource(source: 'tg' | 'ig' | 'ms' | 'ym'): MetricDef[] {
   return WIDGET_METRICS.filter((m) => m.source === source || m.source === 'all');
 }
 

@@ -5,7 +5,7 @@
 //   • happy-path — сегмент/окно/asOf доходят до repo, имена+адреса+phone/email живым словарём
 //     counterparty, копейки→рубли, city/last_day/scores в строках, кэш-хит вторым вызовом;
 //   • деградация словаря (не-401/403) → name/address/phone/email:null БЕЗ кэша;
-//     401/403 → ms_token_revoked;
+//     401 → ms_token_revoked, 403 → ms_forbidden;
 //   • 400 на неизвестный segment (repo не вызывается) и на кривой диапазон from/to;
 //   • пагинация ПОСЛЕ фильтра+сортировки: limit/offset-срез, клампы (1..200 / >=0), словарь
 //     ТОЛЬКО по id строк страницы чанками по 25; пустая страница кэшируется без словаря.
@@ -137,7 +137,7 @@ test('rfm-customers: сегмент/окно в repo, имена+адреса О
   assert.equal(repoCalls.length, 1, 'кэш укрывает и DB-агрегат');
 });
 
-test('rfm-customers: сбой словаря → name/address:null без кэша; days=0 → вся история; 401/403 → ms_token_revoked', async () => {
+test('rfm-customers: сбой словаря → name/address:null без кэша; days=0 → вся история; 401 → ms_token_revoked, 403 → ms_forbidden', async () => {
   let dictCalls = 0;
   let seenSince = 'UNSET';
   const { routes } = buildMs({
@@ -167,22 +167,24 @@ test('rfm-customers: сбой словаря → name/address:null без кэш
   await invoke(routes, 'GET /api/ms/rfm-customers', { query: { days: '0', segment: 'new' } });
   assert.equal(dictCalls, 2, 'деградированный ответ не кэшируется — словарь пробуется снова');
 
-  const revoked = buildMs({
-    msFetch: async () => {
-      const e = new Error('МойСклад: HTTP 403');
-      e.status = 403;
-      throw e;
-    },
-    db: {
-      getMsRfmCustomersForActor: async () => listing([{
-        agent_id: 'cp-a', recency_days: 3, orders: 1, sum_kopecks: 100,
-        r: 3, f: 3, m: 3, last_day: '2026-07-15', city: null,
-      }]),
-    },
-  });
-  const r2 = await invoke(revoked.routes, 'GET /api/ms/rfm-customers', { query: { days: '7', segment: 'new' } });
-  assert.equal(r2.statusCode, 401, 'отозванный токен не маскируется под name:null');
-  assert.equal(r2.body.code, 'ms_token_revoked');
+  for (const [upstream, statusCode, code] of [[401, 401, 'ms_token_revoked'], [403, 403, 'ms_forbidden']]) {
+    const denied = buildMs({
+      msFetch: async () => {
+        const e = new Error(`МойСклад: HTTP ${upstream}`);
+        e.status = upstream;
+        throw e;
+      },
+      db: {
+        getMsRfmCustomersForActor: async () => listing([{
+          agent_id: 'cp-a', recency_days: 3, orders: 1, sum_kopecks: 100,
+          r: 3, f: 3, m: 3, last_day: '2026-07-15', city: null,
+        }]),
+      },
+    });
+    const r2 = await invoke(denied.routes, 'GET /api/ms/rfm-customers', { query: { days: '7', segment: 'new' } });
+    assert.equal(r2.statusCode, statusCode, `МС ${upstream} не маскируется под name:null`);
+    assert.equal(r2.body.code, code);
+  }
 });
 
 test('rfm-customers: неизвестный/отсутствующий segment → 400 без чтения repo; кривой диапазон → 400', async () => {

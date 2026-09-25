@@ -149,8 +149,6 @@ async function boot(
   });
 
   await page.addInitScript(() => {
-    localStorage.setItem('pulse_token', 'e2e-token');
-    localStorage.setItem('pulse_token_exp', String(Date.now() + 60 * 60 * 1000));
     localStorage.setItem('pulse_channel', '1');
     localStorage.setItem('pulse_theme', 'dark');
   });
@@ -257,6 +255,50 @@ test.describe('Упоминания — desktop периодная поверх�
     await expect(dialog.getByRole('button', { name: 'Сохранить правила' })).toHaveCount(0);
     expect(state.liveRequests()).toBe(0);
   });
+
+  test('график по дням открывается отдельной страницей и сохраняет период с источником', async ({ page }) => {
+    await boot(page);
+    await page.goto('/mentions?period=7&source=111');
+
+    await page.getByRole('heading', { name: 'Упоминания по дням', exact: true }).click();
+    await expect(page).toHaveURL(/\/metrics\/mentions-timeline\?/);
+    await expect(page).toHaveURL(/source=111/);
+    await expect(page).toHaveURL(/p=7d/);
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(page.getByRole('heading', { level: 1, name: 'Упоминания по дням' })).toBeVisible();
+    await expect(page.getByRole('toolbar', { name: 'Тип графика' })).toBeVisible();
+    await expect(page.getByRole('toolbar', { name: 'База сравнения' })).toBeVisible();
+    await expect(page.getByRole('group', { name: 'Окно' })).toBeVisible();
+    await expect(page.getByText('Telegram · @demo', { exact: true })).toBeVisible();
+
+    const back = page.locator('main').getByRole('link', { name: /Упоминания$/ }).first();
+    await expect(back).toHaveAttribute('href', /\/mentions\?period=7&source=111/);
+  });
+
+  test('полный рейтинг источников не схлопывается выбранным source и не показывает ложные контролы', async ({ page }) => {
+    await boot(page);
+    await page.goto('/metrics/mentions-sources?source=111&p=30d');
+
+    await expect(page.getByRole('heading', { level: 1, name: 'Кто упоминает' })).toBeVisible();
+    await expect(page.getByText('@smm', { exact: true })).toBeVisible();
+    await expect(page.getByText('@blog', { exact: true })).toBeVisible();
+    await expect(page.getByRole('toolbar', { name: 'Тип графика' })).toHaveCount(0);
+    await expect(page.getByRole('toolbar', { name: 'База сравнения' })).toHaveCount(0);
+    await expect(page.getByRole('group', { name: 'Окно' })).toBeVisible();
+    await expect(page.locator('main').getByRole('link', { name: /Упоминания$/ }).first()).toHaveAttribute(
+      'href',
+      /\/mentions\?source=111/,
+    );
+  });
+
+  test('старый detail-deep-link канонизируется в metric route без оверлея', async ({ page }) => {
+    await boot(page);
+    await page.goto('/mentions?detail=mentions-timeline');
+
+    await expect(page).toHaveURL(/\/metrics\/mentions-timeline$/);
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(page.getByRole('heading', { level: 1, name: 'Упоминания по дням' })).toBeVisible();
+  });
 });
 
 test.describe('Упоминания — мобильная ветка сохранена', () => {
@@ -269,10 +311,21 @@ test.describe('Упоминания — мобильная ветка сохра
     await expect(page.getByText('Суммарный охват')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Обновить' })).toBeVisible();
 
-    // Старые per-widget period pills остаются ровно в одном экземпляре; новый desktop header не
-    // добавляет вторую группу. Плотная таблица и её фильтр отсутствуют.
-    await expect(page.getByRole('group', { name: 'Период' })).toHaveCount(1);
+    // Мобильная карточка больше не дублирует период: окно принадлежит выделенной metric-page.
+    // Плотная desktop-таблица и её фильтр здесь также отсутствуют.
+    await expect(page.getByRole('group', { name: 'Период' })).toHaveCount(0);
     await expect(page.locator('table')).toHaveCount(0);
     await expect(page.getByTestId('mentions-source-filter')).toHaveCount(0);
+  });
+
+  test('мобильная карточка динамики открывает ту же полноэкранную страницу', async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== 'mobile-430', 'проверка мобильной ветки');
+    await boot(page);
+    await page.goto('/mentions');
+
+    await page.getByRole('heading', { name: 'Упоминаний по дням', exact: true }).click();
+    await expect(page).toHaveURL(/\/metrics\/mentions-timeline$/);
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(page.getByRole('heading', { level: 1, name: 'Упоминания по дням' })).toBeVisible();
   });
 });

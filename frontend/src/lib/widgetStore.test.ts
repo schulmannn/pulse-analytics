@@ -1,4 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { normalizeWidget } from '@/lib/widgetConfig';
 import {
   __resetWidgetStoreCache,
   addWidgetConfig,
@@ -9,6 +10,7 @@ import {
   removeWidgetConfig,
   setWidgetConfigs,
   syncableWidgetConfigs,
+  replaceWidgetConfig,
   updateWidgetConfig,
 } from '@/lib/widgetStore';
 
@@ -175,5 +177,50 @@ describe('account-sync reconciliation', () => {
     const { seed, pushBack } = reconcileHydratedConfigs([{ id: 'acc1', metricId: 'tg.reactions', viz: 'line' }], new Set(['stale-local']));
     expect(seed.map((c) => c.id)).toEqual(['acc1']); // stale local does NOT override the account
     expect(pushBack).toBe(false);
+  });
+});
+
+/**
+ * С полностраничного эксплорера СНЯТЬ настройку было физически невозможно: `updateWidgetConfig`
+ * мержит спредом, а `normalizeWidget` не кладёт в объект ключи со снятым значением (нет сравнения —
+ * нет `comparison`). Спред тогда сохранял СТАРОЕ значение: превью показывало «выключено»,
+ * «Применить к виджету» отрабатывало вхолостую, а кнопка навсегда оставалась активной, потому что
+ * config так и не догонял draft.
+ */
+describe('снятие опционального поля виджета', () => {
+  const seed = () => {
+    const cfg = normalizeWidget({
+      id: 'w1',
+      metricId: 'tg.views',
+      viz: 'line',
+      comparison: { mode: 'previous_period', display: 'ghost_line' },
+      title: 'Мой заголовок',
+    })!;
+    setWidgetConfigs([cfg]);
+    return cfg;
+  };
+
+  it('normalizeWidget действительно ОПУСКАЕТ снятый ключ — на этом и ломался спред', () => {
+    const cleared = normalizeWidget({ ...seed(), comparison: undefined })!;
+    expect('comparison' in cleared).toBe(false);
+  });
+
+  it('updateWidgetConfig не снимает поле: это частичный патч (задокументированное поведение)', () => {
+    const cleared = normalizeWidget({ ...seed(), comparison: undefined })!;
+    updateWidgetConfig('w1', cleared);
+    expect(getWidgetConfigs()[0].comparison).toBeDefined();
+  });
+
+  it('replaceWidgetConfig снимает поле — ровно то, что обещает превью эксплорера', () => {
+    const cleared = normalizeWidget({ ...seed(), comparison: undefined })!;
+    replaceWidgetConfig('w1', cleared);
+    expect(getWidgetConfigs()[0].comparison).toBeUndefined();
+  });
+
+  it('replaceWidgetConfig снимает заголовок и сохраняет id', () => {
+    const cleared = normalizeWidget({ ...seed(), title: undefined })!;
+    replaceWidgetConfig('w1', cleared);
+    expect(getWidgetConfigs()[0].title).toBeUndefined();
+    expect(getWidgetConfigs()[0].id).toBe('w1');
   });
 });

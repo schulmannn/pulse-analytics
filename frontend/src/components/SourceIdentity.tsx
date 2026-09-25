@@ -11,10 +11,13 @@ import type { SourceNetwork } from '@/lib/homeSourceContext';
 export function SourceIdentity({
   network,
   channelId,
+  compact = false,
   className,
 }: {
   network: SourceNetwork;
   channelId?: number | null;
+  /** Third-width Home cards keep only the network badge so the metric title stays readable. */
+  compact?: boolean;
   className?: string;
 }) {
   const { channelId: selectedChannelId } = useSelectedChannel();
@@ -24,15 +27,19 @@ export function SourceIdentity({
   const channelLabel = channel?.username
     ? `@${channel.username}`
     : channel?.title || (effectiveChannelId != null ? `#${effectiveChannelId}` : 'источник');
+  const networkLabel = network === 'multi' ? 'Telegram + Instagram' : networkByKey(network).name;
+  const fullLabel = `${networkLabel} · ${channelLabel}`;
+  const shortLabel = network === 'multi' ? 'TG + IG' : network.toUpperCase();
 
   return (
     <span
       className={cn(
         'hidden min-w-0 max-w-52 items-center gap-1.5 text-2xs text-muted-foreground md:inline-flex',
+        compact && 'max-w-none',
         className,
       )}
       data-source-identity
-      title={`${network === 'multi' ? 'Telegram + Instagram' : networkByKey(network).name} · ${channelLabel}`}
+      title={fullLabel}
     >
       {network === 'multi' ? (
         <span className="flex shrink-0 items-center gap-0.5" aria-hidden="true">
@@ -47,9 +54,14 @@ export function SourceIdentity({
           <NetworkGlyph k={network} className="h-3 w-3" />
         </span>
       )}
-      <span className="truncate">
-        {network === 'multi' ? 'TG + IG' : networkByKey(network).name} · {channelLabel}
-      </span>
+      {compact ? (
+        <>
+          <span aria-hidden="true">{shortLabel}</span>
+          <span className="sr-only">{fullLabel}</span>
+        </>
+      ) : (
+        <span className="truncate">{fullLabel}</span>
+      )}
     </span>
   );
 }

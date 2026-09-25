@@ -1,5 +1,4 @@
-import { z } from 'zod';
-import { apiSend } from '@/api/client';
+import { isDemoMode } from '@/lib/demo';
 import { setWidgetErrorSink, buildWidgetErrorReport, nextTraceId, type WidgetErrorReport } from '@/lib/widgetErrors';
 
 /**
@@ -9,9 +8,27 @@ import { setWidgetErrorSink, buildWidgetErrorReport, nextTraceId, type WidgetErr
  * only ships the report the boundary already built, fire-and-forget.
  */
 
-const AckSchema = z
-  .object({ ok: z.boolean().optional(), id: z.number().nullable().optional(), traceId: z.string().optional() })
-  .passthrough();
+async function sendCrashReport(body: Record<string, unknown>): Promise<void> {
+  // Preserve apiSend's read-only demo contract without importing its full fixture/schema graph into
+  // every public route. Telemetry is best-effort and never changes product state.
+  if (isDemoMode()) return;
+  const response = await fetch('/api/client-errors', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) throw new Error('crash report rejected');
+  const data: unknown = await response.json().catch(() => null);
+  if (
+    typeof data !== 'object' ||
+    data === null ||
+    !('ok' in data) ||
+    typeof (data as { ok?: unknown }).ok !== 'boolean'
+  ) {
+    throw new Error('crash report response drift');
+  }
+}
 
 // Per-scope budgets so a broadly-broken deploy's WIDGET-crash noise can never starve the report of a
 // (rarer, higher-value) app-shell white-screen crash. No signature dedupe: every crash the user is
@@ -34,10 +51,7 @@ export function reportCrashToServer(report: WidgetErrorReport, scope: 'widget' |
   }
   // 'global' is pre-gated by reportGlobalCrash (per-signature dedupe + its own budget) → no double cap.
   try {
-    void apiSend(
-      'POST',
-      '/api/client-errors',
-      {
+    void sendCrashReport({
         traceId: report.traceId,
         name: report.name,
         message: report.message,
@@ -46,13 +60,11 @@ export function reportCrashToServer(report: WidgetErrorReport, scope: 'widget' |
         widgetId: report.widgetId,
         label: report.label,
         scope,
-      },
-      AckSchema,
-    ).catch(() => {
+      }).catch(() => {
       /* offline / demo / rate-limited — the console line already captured it locally */
     });
   } catch {
-    /* apiSend can throw synchronously (demo mode) — swallow */
+    /* JSON/fetch setup can throw synchronously — swallow */
   }
 }
 
@@ -63,8 +75,8 @@ const widgetSink = (report: WidgetErrorReport) => reportCrashToServer(report, 'w
 // ErrorBoundary, so this runs before the first React commit), and it is never torn down: a passive
 // effect / logout-cleanup could null it and — since re-login is pure SPA navigation with no page
 // reload, so this module never re-evaluates — leave a first-render crash after re-login unreported.
-// The sink is stateless (apiSend reads the auth token at call time; an unauthenticated POST just 401s
-// and is swallowed), so keeping it armed for the whole session is harmless.
+// The sink is stateless (the cookie is read by the server; an unauthenticated POST just 401s and is
+// swallowed), so keeping it armed for the whole session is harmless.
 setWidgetErrorSink(widgetSink);
 
 // ── Global (non-React) error net ────────────────────────────────────────────────────────────
@@ -96,6 +108,13 @@ function reportGlobalCrash(error: unknown, kind: 'error' | 'unhandledrejection')
   reportCrashToServer(report, 'global');
 }
 
+/** Хрестоматийный benign-шум Chrome: «ResizeObserver loop …» — не исключение и ничего не
+    ломает, но штатно всплывает window.error-ом у ResizeObserver-потребителей (react-virtual
+    measureElement, edge-fade). В bugs/Notion такому не место. */
+export function isBenignWindowError(message: unknown): boolean {
+  return typeof message === 'string' && message.startsWith('ResizeObserver loop');
+}
+
 let globalInstalled = false;
 /** Arm the window-level catch-all: uncaught errors + unhandled promise rejections. Idempotent; a
  *  no-op outside a browser (SSR / node test env). Call once at app init (main.tsx). */
@@ -107,6 +126,7 @@ export function installGlobalErrorReporter(): void {
     // target — not real script exceptions.
     if (event.target && event.target !== window) return;
     if (event.error == null && !event.message) return;
+    if (isBenignWindowError(event.message)) return;
     reportGlobalCrash(event.error ?? event.message, 'error');
   });
   window.addEventListener('unhandledrejection', (event) => {

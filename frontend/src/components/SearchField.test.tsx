@@ -25,6 +25,14 @@ describe('SearchField', () => {
     expect(html).not.toContain('Очистить поиск');
   });
 
+  it('keeps the 44px mobile touch height of the button canon', () => {
+    // Базовый Input — 36px: ниже минимальной цели касания. Поле поиска на телефоне часто первое,
+    // во что метят пальцем, поэтому оно держит тот же min-h-11 sm:min-h-0, что и Button.
+    const html = markup(<SearchField value="" onChange={() => {}} ariaLabel="Поиск" />);
+    expect(html).toContain('min-h-11');
+    expect(html).toContain('sm:min-h-0');
+  });
+
   it('shows a clear button with an explicit Russian accessible name once non-empty', () => {
     const html = markup(
       <SearchField value="куртка" onChange={() => {}} ariaLabel="Поиск" />,
@@ -38,5 +46,27 @@ describe('SearchField', () => {
       <SearchField value="x" onChange={() => {}} ariaLabel="Поиск" clearLabel="Сбросить" />,
     );
     expect(html).toContain('aria-label="Сбросить"');
+  });
+
+  it('announces the result count in a polite live region only when the caller supplies one', () => {
+    const withCount = markup(
+      <SearchField value="куртка" onChange={() => {}} ariaLabel="Поиск" resultsLabel="3 отчёта" />,
+    );
+    expect(withCount).toContain('aria-live="polite"');
+    expect(withCount).toContain('role="status"');
+    expect(withCount).toContain('3 отчёта');
+    // Visually hidden: the count is an announcement, not a second on-screen counter.
+    expect(withCount).toContain('sr-only');
+
+    // A surface with no count renders no empty live region (an empty one still gets polled).
+    const withoutCount = markup(<SearchField value="куртка" onChange={() => {}} ariaLabel="Поиск" />);
+    expect(withoutCount).not.toContain('aria-live');
+  });
+
+  it('renders a zero-result announcement rather than falling back to silence', () => {
+    const html = markup(
+      <SearchField value="zzz" onChange={() => {}} ariaLabel="Поиск" resultsLabel="0 отчётов" />,
+    );
+    expect(html).toContain('0 отчётов');
   });
 });

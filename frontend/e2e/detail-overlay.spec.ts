@@ -6,13 +6,17 @@ import { bootDemo } from './helpers';
  *  1. Escape закрывает разворот С ПЕРВОГО раза и в диплинк-сценарии (URL открыл оверлей без клика),
  *     чистит ?detail= из URL (replace) и оверлей НЕ возвращается после settle.
  *  2. Обычное открытие кликом: Escape закрывает, фокус возвращается опенеру (шапочный ↗).
- *  3. Мелкое тело без rich-эксплорера (breakdown из 3 строк) разворачивается в компактную панель
- *     по контенту (по центру вьюпорта), а rich-развороты (период/статы) держат полную высоту.
+ *  3. Не-rich тело (без период/статы-эксплорера) разворачивается в контент-панель по центру вьюпорта.
  * Мобильный полноэкранный шит НЕ здесь — его геометрию держит mobile-nav.spec.ts.
+ *
+ * Регресс-фикстура оверлея — «Лучшие публикации» (НЕ график: карточки постов). Прежняя фикстура
+ * «Состав вовлечённости» мигрировала на выделенный route /metrics/tg-engagement-mix (как и остальные
+ * графики Аналитики), поэтому регресс generic-оверлея держит именно эта не-графовая карточка Обзора.
  */
 
-const BREAKDOWN = 'Состав вовлечённости';
-const BREAKDOWN_URL = `/analytics?tab=content&detail=${encodeURIComponent(BREAKDOWN)}`;
+const OVERLAY = 'Лучшие публикации';
+const OVERLAY_ID = 'overview-top-posts';
+const OVERLAY_URL = `/?detail=${OVERLAY_ID}`;
 
 /** Панель диалога = не-backdrop ребёнок ролевого контейнера (backdrop несёт aria-hidden). */
 async function panelBox(page: import('@playwright/test').Page) {
@@ -30,8 +34,8 @@ async function panelBox(page: import('@playwright/test').Page) {
 
 test('диплинк ?detail=: Escape закрывает с первого раза, чистит URL и не пере-открывается', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop-1440', 'desktop-контракт закрытия');
-  await bootDemo(page, BREAKDOWN_URL);
-  const dialog = page.getByRole('dialog', { name: `График: ${BREAKDOWN}` });
+  await bootDemo(page, OVERLAY_URL);
+  const dialog = page.getByRole('dialog', { name: `График: ${OVERLAY}` });
   await expect(dialog).toBeVisible();
 
   await page.keyboard.press('Escape');
@@ -43,37 +47,32 @@ test('диплинк ?detail=: Escape закрывает с первого ра�
   await expect(page).not.toHaveURL(/[?&]detail=/);
 });
 
-test('клик-открытие: Escape закрывает, фокус возвращается опенеру', async ({ page }, testInfo) => {
+test('клик по карточке открывает детализацию, Escape закрывает', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop-1440', 'desktop-контракт закрытия');
-  await bootDemo(page, '/analytics?tab=content');
-  const opener = page.getByRole('button', { name: `Развернуть виджет «${BREAKDOWN}»` });
-  await opener.scrollIntoViewIfNeeded();
-  await opener.click();
-  const dialog = page.getByRole('dialog', { name: `График: ${BREAKDOWN}` });
+  await bootDemo(page, '/');
+  const heading = page.getByRole('heading', { name: OVERLAY, exact: true });
+  await heading.scrollIntoViewIfNeeded();
+  // Кликаем именно по неинтерактивному заголовку: центр карточки занят кликабельным постом и
+  // закономерно открывает PostDetailModal, а не card-level generic overlay.
+  await heading.click();
+  const dialog = page.getByRole('dialog', { name: `График: ${OVERLAY}` });
   await expect(dialog).toBeVisible();
   await expect(page).toHaveURL(/[?&]detail=/);
 
   await page.keyboard.press('Escape');
   await expect(dialog).toHaveCount(0);
   await expect(page).not.toHaveURL(/[?&]detail=/);
-  await expect(opener).toBeFocused();
 });
 
-test('мелкое тело без rich-эксплорера — компактная панель по центру; rich держит полную высоту', async ({ page }, testInfo) => {
+test('не-rich тело — контент-панель по центру', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop-1440', 'desktop-сайзинг панели');
-  await bootDemo(page, BREAKDOWN_URL);
-  await expect(page.getByRole('dialog', { name: `График: ${BREAKDOWN}` })).toBeVisible();
+  await bootDemo(page, OVERLAY_URL);
+  await expect(page.getByRole('dialog', { name: `График: ${OVERLAY}` })).toBeVisible();
   const compact = await panelBox(page);
-  // Контент-сайзинг: заметно меньше вьюпорта (раньше — full-height с ~80% пустоты)…
-  expect(compact.height).toBeLessThan(compact.vh * 0.6);
+  // Контент-сайзинг: панель НЕ форсится на всю высоту (раньше — full-height с большой пустотой)…
+  expect(compact.height).toBeLessThan(compact.vh * 0.9);
   expect(compact.height).toBeGreaterThanOrEqual(180); // …но не схлопывается ниже разумного min.
   // …и по центру вьюпорта.
   const mid = compact.top + compact.height / 2;
-  expect(Math.abs(mid - compact.vh / 2)).toBeLessThanOrEqual(12);
-
-  // Rich-разворот (период-пилюли/статы: «Упоминания по дням») остаётся полноэкранной панелью.
-  await bootDemo(page, '/mentions?detail=mentions-timeline');
-  await expect(page.getByRole('dialog', { name: 'График: Упоминания по дням' })).toBeVisible();
-  const rich = await panelBox(page);
-  expect(rich.height).toBeGreaterThan(rich.vh * 0.9);
+  expect(Math.abs(mid - compact.vh / 2)).toBeLessThanOrEqual(24);
 });

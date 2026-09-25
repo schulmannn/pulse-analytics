@@ -49,7 +49,7 @@ const median = (nums: number[]): number | null => {
   return s.length % 2 ? s[mid]! : (s[mid - 1]! + s[mid]!) / 2;
 };
 
-async function boot(page: Page) {
+async function boot(page: Page, path = '/campaigns/1') {
   let rows = [...ROWS];
   const campaign = {
     id: 1,
@@ -187,14 +187,15 @@ async function boot(page: Page) {
   });
 
   await page.addInitScript(() => {
-    localStorage.setItem('pulse_token', 'e2e-token');
-    localStorage.setItem('pulse_token_exp', String(Date.now() + 60 * 60 * 1000));
     localStorage.setItem('pulse_channel', '1');
     localStorage.setItem('pulse_theme', 'dark');
   });
 
-  await page.goto('/campaigns/1');
-  await page.getByTestId('campaign-name').waitFor({ state: 'visible', timeout: 25_000 });
+  await page.goto(path);
+  await page.locator('main h1, [data-testid="campaign-name"]').first().waitFor({
+    state: 'visible',
+    timeout: 25_000,
+  });
 }
 
 test.describe('Смешанная кампания TG+IG', () => {
@@ -292,20 +293,30 @@ test.describe('Смешанная кампания TG+IG', () => {
     const tableRows = table.locator('tbody tr');
     await expect(tableRows).toHaveCount(4);
 
-    // ── Плотность — Astryx SegmentedControl (radiogroup). Дефолт «Обычно» → data-density=balanced. ──
+    // ── Плотность — общий SegmentedControl (toolbar + aria-pressed). Дефолт «Обычно» → balanced. ──
+    const densityTrack = page.getByRole('toolbar', { name: 'Плотность строк' });
     await expect(table).toHaveAttribute('data-density', 'balanced');
-    await page.getByRole('radio', { name: 'Плотно' }).click();
+    await expect(densityTrack.getByRole('button', { name: 'Обычно', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await densityTrack.getByRole('button', { name: 'Плотно', exact: true }).click();
     await expect(table).toHaveAttribute('data-density', 'compact');
-    await page.getByRole('radio', { name: 'Свободно' }).click();
+    await densityTrack.getByRole('button', { name: 'Свободно', exact: true }).click();
     await expect(table).toHaveAttribute('data-density', 'spacious');
+    // Трек — один tab-stop: Radix ставит физический фокус после стрелки в следующей задаче,
+    // затем Space коммитит (роль toolbar это и обещает).
+    const balancedDensity = densityTrack.getByRole('button', { name: 'Обычно', exact: true });
+    await densityTrack.getByRole('button', { name: 'Свободно', exact: true }).focus();
+    await page.keyboard.press('ArrowLeft');
+    await expect(balancedDensity).toBeFocused();
+    await page.keyboard.press('Space');
+    await expect(table).toHaveAttribute('data-density', 'balanced');
 
-    // ── Видимость колонок — Astryx MultiSelector. Скрытие активной метрики сортировки безопасно ──
-    // ── возвращает сортировку к «дата, убыв». ──
+    // ── Видимость колонок — общий shadcn DropdownMenu (как «Колонки» в IG). Скрытие активной ──
+    // ── метрики сортировки безопасно возвращает сортировку к «дата, убыв». ──
     await table.getByRole('button', { name: 'Основной результат', exact: true }).click();
     await expect.poll(() => new URL(page.url()).searchParams.get('sort')).toBe('result');
     await expect(table.getByRole('columnheader', { name: 'Основной результат' })).toBeVisible();
-    await page.getByRole('combobox', { name: 'Колонки' }).click();
-    await page.getByRole('option', { name: 'Основной результат' }).click();
+    await page.getByRole('button', { name: 'Колонки' }).click();
+    await page.getByRole('menuitemcheckbox', { name: 'Основной результат' }).click();
     await page.keyboard.press('Escape');
     await expect(table.getByRole('columnheader', { name: 'Основной результат' })).toHaveCount(0);
     await expect.poll(() => new URL(page.url()).searchParams.has('sort')).toBe(false);
@@ -319,6 +330,8 @@ test.describe('Смешанная кампания TG+IG', () => {
     await tableRows.filter({ hasText: 'TG видео о продукте' }).locator('[data-campaign-post-open-trigger]').click();
     const inspector = page.locator('[data-campaign-inspector-open]');
     await expect(inspector).toBeVisible();
+    // Панель остаётся complementary-лендмарком с собственным именем (роль даёт сам <aside>).
+    await expect(page.getByRole('complementary', { name: 'Детали выбранной публикации' })).toBeVisible();
     await expect(inspector.getByText('TG видео о продукте')).toBeVisible();
     await expect(inspector.getByText('TG просмотры')).toBeVisible();
     await expect(inspector.getByText('TG реакции + репосты + комментарии')).toBeVisible();
@@ -359,5 +372,59 @@ test.describe('Смешанная кампания TG+IG', () => {
     }
     await expect(page.getByTestId('campaign-posts-search')).toHaveCount(0);
     await expect(page.getByTestId('campaign-post-select')).toHaveCount(0);
+  });
+
+  test('desktop campaign charts open as dedicated metric pages with preserved context', async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name === 'mobile-430', 'desktop contract');
+    await boot(page, '/campaigns/1?source=ig%3A2&q=reels&sort=result&metric=ig_reach');
+
+    await page.locator('[data-drill-to*="/campaigns/1/metrics/timeline"]').click();
+    await expect.poll(() => new URL(page.url()).pathname).toBe('/campaigns/1/metrics/timeline');
+    await expect.poll(() => new URL(page.url()).searchParams.get('source')).toBe('ig:2');
+    await expect.poll(() => new URL(page.url()).searchParams.get('q')).toBe('reels');
+    await expect.poll(() => new URL(page.url()).searchParams.get('sort')).toBe('result');
+    await expect(page.getByRole('heading', { level: 1, name: 'Сумма охватов IG · по дате публикации' })).toBeVisible();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+
+    const chartType = page.getByRole('toolbar', { name: 'Тип графика' });
+    await expect(chartType).toBeVisible();
+    await chartType.getByRole('button', { name: 'Тип графика: Столбцы' }).click();
+    await expect.poll(() => new URL(page.url()).searchParams.get('chart')).toBe('bar');
+    await expect(page.getByRole('toolbar', { name: 'Показатель' })).toBeVisible();
+
+    const backLink = page.locator('a[href^="/campaigns/1?"]').first();
+    await expect(backLink).toHaveAttribute('href', /source=ig%3A2/);
+    await expect(backLink).toHaveAttribute('href', /q=reels/);
+    await expect(backLink).toHaveAttribute('href', /sort=result/);
+    await expect(backLink).not.toHaveAttribute('href', /chart=/);
+
+    await page.goto('/campaigns/1?source=ig%3A2&q=reels&sort=result');
+    await page.locator('[data-drill-to*="/campaigns/1/metrics/sources"]').click();
+    await expect.poll(() => new URL(page.url()).pathname).toBe('/campaigns/1/metrics/sources');
+    await expect(page.getByRole('heading', { level: 1, name: 'Источники кампании' })).toBeVisible();
+    await expect(page.getByText('IG аккаунт')).toBeVisible();
+    await expect(page.getByText('TG канал')).toHaveCount(0);
+    await expect(page.getByRole('toolbar', { name: 'Тип графика' })).toHaveCount(0);
+
+    await page.goto('/campaigns/1');
+    await page.locator('[data-drill-to*="/campaigns/1/metrics/formats"]').click();
+    await expect.poll(() => new URL(page.url()).pathname).toBe('/campaigns/1/metrics/formats');
+    await expect(page.getByRole('heading', { level: 1, name: 'Форматы кампании' })).toBeVisible();
+    // Форматы — составное полукольцо (RadialShare, выбор владельца): имя графики несёт итог+состав.
+    await expect(page.getByRole('img', { name: /^Всего .* публ\./ })).toBeVisible();
+    await expect(page.getByRole('toolbar', { name: 'Тип графика' })).toHaveCount(0);
+  });
+
+  test('mobile campaign chart uses the same dedicated timeline route', async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== 'mobile-430', 'mobile contract');
+    await boot(page);
+
+    await page.locator('[data-drill-to*="/campaigns/1/metrics/timeline?metric=ig_reach"]').click();
+    await expect.poll(() => new URL(page.url()).pathname).toBe('/campaigns/1/metrics/timeline');
+    await expect.poll(() => new URL(page.url()).searchParams.get('metric')).toBe('ig_reach');
+    await expect(page.getByRole('heading', { level: 1, name: 'Сумма охватов IG · по дате публикации' })).toBeVisible();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(page.getByRole('toolbar', { name: 'Тип графика' })).toBeVisible();
+    await expect(page.getByRole('toolbar', { name: 'Показатель' })).toBeVisible();
   });
 });

@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react';
-import { cn } from '@/lib/utils';
 
 /**
  * Cartograph — the one source of line-art illustration for Atlavue's error / empty / 404 states
@@ -55,7 +54,9 @@ export function Cartograph({ name, className, animate = true }: CartographProps)
     <svg
       ref={ref}
       viewBox={VIEWBOX[name]}
-      className={cn('cartograph block h-32 w-auto', offscreen && 'cartograph-offscreen', className)}
+      className={['cartograph block h-32 w-auto', offscreen && 'cartograph-offscreen', className]
+        .filter(Boolean)
+        .join(' ')}
       fill="none"
       strokeWidth={1.6}
       strokeLinecap="round"
@@ -114,7 +115,12 @@ function Globe({ animate }: { animate: boolean }) {
       <line x1="27" y1="52" x2="133" y2="52" className={faint} />
       <line x1="27" y1="108" x2="133" y2="108" className={faint} />
       <path d="M80 20 V140" className="stroke-primary" strokeDasharray="4 6" />
-      <circle cx="80" cy="80" r="3" className={cn('fill-primary', animate && 'cartograph-orbit')} />
+      <circle
+        cx="80"
+        cy="80"
+        r="3"
+        className={['fill-primary', animate && 'cartograph-orbit'].filter(Boolean).join(' ')}
+      />
     </>
   );
 }
@@ -141,8 +147,18 @@ function OffMap({ animate }: { animate: boolean }) {
 function BrokenRoute({ animate }: { animate: boolean }) {
   return (
     <>
-      <circle cx="42" cy="70" r="4" className={cn('fill-primary', animate && 'cartograph-pulse')} />
-      <circle cx="158" cy="46" r="4" className={cn('fill-muted-foreground', animate && 'cartograph-pulse-2')} />
+      <circle
+        cx="42"
+        cy="70"
+        r="4"
+        className={['fill-primary', animate && 'cartograph-pulse'].filter(Boolean).join(' ')}
+      />
+      <circle
+        cx="158"
+        cy="46"
+        r="4"
+        className={['fill-muted-foreground', animate && 'cartograph-pulse-2'].filter(Boolean).join(' ')}
+      />
       <path d="M42 70 C 66 58 82 60 90 62" className="stroke-primary opacity-50" strokeDasharray="3 5" />
       <path d="M110 58 C 130 54 146 50 158 48" className="stroke-muted-foreground opacity-50" strokeDasharray="3 5" />
       <line x1="98" y1="52" x2="102" y2="68" className="stroke-muted-foreground" />

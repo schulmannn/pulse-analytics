@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react';
 import { Outlet, useLocation, useOutletContext, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
+import { qk } from '@/api/queryKeys';
 import { useIgData } from '@/lib/useIgData';
 import type { IgData } from '@/lib/useIgData';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { useMediaQuery } from '@/lib/useMediaQuery';
 import { usePagePeriod } from '@/lib/period';
 import { PeriodChips } from '@/components/PeriodChips';
-import { IgConnectPanel } from '@/components/instagram/health';
+import { IgConnectPanel, IgReauthState } from '@/components/instagram/health';
 import { ErrorState } from '@/components/ErrorState';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
@@ -65,9 +66,11 @@ function useIgConnectNotice() {
       const ch = parseInt(params.get('ch') ?? '', 10);
       if (Number.isFinite(ch) && ch > 0) {
         setChannelId(ch);
-        qc.invalidateQueries({ queryKey: ['channels'] });
+        qc.invalidateQueries({ queryKey: qk.channels });
       }
-      qc.invalidateQueries({ predicate: (q) => String(q.queryKey[0]).startsWith('ig-') });
+      // ВЕСЬ IG-кластер, а не текущий канал: setChannelId выше ещё не применён к этому рендеру,
+      // и аккаунт мог быть только что создан вместе со своим новым каналом.
+      qc.invalidateQueries({ queryKey: qk.ig.root });
     }
     // Strip the flag so a reload doesn't re-show it. setParams is stable, so this re-runs the effect
     // once with the flag already gone → early return, no loop. Keeping params in deps makes the
@@ -125,6 +128,11 @@ export function IgShell() {
     </div>
   ) : null;
 
+  // РАНЬШЕ скелетона: истёкший токен — известное состояние, и держать его под «загрузкой» на время
+  // ретраев 502 значит врать. Ждать данных, которые не придут без реконнекта, незачем.
+  if (ig.reauth) {
+    return <div className="space-y-6">{banner}<IgReauthState expiresAt={ig.tokenExpiresAt} /></div>;
+  }
   if (ig.loading) {
     return <div className="space-y-6">{banner}{onContentTable ? <IgContentPageSkeleton /> : <InstagramSkeleton />}</div>;
   }

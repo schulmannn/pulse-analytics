@@ -102,9 +102,15 @@ describe('deriveNetGrowth — follows the window', () => {
     const expected = joined
       .map((j, i) => j - left[i]!)
       .filter((_, i) => xs[i]! >= win!.from && xs[i]! <= win!.to);
-    expect(net.values).toEqual(expected);
+    let running = 0;
+    const cumulative = expected.map((value) => {
+      running += value;
+      return running;
+    });
+    expect(net.values).toEqual([0, ...cumulative]);
     expect(net.total).toBe(expected.reduce((a, v) => a + v, 0));
-    expect(net.titles).toHaveLength(expected.length);
+    expect(net.titles).toHaveLength(expected.length + 1);
+    expect(net.labels[0]).toBe('Начало');
   });
 
   it('returns empty when either series is missing', () => {

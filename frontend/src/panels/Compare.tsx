@@ -1,6 +1,7 @@
 import { useTgFull } from '@/api/queries';
 import { normalizeTgPosts, type NormalizedPost } from '@/lib/posts';
 import { fmt, pluralRu } from '@/lib/format';
+import { withShares } from '@/lib/breakdownShare';
 import { pctDelta } from '@/lib/delta';
 import { describeChange, explainChange } from '@/lib/whyChanged';
 import { calendarWindowForPeriod, periodDateTimestamp, splitCalendarRows, useWidgetPeriod } from '@/lib/period';
@@ -59,6 +60,53 @@ function formatLabel(mediaType: string | null, albumSize: number): string {
   if (mediaType === 'video') return 'Видео';
   if (mediaType === 'document') return 'Файл';
   return 'Текст';
+}
+
+/**
+ * AVERAGE reach per post by weekday (Mon→Sun), over the given (already windowed) posts. UTC day-key
+ * to match the UTC day buckets the daily charts use. Pure + exported so the full-screen
+ * `/metrics/tg-weekday-reach` route re-derives from the same posts — never a sum, never fabricated.
+ */
+export function deriveWeekdayReach(posts: NormalizedPost[]): { values: number[]; labels: string[]; hasData: boolean } {
+  const wdViews = Array<number>(7).fill(0);
+  const wdCount = Array<number>(7).fill(0);
+  posts.forEach((p) => {
+    if (!p.date) return;
+    const d = new Date(p.date).getUTCDay();
+    wdViews[d] += p.reach;
+    wdCount[d] += 1;
+  });
+  const values = WD_ORDER.map((i) => (wdCount[i] ? wdViews[i]! / wdCount[i]! : 0));
+  return { values, labels: WD_LABELS, hasData: values.some((v) => v > 0) };
+}
+
+/**
+ * TOTAL post views per media format over the given (already windowed) posts, ranked desc. Pure +
+ * exported so the full-screen `/metrics/tg-format-views` route re-derives the same breakdown items.
+ */
+export function deriveFormatViews(
+  posts: NormalizedPost[],
+): { label: string; value: number; display: string; color: string; share?: number }[] {
+  const byFormat = new Map<string, { views: number; count: number }>();
+  posts.forEach((p) => {
+    const key = formatLabel(p.mediaType, p.albumSize);
+    const e = byFormat.get(key) ?? { views: 0, count: 0 };
+    e.views += p.reach;
+    e.count += 1;
+    byFormat.set(key, e);
+  });
+  // Форматы делят ВСЕ просмотры окна — часть целого, поэтому строка несёт долю; рендер допишет её
+  // последним сегментом: «1,3 тыс · 12 постов · 54.3%» (объём выборки остаётся при значении).
+  return withShares(
+    [...byFormat.entries()]
+      .sort((x, y) => y[1].views - x[1].views)
+      .map(([label, v], i) => ({
+        label,
+        value: v.views,
+        display: `${fmt.short(v.views)} · ${v.count} ${pluralRu(v.count, ['пост', 'поста', 'постов'])}`,
+        color: CHART_CYCLE[i % CHART_CYCLE.length]!,
+      })),
+  );
 }
 
 /**
@@ -124,39 +172,17 @@ export function Compare() {
     { label: 'Репосты', cur: a.forwards, prev: b.forwards, render: fmt.short },
     { label: 'Комментарии', cur: a.replies, prev: b.replies, render: fmt.short },
     { label: 'Постов', cur: a.count, prev: b.count, render: fmt.num },
-    { label: 'ER', cur: a.er, prev: b.er, render: (n) => `${n.toFixed(2)}%` },
+    // Тот же абсолютный процент, что на карточке Обзора и /metrics/er (fmt.pctAbs) — одно число
+    // одним форматом на всех поверхностях.
+    { label: 'ER', cur: a.er, prev: b.er, render: fmt.pctAbs },
   ];
 
-  // By weekday (avg views over the current window).
-  const wdViews = Array<number>(7).fill(0);
-  const wdCount = Array<number>(7).fill(0);
-  cur.forEach((p) => {
-    if (!p.date) return;
-    // UTC to match the UTC day-keys the daily charts/drill-down bucket by.
-    const d = new Date(p.date).getUTCDay();
-    wdViews[d] += p.reach;
-    wdCount[d] += 1;
-  });
-  const wdAvg = WD_ORDER.map((i) => (wdCount[i] ? wdViews[i] / wdCount[i] : 0));
-  const hasWeekday = wdAvg.some((v) => v > 0);
-
-  // By format (total views per media format over the current window).
-  const byFormat = new Map<string, { views: number; count: number }>();
-  cur.forEach((p) => {
-    const key = formatLabel(p.mediaType, p.albumSize);
-    const e = byFormat.get(key) ?? { views: 0, count: 0 };
-    e.views += p.reach;
-    e.count += 1;
-    byFormat.set(key, e);
-  });
-  const formatItems = [...byFormat.entries()]
-    .sort((x, y) => y[1].views - x[1].views)
-    .map(([label, v], i) => ({
-      label,
-      value: v.views,
-      display: `${fmt.short(v.views)} · ${v.count} ${pluralRu(v.count, ['пост', 'поста', 'постов'])}`,
-      color: CHART_CYCLE[i % CHART_CYCLE.length],
-    }));
+  // By weekday (avg reach per post over the current window) and by format (total views per format)
+  // — the same pure derivations the /metrics/tg-weekday-reach and /metrics/tg-format-views routes use.
+  const weekday = deriveWeekdayReach(cur);
+  const wdAvg = weekday.values;
+  const hasWeekday = weekday.hasData;
+  const formatItems = deriveFormatViews(cur);
 
   // Keep the original timestamps until explainChange has assigned each publication to a rolling
   // window. Collapsing to YYYY-MM-DD first moves boundary-day posts to midnight and can make the
@@ -252,6 +278,7 @@ export function Compare() {
         <ChartSection
           title="Охват по дням недели"
           defaultSize="half"
+          drillTo="/metrics/tg-weekday-reach"
           variants={
             hasWeekday
               ? [
@@ -277,7 +304,7 @@ export function Compare() {
         >
           {!hasWeekday && <EmptyHint />}
         </ChartSection>
-        <ChartSection title="По форматам (просмотры)" defaultSize="half" variants={formatItems.length > 0 ? breakdownVariants(formatItems) : undefined}>
+        <ChartSection title="По форматам (просмотры)" defaultSize="half" drillTo="/metrics/tg-format-views" variants={formatItems.length > 0 ? breakdownVariants(formatItems, { columns: { label: 'Формат', value: 'Просмотры' } }) : undefined}>
           {formatItems.length === 0 && <EmptyHint />}
         </ChartSection>
       </WidgetGroup>

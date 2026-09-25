@@ -38,3 +38,23 @@ test('metric explorer inspector resizes, persists and resets', async ({ page }, 
     .poll(() => page.evaluate(() => document.documentElement.style.getPropertyValue('--inspector-w')))
     .toBe('');
 });
+
+test('inspector handle names what it controls and reads its value in units', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop-1440', 'Desktop-эксплорер');
+  await bootDemo(page, '/metrics/views', { theme: 'dark' });
+
+  const handle = page.getByTestId('inspector-handle');
+  await expect(handle).toBeVisible();
+
+  // Фокусируемый separator обязан сказать, ЧЕМ он управляет: без aria-controls скринридер
+  // объявляет «разделитель, 280» без привязки к панели.
+  const controls = await handle.getAttribute('aria-controls');
+  expect(controls).toBeTruthy();
+  await expect(page.locator(`#${controls}`)).toBeVisible();
+
+  // aria-valuetext даёт единицы вместо голого числа — и следует за изменением значения.
+  await expect(handle).toHaveAttribute('aria-valuetext', '280 пикселей');
+  await handle.focus();
+  await page.keyboard.press('ArrowLeft');
+  await expect(handle).toHaveAttribute('aria-valuetext', '296 пикселей');
+});

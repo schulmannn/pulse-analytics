@@ -33,6 +33,11 @@ SCHEMA_VERSION = 1
 # Retry ceiling for transient delivery errors; a payload the server actively rejects
 # (4xx other than 408/429) is dead-lettered immediately — see flush_queue.
 MAX_DELIVERY_ATTEMPTS = 20
+# The eternal `run` re-verifies /api/collector/compatibility before the first pass and then
+# every this many passes: a server that moved past our SCHEMA_VERSION would otherwise reject
+# EVERY delivery as a permanent 4xx (silent dead-letter of each collection) — see
+# ensure_compatibility, which stops the process loudly instead.
+COMPATIBILITY_RECHECK_PASSES = 20
 LOG = logging.getLogger("pulse-collector")
 
 
@@ -391,6 +396,34 @@ async def doctor(config: dict[str, str]) -> None:
     await service.shutdown()
 
 
+async def ensure_compatibility(config: dict[str, str]) -> None:
+    """Re-verify /api/collector/compatibility inside the eternal `run` (doctor's same check).
+
+    A DEFINITIVE server answer that SCHEMA_VERSION is unsupported stops the process with exit
+    code 2: every subsequent collection would be rejected as a permanent 4xx and silently
+    dead-lettered, so an honest loud stop (with an update instruction) is strictly better.
+    A transient failure of the check itself (network/5xx) must NOT kill the loop — delivery
+    already owns retries, and the next scheduled recheck will try again.
+    """
+    try:
+        compatibility = await asyncio.to_thread(api_request, config, "/api/collector/compatibility")
+    except Exception as error:
+        LOG.warning("Compatibility recheck unavailable (keeping the loop): %s", error)
+        return
+    supported = compatibility.get("supported_schema_versions", [])
+    if isinstance(supported, list) and SCHEMA_VERSION in supported:
+        return
+    LOG.error(
+        "Collector schema %s is no longer supported by the Atlavue server (supported: %s). "
+        "Update the collector: git pull && pip install -r collector/requirements.txt "
+        "(or pull the latest collector image), then restart. Stopping now so every "
+        "collection is not silently dead-lettered.",
+        SCHEMA_VERSION,
+        supported,
+    )
+    sys.exit(2)
+
+
 async def run_once(queue: DeliveryQueue, config: dict[str, str], include_mentions: bool) -> bool:
     await flush_queue(queue, config)
     payload = await collect_payload(include_mentions=include_mentions)
@@ -427,7 +460,13 @@ async def async_main(args: argparse.Namespace) -> int:
         return 0 if ok else 1
 
     interval = max(900, int(os.getenv("COLLECT_INTERVAL_SECONDS", "21600")))
+    passes = 0
     while True:
+        # Doctor-style schema recheck before the FIRST pass and then every
+        # COMPATIBILITY_RECHECK_PASSES passes: the server may move on while this loop lives.
+        if passes % COMPATIBILITY_RECHECK_PASSES == 0:
+            await ensure_compatibility(config)
+        passes += 1
         try:
             await run_once(queue, config, include_mentions)
         except Exception as error:

@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { DeltaPill } from '@/components/DeltaPill';
 import { ChartSection } from '@/components/instagram/shared';
+import { KpiValue } from '@/components/chartWidget/KpiValue';
 import { fmt } from '@/lib/format';
 import { isDrillKey } from '@/lib/kpiDerive';
 import type { DrillKey } from '@/lib/kpiDerive';
@@ -27,6 +28,7 @@ import {
   TextBlock,
 } from '@/panels/report/blocks';
 import type { ReportData } from '@/panels/report/useReportData';
+import { useScrollEdgeFade } from '@/lib/useScrollEdgeFade';
 
 interface CompositionProps {
   blocks: ReportBlock[];
@@ -43,6 +45,19 @@ function ReportSection({ title, children }: { title: string; children: ReactNode
   return (
     <div className="report-section">
       <ChartSection title={title}>{children}</ChartSection>
+    </div>
+  );
+}
+
+function ReportTableShell({ children }: { children: ReactNode }) {
+  const scrollFadeRef = useScrollEdgeFade<HTMLDivElement>();
+  return (
+    <div
+      ref={scrollFadeRef}
+      className="report-table-shell scroll-fade-x overflow-x-auto"
+      data-report-table="weekly"
+    >
+      {children}
     </div>
   );
 }
@@ -75,8 +90,8 @@ export function ReportComposition({ blocks, data, editable, onInsert, onMove, on
         >
           <div className="text-2xs tracking-wide text-muted-foreground">{label}</div>
           <div className="mt-1 flex items-baseline gap-1.5">
-            <span className="text-2xl font-medium tabular-nums tracking-tight">{drillMeta[k].total}</span>
-            <DeltaPill delta={drillMeta[k].trend} subtle />
+            <KpiValue size="small" text={drillMeta[k].total} />
+            <DeltaPill delta={drillMeta[k].trend} />
           </div>
         </Link>
       ))}
@@ -87,7 +102,7 @@ export function ReportComposition({ blocks, data, editable, onInsert, onMove, on
     if (!weekly) return null;
     return (
       <div className="report-table-group">
-        <div className="report-table-shell overflow-x-auto" data-report-table="weekly">
+        <ReportTableShell>
           <table className="report-table w-full min-w-[560px] border-collapse text-sm">
             <caption className="sr-only">Динамика показателей по неделям</caption>
             <thead className="report-table__head">
@@ -149,7 +164,7 @@ export function ReportComposition({ blocks, data, editable, onInsert, onMove, on
               })}
             </tbody>
           </table>
-        </div>
+        </ReportTableShell>
         <p className="report-table__note mt-2 text-2xs text-muted-foreground">
           Заливка — доля от максимума строки; источник — дневной архив, последняя неделя может быть неполной.
         </p>
@@ -177,7 +192,7 @@ export function ReportComposition({ blocks, data, editable, onInsert, onMove, on
         );
       case 'metric-subscribers':
         return (
-          <ReportMetricCard title="Подписчики по дням" total={drillMeta.subscribers.total} trend={drillMeta.subscribers.trend}
+          <ReportMetricCard title="Динамика подписчиков" total={drillMeta.subscribers.total} trend={drillMeta.subscribers.trend}
             series={subsSpark} valueFmt={fmt.num} to="/metrics/subscribers" onOpen={openPinnedTelegramSource}
             chartAppearance="rhea" chartLabel="Подписчики" />
         );
@@ -237,7 +252,7 @@ export function ReportComposition({ blocks, data, editable, onInsert, onMove, on
             )}
             <div className="text-xs font-medium tracking-wider text-muted-foreground">{label}</div>
             <div className="mt-2 flex items-baseline gap-2">
-              <span className="text-3xl font-medium tabular-nums tracking-tight">{drillMeta[metric].total}</span>
+              <KpiValue size="compact" text={drillMeta[metric].total} />
               <DeltaPill delta={drillMeta[metric].trend} />
             </div>
           </div>
@@ -263,8 +278,8 @@ export function ReportComposition({ blocks, data, editable, onInsert, onMove, on
               )}
             </div>
             <div className="flex items-baseline gap-2">
-              <span className="text-2xl font-medium tabular-nums tracking-tight">{drillMeta[spec.drill].total}</span>
-              <DeltaPill delta={drillMeta[spec.drill].trend} subtle />
+              <KpiValue size="small" text={drillMeta[spec.drill].total} />
+              <DeltaPill delta={drillMeta[spec.drill].trend} />
             </div>
             <ReportChart series={spec.series} viz={viz} valueFmt={spec.valueFmt} zeroBase={spec.zeroBase}
               chartAppearance={viz === 'line' ? 'rhea' : 'default'} chartLabel={chartLabel} />

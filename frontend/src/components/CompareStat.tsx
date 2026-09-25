@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react';
-import { DeltaPill } from '@/components/DeltaPill';
+import { KpiValue } from '@/components/chartWidget/KpiValue';
+import { DeltaNote, DeltaPill, deltaBasisTitle, deltaLabel } from '@/components/DeltaPill';
+import type { DeltaBasis } from '@/components/DeltaPill';
 import type { MetricDelta } from '@/lib/delta';
 
 /**
@@ -14,38 +16,112 @@ import type { MetricDelta } from '@/lib/delta';
  * one; identity hues drive only the composition segments. Green/red stay reserved for the DeltaPill.
  */
 
-/** Big headline number, optionally a drill button (with the app-wide «Разбор: …» a11y label), with
-    the delta pill inline. */
+/**
+ * ГОЛОВА S-КАРТОЧКИ — число и дельта на ОДНОЙ базовой линии, слева. Опциональная
+ * кнопка разбора несёт общеприложенческую a11y-подпись «Разбор: …».
+ *
+ * СЛОТ ДЕЛЬТЫ ДЕРЖИТСЯ ВСЕГДА (аудит #554, D9). Раньше «Ср. охват» печатал голое
+ * число (пары окон нет → DeltaPill отдавал null), а соседние «Реакции» — число со стрелкой:
+ * две карточки одного размера в одном ряду читались как карточки разных типов. Теперь слот говорит
+ * всегда и говорит честно: «0%» — сравнили и изменений нет, «нет базы» — сравнивать НЕ С ЧЕМ.
+ * Сам DeltaPill не трогаем: его молчание на flat — канон для разбора и таблиц сравнения.
+ *
+ * `deltaText` — честные «п.п.» там, где относительный процент от процента был бы ложью (ER); выигрывает у пилюли.
+ *
+ * `basis` — с ЧЕМ сравнили (даты базы и её число). Подсказка стоит на ЛЮБОМ варианте слота:
+ * в леджере половина карточек печатает `deltaText`, а не пилюлю, и повесить основание только на
+ * пилюлю значило бы оставить их без него.
+ *
+ * МОЛЧАЩИЙ СЛОТ ГОВОРИТ «нет базы», а не «— к пред.»: прежний текст ссылался на
+ * «пред.», которого читатель нигде не видел, и читался как сбой загрузки. Причину
+ * приносит `noBasisReason` — её знает только считающий.
+ */
 export function CompactStatHeadline({
   text,
   delta,
+  deltaText,
+  basis,
+  noBasisReason,
   onDrill,
   drillLabel,
   live,
 }: {
   text: string;
   delta?: MetricDelta | null;
+  deltaText?: string | null;
+  basis?: DeltaBasis | null;
+  noBasisReason?: string;
   onDrill?: () => void;
   drillLabel?: string;
   live: boolean;
 }) {
-  const numberClass = 'kpi-accent text-hero font-medium leading-none tabular-nums tracking-tight';
+  const basisTitle = basis ? deltaBasisTitle(basis) : undefined;
   return (
     <div className="flex items-baseline gap-2">
-      {onDrill && live ? (
-        <button
-          type="button"
-          aria-label={drillLabel ? `Разбор: ${drillLabel}` : undefined}
-          title="Подробный разбор"
-          onClick={onDrill}
-          className={`${numberClass} rounded text-left transition-colors hover:text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40`}
-        >
-          {text}
-        </button>
-      ) : (
-        <div className={numberClass}>{text}</div>
-      )}
-      {live ? <DeltaPill delta={delta} /> : null}
+      <KpiValue
+        text={text}
+        onDrill={onDrill && live ? onDrill : undefined}
+        drillLabel={drillLabel}
+      />
+      {live ? (
+        deltaText ? (
+          <DeltaNote text={deltaText} title={basisTitle} />
+        ) : deltaLabel(delta) ? (
+          <DeltaPill delta={delta} basis={basis} />
+        ) : delta ? (
+          <DeltaNote text="0%" title={basisTitle} />
+        ) : (
+          <DeltaNote text="нет базы" title={noBasisReason} />
+        )
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * СТАТ БЕЗ ГРАФИКА — та же анатомия, что у соседей по ряду: число и дельта одной строкой
+ * слева, внизу — одна пояснительная строка вместо искры.
+ *
+ * БЫЛО ЦЕНТРИРОВАНИЕ (референс владельца, 2026-08-14): крупный процент по центру тела,
+ * строкой ниже — сравнение с прошлым периодом. Аудит #554 (D9) снял его: три соседние
+ * карточки одного размера держали три разные оси выравнивания, и ряд читался как три разные
+ * карточки вместо одной семьи. Всё остальное из того решения цело: графика здесь по-прежнему
+ * нет, дельта ER остаётся в честных «п.п.», пояснение стоит внизу тем же тихим набором.
+ */
+export function StackedStat({
+  text,
+  delta,
+  deltaText,
+  basis,
+  noBasisReason,
+  onDrill,
+  drillLabel,
+  live,
+  note,
+}: {
+  text: string;
+  delta?: MetricDelta | null;
+  deltaText?: string | null;
+  basis?: DeltaBasis | null;
+  noBasisReason?: string;
+  onDrill?: () => void;
+  drillLabel?: string;
+  live: boolean;
+  note?: ReactNode;
+}) {
+  return (
+    <div className="flex h-full min-h-0 flex-col justify-between gap-4">
+      <CompactStatHeadline
+        text={text}
+        delta={delta}
+        deltaText={live ? deltaText : null}
+        basis={basis}
+        noBasisReason={noBasisReason}
+        onDrill={onDrill}
+        drillLabel={drillLabel}
+        live={live}
+      />
+      {note ? <p className="text-2xs leading-relaxed text-muted-foreground">{note}</p> : null}
     </div>
   );
 }
@@ -96,15 +172,19 @@ export interface CompareStatProps {
   hasValue?: boolean;
   /** Row label for the current bar (default «Период»). */
   currentLabel?: string;
+  /** С чем сравнили — даты базы и её число (подсказка у слота дельты). */
+  basis?: DeltaBasis | null;
+  /** Почему сравнивать не с чем — подсказка у «нет базы». */
+  noBasisReason?: string;
 }
 
-export function CompareStat({ value, prev, delta, format, onDrill, drillLabel, hasValue = true, currentLabel = 'Период' }: CompareStatProps) {
+export function CompareStat({ value, prev, delta, format, onDrill, drillLabel, hasValue = true, currentLabel = 'Период', basis, noBasisReason }: CompareStatProps) {
   const live = hasValue && value != null && Number.isFinite(value);
   const bars = live && prev != null && Number.isFinite(prev) && prev >= 0;
   const max = bars ? Math.max(value as number, prev as number) : 0;
   return (
     <div className="flex h-full min-h-0 flex-col justify-between gap-4">
-      <CompactStatHeadline text={live ? format(value as number) : '—'} delta={bars ? delta : null} onDrill={onDrill} drillLabel={drillLabel} live={live} />
+      <CompactStatHeadline text={live ? format(value as number) : '—'} delta={bars ? delta : null} basis={bars ? basis : null} noBasisReason={noBasisReason} onDrill={onDrill} drillLabel={drillLabel} live={live} />
       {bars ? (
         <div className="space-y-2.5">
           <CompareBar label={currentLabel} value={value as number} max={max} format={format} tone="current" />

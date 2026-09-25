@@ -4,6 +4,7 @@ import { useChannels, useHistory, useTgFull } from '@/api/queries';
 import { latestDataMs } from '@/lib/freshness';
 import { ChannelRecencyProvider } from '@/lib/period';
 import { useMediaQuery } from '@/lib/useMediaQuery';
+import { Button } from '@/components/ui/button';
 import { WidgetGroup } from '@/components/widgets/WidgetGroup';
 import {
   HomeEditContext,
@@ -202,6 +203,24 @@ export function Home() {
       setHomeBlocks(seeded);
       return;
     }
+    // YM-only workspace — тот же стандартный add-флоу, что у МС-ветки выше (МС при наличии обоих
+    // побеждает сознательно: порядок веток). Ритм: Визиты на всю ширину, Посетители + Просмотры парой.
+    if (keys.length === 0 && channels.some((c) => c.source === 'ym')) {
+      const seeded: string[] = [];
+      for (const [metricId, size] of [
+        ['ym.visits', 'full'],
+        ['ym.users', 'half'],
+        ['ym.pageviews', 'half'],
+      ] as const) {
+        const w = addWidgetForMetric(metricId);
+        if (!w) continue;
+        updateWidgetConfig(w.id, { size });
+        seeded.push(customKey(w.id));
+      }
+      setGroupOrder('home', seeded.map((key) => `custom-${configIdFromKey(key) ?? ''}`));
+      setHomeBlocks(seeded);
+      return;
+    }
     // The desktop composition is a deliberate 100 / 50+50 / 100 / 100 rhythm. Preserve any old
     // per-widget choice, but give a genuinely new board enough room for its narrative and line chart.
     if (keys.includes('growth') && !getWidgetConfig(legacyConfigId('growth'))) {
@@ -240,6 +259,7 @@ export function Home() {
   // registry key stays in the (account-synced) pinned list as the stable cross-device pointer; the
   // config is device-local (widgetStore) and re-heals per device from that device's prefs.
   const pinnedSig = pinned.join('|');
+  // biome-ignore lint/correctness/useExhaustiveDependencies: pinned захвачен через pinnedSig (контент-сигнатура) — свежий массив на каждый рендер ожидаем
   useEffect(() => {
     // Desktop-only: split the legacy Telegram «Показатели» composite into five independent cards
     // before the generic legacy heal (which then skips `kpi`). Idempotent — a no-op once split.
@@ -256,8 +276,6 @@ export function Home() {
       if (prefs.hidden) setWidgetHidden(newId, true);
       remapGroupOrder('home', oldId, newId);
     }
-    // pinned is captured via pinnedSig (its content signature); a fresh array each render is expected.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pinnedSig, isDesktop]);
 
   return (
@@ -301,11 +319,11 @@ export function Home() {
               className="edit-toggle btn-pill text-sm font-medium"
             >
               <span className="edit-toggle-icons" aria-hidden="true">
-                <svg className="i-edit" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <svg aria-hidden="true" focusable="false" className="i-edit" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M12 20h9" />
                   <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z" />
                 </svg>
-                <svg className="i-done" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <svg aria-hidden="true" focusable="false" className="i-done" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   {/* pathLength=1 normalises the stroke length so the CSS draw-on (dasharray/offset) needs no measuring */}
                   <path d="M20 6 9 17l-5-5" pathLength={1} />
                 </svg>
@@ -410,7 +428,7 @@ export function Home() {
  * The single Home add flow: the metric catalogue → build dialog → pin. Lifted out of the edit-mode
  * dock so the desktop header button, the dock and the empty state all open the SAME modal chain and
  * add through one path (no duplicate catalog instance, no double mutation). Focus restore is handled
- * by the modals themselves (useFocusTrap snapshots whatever element opened them, restores on close).
+ * by the Radix dialogs themselves (the shared wrapper snapshots the opener and restores it on close).
  */
 function useHomeAdd(): { openCatalog: () => void; node: ReactNode } {
   const [catalogOpen, setCatalogOpen] = useState(false);
@@ -594,13 +612,9 @@ function HomeEmptyState({
           Соберите личную доску из ключевых метрик и сохранённых виджетов.
         </p>
         <div className="mt-5 flex flex-wrap items-center gap-3">
-          <button
-            type="button"
-            onClick={onAdd}
-            className="btn-pill bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-          >
+          <Button type="button" onClick={onAdd}>
             Добавить виджет
-          </button>
+          </Button>
           <button
             type="button"
             onClick={onSeedDefaults}
@@ -634,13 +648,9 @@ function HomeEmptyState({
         «На главную» на любом виджете.
       </p>
       <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
-        <button
-          type="button"
-          onClick={onEdit}
-          className="btn-pill bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-        >
+        <Button type="button" onClick={onEdit}>
           Добавить виджет
-        </button>
+        </Button>
         <button
           type="button"
           onClick={onSeedDefaults}

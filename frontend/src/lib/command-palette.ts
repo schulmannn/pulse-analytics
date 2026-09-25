@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from 'react';
+import { useEffect, useSyncExternalStore } from 'react';
 
 /**
  * Tiny external store for the global ⌘K command palette. Any control (the sidebar header's
@@ -38,4 +38,24 @@ const getSnapshot = () => open;
 export function useCommandPaletteOpen(): { open: boolean; setOpen: (next: boolean) => void } {
   const isOpen = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
   return { open: isOpen, setOpen: setCommandPaletteOpen };
+}
+
+/**
+ * Mount the global shortcut in the eager app shell. The palette UI is lazy-loaded, so keeping
+ * this listener inside that chunk can lose Ctrl/Cmd+K presses made while the chunk is in flight.
+ */
+export function useCommandPaletteHotkeys(): void {
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        toggleCommandPalette();
+      } else if (event.key === 'Escape') {
+        setCommandPaletteOpen(false);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 }

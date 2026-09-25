@@ -63,11 +63,13 @@ function createIntegrationsRepo({ pool, enabled, ensureExternalSource, transacti
   }
 
   // Full row incl. the encrypted token (callers decrypt). Returns null when not connected.
+  // token_expires_at — с оффсетом TZH:TZM ('+00:00'): igTokenState/refreshIgIfNeeded парсят его
+  // через new Date(), а голый 'OF' ('+00') даёт NaN → продление токена молча не срабатывает.
   async function getIgAccount(channelId) {
     if (!enabled || !channelId) return null;
     const { rows } = await pool.query(
       `SELECT channel_id, ig_user_id, username, access_token_enc, scopes,
-              to_char(token_expires_at,'YYYY-MM-DD"T"HH24:MI:SSOF') AS token_expires_at,
+              to_char(token_expires_at,'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS token_expires_at,
               to_char(connected_at,'YYYY-MM-DD"T"HH24:MI:SS') AS connected_at
          FROM ig_accounts WHERE channel_id=$1`, [channelId]);
     return rows[0] || null;
@@ -95,7 +97,7 @@ function createIntegrationsRepo({ pool, enabled, ensureExternalSource, transacti
     if (!enabled) return [];
     const { rows } = await pool.query(
       `SELECT channel_id, ig_user_id, username, access_token_enc, scopes,
-              to_char(token_expires_at,'YYYY-MM-DD"T"HH24:MI:SSOF') AS token_expires_at
+              to_char(token_expires_at,'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS token_expires_at
          FROM ig_accounts ORDER BY channel_id ASC`);
     return rows;
   }
@@ -161,6 +163,90 @@ function createIntegrationsRepo({ pool, enabled, ensureExternalSource, transacti
     return rowCount > 0;
   }
 
+  // ── Яндекс.Метрика (per-channel счётчик, подключение по OAuth-токену) ─────────
+  // Одна учётка Метрики на канал, зеркально ms_accounts. Токен приходит и отдаётся УЖЕ
+  // шифрованным (callers шифруют/дешифруют через lib/ym_crypto) — repo никогда не видит
+  // plaintext и не логирует его.
+  async function saveYmAccount(channelId, { counter_id, counter_name, site, counter_created_day, access_token_enc }) {
+    if (!enabled || !channelId) return false;
+    // Зеркало saveMsAccount: canonical ym-source → строка учётки → штамп source_id канала —
+    // одной транзакцией, чтобы падение между записями не оставило учётку без source-связки.
+    // counter_name идёт в external_sources как title (витринное имя), site — как username
+    // (доменный handle счётчика — ближайший аналог хэндла).
+    return transaction(async (client) => {
+      const srcId = await ensureExternalSource('ym', counter_id, { username: site, title: counter_name }, client);
+      await client.query(
+        `INSERT INTO ym_accounts (channel_id, counter_id, counter_name, site, counter_created_day, access_token_enc, source_id, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7, now())
+         ON CONFLICT (channel_id) DO UPDATE SET
+           counter_id=EXCLUDED.counter_id, counter_name=EXCLUDED.counter_name,
+           site=EXCLUDED.site, counter_created_day=EXCLUDED.counter_created_day,
+           access_token_enc=EXCLUDED.access_token_enc,
+           quality_backfilled_at=CASE
+             WHEN ym_accounts.counter_id=EXCLUDED.counter_id THEN ym_accounts.quality_backfilled_at
+             ELSE NULL
+           END,
+           source_id=COALESCE(EXCLUDED.source_id, ym_accounts.source_id), updated_at=now()`,
+        [channelId, counter_id, counter_name || null, site || null, counter_created_day || null, access_token_enc, srcId]);
+      await client.query(
+        `UPDATE channels SET source_id=$2 WHERE id=$1 AND source_id IS NULL AND tg_channel_id IS NULL AND source='ym'`,
+        [channelId, srcId]);
+      return true;
+    });
+  }
+
+  // Полная строка вместе с шифрованным токеном (callers дешифруют). null = не подключён.
+  async function getYmAccount(channelId) {
+    if (!enabled || !channelId) return null;
+    const { rows } = await pool.query(
+      `SELECT channel_id, counter_id, counter_name, site,
+              to_char(counter_created_day,'YYYY-MM-DD') AS counter_created_day,
+              access_token_enc,
+              to_char(connected_at,'YYYY-MM-DD"T"HH24:MI:SS') AS connected_at
+         FROM ym_accounts WHERE channel_id=$1`, [channelId]);
+    return rows[0] || null;
+  }
+
+  // Все подключённые счётчики ЖИВЫХ каналов — для доверенного дневного крона
+  // (ymCollectionJob дешифрует токен и ходит в отчёты). Зеркало listMsAccounts: JOIN-фильтр
+  // status<>'disabled' — выключенный канал не тратит квоту Метрики на сбор, который никто не
+  // читает; без ownership-фильтра — крон доверенный. counter_id нужен ключу durable per-day
+  // джобы (reconnect другого счётчика тем же каналом не наследует сегодняшний succeeded).
+  async function listYmAccounts() {
+    if (!enabled) return [];
+    const { rows } = await pool.query(
+      `SELECT ya.channel_id, ya.counter_id, ya.counter_name,
+              to_char(ya.counter_created_day,'YYYY-MM-DD') AS counter_created_day,
+              ya.access_token_enc,
+              to_char(ya.quality_backfilled_at,'YYYY-MM-DD"T"HH24:MI:SS') AS quality_backfilled_at
+         FROM ym_accounts ya
+         JOIN channels c ON c.id = ya.channel_id AND c.status <> 'disabled'
+        ORDER BY ya.channel_id ASC`);
+    return rows;
+  }
+
+  // Durable маркер одноразового бэкфилла качества (миграция 034). Ставится ТОЛЬКО кроном и ТОЛЬКО
+  // после успешного непустого upsert'а полного историко-качественного бэкфилла. Guarded
+  // channel+counter: переподключение ДРУГОГО счётчика тем же каналом (гонка reconnect) не
+  // унаследует чужой succeeded-маркер. `quality_backfilled_at IS NULL` делает пометку
+  // идемпотентной — повторный успешный проход не передёргивает штамп.
+  async function markYmQualityBackfilled(channelId, counterId) {
+    if (!enabled || !channelId || !counterId) return false;
+    const { rowCount } = await pool.query(
+      `UPDATE ym_accounts SET quality_backfilled_at=now()
+         WHERE channel_id=$1 AND counter_id=$2 AND quality_backfilled_at IS NULL`,
+      [channelId, String(counterId)]);
+    return rowCount > 0;
+  }
+
+  // Отключение источника: сносим ТОЛЬКО строку учётки (токен). Канал и архив ym_daily живут
+  // дальше — история остаётся читаемой, повторный connect того же счётчика её продолжит.
+  async function deleteYmAccount(channelId) {
+    if (!enabled || !channelId) return false;
+    const { rowCount } = await pool.query('DELETE FROM ym_accounts WHERE channel_id=$1', [channelId]);
+    return rowCount > 0;
+  }
+
   // ── Telegram QR sessions (managed connect) ───────────────────────────
   // One encrypted user session per account (callers encrypt via lib/tg_crypto — the repo never sees
   // plaintext). Covers every channel where that user is an admin; QR-connected channels reach it
@@ -205,10 +291,10 @@ function createIntegrationsRepo({ pool, enabled, ensureExternalSource, transacti
     const { rows } = await pool.query(
       `SELECT uid, tg_user_id, username, session_enc, connection_state, session_version,
               to_char(connected_at,'YYYY-MM-DD"T"HH24:MI:SS') AS connected_at,
-              to_char(last_attempt_at,'YYYY-MM-DD"T"HH24:MI:SSOF') AS last_attempt_at,
-              to_char(last_success_at,'YYYY-MM-DD"T"HH24:MI:SSOF') AS last_success_at,
+              to_char(last_attempt_at,'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS last_attempt_at,
+              to_char(last_success_at,'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS last_success_at,
               last_error_code,
-              to_char(last_error_at,'YYYY-MM-DD"T"HH24:MI:SSOF') AS last_error_at
+              to_char(last_error_at,'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS last_error_at
          FROM tg_sessions WHERE uid=$1`, [uid]);
     return rows[0] || null;
   }
@@ -226,10 +312,10 @@ function createIntegrationsRepo({ pool, enabled, ensureExternalSource, transacti
     if (!enabled) return [];
     const { rows } = await pool.query(
       `SELECT uid, tg_user_id, username, session_enc, connection_state, session_version,
-              to_char(last_attempt_at,'YYYY-MM-DD"T"HH24:MI:SSOF') AS last_attempt_at,
-              to_char(last_success_at,'YYYY-MM-DD"T"HH24:MI:SSOF') AS last_success_at,
+              to_char(last_attempt_at,'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS last_attempt_at,
+              to_char(last_success_at,'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS last_success_at,
               last_error_code,
-              to_char(last_error_at,'YYYY-MM-DD"T"HH24:MI:SSOF') AS last_error_at
+              to_char(last_error_at,'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM') AS last_error_at
          FROM tg_sessions ORDER BY uid ASC`);
     return rows;
   }
@@ -322,6 +408,7 @@ function createIntegrationsRepo({ pool, enabled, ensureExternalSource, transacti
   return {
     saveIgAccount, getIgAccount, updateIgToken, deleteIgAccount, listIgAccounts,
     saveMsAccount, getMsAccount, listMsAccounts, deleteMsAccount,
+    saveYmAccount, getYmAccount, listYmAccounts, deleteYmAccount, markYmQualityBackfilled,
     saveTgSession, getTgSession, deleteTgSession, listTgSessions, rotateTgSessionCiphertext,
     listTgQrCollectCandidates,
     recordTgSessionAttempt, recordTgSessionSuccess, recordTgSessionFailure,

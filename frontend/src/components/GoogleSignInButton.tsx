@@ -47,6 +47,7 @@ export function GoogleSignInButton({ text = 'continue_with' }: { text?: 'continu
   const [loadErr, setLoadErr] = useState(false);
   const clientId = config.data?.google_client_id ?? null;
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: одноразовая инициализация GIS-виджета — ре-init только по clientId, колбэки стабильны
   useEffect(() => {
     if (!clientId || !ref.current) return;
     let cancelled = false;
@@ -72,7 +73,6 @@ export function GoogleSignInButton({ text = 'continue_with' }: { text?: 'continu
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clientId]);
 
   if (!clientId) return null; // inert until GOOGLE_CLIENT_ID is set on the server

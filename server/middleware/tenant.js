@@ -1,5 +1,24 @@
 'use strict';
 
+/**
+ * Канал АРЕНДАТОРА для запроса. Канон: заголовок `x-channel-id`, его шлёт клиент на каждый вызов;
+ * `?channel=` — запасной путь для ссылок, где заголовок не поставить (скачивание CSV прямым
+ * `<a href>`).
+ *
+ * Query-значение берётся ТОЛЬКО когда это чистое число. Раньше было
+ * `parseInt(req.query.channel || req.headers['x-channel-id'], 10) || 0`, и любое нечисловое
+ * значение молча означало «канал по умолчанию»: лента заказов СДЭКа слала `?channel=yandex_market`
+ * — свой фильтр по каналу ПРОДАЖ, совсем другое понятие, — запрос уезжал на дефолтный канал
+ * пользователя, тот оказывался не-СДЭКом, и лента отвечала «Не удалось получить заказы» (прод-баг,
+ * найден владельцем). Имя фильтра с тех пор своё (`sales_channel`), но подстраховка остаётся:
+ * непонятный `?channel` не должен подменять арендатора — он должен быть проигнорирован.
+ */
+function tenantChannelId(req) {
+  const raw = req && req.query ? req.query.channel : null;
+  if (typeof raw === 'string' && /^\d+$/.test(raw)) return parseInt(raw, 10);
+  return parseInt(req && req.headers ? req.headers['x-channel-id'] : null, 10) || 0;
+}
+
 function makeResolveChannel({ db, isReady }) {
   return async function resolveChannel(req, res, next) {
     if (!db.enabled) {
@@ -7,7 +26,7 @@ function makeResolveChannel({ db, isReady }) {
       return next();
     }
     if (!isReady()) return res.status(503).json({ error: 'Сервис запускается, попробуй через секунду' });
-    const channelId = parseInt(req.query.channel || req.headers['x-channel-id'], 10) || 0;
+    const channelId = tenantChannelId(req);
     try {
       // Auth/tenant hot path: resolve the request's channel in ONE query. getChannelOrDefault picks
       // the caller's default channel (same visibility + created_at order as listChannels, with the
@@ -76,4 +95,4 @@ function makeServeSnapshot({ db }) {
   };
 }
 
-module.exports = { makeResolveChannel, makeServeSnapshot, requireWorkspaceRole, hasWorkspaceRole };
+module.exports = { makeResolveChannel, makeServeSnapshot, requireWorkspaceRole, hasWorkspaceRole, tenantChannelId };

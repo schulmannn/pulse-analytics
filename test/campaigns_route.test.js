@@ -74,7 +74,10 @@ test('POST /api/campaigns: валидация name/color/status/дат', async (
     [{ channel_id: 1, name: {} }, /name/],
     [{ channel_id: 0, name: 'ok' }, /channel_id/],
     [{ name: 'x'.repeat(121) }, /name/],
-    [{ name: 'ok', color: 'red' }, /color/],
+    [{ name: 'ok', color: 'red' }, /color: ожидается #RRGGBB или chart-1\.\.chart-6/],
+    [{ name: 'ok', color: 'chart-0' }, /color/],
+    [{ name: 'ok', color: 'chart-7' }, /color/],
+    [{ name: 'ok', color: 'CHART-3' }, /color/],
     [{ name: 'ok', status: 'paused' }, /status/],
     [{ name: 'ok', start_date: '10.06.2026' }, /start_date/],
     [{ name: 'ok', start_date: '2026-02-31' }, /start_date/],
@@ -90,6 +93,23 @@ test('POST /api/campaigns: валидация name/color/status/дат', async (
   });
   assert.equal(ok.statusCode, 200);
   assert.equal(ok.body.campaign.id, 5);
+});
+
+test('color-контракт: легаси-hex нормализуется в lowercase, токен chart-N хранится как есть', async () => {
+  let received = null;
+  const routes = buildRoutes(baseDb({
+    createCampaign: async (_uid, fields) => { received = fields; return CAMPAIGN; },
+  }));
+  const hex = await invoke(routes, 'POST /api/campaigns', {
+    body: { channel_id: 1, name: 'Hex', color: '#2D6BE0' },
+  });
+  assert.equal(hex.statusCode, 200);
+  assert.equal(received.color, '#2d6be0', 'hex приводится к lowercase');
+  const token = await invoke(routes, 'POST /api/campaigns', {
+    body: { channel_id: 1, name: 'Токен', color: 'chart-3' },
+  });
+  assert.equal(token.statusCode, 200);
+  assert.equal(received.color, 'chart-3', 'токен проходит без изменений');
 });
 
 test('409: дубль имени (create и patch) и лимит membership', async () => {

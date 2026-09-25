@@ -8,8 +8,7 @@ import { bootDemo } from './helpers';
  * stays under BUDGET across every breakpoint.
  *
  * Google's "good" CLS threshold is 0.1; the app measures well under it — most routes ~0, /overview
- * the highest (~0.04) from its content-height insight/grid — after reserving the sidebar freshness
- * row (DashboardLayout SidebarStatus, which used to return null then pop in and shove the nav down).
+ * the highest (~0.04) from its content-height insight/grid.
  * The gate is a REGRESSION guard: a skeleton that stops matching its content (a return-null→content
  * pop-in, a mis-sized loading block) blows past 0.1 and fails here.
  */

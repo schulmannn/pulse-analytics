@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { lazy, Suspense, useState } from 'react';
 import { cn } from '@/lib/utils';
+import { fmt } from '@/lib/format';
 import { Button } from '@/components/ui/button';
-import { DateRangePicker } from '@/components/DateRangePicker';
+import { Skeleton } from '@/components/ui/skeleton';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import {
   Popover,
@@ -10,6 +11,12 @@ import {
 } from '@/components/ui/popover';
 import type { DateRange, PeriodDays } from '@/lib/period';
 
+const DateRangePicker = lazy(() =>
+  import('@/components/DateRangePicker').then((module) => ({
+    default: module.DateRangePicker,
+  })),
+);
+
 const PRESETS: { days: PeriodDays; label: string }[] = [
   { days: 7, label: '7д' },
   { days: 30, label: '30д' },
@@ -17,10 +24,10 @@ const PRESETS: { days: PeriodDays; label: string }[] = [
   { days: 0, label: 'Всё' },
 ];
 
-/** Short «дд.мм» for the active custom-range chip label. */
-// Канон дат приложения — «3 июн.», не «03.06» (регресс закрытого канона, проход №3).
-const fmtRangeChip = (ms: number) =>
-  new Date(ms).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
+/** Date label for the active custom-range chip. */
+// Канон дат приложения — «3 июн.», не «03.06» (регресс закрытого канона, проход №3): один
+// форматтер на всё приложение, локальных вариантов не заводим.
+const fmtRangeChip = (ms: number) => fmt.day(ms);
 
 /**
  * Compact rounded-pill period selector for a feed header (7д / 30д / 90д / Всё). Presentational —
@@ -49,13 +56,10 @@ export function PeriodChips({
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
   return (
-    <div
-      role="group"
-      aria-label={ariaLabel}
-      className={cn('relative flex flex-wrap items-center gap-1.5', className)}
-    >
-      {/* Presets ride the shared sliding-glider primitive; a picked custom range deselects every
-          preset (value matches no segment → the glider hides). Rendered `groupless` so this one
+    <fieldset className={cn('relative m-0 flex min-w-0 flex-wrap items-center gap-1.5 border-0 p-0', className)}>
+      <legend className="sr-only">{ariaLabel}</legend>
+      {/* Presets ride the shared shadcn/Radix ToggleGroup; a picked custom range deselects every
+          preset. Rendered `groupless` so this one
           public «Период» group stays the sole labelled group (the «Свой период» pill lives in it). */}
       <SegmentedControl
         groupless
@@ -70,17 +74,21 @@ export function PeriodChips({
         <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
           <PopoverTrigger asChild>
             {/* Part of the shared Button system rather than an ad-hoc pill; the active (picked-range)
-                state tints the same outline chip so it still reads as pressed next to the presets. */}
+                state tints the same outline chip so it still reads as pressed next to the presets.
+                NO aria-pressed here: Radix already owns aria-expanded/aria-haspopup on a popover
+                trigger, and a button cannot be a toggle and a disclosure at once (screen readers
+                would announce both states). The picked range is carried by the accessible NAME —
+                the label itself becomes «3 июн. – 12 июн.» — so the state stays announced. */}
             <Button
               type="button"
               variant="outline"
-              size="xs"
-              aria-pressed={!!range}
+              size="default"
+              shape="pill"
               className={cn(
-                'font-medium',
+                'min-w-11 text-xs sm:min-w-0',
                 range
-                  ? 'border-primary/40 bg-primary/10 text-primary hover:bg-primary/10 hover:text-primary'
-                  : 'border-border bg-transparent text-muted-foreground hover:bg-transparent hover:text-foreground',
+                  ? 'bg-accent text-accent-foreground hover:bg-accent hover:text-accent-foreground'
+                  : 'bg-transparent text-muted-foreground hover:text-foreground',
               )}
             >
               {range
@@ -88,21 +96,23 @@ export function PeriodChips({
                 : 'Свой период'}
             </Button>
           </PopoverTrigger>
-          <PopoverContent align="end" sideOffset={8} className="w-auto p-3">
-            <DateRangePicker
-              value={range ?? null}
-              onApply={(nextRange) => {
-                onRangeChange(nextRange);
-                setPickerOpen(false);
-              }}
-              onReset={() => {
-                onRangeChange(null);
-                setPickerOpen(false);
-              }}
-            />
+          <PopoverContent align="end" sideOffset={8} className="w-auto p-0">
+            <Suspense fallback={<Skeleton className="h-80 w-80 rounded-none" />}>
+              <DateRangePicker
+                value={range ?? null}
+                onApply={(nextRange) => {
+                  onRangeChange(nextRange);
+                  setPickerOpen(false);
+                }}
+                onReset={() => {
+                  onRangeChange(null);
+                  setPickerOpen(false);
+                }}
+              />
+            </Suspense>
           </PopoverContent>
         </Popover>
       )}
-    </div>
+    </fieldset>
   );
 }

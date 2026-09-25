@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react';
+import { toast } from 'sonner';
 import { useBugs, useCreateBug, useUpdateBugStatus, useDeleteBug } from '@/api/queries';
 import { PillSelect } from '@/components/PillSelect';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -117,7 +118,7 @@ export function Bugs() {
                 availableStatuses={availableStatuses}
                 onDelete={async (id) => {
                   const ok = await confirm({ title: 'Удалить запись из баг-трекера?' });
-                  if (ok) deleteBugMutation.mutate(id);
+                  if (ok) deleteBugMutation.mutate(id, { onSuccess: () => toast('Тикет удалён') });
                 }}
               />
             ))}
@@ -151,7 +152,7 @@ function BugRowCard({ bug, availableStatuses, onDelete }: BugRowCardProps) {
   const kindColors: Record<string, string> = {
     bug: 'text-ember bg-ember/10',
     feature: 'text-verdant bg-verdant/10',
-    change: 'text-primary bg-primary/10',
+    change: 'bg-primary/10 text-accent-foreground',
     crash: 'text-ember bg-ember/10',
   };
   // 'crash' is auto-reported (POST /api/client-errors), not a create-form option, so its label lives
@@ -174,6 +175,7 @@ function BugRowCard({ bug, availableStatuses, onDelete }: BugRowCardProps) {
             {bug.text}
           </div>
           <button
+            type="button"
             onClick={() => onDelete(bug.id)}
             aria-label="Удалить тикет"
             className="shrink-0 self-end rounded border border-transparent p-1 text-xs text-muted-foreground transition-colors hover:border-border hover:text-destructive sm:self-auto"
