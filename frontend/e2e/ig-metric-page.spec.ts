@@ -229,6 +229,10 @@ test.describe('Instagram chart cards — /metrics/ig-*', () => {
 
     await expect(page).toHaveURL(/\/metrics\/ig-format-engagement\?campaign=1$/);
     await expect(page.locator('[role="dialog"]')).toHaveCount(0);
+    // URL меняется раньше коммита нового роута: без ожидания h1 страницы метрики getByText ловил
+    // ещё не снятый «Контент» (чип формата в строке, вкладка «Reels», карточка «Форматы») — три
+    // совпадения и strict-mode отказ в CI. h1 с этим именем есть только у страницы метрики.
+    await expect(page.getByRole('heading', { name: 'Вовлечённость по форматам', level: 1 })).toBeVisible();
     await expect(page.getByText('Reels', { exact: true })).toBeVisible();
     // Account-level breakdown contains Feed, but the selected campaign contains only reel1.
     await expect(page.getByText('Лента', { exact: true })).toHaveCount(0);

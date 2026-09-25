@@ -245,13 +245,38 @@ function createInstagramClient({ db, log, igCrypto, defaultToken, inflight, fetc
   // re-encrypted and persisted. Any failure is swallowed — the current token is returned so the
   // request never breaks; a truly-expired token surfaces as a Graph error → reconnect needed.
   const IG_REFRESH_WINDOW_MS = 10 * 24 * 60 * 60 * 1000;
-  async function refreshIgIfNeeded(channelId, token, expiresAtStr) {
+  // Продление стоит на каждом IG-роуте (resolveIg), поэтому дашборд из 8 карточек у аккаунта в окне
+  // продления — это 8 одновременных вызовов. Без схлопывания каждый шёл в Graph и писал токен в БД,
+  // а отказ Graph (отозванный доступ, приложение в dev-режиме) повторялся на КАЖДОМ чтении лишним
+  // round-trip'ом. Поэтому: (1) singleflight по (канал, токен) в общем igInflight — live-роуты и
+  // фоновые проходы делят один вызов; (2) исход — и успех, и отказ — помнится IG_REFRESH_SETTLED_MS
+  // для ровно этого исходного токена: запоздалые чтения со старым снимком из БД получают уже
+  // продлённый токен, а отказ не долбит Graph. Новый токен (переподключение) под память не попадает.
+  const IG_REFRESH_SETTLED_MS = 30 * 60 * 1000;
+  const refreshSettled = new Map();   // channelId → { from, to, until }
+  function refreshIgIfNeeded(channelId, token, expiresAtStr) {
+    if (!expiresAtStr) return Promise.resolve(token);
+    const exp = new Date(expiresAtStr).getTime();
+    if (!Number.isFinite(exp)) return Promise.resolve(token);
+    const now = clock();
+    if (exp <= now || exp - now > IG_REFRESH_WINDOW_MS) return Promise.resolve(token);   // dead, or not due yet
+    const settled = refreshSettled.get(channelId);
+    if (settled && settled.from === token && now < settled.until) return Promise.resolve(settled.to);
+    const key = `refresh:${channelId}:${token}`;
+    let flight = igInflight.get(key);
+    if (!flight) {
+      flight = refreshOnce(channelId, token, now).then((next) => {
+        refreshSettled.set(channelId, { from: token, to: next, until: clock() + IG_REFRESH_SETTLED_MS });
+        return next;
+      });
+      igInflight.set(key, flight);
+      flight.finally(() => igInflight.delete(key)).catch(() => {});
+    }
+    return flight;
+  }
+
+  async function refreshOnce(channelId, token, now) {
     try {
-      if (!expiresAtStr) return token;
-      const exp = new Date(expiresAtStr).getTime();
-      if (!Number.isFinite(exp)) return token;
-      const now = clock();
-      if (exp <= now || exp - now > IG_REFRESH_WINDOW_MS) return token;   // dead, or not due yet
       // Single-shot on purpose: token refresh is NOT idempotent-safe to retry and must bypass the
       // igFetch data-GET retry machinery. It shares only the injected fetch, never the retry loop.
       const r = await doFetch(`${IG_GRAPH}/refresh_access_token?` + new URLSearchParams({
@@ -259,7 +284,8 @@ function createInstagramClient({ db, log, igCrypto, defaultToken, inflight, fetc
       const j = await r.json();
       if (j && j.access_token && j.expires_in) {
         const nextExpiry = new Date(now + j.expires_in * 1000);
-        // Провал персиста — actionable (рефреш будет повторяться на каждом чтении): логируем, не глотаем.
+        // Провал персиста — actionable (БД держит старый токен, и после IG_REFRESH_SETTLED_MS рефреш
+        // пойдёт снова): логируем, не глотаем.
         await db.updateIgToken(channelId, igCrypto.encrypt(j.access_token), nextExpiry)
           .catch((e) => log('warn', 'ig_token_persist_failed', { channelId, error: e.message }));
         log('info', 'ig_token_refreshed', { channelId, expiresAt: nextExpiry.toISOString() });

@@ -14,7 +14,8 @@
 
 const { channelAccessSql } = require('../db/access');
 
-const ISO = `'YYYY-MM-DD"T"HH24:MI:SSOF'`;
+// Смещение — TZH:TZM ('+00:00'), не OF: OF при целочасовом поясе даёт '+00', а JS Date такое не парсит.
+const ISO = `'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM'`;
 
 function createMentionNotifyRepo({ pool, enabled }) {
   // ── Привязка бота (deep-link /start) ────────────────────────────────────────────────────────────
