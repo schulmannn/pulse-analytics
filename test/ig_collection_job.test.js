@@ -166,3 +166,139 @@ test('stories: throttle в per-метрик вызове пробрасывае�
   });
   await assert.rejects(job.collectIgForAccount(ACC, DAY), (e) => isIgThrottleError(e));
 });
+
+// ── collectIgDailyForDay: вынос дня из крона (догрузка истории повторяет ровно эти запросы) ──────
+
+const SEC = 86400;
+const TV = ['views', 'profile_views', 'accounts_engaged', 'total_interactions', 'likes', 'comments', 'saves', 'shares'];
+const dayOf = (ms) => new Date(ms).toISOString().slice(0, 10);
+
+// Записывающий фейк Graph: (path, params) в порядке вызова + программируемый ответ.
+function recordingJob(handler = benign) {
+  const calls = [];
+  const writes = [];
+  const logs = [];
+  const job = createInstagramCollectionJob({
+    db: {
+      upsertIgDaily: async (chan, rows, executor, opts) => { writes.push({ chan, rows, executor, opts }); return rows.length; },
+      upsertIgMediaDaily: async () => {},
+      saveRawSnapshot: async () => {},
+    },
+    log: (level, event, fields) => logs.push({ level, event, fields }),
+    igCrypto: { decrypt: () => 'TOKEN' },
+    igFetch: async (path, params = {}, token) => { calls.push({ path, params: JSON.stringify(params), token }); return handler(path, params); },
+    refreshIgIfNeeded: async (_c, t) => t,
+  });
+  return { job, calls, writes, logs };
+}
+
+// Эталон — последовательность запросов крона ДО выноса collectIgDailyForDay (в том же порядке ключей).
+function legacyCronCalls(day) {
+  const since = Date.parse(`${day}T00:00:00Z`) / 1000;
+  const until = since + SEC;
+  const fau = { metric: 'follows_and_unfollows', metric_type: 'total_value', breakdown: 'follow_type', period: 'day' };
+  return [
+    ['/IG1/insights', { metric: 'reach,follower_count', period: 'day', since, until }],
+    ...TV.map((metric) => ['/IG1/insights', { metric, metric_type: 'total_value', period: 'day', since, until }]),
+    ['/IG1/insights', { ...fau, since: until - 8 * SEC, until }],
+    ['/IG1/insights', { ...fau, since: until - 8 * SEC, until: since }],
+    ['/IG1', { fields: 'followers_count' }],
+  ].map(([path, params]) => ({ path, params: JSON.stringify(params), token: 'TOKEN' }));
+}
+
+test('паритет крона: запросы за «вчера» и записанная строка не изменились после выноса дня', async () => {
+  const tv = { views: 11, profile_views: 12, accounts_engaged: 13, total_interactions: 14, likes: 15, comments: 16, saves: 17, shares: 18 };
+  const fauBlock = (f, u) => ({ data: [{ total_value: { breakdowns: [{ results: [
+    { dimension_values: ['FOLLOWER'], value: f }, { dimension_values: ['NON_FOLLOWER'], value: u }] }] } }] });
+  const { job, calls, writes } = recordingJob((path, params) => {
+    if (params.metric_type === 'total_value' && params.metric in tv && params.breakdown == null) return { data: [{ total_value: { value: tv[params.metric] } }] };
+    // wide [якорь, сегодня) = 7/4, narrow [якорь, вчера) = 4/3 → вчера = 3/1.
+    if (params.metric === 'follows_and_unfollows') return params.until % SEC === 0 && params.until * 1000 > Date.now() - SEC * 1000 ? fauBlock(7, 4) : fauBlock(4, 3);
+    return benign(path, params);
+  });
+  const before = dayOf(Date.now() - SEC * 1000);
+  await job.collectIgForAccount(ACC, DAY);
+  const after = dayOf(Date.now() - SEC * 1000);
+  const day = writes[0].rows[0].day;
+  assert.ok(day === before || day === after, 'строка крона — ровно вчера (UTC)');
+  const daily = calls.filter((c) => c.path === '/IG1' || (c.path === '/IG1/insights' && !/follower_demographics|online_followers|media_product_type|profile_links_taps/.test(c.params)));
+  assert.deepEqual(daily, legacyCronCalls(day), 'те же (path, params) в том же порядке');
+  assert.deepEqual(writes[0].rows, [{
+    day, reach: 5, followers: 9, ...tv, follows: 3, unfollows: 1, followers_total: 100,
+  }]);
+  assert.equal(writes[0].opts, undefined, 'крон зовёт upsert без guardSource — его SQL не меняется');
+});
+
+test('крон не пишет строку из одних null: пропуск остаётся видимым для ремонта', async () => {
+  const { job, writes, logs } = recordingJob((path, params) => {
+    if (path === '/IG1' && params.fields === 'followers_count') return {};
+    if (params.metric === 'follows_and_unfollows') return { data: [] };
+    if (path === '/IG1/insights' && params.metric === 'reach,follower_count') return { data: [] };
+    return benign(path, params);
+  });
+  await job.collectIgForAccount(ACC, DAY);
+  assert.equal(writes.length, 0, 'всё-null строка не записана');
+  assert.ok(logs.some((l) => l.event === 'ig_cron_day_empty'), 'пустой день залогирован');
+});
+
+test('collectIgDailyForDay: прошлый день — окно [D, D+1), без уровня базы, только reach при followerCount=false', async () => {
+  const { job, calls, writes } = recordingJob((path, params) => {
+    if (params.metric === 'reach' && params.period === 'day' && !params.metric_type) return { data: [{ name: 'reach', values: [{ value: 42 }] }] };
+    return benign(path, params);
+  });
+  const r = await job.collectIgDailyForDay(ACC, 'TOKEN', '2025-03-10', { followerCount: false, level: false });
+  const since = Date.parse('2025-03-10T00:00:00Z') / 1000;
+  assert.deepEqual(JSON.parse(calls[0].params), { metric: 'reach', period: 'day', since, until: since + SEC });
+  assert.ok(!calls.some((c) => c.path === '/IG1'), 'followers_count прошлого дня не запрашивается');
+  assert.equal(calls.length, 11, 'reach + 8 total_value + 2 окна fau');
+  assert.equal(r.calls, 11);
+  assert.equal(r.row.followers_total, undefined);
+  assert.equal(r.row.reach, 42);
+  assert.equal(r.outcome, 'data');
+  assert.equal(writes.length, 0, 'write=false — пишет вызывающий');
+  const fauWide = JSON.parse(calls[9].params);
+  assert.equal(fauWide.since, since + SEC - 8 * SEC, 'якорь fau — until − 8 дней, как у крона');
+});
+
+test('collectIgDailyForDay: исход дня — reauth > transient > data > empty; throttle пробрасывается', async () => {
+  const err = (status, extra = {}) => Object.assign(new Error('x'), { status, ...extra });
+  const zeros = (path, params) => {
+    if (path === '/IG1/insights' && params.metric === 'reach') return { data: [{ name: 'reach', values: [{ value: 0 }] }] };
+    if (params.metric_type === 'total_value' && params.breakdown == null) return { data: [{ total_value: { value: 0 } }] };
+    return benign(path, params);
+  };
+  const empty = recordingJob((path, params) => {
+    if (params.metric === 'follows_and_unfollows') return { data: [] };
+    return zeros(path, params);
+  });
+  assert.equal((await empty.job.collectIgDailyForDay(ACC, 'T', '2025-01-01', { followerCount: false })).outcome, 'empty',
+    'день из одних нулей/null — пусто, а не выдуманный ноль');
+
+  const tooOld = recordingJob(() => { throw err(502, { igCode: 100 }); });
+  assert.equal((await tooOld.job.collectIgDailyForDay(ACC, 'T', '2020-01-01', { followerCount: false })).outcome, 'empty',
+    'Graph #100 «слишком старо» — пустой день');
+
+  const transient = recordingJob((path, params) => { if (params.metric === 'likes') throw err(503, { transient: true }); return benign(path, params); });
+  assert.equal((await transient.job.collectIgDailyForDay(ACC, 'T', '2025-01-01')).outcome, 'transient');
+
+  const reauth = recordingJob((path, params) => {
+    if (params.metric === 'likes') throw err(503, { transient: true });
+    if (params.metric === 'views') throw err(409, { code: 'ig_reauth' });
+    return benign(path, params);
+  });
+  assert.equal((await reauth.job.collectIgDailyForDay(ACC, 'T', '2025-01-01')).outcome, 'reauth');
+
+  const data = recordingJob();
+  assert.equal((await data.job.collectIgDailyForDay(ACC, 'T', '2025-01-01')).outcome, 'data');
+
+  const throttled = recordingJob((path, params) => { if (params.metric === 'saves') throw err(429); return benign(path, params); });
+  await assert.rejects(throttled.job.collectIgDailyForDay(ACC, 'T', '2025-01-01'), (e) => isIgThrottleError(e));
+
+  await assert.rejects(data.job.collectIgDailyForDay(ACC, 'T', '2025-1-1'), TypeError);
+});
+
+test('collectIgDailyForDay: write+guardSource передаёт страж идентичности в upsert', async () => {
+  const { job, writes } = recordingJob();
+  await job.collectIgDailyForDay(ACC, 'T', '2025-01-02', { write: true, guardSource: true });
+  assert.deepEqual(writes[0].opts, { guardSource: true, igUserId: 'IG1' });
+});

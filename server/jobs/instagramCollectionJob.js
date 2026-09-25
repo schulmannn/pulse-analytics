@@ -67,65 +67,128 @@ function createInstagramCollectionJob({ db, log, igCrypto, igFetch, refreshIgIfN
   // даёт null вместо выдуманного насыщенного значения. null и ноль сохраняются как есть.
   const igNum = toMetricInt;
 
-  // Собираем дневные метрики аккаунта ровно за ОДИН календарный день — ВЧЕРА (UTC).
-  // Окно строго [вчера 00:00, сегодня 00:00): сегодня частичный/нефинализированный, а окно
-  // ШИРЕ одного дня заставило бы соседние прогоны крона перекрываться и удваивать суммы
-  // total_value при агрегации по периоду (windowPair на фронте суммирует дневные строки).
-  // reach/follower_count — дневная серия (единственная точка за вчера), остальное — window-
-  // агрегаты total_value за это же однодневное окно. row.day = вчера (день, к которому относятся данные).
-  async function collectIgDailyForAccount(acc, token) {
-    const SEC = 86400;
-    const now = Math.floor(Date.now() / 1000);
-    const todayMidnight = Math.floor(now / SEC) * SEC;   // UTC-полночь сегодня
-    const since = todayMidnight - SEC, until = todayMidnight;   // ровно вчера, одни сутки
-    const targetDay = new Date(since * 1000).toISOString().slice(0, 10);   // YYYY-MM-DD вчера
+  // Дневные метрики, по которым день считается «с данными» (followers_total — уровень, не дневная
+  // метрика: одна лишь точка уровня день не наполняет).
+  const IG_DAY_METRICS = ['reach', 'followers', ...IG_TV_NAMES, 'follows', 'unfollows'];
+  const SEC = 86400;
+  const DAY_KEY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+  // Класс сбоя отдельного вызова для исхода дня: 409/ig_reauth — токен умер (переподключите);
+  // временный сбой Graph (клиент отдаёт его 503 / transient=true после своих ретраев) — день стоит
+  // повторить; остальное (502: #100 «слишком старо», нет метрики, права) — перманентная пустота этой
+  // метрики. Throttle (429) сюда не попадает: он пробрасывается раньше.
+  const failureKind = (e) => {
+    if (!e) return null;
+    if (Number(e.status) === 409 || e.code === 'ig_reauth') return 'reauth';
+    if (e.transient === true || Number(e.status) === 503 || Number(e.status) === 504) return 'transient';
+    return null;
+  };
+
+  // Дневные метрики аккаунта ровно за ОДИН календарный UTC-день `day` ('YYYY-MM-DD'). Окно строго
+  // [day 00:00Z, day+1 00:00Z): окно ШИРЕ одного дня заставило бы соседние дни перекрываться и
+  // удваивать суммы total_value при агрегации по периоду (windowPair на фронте суммирует дневные
+  // строки). reach/follower_count — дневная серия (единственная точка за день), остальное — window-
+  // агрегаты total_value за это же однодневное окно. row.day = day. Ровно те же запросы, что крон
+  // шлёт за «вчера», — поэтому строка бэкфилла (jobs/igBackfillJob) значит то же, что строка крона.
+  //   opts.level        — снять профильный followers_count как уровень базы (только крон: «сейчас»
+  //                       ≈ конец вчерашнего дня; для прошлых дней уровня у Graph нет);
+  //   opts.followerCount — просить follower_count в дневной серии. Серия живёт ~30 дней, а
+  //                       комбинированный вызов падает ЦЕЛИКОМ, если одна метрика не поддержана, —
+  //                       для старых дней просим только reach;
+  //   opts.write        — upsert строки (крон). Бэкфилл пишет сам, решая по исходу;
+  //   opts.guardSource/opts.igUserId — страж идентичности upsertIgDaily (см. collectorRepo);
+  //   opts.logPrefix    — префикс событий лога ('ig_cron' у крона).
+  // Возвращает { row, outcome, calls }: outcome ∈ data | empty | transient | reauth (приоритет
+  // reauth > transient > data > empty). data = хотя бы одна дневная метрика > 0: день из одних
+  // нулей/null от Graph (до создания аккаунта, за горизонтом) — «пусто», а не выдуманный ноль.
+  // Throttle-ошибки пробрасываются как раньше — runJobOnce пометит работу failed/retryable.
+  async function collectIgDailyForDay(acc, token, day, opts = {}) {
+    const {
+      level = false, followerCount = true, write = false, guardSource = false, logPrefix = 'ig_cron',
+    } = opts;
+    if (typeof day !== 'string' || !DAY_KEY_RE.test(day)) throw new TypeError('collectIgDailyForDay: day YYYY-MM-DD');
+    const since = Math.floor(Date.parse(`${day}T00:00:00Z`) / 1000);
+    if (!Number.isFinite(since)) throw new TypeError('collectIgDailyForDay: day YYYY-MM-DD');
+    const until = since + SEC;   // ровно одни сутки
     const id = acc.ig_user_id;
-    const row = { day: targetDay };
-    // Дневные серии reach + follower_count — одним вызовом (одна точка за вчерашние сутки).
+    const row = { day };
+    let calls = 0;
+    let reauth = false, transient = false;
+    const note = (e) => {
+      const k = failureKind(e);
+      if (k === 'reauth') reauth = true;
+      else if (k === 'transient') transient = true;
+    };
+    const fetch = (path, params) => { calls++; return igFetch(path, params, token); };
+    // Дневные серии reach (+ follower_count) — одним вызовом (одна точка за сутки).
     try {
-      const daily = await igFetch(`/${id}/insights`, { metric: 'reach,follower_count', period: 'day', since, until }, token);
+      const daily = await fetch(`/${id}/insights`, { metric: followerCount ? 'reach,follower_count' : 'reach', period: 'day', since, until });
       (daily.data || []).forEach((m) => {
         const vals = m.values || [];
-        const last = vals.length ? vals[vals.length - 1].value : null;   // финализированная точка за вчера
+        const last = vals.length ? vals[vals.length - 1].value : null;   // финализированная точка за день
         if (m.name === 'reach') row.reach = igNum(last);
         else if (m.name === 'follower_count') row.followers = igNum(last);
       });
-    } catch (e) { if (isIgThrottleError(e)) throw e; log('warn', 'ig_cron_daily_series_failed', { channelId: acc.channel_id, error: e.message }); }
+    } catch (e) { if (isIgThrottleError(e)) throw e; note(e); log('warn', `${logPrefix}_daily_series_failed`, { channelId: acc.channel_id, day, error: e.message }); }
     // Window-агрегаты total_value (каждая метрика независимо — одна неподдерживаемая не рушит остальные).
     // Bounded фан-аут (concurrency=2) сохраняет порядок → индексная привязка к IG_TV_NAMES цела.
     const settled = await boundedAllSettled(
       IG_TV_NAMES,
-      (metric) => igFetch(`/${id}/insights`, { metric, metric_type: 'total_value', period: 'day', since, until }, token),
+      (metric) => fetch(`/${id}/insights`, { metric, metric_type: 'total_value', period: 'day', since, until }),
       2);
     for (const r of settled) { if (r.status === 'rejected' && isIgThrottleError(r.reason)) throw r.reason; }
-    settled.forEach((r, i) => { if (r.status === 'fulfilled') row[IG_TV_NAMES[i]] = igNum(igTvVal(r.value)); });
-    // follows_and_unfollows → follows / unfollows за вчера. НЕ однодневным окном (оно возвращает
+    settled.forEach((r, i) => {
+      if (r.status === 'fulfilled') row[IG_TV_NAMES[i]] = igNum(igTvVal(r.value));
+      else note(r.reason);
+    });
+    // follows_and_unfollows → follows / unfollows за день. НЕ однодневным окном (оно возвращает
     // пустой breakdown — см. igFauDiff выше), а разностью двух окон с общим якорем −8 дней:
-    // wide = [якорь, сегодня) покрывает вчера, narrow = [якорь, вчера) — нет; wide − narrow = вчера.
+    // wide = [якорь, day+1) покрывает день, narrow = [якорь, day) — нет; wide − narrow = день.
     try {
       const anchor = until - 8 * SEC;
       const fauArgs = { metric: 'follows_and_unfollows', metric_type: 'total_value', breakdown: 'follow_type', period: 'day' };
       const [wideRes, narrowRes] = await Promise.all([
-        igFetch(`/${id}/insights`, { ...fauArgs, since: anchor, until }, token),
-        igFetch(`/${id}/insights`, { ...fauArgs, since: anchor, until: since }, token),
+        fetch(`/${id}/insights`, { ...fauArgs, since: anchor, until }),
+        fetch(`/${id}/insights`, { ...fauArgs, since: anchor, until: since }),
       ]);
       const wide = igFauVal(wideRes), narrow = igFauVal(narrowRes);
       if ((wide.follows != null && narrow.follows != null && wide.follows < narrow.follows) ||
           (wide.unfollows != null && narrow.unfollows != null && wide.unfollows < narrow.unfollows)) {
-        log('warn', 'ig_cron_fau_negative_diff', { channelId: acc.channel_id, wide, narrow });
+        log('warn', `${logPrefix}_fau_negative_diff`, { channelId: acc.channel_id, day, wide, narrow });
       }
-      const day = igFauDiff(wide, narrow);
-      row.follows = igNum(day.follows); row.unfollows = igNum(day.unfollows);
-    } catch (e) { if (isIgThrottleError(e)) throw e; log('warn', 'ig_cron_fau_failed', { channelId: acc.channel_id, error: e.message }); }
+      const fau = igFauDiff(wide, narrow);
+      row.follows = igNum(fau.follows); row.unfollows = igNum(fau.unfollows);
+    } catch (e) { if (isIgThrottleError(e)) throw e; note(e); log('warn', `${logPrefix}_fau_failed`, { channelId: acc.channel_id, day, error: e.message }); }
     // Абсолютный уровень базы (профильный followers_count) — исторических уровней IG не отдаёт,
     // поэтому фиксируем «сейчас» при каждом дневном сборе. Ставится на вчерашнюю строку: сбор
     // идёт ранним утром, значение ≈ уровень конца вчерашнего дня (честная погрешность в часы,
     // фронт использует эти точки как якоря графика уровня «Подписчики»).
-    try {
-      const prof = await igFetch(`/${id}`, { fields: 'followers_count' }, token);
-      row.followers_total = igNum(prof && prof.followers_count);
-    } catch (e) { if (isIgThrottleError(e)) throw e; log('warn', 'ig_cron_followers_total_failed', { channelId: acc.channel_id, error: e.message }); }
-    await db.upsertIgDaily(acc.channel_id, [row]);
+    if (level) {
+      try {
+        const prof = await fetch(`/${id}`, { fields: 'followers_count' });
+        row.followers_total = igNum(prof && prof.followers_count);
+      } catch (e) { if (isIgThrottleError(e)) throw e; note(e); log('warn', `${logPrefix}_followers_total_failed`, { channelId: acc.channel_id, day, error: e.message }); }
+    }
+    const hasData = IG_DAY_METRICS.some((k) => row[k] != null && row[k] > 0);
+    const outcome = reauth ? 'reauth' : transient ? 'transient' : hasData ? 'data' : 'empty';
+    if (write) {
+      // Строка из одних null выглядит как покрытие и прячет пропуск от ремонта — не пишем её.
+      const anyValue = Object.keys(row).some((k) => k !== 'day' && row[k] != null);
+      if (anyValue) {
+        await db.upsertIgDaily(acc.channel_id, [row], undefined, guardSource ? { guardSource: true, igUserId: id } : undefined);
+      } else {
+        log('warn', `${logPrefix}_day_empty`, { channelId: acc.channel_id, day });
+      }
+    }
+    return { row, outcome, calls };
+  }
+
+  // Дневной сбор крона — ровно ВЧЕРА (UTC): сегодня частичный/нефинализированный. Те же запросы и та
+  // же строка, что до выноса collectIgDailyForDay (паритет закреплён тестом).
+  async function collectIgDailyForAccount(acc, token) {
+    const todayMidnight = Math.floor(Math.floor(Date.now() / 1000) / SEC) * SEC;   // UTC-полночь сегодня
+    const yesterday = new Date((todayMidnight - SEC) * 1000).toISOString().slice(0, 10);
+    const { row } = await collectIgDailyForDay(acc, token, yesterday, { level: true, followerCount: true, write: true });
     return row;
   }
 
@@ -237,7 +300,7 @@ function createInstagramCollectionJob({ db, log, igCrypto, igFetch, refreshIgIfN
     try { await collectIgSnapshotsForAccount(acc, token, day); } catch (e) { if (isIgThrottleError(e)) throw e; log('error', 'ig_cron_snapshots_failed', { channelId: acc.channel_id, error: e.message }); }
   }
 
-  return { collectIgForAccount };
+  return { collectIgForAccount, collectIgDailyForDay };
 }
 
 module.exports = { createInstagramCollectionJob, isIgThrottleError };
