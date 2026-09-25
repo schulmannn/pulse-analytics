@@ -56,7 +56,7 @@ test('middleware order: неизвестный /api/* → JSON 404 (API-обра
 });
 
 test('middleware order: неизвестный НЕ-API GET обслуживается SPA-fallback, НЕ API-JSON-404', async () => {
-  // Инвариант независим от наличия frontend/dist: SPA-fallback (app.get('*')) владеет не-API
+  // Инвариант независим от наличия frontend/dist: SPA-fallback (app.get('/{*splat}')) владеет не-API
   // путями. С собранным dist → 200 text/html; без него (backend-only CI) → 404 БЕЗ JSON-тела.
   // Ключевое: ответ НЕ должен быть API-контрактом {error:'not_found'} (иначе SPA перехватил бы /api).
   const r = await req('GET', '/some/unknown/spa/route');

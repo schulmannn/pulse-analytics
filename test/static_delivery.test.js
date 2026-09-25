@@ -33,7 +33,10 @@ let baseUrl;
 let distDir;
 
 test.before(async () => {
-  distDir = fs.mkdtempSync(path.join(os.tmpdir(), 'atlavue-dist-'));
+  // Точка в имени каталога — нарочно: send 1.x (Express 5) с dotfiles:'ignore' отвечает 404 на
+  // абсолютный путь, в котором ЛЮБОЙ сегмент начинается с точки (так ломался чекаут под
+  // …/.claude/worktrees/…). Отдача через `root` проверяет только путь внутри dist.
+  distDir = fs.mkdtempSync(path.join(os.tmpdir(), '.atlavue-dist-'));
   fs.mkdirSync(path.join(distDir, 'assets'));
   // A compressible JS payload well above compression's ~1KB threshold.
   const bundle = `// hashed bundle\n${'export const chunk = "atlavue capacity hardening payload";\n'.repeat(200)}`;
@@ -48,7 +51,7 @@ test.before(async () => {
     setHeaders: (res, filePath) => { res.setHeader('Cache-Control', assetCacheControl(filePath)); },
   }));
   // SPA fallback (as app.js): sendFile default → `public, max-age=0`, never immutable.
-  app.get('*', (req, res) => { res.sendFile(path.join(distDir, 'index.html')); });
+  app.get('/{*splat}', (req, res) => { res.sendFile('index.html', { root: distDir }); });
 
   server = app.listen(0);
   await new Promise((resolve, reject) => {
