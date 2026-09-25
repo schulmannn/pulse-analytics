@@ -56,6 +56,8 @@ test('closed_by согласован с plan_prs в обе стороны', () =
   const merged = real();
   merged.plan_prs['1.6'] = 650;
   merged.ids['EXPAND-17'].closed_by = 650;
+  // Сценарий не зависит от того, отмечен ли 1.6 в боевом реестре: CHARTS-22 «отстал» явно.
+  merged.ids['CHARTS-22'].closed_by = null;
   merged.ids['PERIOD-15'].partially = ['1.3 #646', '1.6 #650'];
   merged.ids['CARDS-17'].partially = ['1.6 #650'];
   merged.ids['STATES-14'].partially = ['1.6 #650'];
