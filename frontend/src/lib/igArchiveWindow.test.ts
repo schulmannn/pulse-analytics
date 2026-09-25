@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { NO_BASIS_ALL_TIME, NO_BASIS_CUSTOM_RANGE, NO_BASIS_SHORT_ARCHIVE } from '@/lib/delta';
-import { igArchiveCoverageNote, igWindowPlan, inPlanDays, isIgLiveWindow } from '@/lib/igArchiveWindow';
+import { igArchiveCoverageNote, igArchiveEmpty, igWindowPlan, inPlanDays, isIgLiveWindow } from '@/lib/igArchiveWindow';
 import { dayKeyOf, endOfLocalDay, startOfLocalDay } from '@/lib/periodWindow';
 
 const DAY_MS = 86_400_000;
@@ -107,5 +107,36 @@ describe('igArchiveCoverageNote — честные подписи покрыти
 
   it('архив пуст, числа от живых рядов — «догружается»', () => {
     expect(igArchiveCoverageNote({ plan: archive, bounds: null, backfill: null, liveFallback: true, fmtDay })).toBe('История Instagram догружается');
+  });
+
+  it('свой период целиком до горизонта завершённой догрузки — край истории, а не «догружается»', () => {
+    const range = { from: Date.parse('2024-01-01T00:00:00'), to: Date.parse('2024-01-31T23:59:59') };
+    const plan = igWindowPlan({ days: 30, range, now: NOW, bounds: { first_day: '2025-06-01', last_day: '2026-01-01' } });
+    const bounds = { first_day: '2025-06-01', last_day: '2026-01-01' };
+    expect(igArchiveCoverageNote({ plan, bounds, backfill: { status: 'done', horizon_day: '2025-06-01' }, liveFallback: true, fmtDay }))
+      .toBe('Раньше «2025-06-01» Instagram данных не отдаёт');
+    // Догрузка выключена (backfill: null), окно до начала архива — тоже граница архива.
+    expect(igArchiveCoverageNote({ plan, bounds, backfill: null, liveFallback: true, fmtDay }))
+      .toBe('Архив Instagram — с «2025-06-01»');
+  });
+
+  it('отказ в правах на статистику — «переподключите»; скрытая история прежнего аккаунта названа', () => {
+    expect(igArchiveCoverageNote({ plan: archive, bounds: null, backfill: { status: 'error', reason: 'ig_permission' }, fmtDay }))
+      .toBe('Догрузка истории остановлена — у Instagram нет доступа к статистике, переподключите');
+    const own = igWindowPlan({ days: 0, range: null, now: NOW, bounds: { first_day: '2025-12-01', last_day: '2026-01-01' } });
+    expect(igArchiveCoverageNote({
+      plan: own, bounds: { first_day: '2025-12-01', last_day: '2026-01-01' }, backfill: { status: 'done', horizon_day: null }, hiddenDays: 59, fmtDay,
+    })).toBe('История прежнего аккаунта Instagram скрыта (59 дн.)');
+  });
+});
+
+describe('igArchiveEmpty — когда архивному окну нужен живой фолбэк', () => {
+  const base = { isError: false, isPending: false, fetchStatus: 'idle' };
+  it('пустой ответ, сбой чтения и выключенный запрос (демо) — пусто; строки есть или запрос летит — нет', () => {
+    expect(igArchiveEmpty({ ...base, data: { rows: [] } })).toBe(true);
+    expect(igArchiveEmpty({ ...base, isError: true })).toBe(true);
+    expect(igArchiveEmpty({ ...base, isPending: true, fetchStatus: 'idle' })).toBe(true);
+    expect(igArchiveEmpty({ ...base, isPending: true, fetchStatus: 'fetching' })).toBe(false);
+    expect(igArchiveEmpty({ ...base, data: { rows: [{}] } })).toBe(false);
   });
 });

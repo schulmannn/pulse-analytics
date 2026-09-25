@@ -27,7 +27,7 @@ import {
   DAY_NAMES,
   DAY_MS,
 } from '@/lib/igMetrics';
-import { igArchiveCoverageNote, igWindowPlan } from '@/lib/igArchiveWindow';
+import { igArchiveCoverageNote, igArchiveEmpty, igWindowPlan } from '@/lib/igArchiveWindow';
 import { igWindowMetrics } from '@/lib/igWindowMetrics';
 import { buildIgInsights } from '@/lib/igInsights';
 
@@ -62,9 +62,7 @@ export function useIgData() {
     [histRows],
   );
   const planBase = igWindowPlan({ days, range, now, bounds, firstRowDay });
-  const archiveEmpty = historyQ.data
-    ? !historyQ.data.rows?.length
-    : historyQ.isError || (historyQ.isPending && historyQ.fetchStatus === 'idle');
+  const archiveEmpty = igArchiveEmpty(historyQ);
   const insightsEnabled = planBase.mode === 'live' || archiveEmpty;
   const insightsQ = useIgInsights(planBase.insDays, insightsEnabled);
   const postsQ = useIgPosts(24);
@@ -98,7 +96,6 @@ export function useIgData() {
   const mode = plan.mode;
   const fromDay = plan.fromDay;
   const toDay = plan.toDay;
-  const lastArchiveDay = bounds?.last_day ?? null;
   const windowMetrics = useMemo(
     () => igWindowMetrics({
       profile: profileQ.data,
@@ -109,13 +106,12 @@ export function useIgData() {
       mode,
       fromDay,
       toDay,
-      lastArchiveDay,
       // ОКНО СЕРВЕРНЫХ АГРЕГАТОВ. `/api/ig/insights` режет `total_value` по СВОЕМУ `days` и
       // снапит его к 7/30/90 (server/routes/ig.js). Живое окно — ровно пресет 7/30/90, поэтому
       // клиентское окно совпадает с серверным день в день. Архивному окну агрегаты не нужны.
       aggPrevRange: mode === 'live' ? { from: since - windowDays * DAY_MS, to: since - 1 } : null,
     }),
-    [profileQ.data, ins, histRows, since, until, windowDays, mode, fromDay, toDay, lastArchiveDay],
+    [profileQ.data, ins, histRows, since, until, windowDays, mode, fromDay, toDay],
   );
   // Покрытие архива (только архивное окно): «с какого дня архив», «догружается», горизонт Graph,
   // «переподключите». Живёт в существующих слотах — подсказке «нет базы» и тихих подписях.
@@ -125,6 +121,7 @@ export function useIgData() {
     bounds,
     backfill,
     liveFallback: windowMetrics.liveFallback && !profileQ.data?.mock,
+    hiddenDays: historyQ.data?.coverage?.hidden_days ?? 0,
     fmtDay,
   });
   const {

@@ -393,7 +393,7 @@ export const IgHistorySchema = z
     error: z.string().optional().nullable(),
     rows: z.array(IgHistoryRowSchema).optional().default([]),
     bounds: IgArchiveBoundsSchema.nullable().optional(),
-    coverage: z.object({ measured_days: z.coerce.number() }).passthrough().nullable().optional(),
+    coverage: z.object({ measured_days: z.coerce.number(), hidden_days: z.coerce.number().optional() }).passthrough().nullable().optional(),
     backfill: IgBackfillStatusSchema.nullable().optional(),
   })
   .passthrough();

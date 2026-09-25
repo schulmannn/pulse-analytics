@@ -310,6 +310,7 @@ function WidgetMetaLine({ meta, className = '', info, verbose = false }: { meta?
     if (verbose && meta.network) segs.push({ key: 'net', text: networkDisplayName(meta.network) });
     if (verbose && meta.sourceLabel) segs.push({ key: 'src', text: meta.sourceLabel });
     if (meta.periodLabel) segs.push({ key: 'per', text: meta.periodLabel });
+    if (meta.basisNote) segs.push({ key: 'bas', text: meta.basisNote });
     if (meta.samplePosts != null && meta.samplePosts > 0)
       segs.push({ key: 'smp', text: `${meta.samplePosts} ${pluralRu(meta.samplePosts, ['пост', 'поста', 'постов'])}` });
     if (verbose && meta.archiveDays != null && meta.archiveDays > 0)

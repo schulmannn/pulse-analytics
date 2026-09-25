@@ -12,7 +12,8 @@ import {
   igWindowValue,
 } from '@/lib/igAggregations';
 import { igWindowPlan } from '@/lib/igArchiveWindow';
-import { followerLevelSeries } from '@/lib/igMetrics';
+import { followerLevelSeries, type Point } from '@/lib/igMetrics';
+import { pairedDailyEr } from '@/lib/igWindowMetrics';
 import { DAY_MS, alignGhost } from '@/lib/metricSeries';
 import {
   COMPARISON_LABEL,
@@ -62,6 +63,15 @@ export const resolveIgMetric: WidgetMetricResolver = (metric, config, ctx, out) 
   const until = plan.until;
   const since = plan.mode === 'live' ? until - plan.days * DAY_MS : plan.since;
   const grain = effectiveGrain(config.grain);
+  const archive = plan.mode === 'archive';
+  // Ряды — по режиму окна: пресет 7/30/90 читает прежние живые источники (агрегат окна), как карточка
+  // ленты; архивное окно — архив ig_daily. Одна и та же метрика не может разойтись с панелью.
+  const seriesOf = (name: string) => igSeriesPoints(ig.insights, ig.history, name, plan.mode);
+  const inWindow = (points: Point[]) =>
+    points.filter((p) => {
+      const t = Date.parse(p.day);
+      return Number.isFinite(t) && t >= since && t <= until;
+    });
 
   const applyGhost = (
     points: { day: string; value: number }[],
@@ -91,19 +101,22 @@ export const resolveIgMetric: WidgetMetricResolver = (metric, config, ctx, out) 
 
   const flowName = FLOW_SERIES[metric.id];
   if (flowName) {
-    const points = igSeriesPoints(ig.insights, ig.history, flowName);
+    const points = seriesOf(flowName);
     const { cur, delta } = igWindowValue(points, since, until);
     out.series = bucketIgSeries(points, since, until, grain);
     out.valueRaw = cur;
     out.value = fmt.short(cur);
     // Архивное окно («Всё», свой период) сравнивать не с чем — дельты нет.
-    out.delta = plan.mode === 'live' ? delta : null;
+    out.delta = archive ? null : delta;
+    // Охват архивного окна — сумма дневных (уникального охвата за такой период Instagram не
+    // считает): подпись обязана это сказать, как на панелях.
+    if (archive && flowName === 'reach') out.meta = { ...out.meta, basisNote: 'сумма по дням' };
     applyGhost(points);
     return out.series.every((point) => (point.value ?? 0) === 0) && cur === 0 ? { ...out, empty: true } : out;
   }
 
   if (metric.id === 'ig.netFollowers') {
-    const points = igNetFollowerPoints(ig.insights, ig.history);
+    const points = igNetFollowerPoints(ig.insights, ig.history, plan.mode);
     const { cur, hasCur } = igWindowValue(points, since, until);
     if (!hasCur) return { ...out, empty: true };
     const bucketed = bucketIgSeries(points, since, until, grain);
@@ -169,14 +182,20 @@ export const resolveIgMetric: WidgetMetricResolver = (metric, config, ctx, out) 
   }
 
   if (metric.id === 'ig.erv') {
-    const reach = igWindowValue(igSeriesPoints(ig.insights, ig.history, 'reach'), since, until).cur;
-    const interactions = igWindowValue(
-      igSeriesPoints(ig.insights, ig.history, 'total_interactions'),
-      since,
-      until,
-    ).cur;
-    if (reach <= 0) return { ...out, empty: true };
-    const engagementRate = (interactions / reach) * 100;
+    let engagementRate: number;
+    if (archive) {
+      // Архивное окно: ER на одном основании с панелью — только дни, где есть И взаимодействия, И
+      // охват (pairedDailyEr). Охват в знаменателе — сумма дневных, это подписано.
+      const paired = pairedDailyEr(inWindow(seriesOf('total_interactions')), inWindow(seriesOf('reach')));
+      if (paired.reach <= 0) return { ...out, empty: true };
+      engagementRate = paired.er;
+      out.meta = { ...out.meta, basisNote: 'охват — сумма по дням' };
+    } else {
+      const reach = igWindowValue(seriesOf('reach'), since, until).cur;
+      const interactions = igWindowValue(seriesOf('total_interactions'), since, until).cur;
+      if (reach <= 0) return { ...out, empty: true };
+      engagementRate = (interactions / reach) * 100;
+    }
     out.valueRaw = engagementRate;
     // Единый абсолютный процент (fmt.pctAbs) — виджет обязан печатать то же «25.1%», что карточка
     // Обзора и /metrics/ig-er.

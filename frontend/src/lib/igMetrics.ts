@@ -86,11 +86,23 @@ export function liveDailySeries(insights: IgInsights | undefined, name: string):
   return metricSeries(insights, name).filter((p) => p.day !== 'total' && canonicalDayKey(p.day) != null);
 }
 
-/** Слияние дневного АРХИВА (ig_daily) с живым дневным рядом по календарному ключу. Архивный день
-    всегда побеждает; живые точки добирают только дни ПОСЛЕ последнего дня архива (`lastArchiveDay`,
-    по умолчанию — самый новый день архива): свежий хвост, которого крон ещё не снял. Пустой архив
-    (первые часы после подключения) — живой ряд как есть. Порядок — старые → новые. */
-export function mergeIgDaily(archive: Point[], live: Point[], lastArchiveDay?: string | null): Point[] {
+/** Prefer whichever series carries MORE real dated points. The persisted history (accumulated by
+ *  the cron) usually outruns the tiny live API window, but on day 1 the DB is empty — then the live
+ *  series wins and the chart is never blank. Ties keep live (fresher within the shared window).
+ *  Правило ЖИВЫХ пресетов 7/30/90 (как до архива): ряды берутся целиком из одного источника и никогда
+ *  не смешиваются — короткий архив (догрузка ещё идёт) не обрезает длинный живой ряд. */
+export function longerSeries(live: Point[], persisted: Point[]): Point[] {
+  const datedCount = (s: Point[]) =>
+    s.filter((p) => p.day !== 'total' && Number.isFinite(Date.parse(p.day))).length;
+  return datedCount(persisted) > datedCount(live) ? persisted : live;
+}
+
+/** Ряд АРХИВНОГО окна («Всё», свой период): архив ig_daily целиком (дни — по календарному ключу, без
+    дублей, старые → новые); живой ряд — только когда в архиве нет ни одной точки (свежее
+    подключение, демо без архива). Источники НЕ смешиваются: смысл дня у живого `end_time` и у
+    UTC-дня архива ещё не сведён (OD-8), и граничная живая точка могла бы получить следующий ключ и
+    посчитать день дважды в любой сумме по ряду. */
+export function archiveOrLive(archive: Point[], live: Point[]): Point[] {
   const out: Array<{ key: string; point: Point }> = [];
   const seen = new Set<string>();
   for (const p of archive) {
@@ -99,13 +111,7 @@ export function mergeIgDaily(archive: Point[], live: Point[], lastArchiveDay?: s
     seen.add(key);
     out.push({ key, point: p });
   }
-  const last = lastArchiveDay ?? out.reduce<string | null>((m, e) => (m == null || e.key > m ? e.key : m), null);
-  for (const p of live) {
-    const key = p.day === 'total' ? null : canonicalDayKey(p.day);
-    if (!key || seen.has(key) || (last != null && key <= last)) continue;
-    seen.add(key);
-    out.push({ key, point: p });
-  }
+  if (!out.length) return live;
   return out.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0)).map((e) => e.point);
 }
 

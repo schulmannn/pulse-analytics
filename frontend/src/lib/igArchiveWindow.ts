@@ -126,6 +126,25 @@ export function igWindowPlan(input: IgWindowPlanInput): IgWindowPlan {
   };
 }
 
+/** Состояние запроса архива — ровно то, что нужно решению о живом фолбэке. */
+export interface IgArchiveQueryState {
+  data?: { rows?: unknown[] | null } | null;
+  isError: boolean;
+  isPending: boolean;
+  fetchStatus: string;
+}
+
+/**
+ * Архив пуст для целей окна: ответ пришёл без строк (свежее подключение, догрузка ещё не писала,
+ * выключенный кил-свитч, переподключён другой аккаунт), чтение упало, либо запрос выключен (демо,
+ * виджет вне вьюпорта) — тогда архивному окну нужен живой 90-дневный фолбэк. Одно правило на
+ * useIgData и useIgWidgetData, чтобы «Всё» не пустело на одной поверхности и работало на другой.
+ */
+export function igArchiveEmpty(q: IgArchiveQueryState): boolean {
+  if (q.data) return !q.data.rows?.length;
+  return q.isError || (q.isPending && q.fetchStatus === 'idle');
+}
+
 /** Календарный день внутри окна плана (ключи `YYYY-MM-DD` сравниваются строкой). */
 export function inPlanDays(plan: Pick<IgWindowPlan, 'fromDay' | 'toDay'>, day: string): boolean {
   if (!isDayKey(day)) return false;
@@ -140,6 +159,8 @@ export interface IgArchiveCoverageInput {
   backfill?: { status: string; horizon_day?: string | null; reason?: string | null } | null;
   /** В окне нет ни одной точки архива — числа идут от живых дневных рядов. */
   liveFallback?: boolean;
+  /** Дни архива, записанные прежним IG-аккаунтом канала (скрыты стражем идентичности). */
+  hiddenDays?: number;
   fmtDay: (day: string) => string;
 }
 
@@ -153,15 +174,22 @@ export function igArchiveCoverageNote(input: IgArchiveCoverageInput): string | n
   if (backfill?.status === 'error' && backfill.reason === 'ig_reauth') {
     return 'Догрузка истории остановлена — переподключите Instagram';
   }
+  if (backfill?.status === 'error' && backfill.reason === 'ig_permission') {
+    return 'Догрузка истории остановлена — у Instagram нет доступа к статистике, переподключите';
+  }
   const first = bounds?.first_day ?? null;
   if (backfill && (backfill.status === 'running' || backfill.status === 'idle')) {
     return first ? `История Instagram догружается — архив пока с ${fmtDay(first)}` : 'История Instagram догружается';
   }
-  if (input.liveFallback) return 'История Instagram догружается';
+  // Известные границы — раньше «догружается»: окно целиком до горизонта или до начала архива при
+  // завершённой (или выключенной) догрузке — это край истории, а не загрузка.
   if (backfill?.status === 'done' && backfill.horizon_day && plan.fromDay && plan.fromDay < backfill.horizon_day) {
     return `Раньше ${fmtDay(backfill.horizon_day)} Instagram данных не отдаёт`;
   }
   if (first && (plan.fromDay == null || plan.fromDay < first)) return `Архив Instagram — с ${fmtDay(first)}`;
+  const hidden = input.hiddenDays ?? 0;
+  if (hidden > 0) return `История прежнего аккаунта Instagram скрыта (${hidden} дн.)`;
+  if (input.liveFallback) return 'История Instagram догружается';
   return null;
 }
 

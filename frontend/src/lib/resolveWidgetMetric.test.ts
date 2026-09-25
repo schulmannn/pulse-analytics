@@ -3,6 +3,8 @@ import { pluralRu, resolveWidgetMetric, type DataContext } from '@/lib/resolveWi
 import { seriesStats, seriesToChart } from '@/lib/widgetRender';
 import type { WidgetConfig } from '@/lib/widgetConfig';
 import { WIDGET_METRICS } from '@/lib/widgetMetrics';
+import { pctDelta } from '@/lib/delta';
+import { igWindowMetrics } from '@/lib/igWindowMetrics';
 import type {
   ChannelsResponse,
   HistoryData,
@@ -987,5 +989,64 @@ describe('resolveWidgetMetric — Instagram «Всё» читает весь а�
     const r = resolveWidgetMetric(cfg('ig.reach', { grain: 'day' }), { ...allCtx, ig: { profile: igProfile, history: gappy } });
     expect((r.series ?? []).some((p) => p.value === null)).toBe(true);
     expect((r.series ?? []).every((p) => p.value !== 0)).toBe(true);
+  });
+});
+
+// ── Ревью архива IG: пресет = карточка ленты, архивное ER на одном основании, подпись «сумма по дням» ──
+describe('resolveWidgetMetric — IG: живой пресет = карточка ленты, архивное окно = панель', () => {
+  const NOW2 = Date.parse('2026-09-25T10:00:00Z');
+  const key = (n: number) => new Date(NOW2 - n * DAY).toISOString().slice(0, 10);
+  // Синтетический агрегат окна (server pushAgg): прошлое окно — точка в середине прошлого окна,
+  // текущее — точка «сейчас» + total_value.
+  const agg = (name: string, prev: number, cur: number) => ({
+    name,
+    period: 'day',
+    values: [
+      { value: prev, end_time: new Date(NOW2 - 45 * DAY).toISOString() },
+      { value: cur, end_time: new Date(NOW2 - 1000).toISOString() },
+    ],
+    total_value: { value: cur, breakdowns: [] },
+  });
+  const rows = Array.from({ length: 120 }, (_, i) => ({
+    day: key(120 - i), reach: 100, total_interactions: 10, follows: 2, unfollows: 1,
+  }));
+  const history = { enabled: true, rows, bounds: { first_day: key(120), last_day: key(1) } } as unknown as IgHistoryData;
+  const insights = {
+    data: [agg('total_interactions', 300, 300), agg('follows', 40, 40), agg('unfollows', 10, 10)],
+  } as unknown as IgInsights;
+  const liveCtx: DataContext = { now: NOW2, days: 30, range: null, inRange: () => false, ig: { profile: igProfile, insights, history } };
+  const card = igWindowMetrics({
+    profile: igProfile, insights, historyRows: rows, since: NOW2 - 30 * DAY, until: NOW2, mode: 'live',
+  });
+
+  it('ig.interactions на пресете 30д — агрегат окна, как карточка ленты; ровные данные без ложной дельты', () => {
+    const r = resolveWidgetMetric(cfg('ig.interactions'), liveCtx);
+    expect(r.valueRaw).toBe(card.pairs.ti.cur);
+    expect(r.valueRaw).toBe(300);
+    expect(r.delta).toEqual(pctDelta(300, 300));
+  });
+
+  it('ig.netFollowers и ig.erv на пресете совпадают с карточками', () => {
+    expect(resolveWidgetMetric(cfg('ig.netFollowers'), liveCtx).valueRaw).toBe(card.followerNet.cur);
+    expect(resolveWidgetMetric(cfg('ig.erv'), liveCtx).valueRaw).toBeCloseTo(card.erReach, 10);
+    expect(resolveWidgetMetric(cfg('ig.reach'), liveCtx).meta?.basisNote).toBeUndefined();
+  });
+
+  it('ig.erv на «Всё» — только дни с охватом И взаимодействиями, как ER панели; подписано', () => {
+    // 50 дней с обеими величинами, 10 — взаимодействия без охвата (упал вызов reach,follower_count).
+    const gapRows = Array.from({ length: 60 }, (_, i) => ({
+      day: key(60 - i), reach: i < 50 ? 100 : null, total_interactions: 10,
+    }));
+    const h = { enabled: true, rows: gapRows, bounds: { first_day: key(60), last_day: key(1) } } as unknown as IgHistoryData;
+    const allCtx: DataContext = { now: NOW2, days: 0, range: null, inRange: () => false, ig: { profile: igProfile, history: h } };
+    const panel = igWindowMetrics({
+      profile: igProfile, insights: undefined, historyRows: gapRows, since: Date.parse(`${key(60)}T00:00:00Z`), until: NOW2,
+      mode: 'archive', fromDay: key(60), toDay: key(0),
+    });
+    const r = resolveWidgetMetric(cfg('ig.erv'), allCtx);
+    expect(r.valueRaw).toBeCloseTo(10, 10);   // 500 / 5000, а не 600 / 5000
+    expect(r.valueRaw).toBeCloseTo(panel.erReach, 10);
+    expect(r.meta?.basisNote).toBe('охват — сумма по дням');
+    expect(resolveWidgetMetric(cfg('ig.reach'), allCtx).meta?.basisNote).toBe('сумма по дням');
   });
 });

@@ -9,6 +9,7 @@
 import type { IgBreakdowns, IgHistoryData, IgHistoryRow, IgInsights, IgOnline } from '@/api/schemas';
 import { fmt } from '@/lib/format';
 import { pctDelta, type MetricDelta } from '@/lib/delta';
+import type { IgWindowMode } from '@/lib/igArchiveWindow';
 import { bucketKeyOf, bucketKeysInWindow, type SeriesGrain } from '@/lib/metricSeries';
 import {
   AGE_ORDER,
@@ -17,11 +18,11 @@ import {
   MEDIA_PRODUCT_CHART,
   MEDIA_PRODUCT_LABEL,
   aggregateOnline,
+  archiveOrLive,
   cityName,
   countryName,
   histSeries,
-  liveDailySeries,
-  mergeIgDaily,
+  longerSeries,
   metricSeries,
   tvBreakdown,
   windowPair,
@@ -45,21 +46,35 @@ const ARCHIVE_COLUMN: Record<string, keyof IgHistoryRow> = {
   unfollows: 'unfollows',
 };
 
-/** Дневной ряд метрики для виджета: АРХИВ ig_daily + живой дневной хвост после его последнего дня
- *  (mergeIgDaily — то же правило, что у панелей). Пока в архиве нет ни одной точки (свежее
- *  подключение) — прежний живой ряд как есть, чтобы карточка не пустела до первой догрузки. */
-export function igSeriesPoints(ins: IgInsights | undefined, history: IgHistoryData | undefined, name: string): Point[] {
+/** Дневной ряд метрики для виджета — по режиму окна (lib/igArchiveWindow), тем же правилом, что
+ *  у панелей (igWindowMetrics):
+ *   • live (пресет 7/30/90) — как до архива: reach/follower_count — longerSeries(живой, архив),
+ *     остальное — живой ряд вместе с синтетическим агрегатом окна (виджет = карточка ленты);
+ *   • archive («Всё», свой период) — архив ig_daily; пока в нём нет ни одной точки (свежее
+ *     подключение, демо) — прежний живой ряд как есть. Источники не смешиваются (OD-8). */
+export function igSeriesPoints(
+  ins: IgInsights | undefined,
+  history: IgHistoryData | undefined,
+  name: string,
+  mode: IgWindowMode = 'live',
+): Point[] {
+  const live = metricSeries(ins, name);
   const col = ARCHIVE_COLUMN[name];
-  const archive = col ? histSeries(history?.rows, col) : [];
-  if (!archive.length) return metricSeries(ins, name);
-  return mergeIgDaily(archive, liveDailySeries(ins, name), history?.bounds?.last_day ?? null);
+  if (mode === 'archive') return archiveOrLive(col ? histSeries(history?.rows, col) : [], live);
+  if (name === 'reach') return longerSeries(live, histSeries(history?.rows, 'reach'));
+  if (name === 'follower_count') return longerSeries(live, histSeries(history?.rows, 'followers'));
+  return live;
 }
 
-/** Net daily follower movement = gross follows − gross unfollows, aligned by day (архив + живой хвост). */
-export function igNetFollowerPoints(ins: IgInsights | undefined, history?: IgHistoryData): Point[] {
+/** Net daily follower movement = gross follows − gross unfollows, aligned by day (тот же режим окна). */
+export function igNetFollowerPoints(
+  ins: IgInsights | undefined,
+  history?: IgHistoryData,
+  mode: IgWindowMode = 'live',
+): Point[] {
   const byDay = new Map<string, number>();
-  for (const p of igSeriesPoints(ins, history, 'follows')) byDay.set(p.day, (byDay.get(p.day) ?? 0) + p.value);
-  for (const p of igSeriesPoints(ins, history, 'unfollows')) byDay.set(p.day, (byDay.get(p.day) ?? 0) - p.value);
+  for (const p of igSeriesPoints(ins, history, 'follows', mode)) byDay.set(p.day, (byDay.get(p.day) ?? 0) + p.value);
+  for (const p of igSeriesPoints(ins, history, 'unfollows', mode)) byDay.set(p.day, (byDay.get(p.day) ?? 0) - p.value);
   return [...byDay.entries()].map(([day, value]) => ({ day, value }));
 }
 

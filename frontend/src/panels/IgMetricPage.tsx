@@ -309,7 +309,7 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
   const winDays = dayRangeOf(winPoints.map((p) => p.day));
 
   // Длинный архив («Всё») даунсэмплим до CHART_MAX_POINTS перед рендером (канон CLAUDE.md: серии
-  // длиннее порога — суб-пиксельная мазня и дорогие кадры морфа; ig-history приходит за 400 дней).
+  // длиннее порога — суб-пиксельная мазня и дорогие кадры морфа; ig-history приходит всем архивом ?days=0).
   // Окна 7/30/90 короче порога и рисуются как есть, поэтому ghost выравнивается с ними по индексу —
   // а на «Всё» ghost и не строится (он требует days > 0). Ровно так же живёт YmMetricPage.
   // Числа шапки и stats считаются НИЖЕ от полного окна: кап меняет только плотность точек графика.
@@ -340,7 +340,7 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
   // followerLevelSeries). Гейт ≥2 точек: без уровня страница остаётся прежней (сумма подписок).
   const levelFull = metricKey === 'ig-follows' ? ig.series.followerLevel : [];
   const lvl = levelFull.length > 1 ? windowIgSeries(levelFull, days, 'подписчиков') : null;
-  // Уровень базы рисуется линией и приходит тем же 400-дневным архивом — тот же кап.
+  // Уровень базы рисуется линией и приходит тем же архивом (?days=0, без потолка) — тот же кап.
   const lvlPoints = lvl ? levelFull.slice(-lvl.values.length) : [];
   const lvlShown = capPoints(lvlPoints, 'stock');
   const lvlValues = lvlShown.map((pt) => pt.value);
@@ -767,7 +767,9 @@ function capPoints<T extends { day: string; value: number }>(points: T[], kind: 
 }
 
 /** Calendar-day key of an IG post timestamp in the SAME coordinate as the series days: archive days
-    are UTC days (как пишет крон, OD-8), live `end_time` normalises to its UTC day (canonicalDayKey). */
+    are UTC days (как пишет крон, OD-8), live `end_time` normalises to its UTC day (canonicalDayKey).
+    Осознанное исключение из правила «голый ключ = локальный день» (PROJECT_MEMORY, в рамках OD-8):
+    пост закреплённого дня — тот, что попал в охват ЭТОГО UTC-дня ряда. */
 function igDayKey(iso: string): string {
   return canonicalDayKey(iso) ?? '';
 }

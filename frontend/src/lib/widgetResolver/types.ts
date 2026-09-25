@@ -51,6 +51,9 @@ export interface WidgetMeta {
   archiveDays?: number;
   fresh?: Freshness;
   comparisonNote?: string;
+  /** Как посчитано число, когда это не очевидно и влияет на смысл («сумма по дням» у охвата
+   *  архивного окна IG). Честная оговорка — видна на лице карточки. */
+  basisNote?: string;
   /** Серия агрегирована по неделям (длинные бары) — рендер добавляет « · неделя» в тултипы. */
   seriesGrain?: 'week';
 }
