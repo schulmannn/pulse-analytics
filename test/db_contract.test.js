@@ -37,10 +37,11 @@ const EXPECTED_FUNCTIONS = [
   'upsertIgDaily', 'upsertIgMediaDaily', 'upsertMsDaily',
   'upsertMsOrders', 'countMsOrders', 'getMsBackfillState', 'setMsBackfillState',
   'upsertMsReturns', 'countMsReturns', 'getMsReturnsBackfillState', 'setMsReturnsBackfillState',
+  'getIgBackfillState', 'setIgBackfillState', 'listIgBackfillCandidates', 'listIgHealCandidates', 'listIgDayStatus',
   // analytics reads (finding 5: контракт доступа — Internal для cron/service, ForActor для роутов;
   // голого un-gated db.getChannelHistory/getSnapshot/… в публичном API больше НЕТ)
   'getChannelHistoryInternal', 'getMentionsHistoryInternal', 'getMentionsArchiveInternal',
-  'getSnapshotInternal', 'getLatestVelocityInternal', 'listPostsInternal', 'listIgDailyInternal', 'listIgMediaDailyInternal',
+  'getSnapshotInternal', 'getLatestVelocityInternal', 'listPostsInternal', 'listIgDailyInternal', 'getIgArchiveStatusInternal', 'listIgMediaDailyInternal',
   'getMsDailyAllInternal', 'getMsFunnelInternal', 'getMsCustomersInternal', 'getMsRfmInternal',
   'getMsRfmCustomersInternal', 'getMsCohortsInternal',
   'getMsTopCustomersInternal', 'getMsOldestOrderDayInternal',
@@ -48,7 +49,7 @@ const EXPECTED_FUNCTIONS = [
   'getMsChannelSeriesGroupedInternal', 'getMsReturnsInternal',
   'getPublicTgChannelPhoto',
   'getChannelHistoryForActor', 'getMentionsHistoryForActor', 'getMentionsArchiveForActor',
-  'getSnapshotForActor', 'getLatestVelocityForActor', 'listPostsForActor', 'listIgDailyForActor', 'listIgMediaDailyForActor',
+  'getSnapshotForActor', 'getLatestVelocityForActor', 'listPostsForActor', 'listIgDailyForActor', 'getIgArchiveStatusForActor', 'listIgMediaDailyForActor',
   'getMsDailyAllForActor', 'getMsFunnelForActor', 'getMsCustomersForActor', 'getMsRfmForActor',
   'getMsRfmCustomersForActor', 'getMsCohortsForActor',
   'getMsTopCustomersForActor', 'getMsOldestOrderDayForActor',

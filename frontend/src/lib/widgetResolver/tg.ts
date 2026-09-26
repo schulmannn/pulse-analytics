@@ -246,7 +246,8 @@ const resolveNetGrowth: WidgetMetricResolver = (_metric, config, ctx, out) => {
     return Number.isFinite(timestamp) && timestamp >= since && timestamp <= winTo;
   });
   if (inWindow.length === 0) return { ...out, empty: true };
-  const bucketed = bucketIgSeries(points, since, winTo, effectiveGrain(config.grain));
+  // Пустой день графа Telegram — честный ноль прироста (прежнее поведение), не пропуск.
+  const bucketed = bucketIgSeries(points, since, winTo, effectiveGrain(config.grain), 'zero');
   // Форма ряда следует представлению (владелец 2026-08-13): СТОЛБЦЫ рисуют дневной ±поток вокруг
   // нуля (день с оттоком виден сразу), ЛИНИЯ — накопление от начала окна (прежнее поведение:
   // «как изменилась база за период»). Хедлайн в обоих случаях один — итог окна.
@@ -255,7 +256,7 @@ const resolveNetGrowth: WidgetMetricResolver = (_metric, config, ctx, out) => {
   } else {
     let running = 0;
     out.series = bucketed.map((point) => {
-      running += point.value;
+      if (point.value != null) running += point.value;   // 'zero' — пропусков здесь не бывает
       return { ...point, value: running };
     });
   }

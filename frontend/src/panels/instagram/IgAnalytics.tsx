@@ -6,6 +6,7 @@ import { WidgetGroup } from '@/components/widgets/WidgetGroup';
 import { InsightsBlock, PeriodCompareBlock } from '@/components/instagram/insights';
 import { buildIgAnalyticsRows } from '@/lib/igAnalyticsExport';
 import { downloadAnalyticsCsv, exportFilename } from '@/lib/analyticsExport';
+import { IG_ENGAGED_NO_SUM_NOTE, IG_REACH_DAILY_SUM_NOTE } from '@/lib/igArchiveWindow';
 
 /**
  * IG Аналитика — honest dynamics.
@@ -94,7 +95,11 @@ export function IgAnalytics({ ig }: { ig: IgData }) {
           </ChartSection>
         )}
         <ChartSection id="ig-period-compare" title="Сравнение периодов" defaultSize="full" homeKey="ig-compare" noExpand>
-          <p className="text-xs text-muted-foreground">Просмотры, лайки и сохранения сравниваются по периодам.</p>
+          <p className="text-xs text-muted-foreground">
+            {ig.window.mode === 'archive'
+              ? [IG_REACH_DAILY_SUM_NOTE, IG_ENGAGED_NO_SUM_NOTE, ig.archive.note].filter(Boolean).join('. ')
+              : 'Просмотры, лайки и сохранения сравниваются по периодам.'}
+          </p>
           <PeriodCompareBlock rows={periodRows} />
         </ChartSection>
         <ChartSection id="ig-insights" title="Главное" defaultSize="full" homeKey="ig-insights" noExpand>

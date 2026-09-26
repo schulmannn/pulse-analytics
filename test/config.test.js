@@ -739,3 +739,31 @@ test('validateConfig: сообщения НЕ содержат значений 
   const joined = JSON.stringify(errs) + new ConfigError(errs).message;
   assert.ok(!joined.includes(secret), 'значение секрета не утекает в сообщения ошибок');
 });
+
+test('loadConfig/validateConfig: догрузка истории Instagram — дефолты, kill switch и границы', () => {
+  const d = loadConfig({});
+  assert.deepEqual({ ...d.instagram.backfill }, {
+    enabled: true, accountsPerPass: 3, daysPerPass: 14, dailyCalls: 1500, maxDays: 730,
+    emptyStreak: 7, topupDays: 2, bucStopPct: 75, passBudgetMs: 240000,
+  });
+  assert.deepEqual(validateConfig(d).filter((e) => e.field.startsWith('instagram.backfill')), []);
+
+  assert.equal(loadConfig({ IG_BACKFILL_ENABLED: '0' }).instagram.backfill.enabled, false, 'kill switch без выкладки кода');
+  assert.equal(loadConfig({ IG_BACKFILL_ENABLED: '1' }).instagram.backfill.enabled, true);
+  assert.equal(loadConfig({ IG_BACKFILL_TOPUP_DAYS: '0' }).instagram.backfill.topupDays, 0, 'доливку лага можно выключить нулём');
+  const custom = loadConfig({ IG_BACKFILL_DAYS_PER_PASS: '30', IG_BACKFILL_MAX_DAYS: '1000', IG_BACKFILL_DAILY_CALLS: '500' }).instagram.backfill;
+  assert.equal(custom.daysPerPass, 30);
+  assert.equal(custom.maxDays, 1000);
+  assert.equal(custom.dailyCalls, 500);
+
+  const bad = (env) => validateConfig(loadConfig(env)).map((e) => e.field);
+  assert.ok(bad({ IG_BACKFILL_ENABLED: 'yes' }).includes('instagram.backfill.enabled'), 'непонятный выключатель — ошибка, а не догадка');
+  assert.ok(bad({ IG_BACKFILL_ACCOUNTS_PER_PASS: '0' }).includes('instagram.backfill.accountsPerPass'));
+  assert.ok(bad({ IG_BACKFILL_DAYS_PER_PASS: '91' }).includes('instagram.backfill.daysPerPass'));
+  assert.ok(bad({ IG_BACKFILL_DAILY_CALLS: '10' }).includes('instagram.backfill.dailyCalls'), 'бюджет меньше одного дня истории');
+  assert.ok(bad({ IG_BACKFILL_MAX_DAYS: '1.5' }).includes('instagram.backfill.maxDays'));
+  assert.ok(bad({ IG_BACKFILL_EMPTY_STREAK: '0' }).includes('instagram.backfill.emptyStreak'));
+  assert.ok(bad({ IG_BACKFILL_TOPUP_DAYS: '8' }).includes('instagram.backfill.topupDays'));
+  assert.ok(bad({ IG_BACKFILL_BUC_STOP_PCT: '101' }).includes('instagram.backfill.bucStopPct'));
+  assert.ok(bad({ IG_BACKFILL_PASS_BUDGET_MS: '900000' }).includes('instagram.backfill.passBudgetMs'), 'проход короче 15-минутного lease чанка');
+});

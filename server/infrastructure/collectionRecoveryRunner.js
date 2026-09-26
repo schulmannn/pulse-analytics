@@ -5,7 +5,7 @@
 // незавершённого сбора живёт в web-процессе как безопасный бегунок:
 //   • первый проход — через initialDelay после listen/boot, дальше — с интервалом interval;
 //   • single-flight в процессе (пересекающийся тик пропускается, но перепланируется);
-//   • каждый проход = один IG-проход + один TG QR-батч; их item-level runJobOnce делает повторные
+//   • каждый проход = один IG-проход (+ шаг догрузки истории IG) + один TG QR-батч; их item-level runJobOnce делает повторные
 //     проходы идемпотентными и добирающими остаток того же дня (завершённое пропускается);
 //   • работа сабмитится через jobTracker, чтобы shutdown её дожидался;
 //   • unref-таймеры (не держат event loop), во время дренажа новые проходы не планируются, а stop()
@@ -42,6 +42,11 @@ function createCollectionRecoveryRunner({
   // планировщиком/интервалом; внутри свой durable day-gate (реальная работа раз в день).
   // Optional (inert no-op) — pure-scheduler тесты и composition без Rusender-вертикали не задеты.
   runRusenderCollectionPass = async () => ({ skipped: true }),
+  // Догрузка истории Instagram (jobs/igBackfillJob.runIgBackfillPass): идёт ПОСЛЕ дневного
+  // IG-сбора в ТОЙ ЖЕ IG-lane (последовательно, как МС): оба пути бьют одну квоту Graph и один
+  // usage-gate — дневной день никогда не ждёт истории и не делит с ней квоту конкуренцией.
+  // Optional (inert no-op) — pure-scheduler тесты и composition без IG-вертикали не задеты.
+  runIgBackfillPass = async () => ({ skipped: true }),
   igCap,
   tgCap,
   mediaCap,
@@ -70,9 +75,16 @@ function createCollectionRecoveryRunner({
         // пользовательский session не получает два одновременных MTProto fan-out, а repair не
         // превращается в лишнюю конкурентную pipeline. Каждая lane изолирует свой сбой и
         // наследует общий lifecycle/gating.
-        const [ig, tgLane, msLane, ym, rusender] = await Promise.all([
-          runIgCollectionPass({ cap: igCap })
-            .catch((e) => { log('error', 'recovery_ig_pass_failed', { error: e.message }); return null; }),
+        const [igLane, tgLane, msLane, ym, rusender] = await Promise.all([
+          // IG-lane последовательна: дневной сбор «вчера», затем догрузка истории — каждый со своим
+          // .catch, сбой одного не отменяет другой.
+          (async () => {
+            const ig = await runIgCollectionPass({ cap: igCap })
+              .catch((e) => { log('error', 'recovery_ig_pass_failed', { error: e.message }); return null; });
+            const igBackfill = await runIgBackfillPass()
+              .catch((e) => { log('error', 'recovery_ig_backfill_pass_failed', { error: e.message }); return null; });
+            return { ig, igBackfill };
+          })(),
           (async () => {
             const tg = await processTgQrCollection({ cap: tgCap })
               .catch((e) => { log('error', 'recovery_tg_pass_failed', { error: e.message }); return null; });
@@ -97,9 +109,10 @@ function createCollectionRecoveryRunner({
           runRusenderCollectionPass()
             .catch((e) => { log('error', 'recovery_rusender_pass_failed', { error: e.message }); return null; }),
         ]);
+        const { ig, igBackfill } = igLane;
         const { tg, media } = tgLane;
         const { ms, msOrders } = msLane;
-        log('info', 'collection_recovery_pass_done', { ig, tg, media, ms, msOrders, ym, rusender });
+        log('info', 'collection_recovery_pass_done', { ig, igBackfill, tg, media, ms, msOrders, ym, rusender });
     },
   });
 

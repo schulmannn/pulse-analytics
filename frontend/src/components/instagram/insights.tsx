@@ -93,7 +93,8 @@ export function PeriodCompareBlock({ rows }: { rows: { label: string; pair: Wind
           {rows.map((r) => (
             <tr key={r.label} className="transition-colors hover:bg-hover-row">
               <td className="p-4 text-muted-foreground">{r.label}</td>
-              <td className="p-4 text-right font-medium tabular-nums">{fmt.short(r.pair.cur)}</td>
+              {/* Нет измерения за окно — «—», а не выдуманный ноль (вовлечённые аккаунты на архивном окне). */}
+              <td className="p-4 text-right font-medium tabular-nums">{r.pair.hasCur ? fmt.short(r.pair.cur) : '—'}</td>
               <td className="p-4 text-right tabular-nums text-muted-foreground">
                 {r.pair.hasPrev ? fmt.short(r.pair.prev) : '—'}
               </td>

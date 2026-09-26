@@ -16,6 +16,7 @@ import { Sparkline } from '@/components/Sparkline';
 import type { WidgetSize } from '@/lib/widgetPrefsStore';
 import { fmtDay, pairBasis, pairDelta, windowIgSeries, type Point, type WindowPair } from '@/lib/igMetrics';
 import { windowRangeLabel } from '@/lib/metricSeries';
+import { prepareChartSeries } from '@/lib/chartSeries';
 import type { IgOverviewChart } from '@/lib/igWindowMetrics';
 import { calendarWindowForPeriod, periodDateTimestamp, splitCalendarRows, useCardShowsPeriod } from '@/lib/period';
 import type { WidgetPeriodValue } from '@/lib/period';
@@ -322,7 +323,7 @@ export function IgKpiBlock({ ig }: { ig: IgData }) {
       {/* Hero-drillTo — только тихий клик по числу (стрелки у hero нет — она читалась дублем
           карточной, визуальный аудит №1); секционные corner-↗ и whole-card клик не меняются. */}
       <KpiHero
-        label={`Охват · ${ig.window.days} дн.`}
+        label={ig.reachBasis === 'dailySum' && ig.window.mode === 'archive' ? 'Охват · сумма по дням' : `Охват · ${ig.window.label}`}
         value={fmt.kpi(ig.pairs.reach.cur)}
         delta={pairDelta(ig.pairs.reach)}
         basis={pairBasis(ig.pairs.reach, fmt.kpi)}
@@ -450,9 +451,12 @@ export function SubscriberMovement({
 export function IgReachBody({ ig, viz }: { ig: IgData; viz?: 'line' | 'bar' }) {
   // См. useCardShowsPeriod: на ленте окно живёт в шапке страницы, дублировать его в подписи нечем.
   const showPeriod = useCardShowsPeriod();
+  // Архивное окно («Всё», свой период): уникального охвата за такой период Instagram не отдаёт —
+  // число является суммой дневных охватов и обязано так и называться (OD-13).
+  const dailySum = ig.window.mode === 'archive' && ig.reachBasis === 'dailySum';
   return (
     <KpiHero
-      label={showPeriod ? `Охват · ${ig.window.days} дн.` : 'Охват'}
+      label={dailySum ? 'Охват · сумма по дням' : showPeriod ? `Охват · ${ig.window.label}` : 'Охват'}
       value={fmt.kpi(ig.pairs.reach.cur)}
       delta={pairDelta(ig.pairs.reach)}
       basis={pairBasis(ig.pairs.reach, fmt.kpi)}
@@ -481,7 +485,15 @@ export function IgAudienceBody({ ig }: { ig: IgData }) {
       return p.day !== 'total' && Number.isFinite(timestamp) && timestamp >= ig.window.since && timestamp <= ig.window.until;
     })
     .sort((a, b) => a.day.localeCompare(b.day));
+  // Длинное окно («Всё» на годы архива) — через общую политику прореживания (prepareChartSeries):
+  // кап CHART_MAX_POINTS, короткий ряд не трогается.
   const hasChart = level.length >= 2;
+  const levelShown = hasChart
+    ? prepareChartSeries({ points: level, viz: 'line', kind: 'stock', unit: 'number' }).sampledIdx.flatMap((i) => {
+        const point = level[i];
+        return point ? [point] : [];
+      })
+    : level;
   return (
     <div className="flex h-full min-h-0 flex-col gap-4">
       {/* Анатомия истории берётся ЦЕЛИКОМ из ChartCardBody, а не собирается тут руками: раньше это
@@ -491,7 +503,7 @@ export function IgAudienceBody({ ig }: { ig: IgData }) {
           процент, и DeltaPill соврал бы про природу числа. */}
       <div className="min-h-0 flex-1">
         <ChartCardBody
-          label={`База · ${ig.window.days} дн.`}
+          label={`База · ${ig.window.label}`}
           value={fmt.kpi(ig.followers)}
           valueAdornment={
             net.hasCur && net.cur !== 0 ? (
@@ -503,9 +515,9 @@ export function IgAudienceBody({ ig }: { ig: IgData }) {
         >
           {hasChart ? (
             <Sparkline
-              values={level.map((p) => p.value)}
-              labels={level.map((p) => fmtDay(p.day))}
-              axisLabels={timeAxisLabels(level.map((p) => p.day), ig.window.days)}
+              values={levelShown.map((p) => p.value)}
+              labels={levelShown.map((p) => fmtDay(p.day))}
+              axisLabels={timeAxisLabels(levelShown.map((p) => p.day), ig.window.days)}
               area
               strokeWidth={2}
               interactive
@@ -649,7 +661,11 @@ export function IgEngagementBody({ ig }: { ig: IgData }) {
       onDrill={() => navigate('/metrics/ig-er')}
       drillLabel="Вовлечённость"
       live={live}
-      note="Взаимодействия к охвату аккаунта за период."
+      note={
+        ig.window.mode === 'archive'
+          ? 'Взаимодействия к сумме дневного охвата за период.'
+          : 'Взаимодействия к охвату аккаунта за период.'
+      }
     />
   );
 }

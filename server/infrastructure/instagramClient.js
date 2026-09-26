@@ -29,8 +29,10 @@ const IG_BACKOFF_BUDGET_MS = 1000; // hard ceiling on cumulative backoff sleep p
 // Graph error codes that mean "you are being throttled" (surface as 429, retry). Subcodes are not
 // throttle signals on their own, so we match on the top-level code only.
 //   4  = app-level rate limit, 17 = user-level rate limit, 32 = page rate limit,
-//   613 = custom-rate-limit / calls-per-second.
-const IG_RATE_LIMIT_CODES = new Set([4, 17, 32, 613]);
+//   613 = custom-rate-limit / calls-per-second, 80002 = per-account Instagram BUC rate limit
+//   (Business Use Case). До 80002 в списке он приходил как постоянная ошибка 502, и фоновые проходы
+//   (крон, догрузка истории) принимали лимит за «нет данных» вместо повторяемого throttle.
+const IG_RATE_LIMIT_CODES = new Set([4, 17, 32, 613, 80002]);
 // Authentication, permission and invalid-parameter failures must never be retried even if a
 // malformed/contradictory Graph payload happens to mark them transient.
 const IG_NON_RETRYABLE_CODES = new Set([10, 100, 190, 200]);

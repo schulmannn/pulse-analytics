@@ -35,13 +35,15 @@ export const details: MetricDetails = {
   deps: {
     'ig.reach': { widget: ['useIgInsights', 'useIgHistory'], explorer: [...GATE, 'useIgHistory'] },
     'ig.followers': { widget: ['useIgProfile', 'useIgHistory'], explorer: [...GATE, 'useIgHistory'] },
-    'ig.netFollowers': { widget: ['useIgInsights'] },
+    // Движение базы в виджете — архив ig_daily (follows − unfollows) с живым хвостом.
+    'ig.netFollowers': { widget: ['useIgInsights', 'useIgHistory'] },
     'ig.erv': { widget: ['useIgInsights', 'useIgHistory'] },
     'ig.interactions': { widget: ['useIgInsights', 'useIgHistory'], explorer: [...GATE, 'useIgHistory'] },
     'ig.views': { explorer: [...GATE, 'useIgHistory'] },
     'ig.likes': { explorer: [...GATE, 'useIgHistory'] },
     'ig.saves': { explorer: [...GATE, 'useIgHistory'] },
-    'ig.er': { explorer: GATE },
+    // ER архивного окна («Всё», свой период) считается из архива ig_daily.
+    'ig.er': { explorer: [...GATE, 'useIgHistory'] },
     'ig.formats': {
       widget: ['useIgBreakdowns'],
       explorer: [...GATE, 'useIgBreakdowns', 'useIgPosts', 'useCampaignPosts'],

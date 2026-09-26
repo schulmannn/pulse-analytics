@@ -317,8 +317,11 @@ export function igDemoFixture(path: string): unknown | undefined {
   if (p === '/api/ig/stories') return igDemoStories();
   if (p === '/api/ig/tags') return igDemoTags();
   // Постоянной ig_daily-истории у демо нет — клиент прозрачно живёт живой серией (тот же контракт,
-  // что у env/mock-фолбэка реального роута: rows пустые).
-  if (p === '/api/ig/history') return { enabled: false, rows: [] };
+  // что у env/mock-фолбэка реального роута: rows пустые, границ архива и догрузки нет). Фикстура
+  // архива — отдельным PR; «Всё» в демо считается фолбэком от живых дневных рядов.
+  if (p === '/api/ig/history') {
+    return { enabled: false, rows: [], bounds: null, coverage: { measured_days: 0 }, window: null, backfill: null };
+  }
   // Статус подключения: прод-правда для канала без IG-строки. server_ready:true оставляет кнопку
   // «Подключить» активной; сам клик упрётся в штатную блокировку записей демо-режима (apiSend).
   if (p === '/api/ig/oauth/status') {

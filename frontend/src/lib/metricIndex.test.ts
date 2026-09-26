@@ -306,7 +306,7 @@ describe('metricIndex — возможности разбора', () => {
     }
   });
 
-  it('«Всё» и «Свой период» бывают только у окна; потолки — у Метрики, Rusender и инсайтов IG', () => {
+  it('«Всё» и «Свой период» бывают только у окна; потолки — только у Метрики и Rusender (IG — без потолка, OD-13)', () => {
     for (const entry of routed) {
       const caps = entry.capabilities;
       if (caps.customRange) expect(caps.window, entry.id).toBe('explorer');
@@ -317,9 +317,12 @@ describe('metricIndex — возможности разбора', () => {
     );
     for (const [id, days] of Object.entries(capped)) {
       const source = METRIC_INDEX[id].source;
-      expect(days, id).toBe(source === 'ig' ? 90 : 400);
-      expect(['ym', 'rusender', 'ig'], id).toContain(source);
+      expect(days, id).toBe(400);
+      expect(['ym', 'rusender'], id).toContain(source);
     }
+    // Instagram читает архив ig_daily: окно не упирается в живые 90 дней Graph.
+    expect(capabilitiesOf('ig.er')?.maxRangeDays).toBeNull();
+    expect(capabilitiesOf('ig.formats')?.maxRangeDays).toBeNull();
     // Окно разбора Метрики и Rusender режет сервер (YM_RANGE_MAX_DAYS, RANGE_MAX_DAYS).
     expect(capabilitiesOf('ym.sources')?.maxRangeDays).toBe(400);
     expect(capabilitiesOf('rusender.contacts')?.maxRangeDays).toBe(400);

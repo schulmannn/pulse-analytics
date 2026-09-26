@@ -90,7 +90,8 @@ const igFamily = {
   online: (channelId: number | null) => ['ig', channelId, 'online'] as const,
   stories: (channelId: number | null) => ['ig', channelId, 'stories'] as const,
   tags: (channelId: number | null) => ['ig', channelId, 'tags'] as const,
-  history: (channelId: number | null, days: number) => ['ig', channelId, 'history', days] as const,
+  // Архив ig_daily: один общий ключ «весь архив» (OD-13) — окна режет клиент, как у TG useHistory.
+  history: (channelId: number | null, window: number | 'all') => ['ig', channelId, 'history', window] as const,
   oauthStatus: (channelId: number | null) => ['ig', channelId, 'oauth-status'] as const,
 };
 

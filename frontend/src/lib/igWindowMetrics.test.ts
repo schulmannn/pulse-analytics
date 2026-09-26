@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { IgHistoryRow, IgInsights, IgProfile } from '@/api/schemas';
-import { fmtDay, windowIgSeries, type Point } from '@/lib/igMetrics';
+import { archiveOrLive, fmtDay, liveDailySeries, windowIgSeries, windowPair, type Point } from '@/lib/igMetrics';
 import { igOverviewCharts, igWindowMetrics, type IgWindowSeries } from '@/lib/igWindowMetrics';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -262,5 +262,179 @@ describe('igWindowCharts — буквенная ось короткого окн
     const raw = fixedRaw();
     const metrics = igWindowMetrics({ ...raw, since: Date.parse('2026-07-01'), until: Date.parse('2026-07-15') });
     expect(metrics.overviewCharts.views.axisLabels).toBeUndefined();
+  });
+});
+
+// ── Архив ig_daily «как у TG» (OD-13): слияние рядов и архивные окна ─────────────────────────────
+
+describe('archiveOrLive — ряд архивного окна: архив целиком, живой только без архива', () => {
+  const archive: Point[] = [{ day: '2026-07-01', value: 10 }, { day: '2026-07-02', value: 20 }];
+
+  it('шов не удваивает день: живая точка, закрывающая последний день архива, в ряд не попадает', () => {
+    // Graph штампует дневную точку концом суток по PT (07:00Z СЛЕДУЮЩЕГО UTC-дня): точка за 07-02
+    // приходит как 07-03T07:00 — по ключу это «новый» день, хотя значение то же, что в архиве.
+    const live: Point[] = [
+      { day: '2026-07-02T07:00:00+0000', value: 20 },
+      { day: '2026-07-03T07:00:00+0000', value: 20 },
+    ];
+    const merged = archiveOrLive(archive, live);
+    expect(merged.map((p) => p.value)).toEqual([10, 20]);
+    expect(merged.reduce((acc, p) => acc + p.value, 0)).toBe(30);
+  });
+
+  it('пустой архив — живой ряд как есть (свежее подключение); пропуски не заполняются нулями', () => {
+    const live: Point[] = [{ day: '2026-07-01', value: 1 }, { day: '2026-07-04', value: 4 }];
+    expect(archiveOrLive([], live)).toEqual(live);
+  });
+
+  it('синтетический агрегат окна (total_value) в ряд не попадает никогда', () => {
+    const insights: IgInsights = {
+      data: [
+        { name: 'views', period: 'day', values: [{ value: 100, end_time: day(3) }, { value: 150, end_time: day(10) }], total_value: { value: 150, breakdowns: [] } },
+        metric('reach', [1, 2, 3]),
+      ],
+    };
+    expect(liveDailySeries(insights, 'views')).toEqual([]);
+    expect(liveDailySeries(insights, 'reach').map((p) => p.value)).toEqual([1, 2, 3]);
+  });
+});
+
+describe('igWindowMetrics — архивное окно («Всё», свой период)', () => {
+  // 540 дней архива с дырой: окно «Всё» обязано дать ТОЧНЫЕ суммы строк, без 90-дневного потолка.
+  const N = 540;
+  const rows: IgHistoryRow[] = Array.from({ length: N }, (_, i) => ({
+    day: day(i - N),
+    reach: 100 + (i % 7),
+    views: 300 + (i % 5),
+    total_interactions: 20 + (i % 3),
+    likes: 10,
+    follows: 3,
+    unfollows: 1,
+    accounts_engaged: 50,
+  })).filter((_, i) => i !== 100);   // пропуск сбора — не ноль и не строка
+  const liveReach = metric('reach', [7, 8, 9]);   // живой хвост: days 0..2 (после архива)
+  const reachWindowAgg = windowMetric('reach_window', 111, 222);
+  const all = (extra = {}) =>
+    igWindowMetrics({
+      profile: { followers_count: 500 },
+      insights: { data: [liveReach, { ...reachWindowAgg, total_value: { value: 222, breakdowns: [] } }] },
+      historyRows: rows,
+      since: Date.parse(`${day(-N)}T00:00:00Z`),
+      until: Date.parse(`${day(2)}T12:00:00Z`),
+      mode: 'archive',
+      fromDay: day(-N),
+      toDay: day(2),
+      ...extra,
+    });
+
+  it('суммы — ровно по строкам архива, живой хвост в числа не входит, охват — сумма по дням', () => {
+    const m = all();
+    expect(m.mode).toBe('archive');
+    expect(m.reachBasis).toBe('dailySum');
+    expect(m.liveFallback).toBe(false);
+    expect(m.pairs.reach.cur).toBe(sum(rows.map((r) => r.reach ?? 0)));
+    expect(m.pairs.views.cur).toBe(sum(rows.map((r) => r.views ?? 0)));
+    expect(m.pairs.ti.cur).toBe(sum(rows.map((r) => r.total_interactions ?? 0)));
+    expect(m.followerNet.cur).toBe(2 * rows.length);
+    // ER — на одном основании: Σвзаимодействий ÷ Σохвата по одним и тем же дням.
+    expect(m.erReach).toBeCloseTo((sum(rows.map((r) => r.total_interactions ?? 0)) / sum(rows.map((r) => r.reach ?? 0))) * 100, 10);
+  });
+
+  it('вовлечённые аккаунты не суммируются, прошлого периода нет, дельт нет', () => {
+    const m = all();
+    expect(m.pairs.engaged.hasCur).toBe(false);
+    for (const pair of Object.values(m.pairs)) {
+      expect(pair.hasPrev).toBe(false);
+      expect(pair.prevRange ?? null).toBeNull();
+    }
+    expect(m.values.reach.delta).toBeNull();
+    expect(m.values.erReach.delta).toBeNull();
+    expect(m.erReachPrev).toBe(0);
+  });
+
+  it('свой период — только его календарные дни; окно без архива, но с живым рядом — фолбэк «догружается»', () => {
+    const m = all({ fromDay: day(-10), toDay: day(-8) });
+    expect(m.pairs.reach.cur).toBe(sum(rows.filter((r) => r.day >= day(-10) && r.day <= day(-8)).map((r) => r.reach ?? 0)));
+    const fresh = all({ historyRows: [], fromDay: day(0), toDay: day(2) });
+    expect(fresh.liveFallback).toBe(true);
+    expect(fresh.pairs.reach.cur).toBe(7 + 8 + 9);
+    expect(fresh.pairs.views.hasCur).toBe(false);
+  });
+
+  it('пропуск остаётся пропуском: пустое окно — hasCur=false, а не ноль', () => {
+    const m = all({ historyRows: [], insights: { data: [] }, fromDay: day(-5), toDay: day(-3) });
+    expect(m.pairs.reach.hasCur).toBe(false);
+    expect(m.values.reach.hasValue).toBe(false);
+    expect(m.erReach).toBe(0);
+  });
+
+  it('графики длинного окна прорежены до CHART_MAX_POINTS, а ряд — архив без живого хвоста (OD-8)', () => {
+    const m = all();
+    expect(m.series.reach.length).toBe(rows.length);
+    expect(m.overviewCharts.views.values.length).toBeLessThanOrEqual(140);
+    expect(m.overviewCharts.views.values.length).toBeGreaterThan(2);
+  });
+
+  it('живой пресет не изменился: агрегат окна остаётся хедлайном охвата', () => {
+    const raw = fixedRaw();
+    const withAgg: IgInsights = {
+      data: [
+        ...(raw.insights.data ?? []).filter((m) => m.name !== 'reach_window'),
+        { ...windowMetric('reach_window', 1000, 2000), total_value: { value: 2000, breakdowns: [] } },
+      ],
+    };
+    const live = igWindowMetrics({ ...raw, insights: withAgg });
+    expect(live.mode).toBe('live');
+    expect(live.reachBasis).toBe('window');
+    expect(live.pairs.reach.cur).toBe(2000);
+    expect(igWindowMetrics(raw).reachBasis).toBe('dailySum');   // без агрегата — честная сумма дневных
+  });
+});
+
+describe('windowIgSeries — календарные дни, а не последние N точек', () => {
+  it('дыра в архиве не утаскивает окно «7 дн.» в 8-й день', () => {
+    const pts: Point[] = [0, 1, 2, 3, 4, 6, 7, 8].map((i) => ({ day: day(i), value: 10 + i }));
+    const w = windowIgSeries(pts, 7, 'x');
+    // окно = day(2)..day(8) (7 календарных дней, day(5) — пропуск): 6 точек, не 7.
+    expect(w.values).toEqual([12, 13, 14, 16, 17, 18]);
+    expect(w.prevTotal).toBeNull();   // прошлое окно day(-5)..day(1) архивом не покрыто
+  });
+
+  it('живые ISO-моменты и дни архива — один календарный ключ', () => {
+    const pts: Point[] = [
+      { day: day(0), value: 1 },
+      { day: `${day(1)}T07:00:00+0000`, value: 2 },
+    ];
+    expect(windowIgSeries(pts, 7, 'x').total).toBe(3);
+  });
+});
+
+describe('igWindowMetrics — живой пресет не смешивает архив с живым рядом (ревью)', () => {
+  const NOW = Date.parse('2026-09-25T10:00:00Z');
+  const key = (n: number) => new Date(NOW - n * DAY_MS).toISOString().slice(0, 10);
+  const liveReach = (n: number): NonNullable<IgInsights['data']>[number] => ({
+    name: 'reach',
+    period: 'day',
+    values: Array.from({ length: n }, (_, i) => ({ value: 100, end_time: `${key(n - i - 1)}T07:00:00+0000` })),
+  });
+
+  it('короткий архив (догрузка идёт) не обрезает длинный живой ряд графиков', () => {
+    const historyRows: IgHistoryRow[] = [1, 2, 3].map((n) => ({ day: key(n), reach: 1 }));
+    const m = igWindowMetrics({
+      profile: undefined, insights: { data: [liveReach(90)] }, historyRows, since: NOW - 30 * DAY_MS, until: NOW, mode: 'live',
+    });
+    expect(m.series.reach).toHaveLength(90);
+    expect(windowPair(m.series.reach, NOW - 30 * DAY_MS, NOW).cur).toBe(30 * 100);
+    expect(m.daily.reach).toHaveLength(90);
+  });
+
+  it('длинный архив + живой ряд: день на шве не считается дважды', () => {
+    const historyRows: IgHistoryRow[] = Array.from({ length: 120 }, (_, i) => ({ day: key(120 - i), reach: 100 }));
+    const m = igWindowMetrics({
+      profile: undefined, insights: { data: [liveReach(90)] }, historyRows, since: NOW - 30 * DAY_MS, until: NOW, mode: 'live',
+    });
+    expect(m.series.reach).toHaveLength(120);
+    // Архив кончается вчера (key(1)); живая точка key(0)T07:00 — это тот же вчерашний день по PT.
+    expect(m.series.reach.some((p) => p.day.startsWith(key(0)))).toBe(false);
   });
 });

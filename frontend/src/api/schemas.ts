@@ -375,13 +375,30 @@ export const IgHistoryRowSchema = z
   })
   .passthrough();
 
+// Покрытие архива (OD-13): границы дней с данными, число таких дней и состояние догрузки истории.
+// Все поля опциональны — прежние заглушки `{ rows: [] }` (e2e, старый сервер) разбираются как есть.
+export const IgArchiveBoundsSchema = z.object({ first_day: z.string(), last_day: z.string() }).passthrough();
+export const IgBackfillStatusSchema = z
+  .object({
+    status: z.enum(['idle', 'running', 'done', 'error']).catch('idle'),
+    horizon_day: z.string().nullable().optional(),
+    cursor_day: z.string().nullable().optional(),
+    reason: z.string().nullable().optional(),
+  })
+  .passthrough();
+
 export const IgHistorySchema = z
   .object({
     enabled: z.boolean().optional(),
     error: z.string().optional().nullable(),
     rows: z.array(IgHistoryRowSchema).optional().default([]),
+    bounds: IgArchiveBoundsSchema.nullable().optional(),
+    coverage: z.object({ measured_days: z.coerce.number(), hidden_days: z.coerce.number().optional() }).passthrough().nullable().optional(),
+    backfill: IgBackfillStatusSchema.nullable().optional(),
   })
   .passthrough();
+export type IgArchiveBounds = z.infer<typeof IgArchiveBoundsSchema>;
+export type IgBackfillStatus = z.infer<typeof IgBackfillStatusSchema>;
 export type IgHistoryRow = z.infer<typeof IgHistoryRowSchema>;
 export type IgHistoryData = z.infer<typeof IgHistorySchema>;
 

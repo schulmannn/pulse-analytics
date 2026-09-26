@@ -21,11 +21,13 @@ import {
   aggregateOnline,
   hashtagStats,
   hasDailySeries,
+  fmtDay,
+  liveDailySeries,
   MEDIA_PRODUCT_LABEL,
   DAY_NAMES,
   DAY_MS,
 } from '@/lib/igMetrics';
-import { NO_BASIS_CUSTOM_RANGE, NO_BASIS_SHORT_ARCHIVE } from '@/lib/delta';
+import { igArchiveCoverageNote, igArchiveEmpty, igWindowPlan } from '@/lib/igArchiveWindow';
 import { igWindowMetrics } from '@/lib/igWindowMetrics';
 import { buildIgInsights } from '@/lib/igInsights';
 
@@ -39,40 +41,49 @@ export function useIgData() {
   const globalPeriod = usePeriod();
   const days = pagePeriod?.days ?? globalPeriod.days;
   const range = pagePeriod ? pagePeriod.range : globalPeriod.range;
-  const timeframe = days === 7 ? 'last_14_days' : days === 90 || days === 0 ? 'last_90_days' : 'last_30_days';
-  const insDays = range
-    ? Math.min(90, Math.max(1, Math.ceil((range.to - range.from) / DAY_MS)))
-    : days && days > 0 ? Math.min(days, 90) : 90;
+  // Quantized to the minute: a raw Date.now() in render produced a new value every render,
+  // which would defeat the memos below (and subtly shift the window between sibling views).
+  const now = Math.floor(Date.now() / 60_000) * 60_000;
+  // Архив ig_daily целиком (OD-13) — один общий запрос на всех потребителей. Живые пресеты берут
+  // из него только длинные ряды графиков; «Всё» и свой период — ещё и числа (lib/igArchiveWindow).
+  const historyQ = useIgHistory();
+  const histRows = historyQ.data?.rows;
+  const bounds = historyQ.data?.bounds ?? null;
+  const backfill = historyQ.data?.backfill ?? null;
 
   const { channelId } = useSelectedChannel();
   const profileQ = useIgProfile();
-  const insightsQ = useIgInsights(insDays);
+  // Живые пресеты 7/30/90 — окно серверного агрегата. Архивному окну («Всё», свой период) живые
+  // инсайты НЕ нужны: его числа — суммы архива, а своего периода сервер всё равно не знает. Исключение
+  // — архив пуст (свежее подключение, демо без архива, сбой чтения): тогда берём 90 дней живых
+  // дневных рядов как фолбэк «догружается» (тот же кэш, что у пресета 90д, квота не удваивается).
+  const firstRowDay = useMemo(
+    () => histRows?.find((r) => r.reach != null || r.views != null || r.total_interactions != null)?.day ?? null,
+    [histRows],
+  );
+  const planBase = igWindowPlan({ days, range, now, bounds, firstRowDay });
+  const archiveEmpty = igArchiveEmpty(historyQ);
+  const insightsEnabled = planBase.mode === 'live' || archiveEmpty;
+  const insightsQ = useIgInsights(planBase.insDays, insightsEnabled);
   const postsQ = useIgPosts(24);
-  const breakdownsQ = useIgBreakdowns(timeframe);
+  const breakdownsQ = useIgBreakdowns(planBase.timeframe);
   const onlineQ = useIgOnline();
   const storiesQ = useIgStories();
-  // DB-first history: the cron accumulates a long ig_daily series past the live API window. Used
-  // below only to LENGTHEN the reach/follows daily lines when it has more points (else live wins).
-  const historyQ = useIgHistory();
   // Состояние подключения — единственный источник, который знает срок токена и отвечает даже
   // когда Graph-запросы падают. Дешёвое чтение из БД, react-query дедуплицирует его с /connect.
   const oauthStatusQ = useIgOauthStatus();
 
-  // Selected window (custom range overrides the days preset; IG insights cap at ~90 days).
-  // Quantized to the minute: a raw Date.now() in render produced a new value every render,
-  // which would defeat the memos below (and subtly shift the window between sibling views).
-  const now = Math.floor(Date.now() / 60_000) * 60_000;
-  let windowDays: number;
-  let since: number;
-  let until = now;
-  if (range) {
-    since = range.from;
-    until = range.to;
-    windowDays = Math.min(90, Math.max(1, Math.ceil((range.to - range.from) / DAY_MS)));
-  } else {
-    windowDays = days && days > 0 ? Math.min(days, 90) : 90;
-    since = now - windowDays * DAY_MS;
-  }
+  // «Всё» без единой точки архива (свежее подключение) начинается с первой живой дневной точки.
+  // Выключенный запрос может держать placeholder прошлого окна — в архивное окно его не пускаем.
+  const ins0 = insightsEnabled ? insightsQ.data : undefined;
+  const firstLiveMs = useMemo(() => {
+    const first = liveDailySeries(ins0, 'reach')[0];
+    return first ? Date.parse(first.day) : null;
+  }, [ins0]);
+  const plan = planBase.mode === 'archive' && planBase.fromDay == null
+    ? igWindowPlan({ days, range, now, bounds, firstRowDay, firstLiveMs })
+    : planBase;
+  const { since, until, days: windowDays } = plan;
   const inWindow = useCallback(
     (iso: string) => {
       const t = Date.parse(iso);
@@ -81,8 +92,10 @@ export function useIgData() {
     [since, until],
   );
 
-  const ins = insightsQ.data;
-  const histRows = historyQ.data?.rows;
+  const ins = ins0;
+  const mode = plan.mode;
+  const fromDay = plan.fromDay;
+  const toDay = plan.toDay;
   const windowMetrics = useMemo(
     () => igWindowMetrics({
       profile: profileQ.data,
@@ -90,15 +103,27 @@ export function useIgData() {
       historyRows: histRows,
       since,
       until,
+      mode,
+      fromDay,
+      toDay,
       // ОКНО СЕРВЕРНЫХ АГРЕГАТОВ. `/api/ig/insights` режет `total_value` по СВОЕМУ `days` и
-      // снапит его к 7/30/90 (server/routes/ig.js). Пресеты периода — ровно 7/30/90 и «Всё»→90,
-      // поэтому БЕЗ своего периода клиентское окно совпадает с серверным день в день. Со своим
-      // периодом не совпадает (и якорь другой: сервер считает от «сейчас», а не от конца
-      // диапазона) — там границ у агрегата нет вовсе: лучше без подписи, чем не те даты.
-      aggPrevRange: range ? null : { from: since - windowDays * DAY_MS, to: since - 1 },
+      // снапит его к 7/30/90 (server/routes/ig.js). Живое окно — ровно пресет 7/30/90, поэтому
+      // клиентское окно совпадает с серверным день в день. Архивному окну агрегаты не нужны.
+      aggPrevRange: mode === 'live' ? { from: since - windowDays * DAY_MS, to: since - 1 } : null,
     }),
-    [profileQ.data, ins, histRows, since, until, windowDays, range],
+    [profileQ.data, ins, histRows, since, until, windowDays, mode, fromDay, toDay],
   );
+  // Покрытие архива (только архивное окно): «с какого дня архив», «догружается», горизонт Graph,
+  // «переподключите». Живёт в существующих слотах — подсказке «нет базы» и тихих подписях.
+  // Демо/мок архива не имеет вовсе — «догружается» там было бы неправдой.
+  const coverageNote = igArchiveCoverageNote({
+    plan,
+    bounds,
+    backfill,
+    liveFallback: windowMetrics.liveFallback && !profileQ.data?.mock,
+    hiddenDays: historyQ.data?.coverage?.hidden_days ?? 0,
+    fmtDay,
+  });
   const {
     series,
     pairs,
@@ -189,7 +214,14 @@ export function useIgData() {
   // код с самого упавшего запроса профиля.
   const { loading, error, reauth } = igAccessStateOf({
     channelId,
-    pending: [profileQ.isPending, insightsQ.isPending, postsQ.isPending],
+    // Архивное окно считается из архива — ждём и его (isLoading: выключенный в демо запрос не висит
+    // вечной загрузкой). Живые пресеты по-прежнему не ждут архива: он нужен им только для графиков.
+    pending: [
+      profileQ.isPending,
+      insightsEnabled && (mode === 'live' ? insightsQ.isPending : insightsQ.isLoading),
+      postsQ.isPending,
+      mode === 'archive' && historyQ.isLoading,
+    ],
     profileErrored: profileQ.isError,
     profileErrorCode: profileQ.error instanceof ApiError ? profileQ.error.code : undefined,
     tokenState: oauthStatusQ.data?.token_state,
@@ -209,9 +241,17 @@ export function useIgData() {
     isMock,
     lastSync,
     profile: profileQ.data,
-    window: { since, until, days: windowDays },
+    window: { since, until, days: windowDays, mode, label: plan.label, custom: plan.custom, fromDay, toDay },
     // Почему у дельты нет базы — подсказка слота «нет базы» (см. lib/delta).
-    noBasisReason: range ? NO_BASIS_CUSTOM_RANGE : NO_BASIS_SHORT_ARCHIVE,
+    noBasisReason: coverageNote ? `${plan.noBasisReason}. ${coverageNote}` : plan.noBasisReason,
+    // Как посчитан охват (агрегат окна или сумма по дням) и покрытие архива — честные подписи.
+    reachBasis: windowMetrics.reachBasis,
+    archive: {
+      bounds,
+      backfill,
+      liveFallback: windowMetrics.liveFallback,
+      note: coverageNote,
+    },
     inWindow,
     series,
     pairs,

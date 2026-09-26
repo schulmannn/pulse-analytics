@@ -494,16 +494,19 @@ export function useIgTags() {
   });
 }
 
-/** Persisted IG daily series (Postgres ig_daily) — the DB-first history the cron accumulates past
- *  the tiny live window. Disabled in demo mode (no DB, no fixture) so panels keep their live series. */
-export function useIgHistory(days = 400, enabled = true) {
+/** Архив Instagram (Postgres ig_daily) целиком — «как у TG» (OD-13): крон и догрузка истории копят
+ *  его за пределами живых 90 дней Graph, окна (пресеты, «Всё», свой период) режет клиент. ОДИН ключ
+ *  на всех потребителей (useIgData, виджеты, «Неделя аккаунта») — один запрос на канал. В ответе,
+ *  кроме строк, границы архива и состояние догрузки для честных подписей. В демо выключен: фикстуры
+ *  архива нет, панели живут на живых рядах. */
+export function useIgHistory(enabled = true) {
   const { channelId } = useSelectedChannel();
   return useQuery({
     enabled: enabled && channelId != null && !isDemoMode(),
-    queryKey: qk.ig.history(channelId, days),
+    queryKey: qk.ig.history(channelId, 'all'),
     staleTime: STALE_ARCHIVE,
     placeholderData: keepPreviousForChannel(channelId),
-    queryFn: ({ signal }) => apiGet(`/api/ig/history?days=${days}`, IgHistorySchema, { signal, channelId }),
+    queryFn: ({ signal }) => apiGet('/api/ig/history?days=0', IgHistorySchema, { signal, channelId }),
   });
 }
 

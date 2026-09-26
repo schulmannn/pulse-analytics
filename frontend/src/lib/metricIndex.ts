@@ -531,9 +531,10 @@ const TG_EXTRA: RouteFamily<TgExtraKey> = {
 
 // Instagram. Дневные разборы держат СВОЁ окно (useState, пресеты 7/30/90/Всё без календаря) —
 // PERIOD-1/SHELL-4, записано как есть. Агрегатные страницы и разрезы за окно читают глобальный
-// период, но инсайты Instagram не старше 90 дней: «Всё» там не предлагается.
+// период. Потолка окна больше нет (OD-13): длинные окна читают архив ig_daily, а не живые 90 дней
+// Graph; чип «Всё» на этих страницах пока не предлагается (телефонный этап, SHELL-4/PERIOD-1).
 const IG_DAILY = caps({ window: 'local', allowAll: true, compare: OFF_PREV_YEAR, pin: true });
-const IG_INSIGHTS_WINDOW = caps({ window: 'explorer', maxRangeDays: 90 });
+const IG_INSIGHTS_WINDOW = caps({ window: 'explorer', maxRangeDays: null });
 const IG: RouteFamily<IgRouteKey> = {
   source: 'ig',
   scope: 'metrics',

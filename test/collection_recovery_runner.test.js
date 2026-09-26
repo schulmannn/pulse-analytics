@@ -46,8 +46,10 @@ function makeRunner(over = {}) {
   const mediaCalls = [];
   const msCalls = [];
   const msOrdersCalls = [];
+  const igBackfillCalls = [];
+  const logs = [];
   const runner = createCollectionRecoveryRunner({
-    log: () => {},
+    log: (level, event, fields) => logs.push({ level, event, fields }),
     jobTracker,
     runIgCollectionPass: over.runIgCollectionPass || (async ({ cap }) => { igCalls.push(cap); return { started: 0 }; }),
     processTgQrCollection: over.processTgQrCollection || (async ({ cap }) => { tgCalls.push(cap); return { collected: 0 }; }),
@@ -67,6 +69,11 @@ function makeRunner(over = {}) {
       ? {}
       : { runMsOrdersPass: over.runMsOrdersPass
           || (async () => { msOrdersCalls.push(true); return { resume: { resumed: 0 } }; }) }),
+    // …и для догрузки истории IG — та же IG-lane, после дневного сбора.
+    ...(over.runIgBackfillPass === null
+      ? {}
+      : { runIgBackfillPass: over.runIgBackfillPass
+          || (async () => { igBackfillCalls.push(true); return { accounts: 0 }; }) }),
     igCap: 25,
     tgCap: 200,
     mediaCap: 16,
@@ -77,7 +84,7 @@ function makeRunner(over = {}) {
     setTimeoutFn: clock.setTimeoutFn,
     clearTimeoutFn: clock.clearTimeoutFn,
   });
-  return { runner, clock, jobTracker, igCalls, tgCalls, mediaCalls, msCalls, msOrdersCalls };
+  return { runner, clock, jobTracker, igCalls, tgCalls, mediaCalls, msCalls, msOrdersCalls, igBackfillCalls, logs };
 }
 
 test('start(): планирует первый проход через initialDelay, unref-таймер', () => {
@@ -214,6 +221,49 @@ test('проход заказов МС не инъектирован → деф�
   await assert.doesNotReject(clock.fireNext());
   assert.deepEqual(igCalls, [25]);
   assert.deepEqual(msCalls, [true]);
+});
+
+test('IG-lane: догрузка истории идёт в каждом проходе ПОСЛЕ дневного сбора, последовательно', async () => {
+  let releaseIg;
+  const gate = new Promise((resolve) => { releaseIg = resolve; });
+  const order = [];
+  const { runner, logs } = makeRunner({
+    runIgCollectionPass: async () => { order.push('ig:start'); await gate; order.push('ig:end'); return { started: 1 }; },
+    runIgBackfillPass: async () => { order.push('backfill'); return { accounts: 2, fetched: 5 }; },
+  });
+  const pass = runner.runOnce();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.deepEqual(order, ['ig:start'], 'история не делит квоту Graph с идущим дневным сбором');
+  releaseIg();
+  await pass;
+  assert.deepEqual(order, ['ig:start', 'ig:end', 'backfill']);
+  const done = logs.find((l) => l.event === 'collection_recovery_pass_done');
+  assert.deepEqual(done.fields.ig, { started: 1 });
+  assert.deepEqual(done.fields.igBackfill, { accounts: 2, fetched: 5 }, 'итог догрузки — в логе прохода');
+});
+
+test('сбой дневного IG-сбора не отменяет догрузку истории той же lane, и наоборот', async () => {
+  const a = makeRunner({ runIgCollectionPass: async () => { throw new Error('ig boom'); } });
+  a.runner.start();
+  await assert.doesNotReject(a.clock.fireNext());
+  assert.deepEqual(a.igBackfillCalls, [true], 'догрузка выполнена после сбоя дневного сбора');
+
+  const b = makeRunner({ runIgBackfillPass: async () => { throw new Error('backfill boom'); } });
+  b.runner.start();
+  await assert.doesNotReject(b.clock.fireNext());
+  assert.deepEqual(b.igCalls, [25], 'дневной сбор не задет');
+  assert.deepEqual(b.tgCalls, [200], 'TG не задет');
+  assert.deepEqual(b.msCalls, [true], 'МС не задет');
+  assert.ok(b.logs.some((l) => l.event === 'recovery_ig_backfill_pass_failed'), 'сбой догрузки залогирован');
+  assert.equal(b.clock.pending, 1, 'следующий проход всё равно запланирован');
+});
+
+test('догрузка IG не инъектирована → дефолтный no-op, проход не падает', async () => {
+  const { runner, clock, igCalls } = makeRunner({ runIgBackfillPass: null });
+  runner.start();
+  await assert.doesNotReject(clock.fireNext());
+  assert.deepEqual(igCalls, [25]);
 });
 
 test('single-flight: перекрывающийся вызов прохода пропускается, пока предыдущий ещё бежит', async () => {

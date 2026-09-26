@@ -104,6 +104,22 @@ function loadConfig(env = process.env) {
       // консервативны: пик онбординга не должен пинать сотни медленных upstream-запросов.
       oauthMaxInFlight: Number(env.IG_OAUTH_MAX_INFLIGHT || 8),
       oauthAcquireTimeoutMs: Number(env.IG_OAUTH_ACQUIRE_TIMEOUT_MS || 2000),
+      // Догрузка истории в архив ig_daily (jobs/igBackfillJob, OD-13). Kill switch ВКЛЮЧЁН по
+      // умолчанию: IG_BACKFILL_ENABLED=0 останавливает догрузку и дневной ремонт без выкладки кода
+      // (дневной крон не задет). Остальное — квота Graph: сколько аккаунтов и дней за проход, дневной
+      // бюджет вызовов на аккаунт, глубина опроса (граница опроса Graph, НЕ потолок чтения), серия
+      // пустых дней = горизонт, доливка лага, мягкий BUC-стоп и время одного прохода.
+      backfill: Object.freeze({
+        enabled: parseKillSwitch(env.IG_BACKFILL_ENABLED),
+        accountsPerPass: Number(env.IG_BACKFILL_ACCOUNTS_PER_PASS || 3),
+        daysPerPass: Number(env.IG_BACKFILL_DAYS_PER_PASS || 14),
+        dailyCalls: Number(env.IG_BACKFILL_DAILY_CALLS || 1500),
+        maxDays: Number(env.IG_BACKFILL_MAX_DAYS || 730),
+        emptyStreak: Number(env.IG_BACKFILL_EMPTY_STREAK || 7),
+        topupDays: env.IG_BACKFILL_TOPUP_DAYS == null || env.IG_BACKFILL_TOPUP_DAYS === '' ? 2 : Number(env.IG_BACKFILL_TOPUP_DAYS),
+        bucStopPct: Number(env.IG_BACKFILL_BUC_STOP_PCT || 75),
+        passBudgetMs: Number(env.IG_BACKFILL_PASS_BUDGET_MS || 240000),
+      }),
     }),
     moysklad: Object.freeze({
       // Ключ шифрования токенов МойСклада (AES-256-GCM, lib/ms_crypto) — по образцу
@@ -244,6 +260,16 @@ function loadConfig(env = process.env) {
       collectorStaleHours: Math.max(1, parseInt(env.COLLECTOR_STALE_HOURS, 10) || 24),
     }),
   });
+}
+
+// Выключатель «включён по умолчанию»: пусто/не задан → true, '1' → true, '0' → false, всё прочее →
+// null (validateConfig честно откажет, а не угадает намерение оператора).
+function parseKillSwitch(raw) {
+  if (raw == null || String(raw).trim() === '') return true;
+  const v = String(raw).trim();
+  if (v === '1') return true;
+  if (v === '0') return false;
+  return null;
 }
 
 // Возвращает массив структурированных ошибок { field, message } (пустой = валиден). main.js (B2)
@@ -531,6 +557,28 @@ function validateConfig(config) {
     config.instagram.oauthMaxInFlight > 64
   ) {
     add('instagram.oauthMaxInFlight', 'IG_OAUTH_MAX_INFLIGHT должен быть целым числом в диапазоне 1..64.');
+  }
+  // Догрузка истории Instagram: границы защищают квоту Graph (дневной бюджет не меньше одного дня
+  // истории = 11 вызовов) и lease чанка (время прохода < 15-минутного lease runJobOnce).
+  {
+    const b = config.instagram.backfill || {};
+    if (typeof b.enabled !== 'boolean') {
+      add('instagram.backfill.enabled', 'IG_BACKFILL_ENABLED должен быть 0 или 1.');
+    }
+    for (const [field, env, value, min, max] of [
+      ['accountsPerPass', 'IG_BACKFILL_ACCOUNTS_PER_PASS', b.accountsPerPass, 1, 50],
+      ['daysPerPass', 'IG_BACKFILL_DAYS_PER_PASS', b.daysPerPass, 1, 90],
+      ['dailyCalls', 'IG_BACKFILL_DAILY_CALLS', b.dailyCalls, 11, 100000],
+      ['maxDays', 'IG_BACKFILL_MAX_DAYS', b.maxDays, 1, 3650],
+      ['emptyStreak', 'IG_BACKFILL_EMPTY_STREAK', b.emptyStreak, 1, 90],
+      ['topupDays', 'IG_BACKFILL_TOPUP_DAYS', b.topupDays, 0, 7],
+      ['bucStopPct', 'IG_BACKFILL_BUC_STOP_PCT', b.bucStopPct, 1, 100],
+      ['passBudgetMs', 'IG_BACKFILL_PASS_BUDGET_MS', b.passBudgetMs, 10000, 600000],
+    ]) {
+      if (!Number.isInteger(value) || value < min || value > max) {
+        add(`instagram.backfill.${field}`, `${env} должен быть целым числом в диапазоне ${min}..${max}.`);
+      }
+    }
   }
   if (
     !Number.isInteger(config.instagram.oauthAcquireTimeoutMs) ||

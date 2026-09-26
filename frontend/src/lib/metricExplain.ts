@@ -32,6 +32,7 @@ export function explainRows(metricId: string | undefined, meta?: WidgetMeta): Ex
   if (def?.included) rows.push({ label: 'Что учитывается', text: def.included });
   if (def?.sourceNote) rows.push({ label: 'Источник', text: def.sourceNote });
   if (meta?.periodLabel) rows.push({ label: 'Период', text: meta.periodLabel });
+  if (meta?.basisNote) rows.push({ label: 'Основание', text: meta.basisNote });
   const sample = sampleText(meta);
   if (sample) rows.push({ label: 'Выборка', text: sample });
   if (meta?.fresh) rows.push({ label: 'Данные', text: meta.fresh.label, warn: meta.fresh.stale });

@@ -39,3 +39,20 @@ for (const route of IG_ROUTES) {
     expect(igHits).toEqual([]);
   });
 }
+
+// IG-виджет Главной на «Всё»: в демо архива нет (запрос выключен), и окно обязано взять живой
+// фолбэк фикстур, как страницы useIgData. Раньше хук выключал инсайты на архивном окне целиком, и
+// карточка печатала «Нет данных за период».
+test('демо: IG-виджет Главной на «Всё» берёт живой фолбэк, а не «Нет данных за период»', async ({ page }) => {
+  const igHits = collectIgRequests(page);
+  await page.addInitScript(() => {
+    localStorage.setItem('pulse_home_blocks', JSON.stringify({ keys: ['custom:igall'] }));
+    localStorage.setItem('pulse_widget_configs', JSON.stringify([{ id: 'igall', metricId: 'ig.reach', viz: 'line', period: 0 }]));
+  });
+  await bootDemo(page, '/home', { theme: 'dark' });
+  const card = page.locator('section').filter({ has: page.locator('[data-source-identity]', { hasText: 'Instagram' }) });
+  await expect(card).toHaveCount(1);
+  await expect(card.locator('svg[data-chart-kind]').first()).toBeVisible();
+  await expect(card.getByText('Нет данных за период')).toHaveCount(0);
+  expect(igHits).toEqual([]);
+});

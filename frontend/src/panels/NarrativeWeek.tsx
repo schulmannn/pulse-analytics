@@ -144,7 +144,7 @@ export function useIgWeekInput(): { input: NarrativeIgInput | null; loading: boo
   const profileQ = useIgProfile(igFetch);
   const insightsQ = useIgInsights(14, igFetch);
   const insights7Q = useIgInsights(7, igFetch);
-  const historyQ = useIgHistory(400, igFetch);
+  const historyQ = useIgHistory(igFetch);
   const postsQ = useIgPosts(24, igFetch);
   const profile = profileQ.data;
   const ins = insightsQ.data;

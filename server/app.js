@@ -58,7 +58,7 @@ function createApp(deps) {
     SESSION_ABSOLUTE_TTL, GOOGLE_CLIENT_ID,
     appBase, sha256, newToken, VERIFY_TTL, RESET_TTL, INVITE_TTL,
     sendEmail, sendEmailDetailed, emailConfigured, emailShell, emailBtn, escHtml,
-    igFetch, refreshIgIfNeeded, igConfigured, igCrypto, igMock, msCrypto, msFetch, msBackfill,
+    igFetch, refreshIgIfNeeded, igConfigured, igCrypto, igMock, kickIgBackfill, msCrypto, msFetch, msBackfill,
     ymCrypto, ymFetch, rusenderCrypto, rusenderFetch, cdekImport, nearestOf,
     cacheGet, cacheSet, cache, IG_ACCOUNT, IG_TOKEN, IG_GRAPH, AUTH_SECRET,
     tgCrypto, collectQrChannelsNow, collectManagedPostStatsNow, TG_TOKEN, TG_CHANNEL,
@@ -217,7 +217,7 @@ function createApp(deps) {
   // signed-state helpers, the connect-config gate, IG cache purge and the token exchange live there.
   registerIgOauthRoutes({
     app, db, requireAuth, audit, log, fetchWithTimeout, asyncHandler,
-    appBase, cache, igConfigured, igCrypto, AUTH_SECRET, IG_GRAPH,
+    appBase, cache, igConfigured, igCrypto, AUTH_SECRET, IG_GRAPH, kickIgBackfill,
     IG_CLIENT_ID: config.instagram.clientId, IG_CLIENT_SECRET: config.instagram.clientSecret,
     oauthMaxInFlight: config.instagram.oauthMaxInFlight,
     oauthAcquireTimeoutMs: config.instagram.oauthAcquireTimeoutMs,

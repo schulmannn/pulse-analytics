@@ -21,7 +21,11 @@
 const { sameTenantSource, channelAccessSql } = require('../db/access');
 const { parseMentionsRange, rangeDayCount } = require('../lib/mentionsRange');
 const { toMetricNumber } = require('../lib/metricNumber');
+const { isDayKey } = require('../domain/period');
 const { createMsAnalyticsRepo } = require('./msAnalyticsRepo');
+
+// Числовой legacy-`days` архива IG (listIgDailyInternal): верхняя граница только от переполнения даты.
+const IG_LEGACY_DAYS_MAX = 36500;
 
 // Metric counter columns are BIGINT (migration 023); node-postgres returns BIGINT as a decimal
 // STRING. Convert exactly the widened counters back to JS numbers (safe within MAX_SAFE_METRIC) so
@@ -349,14 +353,93 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
   }
 
   // ── Read helpers (история для будущих графиков) ──
-  async function listIgDailyInternal(channelId, days = 400) {
+  // Дневной архив Instagram канала (ig_daily), day ASC. Окно — одной из трёх форм:
+  //   • число n (legacy: reportScheduleJob, aiTools) — day >= CURRENT_DATE - n, как было;
+  //   • { all: true } — весь архив без нижней границы («Всё», OD-13: потолка с нашей стороны нет);
+  //   • { from, to } — точные включительные границы 'YYYY-MM-DD' (любая может отсутствовать).
+  // Страж идентичности: после переподключения ДРУГОГО IG-аккаунта строки прежнего (чужой source_id)
+  // скрыты; после отключения (строки ig_accounts нет) архив остаётся читаемым целиком. Строки без
+  // source_id (legacy до 011) видны всегда. Источник-union между каналами НЕ делаем (tenant-риск).
+  async function listIgDailyInternal(channelId, daysOrOpts = 400) {
     if (!enabled || !channelId) return [];
+    const params = [channelId];
+    let range = '';
+    if (daysOrOpts && typeof daysOrOpts === 'object') {
+      if (!daysOrOpts.all) {
+        if (isDayKey(daysOrOpts.from)) { params.push(daysOrOpts.from); range += ` AND d.day >= $${params.length}::date`; }
+        if (isDayKey(daysOrOpts.to)) { params.push(daysOrOpts.to); range += ` AND d.day <= $${params.length}::date`; }
+      }
+    } else {
+      // Потолок — ради Postgres, а не продукта: CURRENT_DATE − n за пределами ~5.8 млн дней падает
+      // «date out of range». 36 500 дней (100 лет) заведомо шире любого архива.
+      const n = Number.isFinite(Number(daysOrOpts)) ? Math.min(IG_LEGACY_DAYS_MAX, Math.max(0, Math.trunc(Number(daysOrOpts)))) : 400;
+      params.push(n);
+      range = ` AND d.day >= (CURRENT_DATE - $${params.length}::int)`;
+    }
     const { rows } = await pool.query(
-      `SELECT to_char(day,'YYYY-MM-DD') AS day, followers, followers_total, reach, views, profile_views,
-              accounts_engaged, total_interactions, likes, comments, saves, shares, follows, unfollows
-         FROM ig_daily WHERE channel_id=$1 AND day >= (CURRENT_DATE - $2::int) ORDER BY day ASC`,
-      [channelId, days]);
+      `SELECT to_char(d.day,'YYYY-MM-DD') AS day, d.followers, d.followers_total, d.reach, d.views, d.profile_views,
+              d.accounts_engaged, d.total_interactions, d.likes, d.comments, d.saves, d.shares, d.follows, d.unfollows
+         FROM ig_daily d
+         LEFT JOIN ig_accounts a ON a.channel_id = d.channel_id
+        WHERE d.channel_id=$1
+          AND (a.source_id IS NULL OR d.source_id IS NULL OR d.source_id = a.source_id)${range}
+        ORDER BY d.day ASC`,
+      params);
     return rows.map((r) => numifyMetrics(r, IG_DAILY_METRICS));
+  }
+
+  // Покрытие архива Instagram канала для честных подписей на клиенте:
+  //   bounds        — первый/последний день, где ЕСТЬ данные (reach/views/total_interactions), тем же
+  //                   стражем идентичности, что listIgDailyInternal; пустой архив → null;
+  //   measured_days — сколько таких дней;
+  //   hidden_days   — сколько дней архива канала записано ДРУГОЙ IG-идентичностью (прежний аккаунт
+  //                   до переподключения): стражем они скрыты, а догрузка их не перезаписывает — клиент
+  //                   обязан сказать, что история прежнего аккаунта скрыта, а не молча начать архив позже;
+  //   backfill      — состояние догрузки текущей идентичности ({status, horizon_day, cursor_day,
+  //                   reason}); другой аккаунт в состоянии → 'idle' (проход начнётся заново);
+  //                   нет подключения → null.
+  async function getIgArchiveStatusInternal(channelId) {
+    if (!enabled || !channelId) return null;
+    const { rows } = await pool.query(
+      `SELECT to_char(MIN(d.day),'YYYY-MM-DD') AS first_day,
+              to_char(MAX(d.day),'YYYY-MM-DD') AS last_day,
+              COUNT(*)::int AS measured_days,
+              (SELECT COUNT(*)::int FROM ig_daily h JOIN ig_accounts ha ON ha.channel_id = h.channel_id
+                WHERE h.channel_id = $1 AND h.source_id IS NOT NULL AND ha.source_id IS NOT NULL
+                  AND h.source_id <> ha.source_id) AS hidden_days
+         FROM ig_daily d
+         LEFT JOIN ig_accounts a ON a.channel_id = d.channel_id
+        WHERE d.channel_id=$1
+          AND (a.source_id IS NULL OR d.source_id IS NULL OR d.source_id = a.source_id)
+          AND (d.reach IS NOT NULL OR d.views IS NOT NULL OR d.total_interactions IS NOT NULL)`,
+      [channelId]);
+    const agg = rows[0] || {};
+    const { rows: st } = await pool.query(
+      `SELECT a.ig_user_id AS account_ig_user_id, s.ig_user_id AS state_ig_user_id, s.status, s.error,
+              to_char(s.horizon_day,'YYYY-MM-DD') AS horizon_day,
+              to_char(s.cursor_day,'YYYY-MM-DD') AS cursor_day
+         FROM ig_accounts a
+         LEFT JOIN ig_backfill_state s ON s.channel_id = a.channel_id
+        WHERE a.channel_id=$1`, [channelId]);
+    const s = st[0] || null;
+    let backfill = null;
+    if (s) {
+      const same = s.state_ig_user_id != null && s.state_ig_user_id === s.account_ig_user_id;
+      backfill = same
+        ? {
+          status: s.status,
+          horizon_day: s.horizon_day || null,
+          cursor_day: s.cursor_day || null,
+          reason: s.status === 'error' ? (s.error || 'error') : null,
+        }
+        : { status: 'idle', horizon_day: null, cursor_day: null, reason: null };
+    }
+    return {
+      bounds: agg.first_day && agg.last_day ? { first_day: agg.first_day, last_day: agg.last_day } : null,
+      measured_days: Number(agg.measured_days) || 0,
+      hidden_days: Number(agg.hidden_days) || 0,
+      backfill,
+    };
   }
 
   async function listIgMediaDailyInternal(channelId, days = 400) {
@@ -436,6 +519,7 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
   const getLatestVelocityForActor = gated(getLatestVelocityInternal, NONE);
   const listPostsForActor = gated(listPostsInternal, LIST);
   const listIgDailyForActor = gated(listIgDailyInternal, LIST);
+  const getIgArchiveStatusForActor = gated(getIgArchiveStatusInternal, NONE);
   const listIgMediaDailyForActor = gated(listIgMediaDailyInternal, LIST);
   const getMsDailyAllForActor = gated(getMsDailyAllInternal, LIST);
   const getYmDailyAllForActor = gated(getYmDailyAllInternal, LIST);
@@ -473,9 +557,9 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
     ...ms,
     getIgTags, getCollectorStatus, getChannelHistoryInternal, getMentionsHistoryInternal,
     getMentionsArchiveInternal, getSnapshotInternal, getPublicTgChannelPhoto, getLatestVelocityInternal,
-    listPostsInternal, listIgDailyInternal, listIgMediaDailyInternal, getMsDailyAllInternal, hasYmDaily,
+    listPostsInternal, listIgDailyInternal, getIgArchiveStatusInternal, listIgMediaDailyInternal, getMsDailyAllInternal, hasYmDaily,
     getYmDailyAllInternal, getChannelHistoryForActor, getMentionsHistoryForActor, getMentionsArchiveForActor,
-    getSnapshotForActor, getLatestVelocityForActor, listPostsForActor, listIgDailyForActor,
+    getSnapshotForActor, getLatestVelocityForActor, listPostsForActor, listIgDailyForActor, getIgArchiveStatusForActor,
     listIgMediaDailyForActor, getMsDailyAllForActor, getYmDailyAllForActor,
   };
 }

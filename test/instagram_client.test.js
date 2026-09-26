@@ -170,6 +170,19 @@ test('Graph rate-limit код на HTTP 400 → 429, ретраится', async 
   assert.equal(calls.length, 3);
 });
 
+// Graph 80002 — per-account BUC-лимит Instagram. Раньше он приходил 502 (постоянная ошибка), и
+// фоновые проходы принимали лимит за «нет данных»; теперь это throttle → 429 и повторяемость.
+test('Graph код 80002 (per-account BUC) → 429 transient, ретраится', async () => {
+  const { client, calls } = makeClient([
+    () => res({ status: 400, body: { error: { message: 'There have been too many calls for this Instagram account', code: 80002 } } }),
+  ]);
+  const err = await rejects(client.igFetch('/1/insights', { metric: 'reach' }));
+  assert.equal(err.status, 429);
+  assert.equal(err.transient, true);
+  assert.equal(err.igCode, 80002);
+  assert.equal(calls.length, 3, 'bounded retry как у прочих rate-limit кодов');
+});
+
 // ── 6. Битое/не-JSON тело на 5xx не маскирует upstream-статус ─────────────────────────────────────
 test('malformed 5xx body → 503, upstreamStatus=500, статус в message', async () => {
   const { client, calls } = makeClient([
