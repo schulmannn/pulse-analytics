@@ -387,9 +387,8 @@ managed-first. Живой поиск упоминаний также работ�
   один `PagePeriodControl` (`components/PeriodChips`). Оба конца читают одни векторы
   `test/fixtures/period-vectors.json` (vitest — при TZ=Europe/Moscow и America/New_York); корзин и дня недели в них
   пока нет (`bucketKey`/`weekdayOf`/`hourOf` — 3.10).
-- `server/jobs/**` и `server/lib/**` своих примитивов периода не определяют — зовут `server/domain/period.js`
-  (дни джоб — `fmtDay(…, 'local')`); `check:boundaries` (`scripts/server-period-guard.mjs`) это держит, а копии в
-  `routes/**` — трещоткой до нуля. Скользящее окно дайджеста — `transitionalRollingWindow`, до календарных дней OD-8.
+- `server/jobs/**` и `server/lib/**` зовут `server/domain/period.js`, своих примитивов не определяют — держит
+  `check:boundaries` (`scripts/server-period-guard.mjs`).
 - Чтение XLSX (`server/lib/sheetReader.js`) линейно и ограничено: колонки дальше 256-й пропускаются (не
   валят файл и не добивают строку), значение длиннее 32 767 символов отвергает файл, а общий дедлайн
   покрывает всю книгу, а не отдельный лист. Ячейка без `r` встаёт следом за самой правой уже

@@ -121,6 +121,30 @@ test('окно сбора: сегодня−7 … сегодня (7-дневно
   assert.equal(w.date2, '2026-07-17');
 });
 
+// Ревью 2.5a: день окна — МЕСТНЫЕ часы процесса (fmtDay(…, 'local') домена). Моменты у полуночи:
+// 00:05 местного в Токио — ещё прошлый день по UTC, 23:55 местного в Нью-Йорке — уже следующий.
+// CI гоняет суиту в UTC и с TZ=Asia/Tokyo: подмена зоны на 'UTC' краснеет в любой зоне со сдвигом.
+test('окно сбора через границу года: сегодня−7 уходит в прошлый год, день — по местным часам', () => {
+  const { job } = makeJob({ db: makeDb(), handlers: () => report([]) });
+  assert.deepEqual(job.collectionWindow(new Date(2026, 0, 3, 0, 5)), { date1: '2025-12-27', date2: '2026-01-03' });
+  assert.deepEqual(job.collectionWindow(new Date(2026, 0, 2, 23, 55)), { date1: '2025-12-26', date2: '2026-01-02' });
+});
+
+// date2 бэкфилла — тоже «сегодня» по местным часам (а не UTC): момент, где UTC и Токио расходятся в дне.
+test('бэкфилл: date2 — сегодня по местным часам процесса', async (t) => {
+  const at = Date.parse('2026-07-17T20:30:00.000Z'); // UTC — 17 июля, Токио — уже 18 июля
+  t.mock.timers.enable({ apis: ['Date'], now: at });
+  const local = new Date(at);
+  const expected = `${local.getFullYear()}-${String(local.getMonth() + 1).padStart(2, '0')}-${String(local.getDate()).padStart(2, '0')}`;
+  const { job, fetches } = makeJob({ db: makeDb(), handlers: () => report([]) });
+  await job.collectYmForAccount(ACC1, 'TOKEN:enc1');
+  t.mock.timers.reset();
+  assert.equal(fetches.length, 1);
+  assert.ok(fetches[0].path.includes(`&date1=2024-03-01&date2=${expected}&`), fetches[0].path);
+  if (process.env.TZ === 'Asia/Tokyo') assert.equal(expected, '2026-07-18');
+  if (process.env.TZ === 'UTC') assert.equal(expected, '2026-07-17');
+});
+
 test('reportToRows (окно): дни с трафиком из отчёта, остальное окно — честные нули, мусорные дни отброшены', () => {
   const { job } = makeJob({ db: makeDb(), handlers: () => report([]) });
   const rows = job.reportToRows(

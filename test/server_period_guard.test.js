@@ -54,6 +54,68 @@ test('jobs/lib: вызов, импорт из домена, ключ экспо�
   assert.deepEqual(hints, []);
 });
 
+// Ревью 2.5a: гвард ловил только `function NAME(` и `const NAME =`. Копия методом объекта/класса,
+// стрелкой в свойстве или через exports.NAME проходила, а законный алиас из домена
+// (`const fmtDay = require('../domain/period').fmtDay`) валил check.
+test('jobs/lib: копия методом, свойством-функцией и через exports тоже определение', async () => {
+  const { periodDefinitions } = await guard();
+  const src = [
+    'const h = {',
+    '  fmtDay(d) { return d; },',
+    '  isDayKey: (v) => true,',
+    '  shiftDay: function (k, o) { return k; },',
+    '  async parseXPeriod(req) {},',
+    '};',
+    'class A {',
+    '  static shiftDayKey(k, o) {',
+    '    return k;',
+    '  }',
+    '  daysBetween(a, b) {}',
+    '}',
+    'exports.rangeDays = (a, b) => 1;',
+    'module.exports.previousWindow = function () {};',
+    'const g = { parseDay: async (s) => s, daysBetween: x => x };',
+  ].join('\n');
+  assert.deepEqual(
+    periodDefinitions(src).map((d) => `${d.line}:${d.name}`),
+    [
+      '2:fmtDay',
+      '3:isDayKey',
+      '4:shiftDay',
+      '5:parseXPeriod',
+      '8:shiftDayKey',
+      '11:daysBetween',
+      '13:rangeDays',
+      '14:previousWindow',
+      '15:parseDay',
+      '15:daysBetween',
+    ],
+  );
+});
+
+test('jobs/lib: алиас экспорта домена — не копия; вызовы, тернарник и ключ-ссылка тоже не определения', async () => {
+  const { periodDefinitions } = await guard();
+  const src = [
+    "const period = require('../domain/period');",
+    "const fmtDay = require('../domain/period').fmtDay;",
+    'const isDayKey = period.isDayKey;',
+    "const parseCdekPeriod = require('../domain/cdekPeriod').parseCdekPeriod;",
+    'exports.shiftDay = period.shiftDay;',
+    'const pick = flag ? isDayKey : (v) => false;',
+    'const api = { previousWindow: previousMsWindow, fmtDay };',
+    'if (isDayKey(k)) {',
+    '}',
+    'while (fmtDay(new Date()) === k) {}',
+  ].join('\n');
+  assert.deepEqual(periodDefinitions(src), []);
+  // Алиас не из домена — по-прежнему копия (чужой модуль мог завести свой примитив).
+  assert.deepEqual(
+    periodDefinitions("const helpers = require('./helpers');\nconst fmtDay = helpers.fmtDay;\nconst isDayKey = require('./x').isDayKey;\n")
+      .map((d) => d.name),
+    ['fmtDay', 'isDayKey'],
+  );
+});
+
 test('domain — законный дом: определения там гвард не проверяет', async () => {
   const { checkPeriodGuard } = await guard();
   const { errors } = checkPeriodGuard([{ rel: 'server/domain/period.js', src: 'function fmtDay(at, tz) {}\n' }], {});

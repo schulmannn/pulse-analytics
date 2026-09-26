@@ -11,11 +11,17 @@
 //     baseline проходит с подсказкой ужать его;
 //   • server/domain/** — законный дом примитивов, не проверяется.
 //
-// Ловятся ОПРЕДЕЛЕНИЯ (function NAME( / const|let|var NAME =), а не вызовы: fmtDay(now, 'local')
-// и `const { fmtDay } = require('../domain/period')` законны. Комментарии вырезаются тем же
-// maskComments, что у фронтового гейта единообразия, поэтому пояснение «зовём fmtDay домена» не
-// нарушение. Переименованная копия (dayOf, isCalendarDay) по имени не ловится — это известный
-// предел регэкспового гварда; такие копии закрываются ревью и PR 2.4.
+// Ловятся ОПРЕДЕЛЕНИЯ, а не вызовы: `function NAME(`, `const|let|var NAME =`, `(module.)exports.NAME =`,
+// метод объекта или класса `NAME(…) {` и свойство-функция `NAME: (…) =>` / `NAME: function`.
+// Законны вызов fmtDay(now, 'local'), деструктуризация `const { fmtDay } = require('../domain/period')`
+// и алиас экспорта домена — `const fmtDay = require('../domain/…').fmtDay` или `period.fmtDay`, где
+// `period` привязан к require модуля server/domain/. Комментарии вырезаются тем же maskComments, что
+// у фронтового гейта единообразия, поэтому пояснение «зовём fmtDay домена» не нарушение.
+// Пределы регэкспового гварда (закрываются ревью): переименованная копия (dayOf, isCalendarDay —
+// последнюю убирает PR 2.4) по имени не ловится; строковый литерал, дословно похожий на определение,
+// считается определением; метод с вложенными скобками в параметрах (`fmtDay(d = f()) {`) не ловится.
+// Каталоги вне jobs/lib/routes (services/, repos/, infrastructure/, server/*.js) гвард не смотрит:
+// так задан объём PR 2.5 — расширение отдельным решением, когда параллельные PR 2.x сольются.
 import fs from 'node:fs';
 import path from 'node:path';
 import { maskComments } from '../frontend/scripts/consistency-lint.mjs';
@@ -33,10 +39,34 @@ export const PERIOD_PRIMITIVES = [
   'rangeDays',
 ];
 const NAME = `(?:${PERIOD_PRIMITIVES.join('|')}|parse[A-Za-z0-9_$]*Period)`;
-const DEFINITION_RE = new RegExp(
-  `\\bfunction\\s*\\*?\\s*(${NAME})\\s*\\(|\\b(?:const|let|var)\\s+(${NAME})\\s*=(?!=)`,
-  'g',
-);
+// Формы определения; у каждой ровно одна группа захвата имени. Присваивание (const/let/var и exports)
+// идёт с флагом ASSIGN — только его правая часть может оказаться алиасом экспорта домена.
+const FORMS = [
+  { re: `\\bfunction\\s*\\*?\\s*(${NAME})\\s*\\(` },
+  { re: `\\b(?:const|let|var)\\s+(${NAME})\\s*=(?!=)`, assign: true },
+  { re: `(?<![\\w$.])(?:module\\s*\\.\\s*)?exports\\s*\\.\\s*(${NAME})\\s*=(?!=)`, assign: true },
+  // Метод объекта/класса: имя в начале строки или после { } , ; (плюс static/async/get/set/*).
+  {
+    re: `(?<=(?:^|[{},;])[ \\t]*(?:(?:static|async|get|set)\\s+|\\*\\s*)*)(${NAME})[ \\t]*\\([^)]*\\)[ \\t]*\\{`,
+  },
+  // Свойство-функция: ключ после { или , (не тернарник `? isDayKey :`), значение — function или стрелка.
+  {
+    re: `(?<=[{,]\\s*)(${NAME})\\s*:\\s*(?:async\\s+)?(?:function\\b|\\([^)]*\\)\\s*=>|[A-Za-z_$][\\w$]*\\s*=>)`,
+  },
+];
+const DEFINITION_RE = new RegExp(FORMS.map((f) => f.re).join('|'), 'gm');
+const ASSIGN_GROUPS = FORMS.map((f, i) => (f.assign ? i + 1 : 0)).filter(Boolean);
+
+// Без групп захвата: вставляется в другие выражения и не должна сдвигать их номера групп.
+const DOMAIN_REQUIRE = `require\\(\\s*(?:'[^'\\n]*\\bdomain/[^'\\n]*'|"[^"\\n]*\\bdomain/[^"\\n]*")\\s*\\)`;
+// Идентификаторы, привязанные к модулю домена: `const period = require('../domain/period')`.
+const DOMAIN_BINDING_RE = new RegExp(`\\b(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*${DOMAIN_REQUIRE}`, 'g');
+
+/** Правая часть присваивания — чистый алиас экспорта домена с тем же именем (`… = period.fmtDay;`). */
+function isDomainAlias(text, rhsFrom, name, bindings) {
+  const head = bindings.length ? `(?:${DOMAIN_REQUIRE}|(?:${bindings.join('|')})\\b)` : DOMAIN_REQUIRE;
+  return new RegExp(`^\\s*${head}\\s*\\.\\s*${name}\\s*(?:[;,)\\n]|$)`).test(text.slice(rhsFrom, rhsFrom + 300));
+}
 
 /** Каталоги без права на свои примитивы периода — ноль определений. */
 export const ZERO_SCOPES = ['server/jobs/', 'server/lib/'];
@@ -56,9 +86,15 @@ export const ROUTES_PERIOD_BASELINE = {
 /** Определения примитивов периода в исходнике: [{ name, line }]. Комментарии не считаются. */
 export function periodDefinitions(src) {
   const text = maskComments(src);
+  const bindings = [...text.matchAll(DOMAIN_BINDING_RE)].map((m) => m[1].replace(/\$/g, '\\$'));
   const out = [];
   for (const m of text.matchAll(DEFINITION_RE)) {
-    out.push({ name: m[1] || m[2], line: text.slice(0, m.index).split('\n').length });
+    const group = m.findIndex((g, i) => i > 0 && g !== undefined);
+    const name = m[group];
+    // Номер группы = номер формы (по одной группе на форму).
+    if (ASSIGN_GROUPS.includes(group) && isDomainAlias(text, m.index + m[0].length, name, bindings)) continue;
+    const at = m.index + m[0].indexOf(name);
+    out.push({ name, line: text.slice(0, at).split('\n').length });
   }
   return out;
 }
