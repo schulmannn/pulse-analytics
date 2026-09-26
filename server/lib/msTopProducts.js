@@ -9,6 +9,7 @@
 //   • отрицательные/нулевые строки НЕ уменьшают знаменатель и не дают >100% или отрицательных долей.
 const crypto = require('crypto');
 const { kopecksToRub } = require('./msClient');
+const period = require('../domain/period');
 
 // Заголовок «топ-N доля»: сколько выручки/прибыли дают N крупнейших позиций.
 const TOP_SHARE_N = 10;
@@ -35,40 +36,27 @@ function assortmentIdentity(reportRow) {
   return `n:${name || '∅'}`;
 }
 
-// 'YYYY-MM-DD' → та же строка, сдвинутая на offset дней по МЕСТНОМУ календарю (как fmtDay роутов).
-function shiftDayKey(key, offset) {
-  const [y, m, d] = String(key).split('-').map(Number);
-  const dt = new Date(y, m - 1, d + offset);
-  const mm = String(dt.getMonth() + 1).padStart(2, '0');
-  const dd = String(dt.getDate()).padStart(2, '0');
-  return `${dt.getFullYear()}-${mm}-${dd}`;
-}
-
-// Число календарных дней в инклюзивном окне [fromKey..toKey] (UTC-арифметика над днями безопасна от DST).
-function inclusiveDayLength(fromKey, toKey) {
-  const [fy, fm, fd] = String(fromKey).split('-').map(Number);
-  const [ty, tm, td] = String(toKey).split('-').map(Number);
-  return Math.round((Date.UTC(ty, tm - 1, td) - Date.UTC(fy, fm - 1, fd)) / 86_400_000) + 1;
-}
-
 /**
- * Ровно предыдущее равное непересекающееся окно к инклюзивному [sinceDay..untilDay].
+ * Ровно предыдущее равное непересекающееся окно к инклюзивному [sinceDay..untilDay] — в форме,
+ * которую ждёт /api/ms/top-products: дневные границы, moment-границы живого отчёта МС и кэш-токен.
+ * Само окно считает previousWindow домена (server/domain/period.js); здесь только упаковка.
  * Для «Всё» (sinceDay/untilDay отсутствуют) предыдущего равного окна не существует → null:
  * честнее вернуть недоступность, чем выдумать несопоставимый диапазон.
+ *
+ * periodKey 'r:prevFrom:prevTo' и momentTo «… 23:59:59» — ключ loadTopRawCached: другая строка
+ * удвоила бы page-loop МС под лимитом 45 запросов/3с, поэтому их форма закреплена тестом.
+ * Наружу экспортируется под прежним именем previousWindow (routes/moysklad.js).
  * @returns {{ sinceDay:string, untilDay:string, momentFrom:string, momentTo:string, periodKey:string }|null}
  */
-function previousWindow(sinceDay, untilDay) {
-  if (!sinceDay || !untilDay) return null;
-  const len = inclusiveDayLength(sinceDay, untilDay);
-  if (!(len > 0)) return null;
-  const prevTo = shiftDayKey(sinceDay, -1);
-  const prevFrom = shiftDayKey(sinceDay, -len);
+function previousMsWindow(sinceDay, untilDay) {
+  const prev = period.previousWindow(sinceDay, untilDay);
+  if (!prev) return null;
   return {
-    sinceDay: prevFrom,
-    untilDay: prevTo,
-    momentFrom: `${prevFrom} 00:00:00`,
-    momentTo: `${prevTo} 23:59:59`,
-    periodKey: `r:${prevFrom}:${prevTo}`,
+    sinceDay: prev.from,
+    untilDay: prev.to,
+    momentFrom: `${prev.from} 00:00:00`,
+    momentTo: `${prev.to} 23:59:59`,
+    periodKey: `r:${prev.from}:${prev.to}`,
   };
 }
 
@@ -302,6 +290,6 @@ module.exports = {
   TOP_SHARE_N,
   COMPARE_MOVERS_LIMIT,
   assortmentIdentity,
-  previousWindow,
+  previousWindow: previousMsWindow,
   buildAssortmentComparison,
 };

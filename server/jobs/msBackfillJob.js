@@ -30,6 +30,8 @@
 
 'use strict';
 
+const { fmtDay, shiftDay, dayToLocalDate } = require('../domain/period');
+
 const MS_BACKFILL_FRESH_RUNNING_SECONDS = 5 * 60;   // моложе → «уже идёт» (отказ старта)
 const MS_BACKFILL_STALE_RESUME_SECONDS = 10 * 60;   // старше → брошенный прогон (resume)
 const MS_ORDERS_PAGE_LIMIT = 1000;                  // максимум МС без expand
@@ -42,14 +44,9 @@ function createMsBackfillEngine({ db, msFetch, msCrypto, log = () => {}, sleepFn
   // поэтому гонка двух одновременных POST в одном процессе исключена без блокировок.
   const inFlight = new Set();
 
-  // 'YYYY-MM-DD' по местным часам процесса (Railway = UTC) — та же система координат, что у
-  // periodWindow живых роутов и окна msCollectionJob: границы окон и cursor_from не расходятся.
-  const pad2 = (n) => String(n).padStart(2, '0');
-  const fmtDay = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-  const parseDay = (s) => {
-    const [y, m, d] = String(s).slice(0, 10).split('-').map(Number);
-    return new Date(y, m - 1, d);
-  };
+  // Дни — 'YYYY-MM-DD' по местным часам процесса (Railway = UTC): fmtDay(…, 'local') и
+  // dayToLocalDate домена — та же система координат, что у periodWindow живых роутов и окна
+  // msCollectionJob, поэтому границы окон и cursor_from не расходятся.
   const monthStart = (d) => new Date(d.getFullYear(), d.getMonth(), 1);
   const monthEnd = (d) => new Date(d.getFullYear(), d.getMonth() + 1, 0);
   const nextMonthStart = (d) => new Date(d.getFullYear(), d.getMonth() + 1, 1);
@@ -123,11 +120,11 @@ function createMsBackfillEngine({ db, msFetch, msCrypto, log = () => {}, sleepFn
   async function runWindowLoop(channelId, token, cursorFromDay, fetchedStart) {
     let fetched = fetchedStart;
     try {
-      let cursor = parseDay(cursorFromDay);
+      let cursor = dayToLocalDate(cursorFromDay);
       const lastMonth = monthStart(new Date());
       while (monthStart(cursor) <= lastMonth) {
-        const winFrom = fmtDay(cursor);
-        const winTo = fmtDay(monthEnd(cursor));
+        const winFrom = fmtDay(cursor, 'local');
+        const winTo = fmtDay(monthEnd(cursor), 'local');
         await fetchWindowPages(token, winFrom, winTo, async (rows) => {
           if (rows.length) await db.upsertMsOrders(channelId, rows);
           fetched += rows.length;
@@ -138,7 +135,7 @@ function createMsBackfillEngine({ db, msFetch, msCrypto, log = () => {}, sleepFn
         });
         cursor = nextMonthStart(cursor);
         await db.setMsBackfillState(channelId, {
-          status: 'running', cursor_from: fmtDay(cursor), fetched_count: fetched,
+          status: 'running', cursor_from: fmtDay(cursor, 'local'), fetched_count: fetched,
         });
       }
       await db.setMsBackfillState(channelId, { status: 'done', fetched_count: fetched, error: null });
@@ -180,7 +177,7 @@ function createMsBackfillEngine({ db, msFetch, msCrypto, log = () => {}, sleepFn
         });
         return { status: 'done', fetched: 0 };
       }
-      cursorFrom = fmtDay(monthStart(parseDay(firstMoment)));
+      cursorFrom = fmtDay(monthStart(dayToLocalDate(firstMoment)), 'local');
       await db.setMsBackfillState(channelId, {
         status: 'running', cursor_from: cursorFrom, total_estimate: totalEstimate,
         fetched_count: 0, error: null, started_at: new Date(),
@@ -297,9 +294,10 @@ function createMsBackfillEngine({ db, msFetch, msCrypto, log = () => {}, sleepFn
         const key = `${channelId}:${acc.ms_account_id || 'unknown'}:${day}`;
         const out = await db.runJobOnce('ms_orders_topup', key, async () => {
           const now = new Date();
-          const from = fmtDay(new Date(now.getFullYear(), now.getMonth(), now.getDate() - MS_ORDERS_TOPUP_WINDOW_DAYS));
+          const today = fmtDay(now, 'local');
+          const from = shiftDay(today, -MS_ORDERS_TOPUP_WINDOW_DAYS);
           let n = 0;
-          await fetchWindowPages(token, from, fmtDay(now), async (rows) => {
+          await fetchWindowPages(token, from, today, async (rows) => {
             if (rows.length) await db.upsertMsOrders(channelId, rows);
             n += rows.length;
           });
@@ -379,11 +377,11 @@ function createMsBackfillEngine({ db, msFetch, msCrypto, log = () => {}, sleepFn
   async function runReturnsWindowLoop(channelId, token, cursorFromDay, fetchedStart) {
     let fetched = fetchedStart;
     try {
-      let cursor = parseDay(cursorFromDay);
+      let cursor = dayToLocalDate(cursorFromDay);
       const lastMonth = monthStart(new Date());
       while (monthStart(cursor) <= lastMonth) {
-        const winFrom = fmtDay(cursor);
-        const winTo = fmtDay(monthEnd(cursor));
+        const winFrom = fmtDay(cursor, 'local');
+        const winTo = fmtDay(monthEnd(cursor), 'local');
         await fetchReturnsWindowPages(token, winFrom, winTo, async (rows) => {
           if (rows.length) await db.upsertMsReturns(channelId, rows);
           fetched += rows.length;
@@ -393,7 +391,7 @@ function createMsBackfillEngine({ db, msFetch, msCrypto, log = () => {}, sleepFn
         });
         cursor = nextMonthStart(cursor);
         await db.setMsReturnsBackfillState(channelId, {
-          status: 'running', cursor_from: fmtDay(cursor), fetched_count: fetched,
+          status: 'running', cursor_from: fmtDay(cursor, 'local'), fetched_count: fetched,
         });
       }
       await db.setMsReturnsBackfillState(channelId, { status: 'done', fetched_count: fetched, error: null });
@@ -422,7 +420,7 @@ function createMsBackfillEngine({ db, msFetch, msCrypto, log = () => {}, sleepFn
         });
         return { status: 'done', fetched: 0 };
       }
-      cursorFrom = fmtDay(monthStart(parseDay(firstMoment)));
+      cursorFrom = fmtDay(monthStart(dayToLocalDate(firstMoment)), 'local');
       await db.setMsReturnsBackfillState(channelId, {
         status: 'running', cursor_from: cursorFrom, total_estimate: totalEstimate,
         fetched_count: 0, error: null, started_at: new Date(),
@@ -541,9 +539,10 @@ function createMsBackfillEngine({ db, msFetch, msCrypto, log = () => {}, sleepFn
         const key = `${channelId}:${acc.ms_account_id || 'unknown'}:${day}`;
         const out = await db.runJobOnce('ms_returns_topup', key, async () => {
           const now = new Date();
-          const from = fmtDay(new Date(now.getFullYear(), now.getMonth(), now.getDate() - MS_ORDERS_TOPUP_WINDOW_DAYS));
+          const today = fmtDay(now, 'local');
+          const from = shiftDay(today, -MS_ORDERS_TOPUP_WINDOW_DAYS);
           let n = 0;
-          await fetchReturnsWindowPages(token, from, fmtDay(now), async (rows) => {
+          await fetchReturnsWindowPages(token, from, today, async (rows) => {
             if (rows.length) await db.upsertMsReturns(channelId, rows);
             n += rows.length;
           });

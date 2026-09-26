@@ -121,6 +121,30 @@ test('окно сбора: сегодня−7 … сегодня (7-дневно
   assert.equal(w.date2, '2026-07-17');
 });
 
+// Ревью 2.5a: день окна — МЕСТНЫЕ часы процесса (fmtDay(…, 'local') домена). Моменты у полуночи:
+// 00:05 местного в Токио — ещё прошлый день по UTC, 23:55 местного в Нью-Йорке — уже следующий.
+// CI гоняет суиту в UTC и с TZ=Asia/Tokyo: подмена зоны на 'UTC' краснеет в любой зоне со сдвигом.
+test('окно сбора через границу года: сегодня−7 уходит в прошлый год, день — по местным часам', () => {
+  const { job } = makeJob({ db: makeDb(), handlers: () => report([]) });
+  assert.deepEqual(job.collectionWindow(new Date(2026, 0, 3, 0, 5)), { date1: '2025-12-27', date2: '2026-01-03' });
+  assert.deepEqual(job.collectionWindow(new Date(2026, 0, 2, 23, 55)), { date1: '2025-12-26', date2: '2026-01-02' });
+});
+
+// date2 бэкфилла — тоже «сегодня» по местным часам (а не UTC): момент, где UTC и Токио расходятся в дне.
+test('бэкфилл: date2 — сегодня по местным часам процесса', async (t) => {
+  const at = Date.parse('2026-07-17T20:30:00.000Z'); // UTC — 17 июля, Токио — уже 18 июля
+  t.mock.timers.enable({ apis: ['Date'], now: at });
+  const local = new Date(at);
+  const expected = `${local.getFullYear()}-${String(local.getMonth() + 1).padStart(2, '0')}-${String(local.getDate()).padStart(2, '0')}`;
+  const { job, fetches } = makeJob({ db: makeDb(), handlers: () => report([]) });
+  await job.collectYmForAccount(ACC1, 'TOKEN:enc1');
+  t.mock.timers.reset();
+  assert.equal(fetches.length, 1);
+  assert.ok(fetches[0].path.includes(`&date1=2024-03-01&date2=${expected}&`), fetches[0].path);
+  if (process.env.TZ === 'Asia/Tokyo') assert.equal(expected, '2026-07-18');
+  if (process.env.TZ === 'UTC') assert.equal(expected, '2026-07-17');
+});
+
 test('reportToRows (окно): дни с трафиком из отчёта, остальное окно — честные нули, мусорные дни отброшены', () => {
   const { job } = makeJob({ db: makeDb(), handlers: () => report([]) });
   const rows = job.reportToRows(
@@ -179,6 +203,25 @@ test('reportToRows (бэкфилл, fillFrom=null): нули только от �
   assert.deepEqual(rows[1], zeroRow('2026-07-15'));
   // Пустой отчёт: архив не засеивается нулями (решение «бэкфилл или окно» не сгорает).
   assert.deepEqual(job.reportToRows(report([]), { fillFrom: null, fillTo: '2026-07-17' }), []);
+});
+
+// PR 2.5: день строки проверяет строгий isDayKey домена (server/domain/period.js). Единственное
+// наблюдаемое отличие от прежней проверки формата — бэкфилл: невозможная дата больше не становится
+// первым днём архива. Раньше '2026-02-31' проходила формат, Date.parse переносил её на 3 марта,
+// и архив засевался нулями за 3–4 марта, которых в отчёте не было.
+test('reportToRows (бэкфилл): невозможная дата календаря не задаёт начало архива', () => {
+  const { job } = makeJob({ db: makeDb(), handlers: () => report([]) });
+  const rows = job.reportToRows(
+    report([['2026-02-31', 1, 1, 1], ['2026-03-05', 5, 4, 9]]),
+    { fillFrom: null, fillTo: '2026-03-06' },
+  );
+  assert.deepEqual(rows, [dataRow('2026-03-05', 5, 4, 9), zeroRow('2026-03-06')]);
+  // В окне (fillFrom задан) исход прежний: невозможный день в строки не попадает.
+  const windowed = job.reportToRows(
+    report([['2026-02-31', 1, 1, 1], ['2026-03-01', 2, 2, 3]]),
+    { fillFrom: '2026-02-28', fillTo: '2026-03-01' },
+  );
+  assert.deepEqual(windowed, [zeroRow('2026-02-28'), dataRow('2026-03-01', 2, 2, 3)]);
 });
 
 test('окно после маркера: перекрытие, 10-метричный отчёт, day-gate ключ канал:счётчик:q2:день, маркер НЕ ставится', async () => {

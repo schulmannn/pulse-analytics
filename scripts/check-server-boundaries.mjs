@@ -13,9 +13,13 @@
 //  - infrastructure/**: БЕЗ process.env и express (таймеры МОЖНО — за start/stop).
 //  - composition.js: собирает зависимости без env/listen/timers/signals.
 //  - index.js: только dotenv + вызов main, не более 20 строк.
+//  - jobs/**, lib/**: БЕЗ своих определений примитивов периода (isDayKey/fmtDay/previousWindow/
+//    parse…Period…) — только server/domain/period.js; routes/** — трещотка до PR 2.1–2.4
+//    (scripts/server-period-guard.mjs, там же baseline; комментарии этот гвард вырезает).
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { checkPeriodGuard, collectPeriodFiles } from './server-period-guard.mjs';
 
 const ROOT = path.resolve(process.cwd(), 'server');
 const errors = [];
@@ -152,6 +156,13 @@ for (const f of listJsRecursive(path.join(ROOT, 'db'))) {
   const n = read(p).split('\n').length;
   const CAP = 20;
   if (n > CAP) errors.push(`server/index.js — ${n} строк > ${CAP}: entrypoint должен только загружать env и вызывать main()`);
+}
+
+// ── Примитивы периода (PR 2.5): jobs/lib — ноль копий, routes — трещотка ──────────────────────
+{
+  const { errors: periodErrors, hints } = checkPeriodGuard(collectPeriodFiles(path.dirname(ROOT)));
+  errors.push(...periodErrors);
+  for (const hint of hints) console.log(`[boundaries] baseline примитивов периода можно ужать: ${hint}`);
 }
 
 // ── Циклы в графе require ────────────────────────────────────────────────────────────────────
