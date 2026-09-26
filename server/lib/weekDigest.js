@@ -7,6 +7,8 @@
 // Вход собирается из АРХИВА (channel_daily / posts / ig_daily), не из live-графа: письмо уходит
 // утром понедельника, вчерашние сутки закрыты кроном — today-lag здесь не существует по построению.
 
+const { transitionalRollingWindow } = require('../domain/period');
+
 let engine = null;
 let engineTried = false;
 function loadEngine() {
@@ -20,8 +22,6 @@ function loadEngine() {
   }
   return engine;
 }
-
-const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** ERV поста: доверяем сохранённой колонке; нет её — та же формула, что postErv фронта
  *  (вовлечения на просмотр, %). */
@@ -43,21 +43,24 @@ function postErv(p) {
  * «— сейчас N».
  */
 function assembleWeekInput({ daily = [], posts = [], igDaily = [] }, nowMs = Date.now()) {
-  const sinceMs = (days) => nowMs - days * DAY_MS;
+  // Окна дайджеста — скользящие N×24 ч от момента рассылки (переходный хелпер домена до
+  // календарных дней OD-8). Операторы границ — прежние: строки дня >= начала окна, возраст поста
+  // <= N×24 ч включительно, «неделю назад» — последний уровень <= now − 7×24 ч.
+  const { sinceMs } = transitionalRollingWindow(nowMs);
 
   const viewsDaily = daily
     .filter((r) => r.views != null && Date.parse(r.day) >= sinceMs(14))
     .map((r) => ({ day: r.day, v: Number(r.views) }));
 
   const dated = posts.filter((p) => p.date_published && Number.isFinite(Date.parse(p.date_published)));
-  const weekPosts = dated.filter((p) => nowMs - Date.parse(p.date_published) <= 7 * DAY_MS);
-  const posts4w = dated.filter((p) => nowMs - Date.parse(p.date_published) <= 28 * DAY_MS);
+  const weekPosts = dated.filter((p) => Date.parse(p.date_published) >= sinceMs(7));
+  const posts4w = dated.filter((p) => Date.parse(p.date_published) >= sinceMs(28));
   const ervBase = posts4w.filter((p) => Number(p.views) > 0);
   const avgErv = ervBase.length >= 3 ? ervBase.reduce((a, p) => a + postErv(p), 0) / ervBase.length : null;
 
   const levels = daily.filter((r) => r.subscribers != null);
   const last = levels.length ? levels[levels.length - 1] : null;
-  const weekAgo = [...levels].reverse().find((r) => Date.parse(r.day) <= nowMs - 7 * DAY_MS) || null;
+  const weekAgo = [...levels].reverse().find((r) => Date.parse(r.day) <= sinceMs(7)) || null;
   const subsNow = last ? Number(last.subscribers) : null;
   const subsD7 = last && weekAgo ? Number(last.subscribers) - Number(weekAgo.subscribers) : null;
 

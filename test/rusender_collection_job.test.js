@@ -278,6 +278,26 @@ test('проход: снимок базы, рассылки обеих выбо�
   assert.equal(db.calls.activity[0].campaignId, 100);
 });
 
+// День снимка базы (rusender_daily.day) — «сегодня» по МЕСТНЫМ часам процесса, как у ЯМ/МС
+// (PR 2.5: fmtDay(…, 'local') домена вместо копии в джобе). Момент выбран так, что UTC и Токио
+// расходятся в дне: CI гоняет суиту и в UTC, и с TZ=Asia/Tokyo — подмена зоны на 'UTC' (или на
+// любую фиксированную) краснеет хотя бы в одном из прогонов.
+test('снимок базы пишется днём «сегодня» по местным часам процесса', async (t) => {
+  const at = Date.parse('2026-07-17T20:30:00.000Z'); // UTC — 17 июля, Токио — уже 18 июля
+  t.mock.timers.enable({ apis: ['Date'], now: at });
+  const local = new Date(at);
+  const expected = `${local.getFullYear()}-${String(local.getMonth() + 1).padStart(2, '0')}-${String(local.getDate()).padStart(2, '0')}`;
+  const { job, db } = makeJob({
+    single: { '/v1/public/contacts/statistics': { total: 5000 } },
+  });
+  await job.runRusenderCollectionPass();
+  t.mock.timers.reset();
+  assert.equal(db.calls.daily.length, 1);
+  assert.equal(db.calls.daily[0].rows[0].day, expected);
+  if (process.env.TZ === 'Asia/Tokyo') assert.equal(expected, '2026-07-18');
+  if (process.env.TZ === 'UTC') assert.equal(expected, '2026-07-17');
+});
+
 test('сбой активности ОДНОЙ рассылки не рушит проход и не отменяет собранные рассылки', async () => {
   const err = new Error('Rusender: HTTP 500');
   err.status = 500;

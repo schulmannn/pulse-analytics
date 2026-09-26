@@ -24,29 +24,26 @@
 
 'use strict';
 
-function createMsCollectionJob({ db, msFetch, msCrypto, log }) {
-  // 'YYYY-MM-DD' по местным часам процесса (Railway = UTC) — та же дисциплина, что periodWindow
-  // живых роутов: границы окна и день архивной точки считаются в одной системе координат.
-  const fmtDay = (d) => {
-    const m = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${d.getFullYear()}-${m}-${day}`;
-  };
+const { fmtDay, shiftDay, isDayKey } = require('../domain/period');
 
-  // Окно сбора: сегодня−7 полных дней + сегодняшний частичный (8 day-точек plotseries).
+function createMsCollectionJob({ db, msFetch, msCrypto, log }) {
+  // Окно сбора: сегодня−7 полных дней + сегодняшний частичный (8 day-точек plotseries). День —
+  // по местным часам процесса (Railway = UTC), как periodWindow живых роутов: границы окна и
+  // день архивной точки считаются в одной системе координат.
   function collectionWindow(now = new Date()) {
-    const from = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7);
-    return { momentFrom: `${fmtDay(from)} 00:00:00`, momentTo: `${fmtDay(now)} 23:59:00` };
+    const today = fmtDay(now, 'local');
+    return { momentFrom: `${shiftDay(today, -7)} 00:00:00`, momentTo: `${today} 23:59:00` };
   }
 
   // Слить series двух отчётов в строки ms_daily. Точка plotseries: { date:'YYYY-MM-DD HH:MM:SS',
   // sum: КОПЕЙКИ, quantity }. Суммы держим в копейках до самой БД (никаких рублей/float);
   // Math.round — страховка от неожиданной дробной копейки upstream'а, не конверсия.
-  // День валидируем строго до 'YYYY-MM-DD': одна кривая date-строка иначе доехала бы до
-  // x.day::date и уронила ВЕСЬ батч-upsert (у IG аналог — isNaN-гейт в graphsToDailyRows).
+  // День валидируем строго до 'YYYY-MM-DD' и настоящей даты календаря: одна кривая date-строка
+  // (или 2026-02-31) иначе доехала бы до x.day::date и уронила ВЕСЬ батч-upsert (у IG аналог —
+  // isNaN-гейт в graphsToDailyRows).
   const dayOf = (p) => {
     const day = String((p && p.date) || '').slice(0, 10);
-    return /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : null;
+    return isDayKey(day) ? day : null;
   };
   function seriesToRows(sales, orders) {
     const byDay = new Map();

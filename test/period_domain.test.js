@@ -20,6 +20,7 @@ const {
   fmtDay,
   shiftDay,
   daysBetween,
+  dayToLocalDate,
   BAD_PERIOD,
 } = require('../server/domain/period');
 const { parseCdekPeriod } = require('../server/domain/cdekPeriod');
@@ -70,6 +71,25 @@ test("векторы: зона 'local' — это часы процесса (к�
       for (const v of V.today.filter((t) => t.zone === zone)) {
         assert.equal(fmtDay(new Date(Date.parse(v.now)), 'local'), v.day, `${v.now} при TZ=${zone}`);
       }
+    }
+  } finally {
+    if (saved === undefined) delete process.env.TZ;
+    else process.env.TZ = saved;
+  }
+});
+
+test('dayToLocalDate: местная полночь дня — обратна fmtDay(…, \'local\') в любой зоне процесса', () => {
+  const saved = process.env.TZ;
+  try {
+    for (const zone of [...V.zones, 'Asia/Tokyo']) {
+      process.env.TZ = zone;
+      for (const v of V.shift) {
+        const d = dayToLocalDate(v.key);
+        assert.equal(fmtDay(d, 'local'), v.key, `${v.key} при TZ=${zone}`);
+        assert.deepEqual([d.getHours(), d.getMinutes()], [0, 0], `${v.key} при TZ=${zone}`);
+      }
+      // Как прежний parseDay бэкфилла МС: берёт первые 10 символов (moment заказа).
+      assert.equal(fmtDay(dayToLocalDate('2026-03-05 14:22:01'), 'local'), '2026-03-05');
     }
   } finally {
     if (saved === undefined) delete process.env.TZ;

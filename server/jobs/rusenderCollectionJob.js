@@ -32,18 +32,11 @@
 
 'use strict';
 
+const { fmtDay, isDayKey } = require('../domain/period');
+
 // Сколько рассылок за один проход обновляют дневную активность. Каждая — отдельный HTTP-запрос,
 // поэтому число небольшое: свежие обновляются всегда, архив вращается по кругу.
 const ACTIVITY_PER_PASS = 40;
-
-/** 'YYYY-MM-DD' по местным часам процесса (Railway = UTC) — та же дисциплина, что у ЯМ/МС. */
-function fmtDay(d) {
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${d.getFullYear()}-${m}-${day}`;
-}
-
-const isDayKey = (v) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v);
 
 // Правдоподобное время Rusender: раньше 2000 года рассылок не было, а дальше года вперёд их не
 // планируют. Мусорный год (0001 или 9999) иначе становился границей архива, и окно «Всё»
@@ -65,8 +58,8 @@ function dayOfActivity(raw) {
   if (typeof raw !== 'string' || !raw) return null;
   const dotted = /^(\d{2})\.(\d{2})\.(\d{4})$/.exec(raw.trim());
   const day = dotted ? `${dotted[3]}-${dotted[2]}-${dotted[1]}` : raw.slice(0, 10);
+  // Строгий isDayKey домена: формат И настоящая дата календаря (32.13.2026, 2026-02-30 — не дни).
   if (!isDayKey(day)) return null;
-  // Формат совпал, но 32.13.2026 (или 2026-02-30) днём не является — проверяем календарно.
   const at = Date.parse(`${day}T12:00:00Z`);
   if (!Number.isFinite(at) || !isPlausibleMs(at)) return null;
   return new Date(at).toISOString().slice(0, 10) === day ? day : null;
@@ -217,7 +210,8 @@ function createRusenderCollectionJob({ db, rusenderFetch, fetchAllPages, rusende
    */
   async function collectRusenderForAccount(acc, apiKey) {
     const channelId = acc.channel_id;
-    const today = fmtDay(new Date());
+    // Снимок базы — день по местным часам процесса (Railway = UTC), та же дисциплина, что у ЯМ/МС.
+    const today = fmtDay(new Date(), 'local');
     const stats = { contacts: 0, campaigns: 0, activity: 0, activityDays: 0, errors: 0 };
 
     // ── Фаза 1: снимок базы контактов ──────────────────────────────────────────────────────

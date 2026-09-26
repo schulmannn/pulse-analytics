@@ -181,6 +181,25 @@ test('reportToRows (бэкфилл, fillFrom=null): нули только от �
   assert.deepEqual(job.reportToRows(report([]), { fillFrom: null, fillTo: '2026-07-17' }), []);
 });
 
+// PR 2.5: день строки проверяет строгий isDayKey домена (server/domain/period.js). Единственное
+// наблюдаемое отличие от прежней проверки формата — бэкфилл: невозможная дата больше не становится
+// первым днём архива. Раньше '2026-02-31' проходила формат, Date.parse переносил её на 3 марта,
+// и архив засевался нулями за 3–4 марта, которых в отчёте не было.
+test('reportToRows (бэкфилл): невозможная дата календаря не задаёт начало архива', () => {
+  const { job } = makeJob({ db: makeDb(), handlers: () => report([]) });
+  const rows = job.reportToRows(
+    report([['2026-02-31', 1, 1, 1], ['2026-03-05', 5, 4, 9]]),
+    { fillFrom: null, fillTo: '2026-03-06' },
+  );
+  assert.deepEqual(rows, [dataRow('2026-03-05', 5, 4, 9), zeroRow('2026-03-06')]);
+  // В окне (fillFrom задан) исход прежний: невозможный день в строки не попадает.
+  const windowed = job.reportToRows(
+    report([['2026-02-31', 1, 1, 1], ['2026-03-01', 2, 2, 3]]),
+    { fillFrom: '2026-02-28', fillTo: '2026-03-01' },
+  );
+  assert.deepEqual(windowed, [zeroRow('2026-02-28'), dataRow('2026-03-01', 2, 2, 3)]);
+});
+
 test('окно после маркера: перекрытие, 10-метричный отчёт, day-gate ключ канал:счётчик:q2:день, маркер НЕ ставится', async () => {
   const db = makeDb({ accounts: [ACC1_MARKED] });
   const { job, fetches } = makeJob({ db, handlers: () => report([['2026-07-15', 10, 7, 25]]) });

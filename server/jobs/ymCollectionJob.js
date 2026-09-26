@@ -39,6 +39,8 @@
 
 'use strict';
 
+const { fmtDay, shiftDay, isDayKey } = require('../domain/period');
+
 // Консервативный якорь бэкфилла, когда дата создания счётчика неизвестна (старые ответы
 // management API): раньше любого реального счётчика продукта, лишние пустые годы отчёту
 // Метрики не вредят — строк за них просто нет.
@@ -116,23 +118,17 @@ function qualityRowFromMetrics(m) {
 }
 
 function createYmCollectionJob({ db, ymFetch, ymCrypto, log }) {
-  // 'YYYY-MM-DD' по местным часам процесса (Railway = UTC) — та же дисциплина, что periodWindow
-  // живых роутов: границы окна и день архивной точки считаются в одной системе координат.
-  const fmtDay = (d) => {
-    const m = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${d.getFullYear()}-${m}-${day}`;
-  };
-
-  // Окно дневного сбора: сегодня−7 полных дней + сегодняшний частичный (8 day-точек).
+  // Окно дневного сбора: сегодня−7 полных дней + сегодняшний частичный (8 day-точек). День — по
+  // местным часам процесса (Railway = UTC), как periodWindow живых роутов: границы окна и день
+  // архивной точки считаются в одной системе координат.
   function collectionWindow(now = new Date()) {
-    const from = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7);
-    return { date1: fmtDay(from), date2: fmtDay(now) };
+    const today = fmtDay(now, 'local');
+    return { date1: shiftDay(today, -7), date2: today };
   }
 
-  // День строки отчёта валидируем строго до 'YYYY-MM-DD': одна кривая строка иначе доехала бы
-  // до x.day::date и уронила ВЕСЬ батч-upsert (канон dayOf у МС/IG).
-  const isDayKey = (v) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v);
+  // День строки отчёта валидируем строгим isDayKey домена — формат 'YYYY-MM-DD' И настоящая дата
+  // календаря: одна кривая строка иначе доехала бы до x.day::date и уронила ВЕСЬ батч-upsert
+  // (канон dayOf у МС/IG). Невозможную дату (2026-02-31) отчёт теперь пропускает, а не роняет батч.
 
   // Отчёт «по дням» → строки ym_daily. Дни с трафиком приходят из отчёта, остальное окно
   // [fillFrom..fillTo] дозаполняется честными нулями; backfill-режим (fillFrom=null) нулит
@@ -170,7 +166,7 @@ function createYmCollectionJob({ db, ymFetch, ymCrypto, log }) {
   async function collectYmForAccount(acc, token) {
     const backfill = !acc.quality_backfilled_at;
     const { date1, date2 } = backfill
-      ? { date1: acc.counter_created_day || YM_BACKFILL_ANCHOR_DAY, date2: fmtDay(new Date()) }
+      ? { date1: acc.counter_created_day || YM_BACKFILL_ANCHOR_DAY, date2: fmtDay(new Date(), 'local') }
       : collectionWindow();
     const body = await ymFetch(
       token,

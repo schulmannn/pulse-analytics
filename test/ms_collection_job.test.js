@@ -86,6 +86,26 @@ test('seriesToRows: sales+orders склеиваются по дню, копей�
   ]);
 });
 
+// PR 2.5: окно и день точки идут через server/domain/period.js (fmtDay 'local' + shiftDay). Окно
+// через границу года/месяца — тот же календарный сдвиг, что прежний new Date(y, m, d − 7).
+test('окно сбора через границу года: сегодня−7 уходит в прошлый год', () => {
+  const { job } = makeJob({ db: makeDb(), handlers: benign });
+  const w = job.collectionWindow(new Date(2026, 0, 3, 0, 5));   // 3 января 2026, 00:05 местное
+  assert.equal(w.momentFrom, '2025-12-27 00:00:00');
+  assert.equal(w.momentTo, '2026-01-03 23:59:00');
+});
+
+// dayOf точки plotseries — строгий isDayKey домена: невозможная дата календаря пропускается, а не
+// доезжает до x.day::date и не роняет весь батч-upsert аккаунта.
+test('seriesToRows: невозможная дата календаря (2026-02-31) отброшена, как мусор', () => {
+  const { job } = makeJob({ db: makeDb(), handlers: benign });
+  const rows = job.seriesToRows(
+    { series: [{ date: '2026-02-31 00:00:00', sum: 500 }, { date: '2026-02-28 00:00:00', sum: 700 }] },
+    { series: [{ date: '2026-02-31 00:00:00', sum: 1, quantity: 1 }] },
+  );
+  assert.deepEqual(rows, [{ day: '2026-02-28', revenue_kopecks: 700, orders_count: 0, orders_sum_kopecks: 0 }]);
+});
+
 test('happy path: оба отчёта → upsert строк, сводка {channels, days, errors, skipped}', async () => {
   const db = makeDb({ accounts: [ACC1] });
   const { job, fetches } = makeJob({ db, handlers: benign });

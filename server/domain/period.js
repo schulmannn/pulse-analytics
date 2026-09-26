@@ -85,6 +85,17 @@ function fmtDay(at, tz) {
   return `${String(parts.year).padStart(4, '0')}-${parts.month}-${parts.day}`;
 }
 
+/**
+ * «YYYY-MM-DD» → Date МЕСТНОЙ полуночи этого дня (часы процесса) — для джоб, которые шагают по
+ * календарю через Date (помесячный цикл бэкфилла МС: monthStart/monthEnd). Как прежний parseDay
+ * msBackfillJob: берёт первые 10 символов и календарь не проверяет (2026-02-31 → 3 марта) — вход
+ * там пишет сам fmtDay(…, 'local') или он уже прошёл проверку формата; строгий путь — isDayKey.
+ */
+function dayToLocalDate(key) {
+  const [y, m, d] = String(key).slice(0, 10).split('-').map(Number);
+  return new Date(y, m - 1, d);
+}
+
 /** День, сдвинутый на `offset` календарных дней. Невалидный ключ → null. */
 function shiftDay(key, offset) {
   const ms = dayToMs(key);
@@ -102,6 +113,22 @@ function previousWindow(from, to) {
   if (!isDayKey(from) || !isDayKey(to) || from > to) return null;
   const length = daysBetween(from, to);
   return { from: shiftDay(from, -length), to: shiftDay(from, -1) };
+}
+
+/**
+ * ПЕРЕХОДНОЕ — живёт до календарных дней OD-8. Скользящее окно «последние N×24 часа от now»:
+ * так сейчас считает серверный недельный дайджест (weekDigest), и эту семантику PR 2.5 только
+ * переносит сюда, не меняя. Это НЕ календарные дни и не окно parsePeriod: граница — момент
+ * `now − N×24ч`, поэтому результат зависит от часа отправки письма. Когда OD-8 переведёт дайджест
+ * на календарные дни пользователя, вызовы уходят на обычное окно, а этот хелпер удаляется.
+ *
+ * `now` — момент (epoch ms или Date) — передаётся явно, чтобы окно было тестируемым; без него —
+ * часы процесса. `sinceMs(days)` отдаёт epoch ms начала окна; какой оператор границы нужен
+ * (>= для строк, <= для «неделю назад»), решает вызывающий — хелпер их не прячет.
+ */
+function transitionalRollingWindow(now = Date.now()) {
+  const nowMs = now instanceof Date ? now.getTime() : Number(now);
+  return { nowMs, sinceMs: (days) => nowMs - days * DAY_MS };
 }
 
 /**
@@ -229,6 +256,8 @@ module.exports = {
   shiftDay,
   daysBetween,
   dayToMs,
+  dayToLocalDate,
+  transitionalRollingWindow,
   msToDay,
   GRAINS,
   BAD_PERIOD,
