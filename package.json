@@ -20,17 +20,17 @@
     "check:pypins": "node scripts/check-python-pins.mjs"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.125.0",
+    "@anthropic-ai/sdk": "^0.128.0",
     "compression": "^1.8.2",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "express-rate-limit": "^8.7.0",
     "pg": "^8.23.0",
-    "sharp": "^0.35.4"
+    "sharp": "^0.35.5"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.5.13"
+    "@biomejs/biome": "2.5.14"
   },
   "engines": {
     "node": ">=20.19"
